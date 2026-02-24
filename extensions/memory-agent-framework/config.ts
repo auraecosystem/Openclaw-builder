@@ -26,18 +26,16 @@ export const agentFrameworkConfigSchema = {
     if (typeof cfg.apiUrl !== "string" || !cfg.apiUrl.trim()) {
       throw new Error("apiUrl is required");
     }
-    if (typeof cfg.apiKey !== "string" || !cfg.apiKey.trim()) {
-      throw new Error("apiKey is required");
-    }
-
     const recallLimit = typeof cfg.recallLimit === "number" ? Math.floor(cfg.recallLimit) : 5;
     if (recallLimit < 1 || recallLimit > 20) {
       throw new Error("recallLimit must be between 1 and 20");
     }
 
+    const rawApiKey = typeof cfg.apiKey === "string" ? cfg.apiKey.trim() : "";
+
     return {
       apiUrl: cfg.apiUrl.trim().replace(/\/$/, ""),
-      apiKey: resolveEnvVars(cfg.apiKey.trim()),
+      apiKey: rawApiKey ? resolveEnvVars(rawApiKey) : "",
       autoRecall: cfg.autoRecall !== false,
       autoCapture: cfg.autoCapture === true,
       recallLimit,

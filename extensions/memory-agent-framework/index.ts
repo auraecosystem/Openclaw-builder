@@ -1,37 +1,50 @@
+import { execFile as execFileCb } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { Type } from "@sinclair/typebox";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { agentFrameworkConfigSchema, type AgentFrameworkConfig } from "./config.js";
 
+const execFile = promisify(execFileCb);
+
 // ============================================================================
-// API client helpers
+// CLI helpers
 // ============================================================================
 
-type RecallResult = {
+type RecallResultContent = {
   name?: string;
   type?: string;
   description?: string;
-  score?: number;
+  summary?: string;
   content?: string;
 };
+
+type RecallResult = {
+  type?: string;
+  score?: number;
+  content?: RecallResultContent;
+};
+
+function baseArgs(cfg: AgentFrameworkConfig): string[] {
+  const args = ["--json", "--backend-url", cfg.apiUrl];
+  if (cfg.apiKey) args.push("--api-key", cfg.apiKey);
+  return args;
+}
 
 async function recallMemory(
   cfg: AgentFrameworkConfig,
   query: string,
   limit: number,
 ): Promise<RecallResult[]> {
-  const res = await fetch(`${cfg.apiUrl}/api/memory/recall`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": cfg.apiKey,
-    },
-    body: JSON.stringify({ query, limit }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!res.ok) {
-    throw new Error(`recall failed: ${res.status}`);
-  }
-  const data = (await res.json()) as { results?: RecallResult[] };
+  const { stdout } = await execFile(
+    "agent",
+    ["search", query, "--limit", String(limit), ...baseArgs(cfg)],
+    { timeout: 10_000 },
+  );
+  const data = JSON.parse(stdout) as { results?: RecallResult[] };
   return data.results ?? [];
 }
 
@@ -40,25 +53,27 @@ async function ingestContent(
   content: string,
   source: string,
 ): Promise<void> {
-  const res = await fetch(`${cfg.apiUrl}/api/memory/ingest`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": cfg.apiKey,
-    },
-    body: JSON.stringify({ content, source, contentType: "text/plain" }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!res.ok) {
-    throw new Error(`ingest failed: ${res.status}`);
+  const tmp = join(tmpdir(), `openclaw-ingest-${randomBytes(4).toString("hex")}.txt`);
+  try {
+    await writeFile(tmp, content);
+    await execFile(
+      "agent",
+      ["ingest", tmp, "--content-type", "text", "--source", source, ...baseArgs(cfg)],
+      { timeout: 10_000 },
+    );
+  } finally {
+    await unlink(tmp).catch(() => {});
   }
 }
 
 function formatResults(results: RecallResult[]): string {
   return results
-    .map((r, i) =>
-      `${i + 1}. [${r.type ?? "?"}] ${r.name ?? r.content ?? "?"}: ${r.description ?? ""}`.trimEnd(),
-    )
+    .map((r, i) => {
+      const c = r.content ?? {};
+      const label = c.name ?? c.summary ?? c.content ?? "?";
+      const desc = c.description ?? "";
+      return `${i + 1}. [${r.type ?? "?"}] ${label}: ${desc}`.trimEnd();
+    })
     .join("\n");
 }
 
