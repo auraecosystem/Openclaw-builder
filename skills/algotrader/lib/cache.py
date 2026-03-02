@@ -51,9 +51,12 @@ def is_valid(data_dir: Path, required_keys: list[str] | None = None) -> bool:
 
 
 def save(data_dir: Path, name: str, df: pd.DataFrame) -> None:
-    """Write a wide DataFrame to the cache (zstd parquet)."""
+    """Write a wide DataFrame to the cache (zstd parquet, float32)."""
     d = _cache_dir(data_dir)
     d.mkdir(parents=True, exist_ok=True)
+    # Cast float64 columns to float32 — indicators don't need double precision,
+    # and this halves storage vs the pandas/numpy default of float64.
+    df = df.astype({c: "float32" for c, t in df.dtypes.items() if t == "float64"})
     df.to_parquet(d / f"{name}.parquet", compression="zstd")
 
 

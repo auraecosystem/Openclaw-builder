@@ -20,17 +20,16 @@ from decimal import Decimal
 
 import numpy as np
 
-from nautilus_trader.adapters.binance import BINANCE_VENUE
 from nautilus_trader.common.enums import LogColor
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.indicators import AverageTrueRange
 from nautilus_trader.indicators import ExponentialMovingAverage
 from nautilus_trader.indicators import SimpleMovingAverage
-from nautilus_trader.model.currencies import USDT
+from nautilus_trader.model.currencies import USD
 from nautilus_trader.model.data import Bar, BarType
 from nautilus_trader.model.enums import OrderSide, TimeInForce
-from nautilus_trader.model.identifiers import InstrumentId
-from nautilus_trader.model.objects import Price, Quantity
+from nautilus_trader.model.identifiers import InstrumentId, Venue
+from nautilus_trader.model.objects import Currency, Price, Quantity
 from nautilus_trader.trading.strategy import Strategy
 
 from nautilus.indicators import (
@@ -54,6 +53,11 @@ class QullamaggieConfig(StrategyConfig, frozen=True):
     instrument_ids: list[str]
     bar_spec: str = "1-DAY-LAST"
 
+    # Venue settings (defaults to Binance for backward compatibility)
+    venue: str = "BINANCE"
+    benchmark_id: str = "BTCUSDT.BINANCE"  # regime filter instrument
+    quote_currency: str = "USDT"           # account balance currency
+
     # Entry filters
     rs_pct: float = 0.30          # top N% relative strength (63d return rank)
     max_dist_52w: float = 0.25    # max distance from 52-week high
@@ -65,17 +69,36 @@ class QullamaggieConfig(StrategyConfig, frozen=True):
     # controls consolidation tightness for VCP only.
     max_range_pct: float = 0.15
 
-    # Risk management
-    risk_pct: float = 0.005       # fraction of equity risked per trade
-    max_pos_pct: float = 0.20     # max position as fraction of equity
-    partial_bars: int = 5         # bars before partial profit is taken
-    trail_period: int = 10        # SMA period for trailing exit (10 or 20)
-    split_frac: float = 0.50      # partial exit fraction (0.0 = no partial, 1.0 = sell all)
-    max_hold_bars: int = 0        # time stop: close after N bars (0 = disabled)
+    # Indicator periods (in days — multiplied by bars_per_day internally)
+    sma_fast: int = 10            # fast SMA period
+    sma_slow: int = 20            # slow SMA period
+    atr_period: int = 14          # ATR period
+    vol_sma_period: int = 20      # volume SMA period
+    ret_short: int = 21           # short return lookback
+    ret_medium: int = 63          # medium return lookback
+    ret_long: int = 126           # long return lookback
+    regime_ema_fast: int = 10     # regime filter fast EMA
+    regime_ema_slow: int = 20     # regime filter slow EMA
+
+    # Pattern detection
+    pattern_lookback: int = 60    # VCP/flag lookback window
+    swing_order: int = 5          # swing detection order for VCP/flag
+    max_pole_bars: int = 20       # max pole length for flag detection
     flag_min_pole: float = 0.20   # min pole move for flag pattern
     flag_max_retrace: float = 0.50  # max retrace for flag pattern
     flag_min_days: int = 5        # min flag duration
     flag_max_days: int = 25       # max flag duration
+
+    # Risk management
+    risk_pct: float = 0.005       # fraction of equity risked per trade
+    max_pos_pct: float = 0.20     # max position as fraction of equity
+    liq_cap_pct: float = 0.01     # max fraction of avg daily volume to take
+    partial_bars: int = 5         # bars before partial profit is taken
+    trail_period: int = 10        # SMA period for trailing exit (10 or 20)
+    split_frac: float = 0.50      # partial exit fraction (0.0 = no partial, 1.0 = sell all)
+    max_hold_bars: int = 0        # time stop: close after N bars (0 = disabled)
+
+    # Lookbacks
     rs_lookback: int = 63         # return period for RS ranking
     bars_per_day: int = 1         # 1=daily, 288=5m, 24=1h — scales all periods
     high_lookback: int = 252      # rolling high period in days (252=1yr, 30=1mo)
@@ -145,10 +168,13 @@ class QullamaggieBreakout(Strategy):
     # -- lifecycle -----------------------------------------------------------
 
     def on_start(self) -> None:
-        self.benchmark_id = InstrumentId.from_str("BTCUSDT.BINANCE")
-        bpd = self.config.bars_per_day
+        cfg = self.config
+        self.benchmark_id = InstrumentId.from_str(cfg.benchmark_id)
+        self._venue = Venue(cfg.venue)
+        self._quote_currency = Currency.from_str(cfg.quote_currency)
+        bpd = cfg.bars_per_day
 
-        for iid_str in self.config.instrument_ids:
+        for iid_str in cfg.instrument_ids:
             iid = InstrumentId.from_str(iid_str)
             instrument = self.cache.instrument(iid)
             if instrument is None:
@@ -161,28 +187,27 @@ class QullamaggieBreakout(Strategy):
             self.bar_types[iid] = bt
 
             # Built-in indicators (periods scaled by bars_per_day)
-            sma10 = SimpleMovingAverage(10 * bpd)
-            sma20 = SimpleMovingAverage(20 * bpd)
-            atr14 = AverageTrueRange(14 * bpd)
+            cfg = self.config
+            sma10 = SimpleMovingAverage(cfg.sma_fast * bpd)
+            sma20 = SimpleMovingAverage(cfg.sma_slow * bpd)
+            atr14 = AverageTrueRange(cfg.atr_period * bpd)
             self.sma10[iid] = sma10
             self.sma20[iid] = sma20
             self.atr14[iid] = atr14
 
             # Custom indicators (periods scaled by bars_per_day)
-            vol_sma = VolumeSMA(20 * bpd)
-            rolling_high = RollingHigh(self.config.high_lookback * bpd)
-            ret_21 = RollingReturn(21 * bpd)
-            ret_63 = RollingReturn(63 * bpd)
-            ret_126 = RollingReturn(126 * bpd)
-            ret_rs = RollingReturn(self.config.rs_lookback * bpd)
+            vol_sma = VolumeSMA(cfg.vol_sma_period * bpd)
+            rolling_high = RollingHigh(cfg.high_lookback * bpd)
+            ret_21 = RollingReturn(cfg.ret_short * bpd)
+            ret_63 = RollingReturn(cfg.ret_medium * bpd)
+            ret_126 = RollingReturn(cfg.ret_long * bpd)
+            ret_rs = RollingReturn(cfg.rs_lookback * bpd)
             consec_green = ConsecutiveGreen()
             # Pattern detectors: lookback stays small (O(lookback²) per bar).
-            # On daily bars (bpd=1): 60 bars = 60 days.
-            # On 5m bars (bpd=288): 60 bars = 5 hours — intraday patterns.
-            vcp_det = VCPDetector(lookback=60, swing_order=5)
+            vcp_det = VCPDetector(lookback=cfg.pattern_lookback, swing_order=cfg.swing_order)
             flag_det = FlagDetector(
-                lookback=60, swing_order=5,
-                max_flag_bars=25, max_pole_bars=20,
+                lookback=cfg.pattern_lookback, swing_order=cfg.swing_order,
+                max_flag_bars=cfg.flag_max_days, max_pole_bars=cfg.max_pole_bars,
             )
 
             self.vol_sma[iid] = vol_sma
@@ -209,8 +234,8 @@ class QullamaggieBreakout(Strategy):
         # Regime EMAs — created after the loop so instrument ordering doesn't matter
         if self.benchmark_id in self.bar_types:
             bt = self.bar_types[self.benchmark_id]
-            self.regime_ema10 = ExponentialMovingAverage(10 * bpd)
-            self.regime_ema20 = ExponentialMovingAverage(20 * bpd)
+            self.regime_ema10 = ExponentialMovingAverage(cfg.regime_ema_fast * bpd)
+            self.regime_ema20 = ExponentialMovingAverage(cfg.regime_ema_slow * bpd)
             self.register_indicator_for_bars(bt, self.regime_ema10)
             self.register_indicator_for_bars(bt, self.regime_ema20)
         else:
@@ -266,7 +291,7 @@ class QullamaggieBreakout(Strategy):
             and not self.partial_taken[iid]
         ):
             positions = self.cache.positions(
-                venue=BINANCE_VENUE, instrument_id=iid,
+                venue=self._venue, instrument_id=iid,
             )
             if positions and positions[0].is_open:
                 sell_qty = int(float(positions[0].quantity) * self.config.split_frac)
@@ -390,8 +415,8 @@ class QullamaggieBreakout(Strategy):
             return
 
         # -- Position sizing -------------------------------------------------
-        account = self.portfolio.account(BINANCE_VENUE)
-        equity = float(account.balance_total(USDT))
+        account = self.portfolio.account(self._venue)
+        equity = float(account.balance_total(self._quote_currency))
 
         stop_price = max(bar.low.as_double(), close - atr_val)
         stop_dist = abs(close - stop_price)
@@ -401,9 +426,9 @@ class QullamaggieBreakout(Strategy):
         risk_shares = (equity * self.config.risk_pct) / stop_dist
         max_shares = (equity * self.config.max_pos_pct) / close
 
-        # Liquidity cap: limit to 1% of average daily volume (in units)
+        # Liquidity cap: limit to configured fraction of average daily volume
         adv = vsma * close
-        liq_cap = (0.01 * adv) / close if adv > 0 else risk_shares
+        liq_cap = (self.config.liq_cap_pct * adv) / close if adv > 0 else risk_shares
 
         shares = min(risk_shares, max_shares, liq_cap)
         if shares < 1:
@@ -507,6 +532,12 @@ class PrecomputedConfig(StrategyConfig, frozen=True):
     instrument_ids: list[str]
     bar_spec: str = "1-DAY-LAST"
 
+    # Venue settings
+    venue: str = "BINANCE"
+    benchmark_id: str = "BTCUSDT.BINANCE"
+    quote_currency: str = "USDT"
+
+    # Entry filters
     rs_pct: float = 0.30
     max_dist_52w: float = 0.25
     min_prior_move: float = 0.30
@@ -514,8 +545,10 @@ class PrecomputedConfig(StrategyConfig, frozen=True):
     vol_spike: float = 1.5
     max_range_pct: float = 0.15
 
+    # Risk management
     risk_pct: float = 0.005
     max_pos_pct: float = 0.20
+    liq_cap_pct: float = 0.01
     partial_bars: int = 5
     trail_period: int = 10
     split_frac: float = 0.50
@@ -569,7 +602,9 @@ class PrecomputedBreakout(Strategy):
     # -- lifecycle -----------------------------------------------------------
 
     def on_start(self) -> None:
-        self.benchmark_id = InstrumentId.from_str("BTCUSDT.BINANCE")
+        self.benchmark_id = InstrumentId.from_str(self.config.benchmark_id)
+        self._venue = Venue(self.config.venue)
+        self._quote_currency = Currency.from_str(self.config.quote_currency)
 
         for iid_str in self.config.instrument_ids:
             iid = InstrumentId.from_str(iid_str)
@@ -634,7 +669,7 @@ class PrecomputedBreakout(Strategy):
             and not self.partial_taken[iid]
         ):
             positions = self.cache.positions(
-                venue=BINANCE_VENUE, instrument_id=iid,
+                venue=self._venue, instrument_id=iid,
             )
             if positions and positions[0].is_open:
                 sell_qty = int(float(positions[0].quantity) * self.config.split_frac)
@@ -777,8 +812,8 @@ class PrecomputedBreakout(Strategy):
             return
 
         # Position sizing
-        account = self.portfolio.account(BINANCE_VENUE)
-        equity = float(account.balance_total(USDT))
+        account = self.portfolio.account(self._venue)
+        equity = float(account.balance_total(self._quote_currency))
 
         stop_price = max(bar.low.as_double(), close - atr14)
         stop_dist = abs(close - stop_price)
@@ -789,7 +824,7 @@ class PrecomputedBreakout(Strategy):
         max_shares = (equity * self.config.max_pos_pct) / close
 
         adv = vol_sma20 * close
-        liq_cap = (0.01 * adv) / close if adv > 0 else risk_shares
+        liq_cap = (self.config.liq_cap_pct * adv) / close if adv > 0 else risk_shares
 
         shares = min(risk_shares, max_shares, liq_cap)
         if shares < 1:
