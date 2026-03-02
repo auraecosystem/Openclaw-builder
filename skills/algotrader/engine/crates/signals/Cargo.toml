@@ -1,0 +1,11 @@
+[package]
+name = "engine-signals"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine-types = { path = "../types" }
+rustfft = "6"
+faer = "0.20"
+kiddo = "4"
+serde = { version = "1", features = ["derive"] }
