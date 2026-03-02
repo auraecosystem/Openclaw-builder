@@ -141,6 +141,7 @@ pub enum Direction {
 }
 
 /// Entry/exit/stop signals for one setup.
+#[derive(Clone)]
 pub struct SignalSet {
     pub entries: WideMask,
     pub exits: WideMask,

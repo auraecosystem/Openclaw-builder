@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/types", "crates/data", "crates/signals", "crates/patterns", "."]
+members = ["crates/types", "crates/data", "crates/signals", "crates/patterns", "crates/pipeline", "."]
 
 [package]
 name = "algotrader-engine"
@@ -12,6 +12,7 @@ engine-types = { path = "crates/types" }
 engine-data = { path = "crates/data" }
 engine-signals = { path = "crates/signals" }
 engine-patterns = { path = "crates/patterns" }
+engine-pipeline = { path = "crates/pipeline" }
 rayon = "1.10"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

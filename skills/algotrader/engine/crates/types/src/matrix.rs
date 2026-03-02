@@ -5,6 +5,7 @@
 /// `data` which is `pub(crate)` so sibling modules (filters, signals) can
 /// read the backing slice directly when bulk iteration is faster than
 /// per-element `get()`.
+#[derive(Clone)]
 pub struct WideMatrix {
     pub data: Vec<f32>,
     n_rows: usize,
@@ -50,6 +51,7 @@ impl WideMatrix {
 /// Boolean mask with the same (rows x cols) shape as `WideMatrix`.
 ///
 /// Used for universe filters and entry/exit signals.
+#[derive(Clone)]
 pub struct WideMask {
     pub data: Vec<bool>,
     n_rows: usize,

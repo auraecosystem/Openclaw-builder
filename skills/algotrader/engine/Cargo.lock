@@ -39,6 +39,7 @@ dependencies = [
  "clap",
  "engine-data",
  "engine-patterns",
+ "engine-pipeline",
  "engine-signals",
  "engine-types",
  "faer",
@@ -634,6 +635,17 @@ version = "0.1.0"
 dependencies = [
  "engine-types",
  "wide",
+]
+
+[[package]]
+name = "engine-pipeline"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "engine-data",
+ "engine-types",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

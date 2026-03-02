@@ -1,0 +1,8 @@
+{
+    "stock_universe": [
+        { "type": "exclude_etf" },
+        { "type": "price_floor", "min": "@min_price" },
+        { "type": "volume_floor", "min": "@min_vol" },
+        { "type": "adv_floor", "min": "@min_adv" }
+    ]
+}

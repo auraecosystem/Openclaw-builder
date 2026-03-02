@@ -4,6 +4,8 @@
 //! ordered bounds, encode/decode routines, and clamping. Genome vectors are
 //! plain `Vec<f64>` so they work with any optimizer (CMA-ES, DE, GA).
 
+use std::collections::HashMap;
+
 use engine_types::{Params, PatternParams, SignalParams, PATTERN_FEATURE_COUNT, SCANNER_FEATURE_COUNT};
 
 // ---------------------------------------------------------------------------
@@ -168,6 +170,65 @@ impl GenomeSpec {
         let mut combined = Self::params_spec(crypto);
         combined.bounds.extend(Self::pattern_params_spec().bounds);
         combined
+    }
+
+    /// Build a genome spec from a pipeline config's `params` block.
+    ///
+    /// Each param with min/max bounds becomes a gene. Bool params with
+    /// `evolvable: true` become continuous [0,1] genes thresholded at 0.5.
+    /// Simple params (no bounds) and non-evolvable bools are excluded since
+    /// the optimizer cannot meaningfully vary them.
+    ///
+    /// Uses `Box::leak` for param names since `GeneBound` expects `&'static str`.
+    /// This is acceptable because genome specs are built once at startup.
+    pub fn from_pipeline_params(
+        params: &HashMap<String, engine_pipeline::config::ParamValue>,
+    ) -> Self {
+        use engine_pipeline::config::ParamValue;
+
+        let mut bounds = Vec::new();
+        // Sort by name for deterministic gene ordering across runs.
+        let mut names: Vec<&String> = params.keys().collect();
+        names.sort();
+
+        for name in names {
+            let pv = &params[name];
+            let leaked_name: &'static str = Box::leak(name.clone().into_boxed_str());
+
+            match pv {
+                ParamValue::WithBounds {
+                    value,
+                    min,
+                    max,
+                    evolvable,
+                } => {
+                    if value.is_boolean() {
+                        // Bool params only enter the genome if explicitly evolvable.
+                        if *evolvable {
+                            bounds.push(bgene(leaked_name));
+                        }
+                    } else if let (Some(lo), Some(hi)) = (min, max) {
+                        // Integer detection: if the default value is a whole number,
+                        // treat it as an integer gene (rounded on decode/clamp).
+                        let is_int = value
+                            .as_f64()
+                            .map(|v| v == v.round())
+                            .unwrap_or(false);
+                        if is_int {
+                            bounds.push(igene(leaked_name, *lo, *hi));
+                        } else {
+                            bounds.push(gene(leaked_name, *lo, *hi));
+                        }
+                    }
+                    // WithBounds but missing min/max: not evolvable, skip.
+                }
+                ParamValue::Simple(_) => {
+                    // No bounds = not evolvable, skip.
+                }
+            }
+        }
+
+        Self { bounds }
     }
 }
 

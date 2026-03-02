@@ -1,0 +1,32 @@
+{
+    "name": "breakout_quick_dynamic",
+    "direction": "long",
+    "fill_mode": "next_day_open",
+    "equity_fraction": 0.5,
+    "pipeline": [
+        { "use": "stock_universe" },
+        { "type": "rs_percentile", "timeframes": ["1m", "3m", "6m"], "min_pct": "@rs_pct" },
+        { "type": "regime_ema", "when": "@regime" },
+        { "type": "near_52w_high", "max_dist": "@max_dist_52w" },
+        { "type": "consolidation", "min_days": "@min_consol_days", "max_range": "@max_range_pct" },
+        { "type": "pattern_any", "patterns": ["vcp", "flag"] },
+        { "type": "breakout_above", "vol_spike": "@vol_ratio" }
+    ],
+    "stop": { "type": "atr_capped_low", "fallback_pct": 0.05 },
+    "exits": [
+        { "type": "profit_target", "min_bars": 5 },
+        { "type": "sma_trail", "period": 10 },
+        { "type": "stop_loss" }
+    ],
+    "params": {
+        "min_price": { "value": 5.0, "min": 1.0, "max": 50.0 },
+        "min_vol": { "value": 300000, "min": 10000, "max": 1000000 },
+        "min_adv": { "value": 150000000, "min": 5000000, "max": 500000000 },
+        "rs_pct": { "value": 0.80, "min": 0.50, "max": 0.99 },
+        "regime": { "value": true, "evolvable": true },
+        "max_dist_52w": { "value": 0.25, "min": 0.05, "max": 0.50 },
+        "min_consol_days": { "value": 10, "min": 3, "max": 30 },
+        "max_range_pct": { "value": 0.20, "min": 0.10, "max": 0.40 },
+        "vol_ratio": { "value": 2.0, "min": 1.2, "max": 4.0 }
+    }
+}
