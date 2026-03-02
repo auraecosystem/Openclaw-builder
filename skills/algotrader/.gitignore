@@ -1,0 +1,18 @@
+# Data (large parquet files, raw downloads)
+data/
+data-crypto/
+data-crypto-5m/
+
+# Rust engine build artifacts
+engine/target/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Experiment outputs
+*.jsonl
+
+# OS
+.DS_Store
