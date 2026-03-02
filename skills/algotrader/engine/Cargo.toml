@@ -1,0 +1,47 @@
+[package]
+name = "algotrader-engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+polars = { version = "0.46", features = ["parquet", "lazy", "dtype-full", "temporal"] }
+rayon = "1.10"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+strum = { version = "0.26", features = ["derive"] }
+
+# Evolution
+rand = "0.8"
+
+# Signal processing
+rustfft = "6"
+faer = "0.20"
+kiddo = "4"
+
+# Optional pyo3 bridge (behind "python" feature)
+pyo3 = { version = "0.23", features = ["extension-module"], optional = true }
+
+[features]
+default = []
+python = ["pyo3"]
+
+[lib]
+name = "algotrader_engine"
+path = "src/lib.rs"
+crate-type = ["lib", "cdylib"]
+
+[[bin]]
+name = "algotrader-engine"
+path = "src/main.rs"
+
+[[bin]]
+name = "build-cache"
+path = "src/bin/build_cache.rs"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

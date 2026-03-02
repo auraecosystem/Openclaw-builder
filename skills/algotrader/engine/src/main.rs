@@ -1,0 +1,123 @@
+//! Slim CLI dispatch: parse args, load data, delegate to library functions.
+
+mod cli;
+
+use std::path::Path;
+use std::time::Instant;
+
+use anyhow::Result;
+use clap::Parser;
+
+fn main() -> Result<()> {
+    let args = cli::Cli::parse();
+    let data_dir = Path::new(&args.data_dir);
+
+    eprintln!("Loading data from {}...", data_dir.display());
+    let t0 = Instant::now();
+    let store = algotrader_engine::load_data_store(data_dir)?;
+    eprintln!("  Loaded in {:.2}s", t0.elapsed().as_secs_f64());
+
+    if args.evolve {
+        use algotrader_engine::evolution::fitness::FitnessMetric;
+        use algotrader_engine::evolution::{Algorithm, EvolutionConfig};
+
+        let config = EvolutionConfig {
+            algorithm: Algorithm::parse(&args.algo),
+            generations: args.generations,
+            pop_size: args.pop_size_evo,
+            fitness_metric: FitnessMetric::parse(&args.fitness),
+            initial_sigma: args.sigma,
+            evolve_signals: args.evolve_signals,
+            crypto: args.crypto,
+            seed: args.seed,
+        };
+
+        let base = args.to_params();
+
+        let t1 = Instant::now();
+        if args.wf_folds > 0 {
+            let result = algotrader_engine::evolution::evolve_walk_forward(
+                &store,
+                &base,
+                &config,
+                args.wf_folds,
+            );
+            eprintln!(
+                "  Walk-forward evolution complete in {:.2}s",
+                t1.elapsed().as_secs_f64()
+            );
+            let json = serde_json::to_string_pretty(&result)?;
+            println!("{}", json);
+        } else {
+            let result = algotrader_engine::evolution::evolve(&store, &base, &config);
+            eprintln!(
+                "  Evolution complete in {:.2}s ({} generations)",
+                t1.elapsed().as_secs_f64(),
+                result.generations_run,
+            );
+            let json = serde_json::to_string_pretty(&result)?;
+            println!("{}", json);
+        }
+    } else if args.serve {
+        algotrader_engine::server::serve(&store, args.port)?;
+    } else if let Some(batch_path) = &args.batch {
+        let t1 = Instant::now();
+        let reports = algotrader_engine::run_batch(&store, Path::new(batch_path))?;
+        let elapsed = t1.elapsed().as_secs_f64();
+        eprintln!(
+            "  Batch complete: {} runs in {:.2}s ({:.1}ms/run)",
+            reports.len(),
+            elapsed,
+            elapsed * 1000.0 / reports.len().max(1) as f64,
+        );
+        let json = serde_json::to_string(&reports)?;
+        println!("{}", json);
+    } else if let Some(csv_path) = &args.dump_trades {
+        let params = args.to_params();
+        let t1 = Instant::now();
+        let (report, trades) = algotrader_engine::run_single_with_trades(&store, &params);
+        eprintln!(
+            "  Backtest complete in {:.2}ms",
+            t1.elapsed().as_secs_f64() * 1000.0
+        );
+        write_trades_csv(csv_path, &trades, &store.axes)?;
+        eprintln!("  Dumped {} trades to {}", trades.len(), csv_path);
+        let json = serde_json::to_string_pretty(&report)?;
+        println!("{}", json);
+    } else {
+        let params = args.to_params();
+        let t1 = Instant::now();
+        let report = algotrader_engine::run_single(&store, &params);
+        eprintln!(
+            "  Backtest complete in {:.2}ms",
+            t1.elapsed().as_secs_f64() * 1000.0
+        );
+        let json = serde_json::to_string_pretty(&report)?;
+        println!("{}", json);
+    }
+
+    Ok(())
+}
+
+/// Write trades to CSV for cross-engine validation in NautilusTrader.
+fn write_trades_csv(
+    path: &str,
+    trades: &[algotrader_engine::types::Trade],
+    axes: &algotrader_engine::Axes,
+) -> Result<()> {
+    use std::io::Write;
+    let epoch = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+    let mut f = std::fs::File::create(path)?;
+    writeln!(f, "date,ticker,direction,stop_price")?;
+    for t in trades {
+        let days = axes.dates[t.entry_row];
+        let date = epoch + chrono::Duration::days(days as i64);
+        let ticker = &axes.tickers[t.ticker_col];
+        let dir = match t.direction {
+            algotrader_engine::types::Direction::Long => "long",
+            algotrader_engine::types::Direction::Short => "short",
+        };
+        writeln!(f, "{},{},{},{:.8}", date, ticker, dir, t.initial_stop)?;
+    }
+    Ok(())
+}
