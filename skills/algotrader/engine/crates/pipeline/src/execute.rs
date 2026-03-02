@@ -191,7 +191,8 @@ mod tests {
     use engine_data::{Axes, Indicator};
     use engine_types::WideMatrix;
 
-    const INDICATOR_COUNT: usize = 26;
+    use strum::EnumCount;
+    const INDICATOR_COUNT: usize = engine_data::Indicator::COUNT;
 
     fn make_store(
         n_rows: usize,

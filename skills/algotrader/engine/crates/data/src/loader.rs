@@ -134,19 +134,26 @@ pub fn load_data_store(data_dir: &Path, data_config: &DataConfig) -> Result<Data
     // -- Compute runtime indicators from OHLCV (no cache files needed) -------
 
     eprintln!("  Computing runtime indicators...");
-    let [sma10, sma20, vol_sma20, atr14, ret63, ret126, pct10d, dist52w, consol_high, consec_green] =
-        compute::compute_all(&open, &high, &low, &close, &volume);
+    let [sma10, sma20, vol_sma20, atr14, ret21, ret63, ret126, pct10d, dist52w, consol_high, consec_green] =
+        compute::compute_column_local(&open, &high, &low, &close, &volume);
+
+    eprintln!("  Computing cross-sectional RS percentile ranks...");
+    let [rs_1m, rs_3m, rs_6m] = compute::compute_rs_pctrank(&ret21, &ret63, &ret126);
 
     indicator_map.insert(Indicator::Sma10 as u8, sma10);
     indicator_map.insert(Indicator::Sma20 as u8, sma20);
     indicator_map.insert(Indicator::VolSma20 as u8, vol_sma20);
     indicator_map.insert(Indicator::Atr14 as u8, atr14);
+    indicator_map.insert(Indicator::Ret21 as u8, ret21);
     indicator_map.insert(Indicator::Ret63 as u8, ret63);
     indicator_map.insert(Indicator::Ret126 as u8, ret126);
     indicator_map.insert(Indicator::Pct10d as u8, pct10d);
     indicator_map.insert(Indicator::Dist52w as u8, dist52w);
     indicator_map.insert(Indicator::ConsolHigh as u8, consol_high);
     indicator_map.insert(Indicator::ConsecGreen as u8, consec_green);
+    indicator_map.insert(Indicator::RsPctrank1m as u8, rs_1m);
+    indicator_map.insert(Indicator::RsPctrank3m as u8, rs_3m);
+    indicator_map.insert(Indicator::RsPctrank6m as u8, rs_6m);
 
     indicator_map.insert(Indicator::Open as u8, open);
     indicator_map.insert(Indicator::High as u8, high);

@@ -554,7 +554,8 @@ impl Block for ExtensionCap {
                     mask.set(row, col, true);
                     continue;
                 }
-                if a > 0.0 && (c - ch) <= max_atr_above * a {
+                // ATR <= 0 means we can't check extension — pass the cell.
+                if a <= 0.0 || (c - ch) <= max_atr_above * a {
                     mask.set(row, col, true);
                 }
             }
@@ -736,9 +737,8 @@ mod tests {
 
     use crate::blackboard::Blackboard;
 
-    /// Number of Indicator variants. Matches strum::EnumCount but avoids
-    /// adding strum as a dependency of engine-pipeline.
-    const INDICATOR_COUNT: usize = 26;
+    use strum::EnumCount;
+    const INDICATOR_COUNT: usize = engine_data::Indicator::COUNT;
 
     /// Build a minimal DataStore with all indicator matrices initialized to `fill`
     /// (or NaN), then apply per-indicator overrides.

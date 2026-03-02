@@ -1,12 +1,10 @@
 //! Runtime indicator computation from raw OHLCV data.
 //!
-//! Computes 10 indicators that are trivially single-pass forward operations
-//! over per-column time series. These don't need pre-cached parquet files.
-//! Column-by-column processing with temporary buffers keeps inner loops tight
-//! so the compiler can auto-vectorize them.
+//! Computes column-local indicators (SMA, ATR, rolling returns, etc.) and
+//! cross-sectional indicators (RS percentile rank). Column-by-column processing
+//! with temporary buffers keeps inner loops tight for auto-vectorization.
 //!
-//! Kept in cache (not here): cross-sectional RS rank, multi-pass VCP, flag
-//! pattern detection.
+//! Kept in cache (not here): multi-pass VCP and flag pattern detection.
 
 use engine_types::WideMatrix;
 
@@ -14,18 +12,17 @@ use engine_types::WideMatrix;
 // Public entry point
 // ---------------------------------------------------------------------------
 
-/// Fill all 10 runtime-computed indicator slots from the OHLCV matrices.
+/// Column-local indicators computed from OHLCV.
 ///
-/// Returns `[sma10, sma20, vol_sma20, atr14, ret63, ret126, pct10d, dist52w,
-///            consol_high, consec_green]` in that order (matching the order
-/// used by `compute_runtime_indicators` in `loader.rs`).
-pub fn compute_all(
+/// Returns `[sma10, sma20, vol_sma20, atr14, ret21, ret63, ret126, pct10d,
+///            dist52w, consol_high, consec_green]`.
+pub fn compute_column_local(
     open: &WideMatrix,
     high: &WideMatrix,
     low: &WideMatrix,
     close: &WideMatrix,
     volume: &WideMatrix,
-) -> [WideMatrix; 10] {
+) -> [WideMatrix; 11] {
     let n_rows = close.n_rows();
     let n_cols = close.n_cols();
 
@@ -33,6 +30,7 @@ pub fn compute_all(
     let sma20 = rolling_mean(close, 20);
     let vol_sma20 = rolling_mean(volume, 20);
     let atr14 = wilder_atr(high, low, close, 14);
+    let ret21 = pct_change(close, 21);
     let ret63 = pct_change(close, 63);
     let ret126 = pct_change(close, 126);
     let pct10d = pct_change(close, 10);
@@ -40,7 +38,78 @@ pub fn compute_all(
     let consol_high = consol_high(high);
     let consec_green = consec_green(open, close, n_rows, n_cols);
 
-    [sma10, sma20, vol_sma20, atr14, ret63, ret126, pct10d, dist52w, consol_high, consec_green]
+    [sma10, sma20, vol_sma20, atr14, ret21, ret63, ret126, pct10d, dist52w, consol_high, consec_green]
+}
+
+/// Cross-sectional percentile rank of rolling returns.
+///
+/// For each row, ranks all non-NaN tickers by return value and assigns
+/// a percentile in [0.0, 1.0] where 1.0 = highest return (top percentile).
+pub fn cross_sectional_pctrank(returns: &WideMatrix) -> WideMatrix {
+    let n_rows = returns.n_rows();
+    let n_cols = returns.n_cols();
+    let mut out = vec![f32::NAN; n_rows * n_cols];
+
+    // Scratch buffers reused across rows
+    let mut indices: Vec<usize> = Vec::with_capacity(n_cols);
+
+    for row in 0..n_rows {
+        indices.clear();
+
+        // Collect columns with valid return values
+        for col in 0..n_cols {
+            let v = returns.get(row, col);
+            if !v.is_nan() {
+                indices.push(col);
+            }
+        }
+
+        let count = indices.len();
+        if count == 0 {
+            continue;
+        }
+
+        // Sort by return value (ascending)
+        indices.sort_unstable_by(|&a, &b| {
+            let va = returns.get(row, a);
+            let vb = returns.get(row, b);
+            va.partial_cmp(&vb).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Assign percentile rank: rank / (count - 1) for count > 1
+        // With ties handled by average rank (matching pandas pct=True behavior)
+        let denom = if count > 1 { (count - 1) as f32 } else { 1.0 };
+        let mut i = 0;
+        while i < count {
+            // Find the run of tied values
+            let val = returns.get(row, indices[i]);
+            let mut j = i + 1;
+            while j < count && returns.get(row, indices[j]) == val {
+                j += 1;
+            }
+            // Average rank for the tie group
+            let avg_rank = (i + j - 1) as f32 / 2.0;
+            let pct = avg_rank / denom;
+            for k in i..j {
+                out[row * n_cols + indices[k]] = pct;
+            }
+            i = j;
+        }
+    }
+
+    WideMatrix::new(out, n_rows, n_cols)
+}
+
+/// Compute RS percentile ranks for 1m (21-day), 3m (63-day), 6m (126-day).
+pub fn compute_rs_pctrank(
+    ret21: &WideMatrix,
+    ret63: &WideMatrix,
+    ret126: &WideMatrix,
+) -> [WideMatrix; 3] {
+    let rs_1m = cross_sectional_pctrank(ret21);
+    let rs_3m = cross_sectional_pctrank(ret63);
+    let rs_6m = cross_sectional_pctrank(ret126);
+    [rs_1m, rs_3m, rs_6m]
 }
 
 // ---------------------------------------------------------------------------
@@ -423,6 +492,66 @@ mod tests {
         let src = col(&[0.0, 10.0]);
         let out = pct_change(&src, 1);
         assert!(out.get(1, 0).is_nan(), "division by zero → NaN");
+    }
+
+    // -- wilder_atr -----------------------------------------------------------
+
+    // -- cross_sectional_pctrank -----------------------------------------------
+
+    #[test]
+    fn pctrank_basic_4_tickers() {
+        // 1 row, 4 cols: values [10, 30, 20, 40]
+        // Sorted: 10(col0), 20(col2), 30(col1), 40(col3)
+        // Ranks:  0/3=0.0,  2/3=0.667, 1/3=0.333, 3/3=1.0
+        let src = WideMatrix::new(vec![10.0, 30.0, 20.0, 40.0], 1, 4);
+        let out = cross_sectional_pctrank(&src);
+        assert!((out.get(0, 0) - 0.0).abs() < EPS);
+        assert!((out.get(0, 1) - 2.0 / 3.0).abs() < EPS);
+        assert!((out.get(0, 2) - 1.0 / 3.0).abs() < EPS);
+        assert!((out.get(0, 3) - 1.0).abs() < EPS);
+    }
+
+    #[test]
+    fn pctrank_with_nan() {
+        // 1 row, 4 cols: [NaN, 30, 10, 20]
+        // Valid: 10(col2), 20(col3), 30(col1) → ranks 0/2, 1/2, 2/2
+        let src = WideMatrix::new(vec![f32::NAN, 30.0, 10.0, 20.0], 1, 4);
+        let out = cross_sectional_pctrank(&src);
+        assert!(out.get(0, 0).is_nan());
+        assert!((out.get(0, 1) - 1.0).abs() < EPS);
+        assert!((out.get(0, 2) - 0.0).abs() < EPS);
+        assert!((out.get(0, 3) - 0.5).abs() < EPS);
+    }
+
+    #[test]
+    fn pctrank_ties_get_average_rank() {
+        // 1 row, 4 cols: [10, 10, 20, 20]
+        // Sorted: 10(0), 10(1), 20(2), 20(3)
+        // Tie group [0,1]: avg_rank = 0.5, pct = 0.5/3 = 0.1667
+        // Tie group [2,3]: avg_rank = 2.5, pct = 2.5/3 = 0.8333
+        let src = WideMatrix::new(vec![10.0, 10.0, 20.0, 20.0], 1, 4);
+        let out = cross_sectional_pctrank(&src);
+        assert!((out.get(0, 0) - 0.5 / 3.0).abs() < EPS);
+        assert!((out.get(0, 1) - 0.5 / 3.0).abs() < EPS);
+        assert!((out.get(0, 2) - 2.5 / 3.0).abs() < EPS);
+        assert!((out.get(0, 3) - 2.5 / 3.0).abs() < EPS);
+    }
+
+    #[test]
+    fn pctrank_single_value() {
+        // 1 row, 1 col: single value → rank 0/0, denom=1 → 0.0
+        let src = WideMatrix::new(vec![42.0], 1, 1);
+        let out = cross_sectional_pctrank(&src);
+        assert!((out.get(0, 0) - 0.0).abs() < EPS);
+    }
+
+    #[test]
+    fn pctrank_all_nan_row() {
+        let src = WideMatrix::new(vec![f32::NAN; 4], 1, 4);
+        let out = cross_sectional_pctrank(&src);
+        for c in 0..4 {
+            assert!(out.get(0, c).is_nan());
+        }
     }
 
     // -- wilder_atr -----------------------------------------------------------

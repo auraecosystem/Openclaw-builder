@@ -12,19 +12,21 @@ pub enum Indicator {
     Low,
     Close,
     Volume,
-    // --- Technical indicators (each from its own cache parquet) ---
+    // --- Technical indicators (runtime-computed from OHLCV) ---
     Atr14,
     Sma10,
     Sma20,
     VolSma20,
-    RsPctrank1m,
-    RsPctrank3m,
-    RsPctrank6m,
-    Dist52w,
+    Ret21,
     Ret63,
     Ret126,
     Pct10d,
+    Dist52w,
     ConsecGreen,
+    // --- Cross-sectional (runtime-computed from rolling returns) ---
+    RsPctrank1m,
+    RsPctrank3m,
+    RsPctrank6m,
     // --- VCP intermediates ---
     VcpNumContractions,
     VcpLastContractionPct,
@@ -51,16 +53,17 @@ impl Indicator {
             Self::Sma10 => None,
             Self::Sma20 => None,
             Self::VolSma20 => None,
-            Self::Dist52w => None,
+            Self::Ret21 => None,
             Self::Ret63 => None,
             Self::Ret126 => None,
             Self::Pct10d => None,
+            Self::Dist52w => None,
             Self::ConsolHigh => None,
             Self::ConsecGreen => None,
-            // Cross-sectional: must stay cached (needs all tickers simultaneously)
-            Self::RsPctrank1m => Some("rs_pctrank_1m.parquet"),
-            Self::RsPctrank3m => Some("rs_pctrank_3m.parquet"),
-            Self::RsPctrank6m => Some("rs_pctrank_6m.parquet"),
+            // Cross-sectional: runtime-computed from rolling returns
+            Self::RsPctrank1m => None,
+            Self::RsPctrank3m => None,
+            Self::RsPctrank6m => None,
             // Multi-pass pattern detection: stays cached
             Self::VcpNumContractions => Some("vcp_num_contractions.parquet"),
             Self::VcpLastContractionPct => Some("vcp_last_contraction_pct.parquet"),
@@ -82,7 +85,6 @@ impl Indicator {
     }
 
     /// True for indicators computed at runtime from OHLCV (no cache file needed).
-    /// These 10 are single-pass, column-local, SIMD-friendly operations.
     pub fn is_runtime_computed(&self) -> bool {
         matches!(
             self,
@@ -90,12 +92,16 @@ impl Indicator {
                 | Self::Sma10
                 | Self::Sma20
                 | Self::VolSma20
-                | Self::Dist52w
+                | Self::Ret21
                 | Self::Ret63
                 | Self::Ret126
                 | Self::Pct10d
+                | Self::Dist52w
                 | Self::ConsolHigh
                 | Self::ConsecGreen
+                | Self::RsPctrank1m
+                | Self::RsPctrank3m
+                | Self::RsPctrank6m
         )
     }
 }

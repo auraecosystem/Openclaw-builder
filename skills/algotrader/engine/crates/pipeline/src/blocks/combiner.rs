@@ -121,7 +121,8 @@ mod tests {
     use crate::blackboard::Blackboard;
 
     /// Matches strum EnumCount for Indicator without adding strum as a dep.
-    const INDICATOR_COUNT: usize = 26;
+    use strum::EnumCount;
+    const INDICATOR_COUNT: usize = engine_data::Indicator::COUNT;
 
     /// Minimal DataStore for tests that never read indicator data.
     fn dummy_store() -> DataStore {

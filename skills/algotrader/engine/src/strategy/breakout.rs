@@ -110,19 +110,23 @@ fn breakout_filter(store: &DataStore, params: &Params, range: Range<usize>) -> W
             if vsma.is_nan() || vsma <= params.min_vol {
                 continue;
             }
-            // RS filter: top N% across all three timeframes
-            if rs_1m.get(row, col) < rs_threshold
-                || rs_3m.get(row, col) < rs_threshold
-                || rs_6m.get(row, col) < rs_threshold
+            // RS filter: top N% across all three timeframes (NaN → fail)
+            let r1 = rs_1m.get(row, col);
+            let r3 = rs_3m.get(row, col);
+            let r6 = rs_6m.get(row, col);
+            if r1.is_nan() || r3.is_nan() || r6.is_nan()
+                || r1 < rs_threshold || r3 < rs_threshold || r6 < rs_threshold
             {
                 continue;
             }
-            // Near 52-week high
-            if dist_52w.get(row, col) > params.max_dist_52w {
+            // Near 52-week high (NaN → fail)
+            let d52 = dist_52w.get(row, col);
+            if d52.is_nan() || d52 > params.max_dist_52w {
                 continue;
             }
-            // Prior 3M return
-            if ret_63.get(row, col) < params.min_prior_move {
+            // Prior 3M return (NaN → fail)
+            let r63 = ret_63.get(row, col);
+            if r63.is_nan() || r63 < params.min_prior_move {
                 continue;
             }
             // Extension filter: price not > 1x ATR above consolidation high
@@ -131,9 +135,8 @@ fn breakout_filter(store: &DataStore, params: &Params, range: Range<usize>) -> W
             if !ch.is_nan() && !atr.is_nan() && atr > 0.0 && (close - ch) > atr {
                 continue;
             }
-            // ADR% floor
-            let atr2 = atr_14.get(row, col);
-            if !atr2.is_nan() && close > 0.0 && (atr2 / close) < params.min_adr_pct {
+            // ADR% floor (NaN → fail)
+            if atr.is_nan() || (atr / close) < params.min_adr_pct {
                 continue;
             }
             // Consolidation duration
