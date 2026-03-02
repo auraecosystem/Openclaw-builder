@@ -2,6 +2,12 @@
   "id": "memory-agent-framework",
   "kind": "memory",
   "uiHints": {
+    "cliBin": {
+      "label": "CLI Binary Path",
+      "placeholder": "agent",
+      "help": "Absolute path to the agent-framework CLI binary (defaults to 'agent' on PATH)",
+      "advanced": true
+    },
     "apiUrl": {
       "label": "API URL",
       "placeholder": "http://webapp.agent-framework.orb.local",
@@ -32,6 +38,7 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
+      "cliBin": { "type": "string" },
       "apiUrl": { "type": "string" },
       "apiKey": { "type": "string" },
       "autoRecall": { "type": "boolean" },

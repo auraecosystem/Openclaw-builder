@@ -39,13 +39,18 @@ async function recallMemory(
   query: string,
   limit: number,
 ): Promise<RecallResult[]> {
-  const { stdout } = await execFile(
-    "agent",
-    ["search", query, "--limit", String(limit), ...baseArgs(cfg)],
-    { timeout: 10_000 },
-  );
-  const data = JSON.parse(stdout) as { results?: RecallResult[] };
-  return data.results ?? [];
+  try {
+    const { stdout } = await execFile(
+      cfg.cliBin,
+      [...baseArgs(cfg), "search", query, "--limit", String(limit)],
+      { timeout: 10_000 },
+    );
+    const data = JSON.parse(stdout) as { results?: RecallResult[] };
+    return data.results ?? [];
+  } catch (err: unknown) {
+    const stderr = (err as { stderr?: string }).stderr ?? "";
+    throw new Error(`recall failed: ${stderr || (err as Error).message}`);
+  }
 }
 
 async function ingestContent(
@@ -56,11 +61,16 @@ async function ingestContent(
   const tmp = join(tmpdir(), `openclaw-ingest-${randomBytes(4).toString("hex")}.txt`);
   try {
     await writeFile(tmp, content);
-    await execFile(
-      "agent",
-      ["ingest", tmp, "--content-type", "text", "--source", source, ...baseArgs(cfg)],
-      { timeout: 10_000 },
-    );
+    try {
+      await execFile(
+        cfg.cliBin,
+        [...baseArgs(cfg), "ingest", tmp, "--content-type", "text", "--source", source],
+        { timeout: 30_000 },
+      );
+    } catch (err: unknown) {
+      const stderr = (err as { stderr?: string }).stderr ?? "";
+      throw new Error(`ingest failed: ${stderr || (err as Error).message}`);
+    }
   } finally {
     await unlink(tmp).catch(() => {});
   }

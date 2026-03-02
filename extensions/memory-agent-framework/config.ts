@@ -1,4 +1,5 @@
 export type AgentFrameworkConfig = {
+  cliBin: string;
   apiUrl: string;
   apiKey: string;
   autoRecall: boolean;
@@ -33,7 +34,12 @@ export const agentFrameworkConfigSchema = {
 
     const rawApiKey = typeof cfg.apiKey === "string" ? cfg.apiKey.trim() : "";
 
+    const cliBin = typeof cfg.cliBin === "string" && cfg.cliBin.trim()
+      ? cfg.cliBin.trim()
+      : "agent";
+
     return {
+      cliBin,
       apiUrl: cfg.apiUrl.trim().replace(/\/$/, ""),
       apiKey: rawApiKey ? resolveEnvVars(rawApiKey) : "",
       autoRecall: cfg.autoRecall !== false,
