@@ -1,5 +1,5 @@
 {
-    "name": "breakout_quick",
+    "name": "breakout_runner",
     "direction": "long",
     "fill_mode": "next_day_open",
     "equity_fraction": 0.5,
@@ -19,7 +19,7 @@
     ],
     "stop": { "type": "atr_capped_low", "fallback_pct": "@stop_fallback_pct" },
     "exits": [
-        { "type": "profit_target", "min_bars": 5 },
+        { "type": "breakeven_upgrade", "after_bars": 5 },
         { "type": "sma_trail", "period": 10 },
         { "type": "stop_loss" }
     ],

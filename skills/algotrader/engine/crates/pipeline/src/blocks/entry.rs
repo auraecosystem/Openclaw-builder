@@ -168,11 +168,12 @@ impl Block for BreakoutAbove {
 // GapEntry
 // ---------------------------------------------------------------------------
 
-/// EP-style gap entry: the input mask IS the entry mask (already shifted or
-/// on the fill day). Stop is the gap day's low.
+/// EP-style gap entry: shifts input mask forward by 1 row (entry on the day
+/// after the gap), with stop = gap day's low.
 ///
-/// Config:
-/// - `stop_ref`: which price for stop (default "low")
+/// The hardcoded EP strategy enters at row+1 so the fill happens on the open
+/// of the day after the gap. The stop is the low of the gap day (row), not
+/// the entry day (row+1).
 pub struct GapEntry;
 
 impl Block for GapEntry {
@@ -190,15 +191,18 @@ impl Block for GapEntry {
         let mut entries = WideMask::new_false(nr, nc);
         let mut stops = vec![f32::NAN; nr * nc];
 
-        // Input mask is the entry mask; stop = low of that row.
+        // Shift entry to row+1; stop = gap day's (row) low.
         for row in 0..nr {
             for col in 0..nc {
                 if !input.get(row, col) {
                     continue;
                 }
-                let i = row * nc + col;
+                if row + 1 >= nr {
+                    continue; // no room to shift
+                }
+                let i = (row + 1) * nc + col;
                 entries.data[i] = true;
-                stops[i] = low_m.get(row, col);
+                stops[i] = low_m.get(row, col); // stop from gap day
             }
         }
 
@@ -282,6 +286,65 @@ impl Block for ScoreThreshold {
 }
 
 // ---------------------------------------------------------------------------
+// ParabolicEntry
+// ---------------------------------------------------------------------------
+
+/// Parabolic short entry: input mask is the entry mask, stop = entry day's
+/// high, exit = close <= SMA10 OR close <= SMA20 (mean reversion cover).
+///
+/// Unlike other entry blocks that use fill_sma10_exits(), this uses a dual-SMA
+/// OR exit to match the hardcoded ParabolicShort strategy.
+pub struct ParabolicEntry;
+
+impl Block for ParabolicEntry {
+    fn name(&self) -> &'static str { "parabolic_entry" }
+    fn output_type(&self) -> SlotType { SlotType::Signals }
+
+    fn execute(&self, ctx: &BlockContext) -> anyhow::Result<Slot> {
+        let input = ctx.input_mask().ok_or_else(|| anyhow::anyhow!("parabolic_entry: no input mask"))?;
+
+        let nr = ctx.store.axes.n_rows;
+        let nc = ctx.store.axes.n_cols;
+
+        let close_m = ctx.store.close();
+        let high_m = ctx.store.high();
+        let sma10 = ctx.store.get(Indicator::Sma10);
+        let sma20 = ctx.store.get(Indicator::Sma20);
+
+        let mut entries = WideMask::new_false(nr, nc);
+        let mut exits = WideMask::new_false(nr, nc);
+        let mut stops = vec![f32::NAN; nr * nc];
+
+        for row in 0..nr {
+            for col in 0..nc {
+                let i = row * nc + col;
+                let close = close_m.get(row, col);
+                let s10 = sma10.get(row, col);
+                let s20 = sma20.get(row, col);
+
+                // Cover when price reverts to either SMA
+                if !close.is_nan()
+                    && ((!s10.is_nan() && close <= s10) || (!s20.is_nan() && close <= s20))
+                {
+                    exits.data[i] = true;
+                }
+
+                if !input.get(row, col) {
+                    continue;
+                }
+
+                entries.data[i] = true;
+                // Stop: entry day's high (if price reclaims, short thesis is wrong)
+                stops[i] = high_m.get(row, col);
+            }
+        }
+
+        let stop_prices = WideMatrix::new(stops, nr, nc);
+        Ok(Slot::Signals(SignalSet { entries, exits, stop_prices }))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -328,5 +391,8 @@ mod tests {
 
         assert_eq!(ScoreThreshold.name(), "score_threshold");
         assert_eq!(ScoreThreshold.output_type(), SlotType::Signals);
+
+        assert_eq!(ParabolicEntry.name(), "parabolic_entry");
+        assert_eq!(ParabolicEntry.output_type(), SlotType::Signals);
     }
 }

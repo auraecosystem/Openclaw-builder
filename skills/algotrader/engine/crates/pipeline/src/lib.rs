@@ -58,6 +58,7 @@ pub fn build_default_registry() -> BlockRegistry {
     r.register(Box::new(blocks::entry::BreakoutAbove));
     r.register(Box::new(blocks::entry::GapEntry));
     r.register(Box::new(blocks::entry::ScoreThreshold));
+    r.register(Box::new(blocks::entry::ParabolicEntry));
 
     // Stop generators.
     r.register(Box::new(blocks::stop::AtrCappedLow));
@@ -509,9 +510,9 @@ mod tests {
     fn build_default_registry_has_all_blocks() {
         let reg = build_default_registry();
         let names = reg.names();
-        // 13 universe + 5 pattern + 3 entry + 3 stop + 3 combiner + 1 signal + 3 cross = 31
+        // 13 universe + 5 pattern + 4 entry + 3 stop + 3 combiner + 1 signal + 3 cross = 32
         assert!(
-            names.len() >= 30,
+            names.len() >= 31,
             "expected at least 30 blocks, got {}",
             names.len()
         );
@@ -523,6 +524,7 @@ mod tests {
         assert!(reg.get("atr_capped_low").is_some());
         assert!(reg.get("and").is_some());
         assert!(reg.get("signal_pipeline").is_some());
+        assert!(reg.get("parabolic_entry").is_some());
         assert!(reg.get("ising_susceptibility").is_some());
     }
 }

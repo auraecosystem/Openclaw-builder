@@ -290,7 +290,8 @@ impl Block for IndicatorGte {
 // ---------------------------------------------------------------------------
 
 /// Generic filter: `indicator <= config["value"]`.
-/// Config: `"indicator"` (string name), `"value"` (f32 threshold).
+/// Config: `"indicator"` (string name), `"value"` (f32 threshold),
+/// `"pass_nan"` (bool, default false) — when true, NaN values pass the filter.
 pub struct IndicatorLte;
 
 impl Block for IndicatorLte {
@@ -304,6 +305,9 @@ impl Block for IndicatorLte {
             .ok_or_else(|| anyhow::anyhow!("indicator_lte: missing 'indicator'"))?;
         let ind = parse_indicator(ind_name)?;
         let threshold = get_f32(&ctx.config, "value", "indicator_lte")?;
+        let pass_nan = ctx.config.get("pass_nan")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
@@ -316,7 +320,9 @@ impl Block for IndicatorLte {
                     if !inp.get(row, col) { continue; }
                 }
                 let v = mat.get(row, col);
-                if !v.is_nan() && v <= threshold {
+                if v.is_nan() {
+                    if pass_nan { mask.set(row, col, true); }
+                } else if v <= threshold {
                     mask.set(row, col, true);
                 }
             }

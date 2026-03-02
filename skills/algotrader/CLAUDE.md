@@ -1,6 +1,6 @@
 # Algotrader — Developer Reference
 
-Qullamaggie-style momentum backtester for crypto and US equities. Five hardcoded setups (breakout, EP, parabolic short, signal_breakout, pattern_breakout) plus a dynamic config-driven pipeline system for defining new strategies as JSON. Primary engine is NautilusTrader; Rust engine is for fast parameter search and evolutionary optimization.
+General-purpose algorithmic trading backtester for crypto and US equities. Strategies are defined as JSON config files composed from a registry of 31 blocks — no Rust recompilation needed. CMA-ES evolves both numeric parameters and pipeline structure. Five legacy hardcoded strategies exist but the system is strategy-agnostic. Primary engine is NautilusTrader (production); Rust engine is for fast parameter search and evolutionary optimization.
 
 ---
 
@@ -17,9 +17,17 @@ IBKR bars        →     nautilus/strategy.py  →   engine/ (cargo)
                                                   (JSON strategies)
 ```
 
-- **NautilusTrader** (`nautilus/`): event-driven, NETTING semantics, Binance + IBKR adapters. Production backtesting.
-- **Rust engine** (`engine/`): Cargo workspace, 6 crates. Fast parameter sweeps, CMA-ES evolution, dynamic pipeline.
+- **NautilusTrader** (`nautilus/`): event-driven, NETTING semantics, Binance + IBKR adapters. Production backtesting. Currently has one hardcoded strategy (Qullamaggie breakout); not yet generalized.
+- **Rust engine** (`engine/`): Cargo workspace, 6 crates. Strategy-agnostic — any strategy expressible as a JSON pipeline of composable blocks. CMA-ES evolution, filter fusion, fast batch parameter sweeps.
 - **Python libs** (`lib/`): indicators, patterns, universe filters, risk sizing, cache I/O.
+
+### How a strategy runs
+
+1. `create_setups("name")` looks up hardcoded strategies by name, or loads `strategies/{name}.json` as a `DynamicSetup`
+2. JSON config is parsed (`@param` interpolation, `"use"` expansion, step ID assignment), validated (type chain, block existence), and compiled into a `PhysicalPlan`
+3. Consecutive fusable filter blocks are auto-coalesced into `FusedFilter` — single vectorized scan
+4. Filter phase runs on the blackboard (seed → mask narrowing), signal phase produces entries/exits/stops
+5. `DynamicSetupAdapter` bridges to the `Setup` trait — simulator sees no difference from hardcoded strategies
 
 ---
 
@@ -36,6 +44,79 @@ The only legitimate hard filters are:
 Everything else — RS rank, volume threshold, distance from 52w high, pattern quality score — belongs in the weight/score layer, not the filter layer.
 
 This principle applies to `lib/universe.py`, `lib/signals.py`, the Rust signal scorer (`engine/crates/signals/scorer.rs`), and any future ML feature selection.
+
+---
+
+## Dynamic Strategy Pipeline (`engine-pipeline`)
+
+The core of the system. Strategies are defined as JSON config files without recompilation. Three layers:
+
+1. **Config (JSON)**: Human-readable strategy files with `@param` interpolation, `"use"` block imports, `"when"` conditionals, and evolvable param bounds.
+2. **Logical Plan**: Parsed config → validated steps with resolved types and dependencies.
+3. **Physical Plan**: Optimized for execution — consecutive simple filters fused into a single vectorized scan.
+
+### Block Registry (31 blocks)
+
+| Category | Blocks |
+|---|---|
+| Universe Filters (13) | `exclude_etf`, `price_floor`, `volume_floor`, `adv_floor`, `indicator_gte/lte`, `rs_percentile`, `near_52w_high`, `prior_move`, `adr_floor`, `extension_cap`, `consolidation`, `regime_ema` |
+| Pattern Detectors (5) | `vcp`, `flag`, `gap_up`, `parabolic_run`, `pattern_any` |
+| Entry Conditions (3) | `breakout_above`, `gap_entry`, `score_threshold` |
+| Stop Generators (3) | `atr_capped_low`, `fixed_pct`, `gap_day_low` |
+| Mask Combiners (3) | `and`, `or`, `not` |
+| Signal Pipeline (1) | `signal_pipeline` (wraps 18-algorithm L0-L3 pipeline, stub) |
+| Cross-Sectional (3) | `ising_susceptibility`, `vn_entropy`, `quorum` (stubs, return all-pass) |
+
+### Filter Fusion
+
+Consecutive blocks that check a single indicator against a threshold are auto-coalesced into a single `FusedFilter` — one pass over all indicator matrices with short-circuit evaluation per cell. A block is fusable when it produces a Mask, reads exactly one indicator per cell, compares against a threshold, and has no `when` conditional or explicit `input` reference.
+
+### CMA-ES Pipeline Evolution
+
+`GenomeSpec::from_pipeline_params()` auto-generates a genome spec from a strategy's `params` block. Numeric params with `min`/`max` bounds become genes. Bool params with `"evolvable": true` become continuous [0,1] genes thresholded at 0.5. The optimizer can evolve both numeric thresholds AND toggle pipeline steps on/off.
+
+### Key Types
+
+```
+Slot:       Mask(WideMask) | Matrix(WideMatrix) | Signals(SignalSet) | Scalar(Vec<f32>)
+Blackboard: HashMap<String, Slot> with ordered insertion (implicit chaining)
+Block:      trait { name, output_type, input_type, execute(BlockContext), fusable_spec }
+FusedFilter: Vec<FusedCondition> — single-pass vectorized scan
+DynamicSetup: from_json/from_file → implements Setup trait via DynamicSetupAdapter
+```
+
+### Example: defining a strategy
+
+```json
+{
+    "name": "my_strategy",
+    "direction": "long",
+    "fill_mode": "next_day_open",
+    "equity_fraction": 0.5,
+    "pipeline": [
+        { "use": "stock_universe" },
+        { "type": "rs_percentile", "min_pct": "@rs_pct" },
+        { "type": "regime_ema", "when": "@regime" },
+        { "type": "breakout_above", "vol_spike": "@vol_ratio" }
+    ],
+    "stop": { "type": "atr_capped_low", "fallback_pct": 0.05 },
+    "exits": [
+        { "type": "profit_target", "min_bars": 5 },
+        { "type": "sma_trail", "period": 10 },
+        { "type": "stop_loss" }
+    ],
+    "params": {
+        "rs_pct": { "value": 0.80, "min": 0.50, "max": 0.99 },
+        "regime": { "value": true, "evolvable": true },
+        "vol_ratio": { "value": 2.0, "min": 1.2, "max": 4.0 }
+    }
+}
+```
+
+- `@param` values resolved from `params` block; CMA-ES mutates these
+- `"use"` imports reusable block chains from `blocks.json`
+- `"when"` conditionally enables/disables steps; CMA-ES can toggle structure
+- Param `min`/`max` bounds define the evolution search space
 
 ---
 
@@ -94,11 +175,11 @@ This principle applies to `lib/universe.py`, `lib/signals.py`, the Rust signal s
 | Crate | Path | Purpose |
 |---|---|---|
 | `engine-types` | `crates/types/` | Params, Trade, Direction, SignalParams, PatternParams, 6 config structs, WideMatrix/WideMask |
-| `engine-data` | `crates/data/` | DataStore, polars loader, 26-variant Indicator enum |
+| `engine-data` | `crates/data/` | DataStore, polars loader, 26-variant Indicator enum, runtime compute |
 | `engine-signals` | `crates/signals/` | 18 algorithms in flat `algorithms/` dir, `pipeline.rs`, `scorer.rs`, `execution_signals.rs`, `arena.rs` |
 | `engine-patterns` | `crates/patterns/` | Fuzzy pattern scoring with NEON acceleration |
-| `engine-pipeline` | `crates/pipeline/` | **Dynamic config-driven strategy pipeline** — 30 composable blocks, filter fusion, JSON configs, DynamicSetup |
-| root crate | `src/` | `run_single()`, `run_batch()`, execution, strategy, analysis, evolution, CLI, TCP server |
+| `engine-pipeline` | `crates/pipeline/` | **Dynamic config-driven strategy pipeline** — 31 composable blocks, filter fusion, JSON configs, DynamicSetup |
+| root crate | `src/` | `run_single()`, `run_batch()`, execution, strategy, analysis, evolution, portfolio, CLI, TCP server |
 
 Key deps: polars 0.46, rayon, rustfft 6, faer 0.20, kiddo 4.
 Build: `cd engine && cargo build --release` (~2.5 min full, ~1s incremental for signal-only changes).
@@ -109,10 +190,14 @@ Build: `cd engine && cargo build --release` (~2.5 min full, ~1s incremental for 
 | File | Purpose |
 |---|---|
 | `blocks.json` | Shared block library (reusable step chains like `stock_universe`) |
-| `breakout_quick.json` | Dynamic equivalent of BreakoutQuick (9 evolvable params) |
-| `ep_dynamic.json` | Dynamic equivalent of EpisodicPivot (5 evolvable params) |
+| `breakout_quick.json` | Momentum breakout strategy (9 evolvable params) |
+| `ep_dynamic.json` | Gap-up episodic pivot strategy (5 evolvable params) |
 
 Unknown strategy names passed to `create_setups()` are looked up as `strategies/{name}.json` and loaded as `DynamicSetup`.
+
+### Legacy hardcoded strategies (`engine/src/strategy/`)
+
+Five Rust structs implementing the `Setup` trait directly: `BreakoutQuick`, `BreakoutRunner`, `EpisodicPivot`, `ParabolicShort`, `SignalBreakout`, `PatternBreakout`. These predate the dynamic pipeline and are Qullamaggie-inspired. New strategies should use JSON configs instead.
 
 ### `references/` — 20 research files
 
@@ -121,46 +206,6 @@ Methods: `walk-forward-and-validation.md`, `backtesting-sins-and-biases.md`, `si
 Signal processing: `signal-processing-cryptography-overlap.md`, `cross-disciplinary-signal-analysis.md`
 Risk: `risk-management-position-sizing.md`, `transaction-costs-and-slippage.md`
 Meta: `who-succeeds-at-algo-trading.md`, `how-to-succeed-at-algo-trading.md`, `strategy-decay-and-lifecycle.md`
-
----
-
-## Dynamic Strategy Pipeline (`engine-pipeline`)
-
-Strategies can be defined as JSON config files without recompilation. The system has three layers:
-
-1. **Config (JSON)**: Human-readable strategy files with `@param` interpolation, `"use"` block imports, `"when"` conditionals, and evolvable param bounds.
-2. **Logical Plan**: Parsed config → validated steps with resolved types and dependencies.
-3. **Physical Plan**: Optimized for execution — consecutive simple filters fused into a single vectorized scan.
-
-### Block Registry (31 blocks)
-
-| Category | Blocks |
-|---|---|
-| Universe Filters (13) | `exclude_etf`, `price_floor`, `volume_floor`, `adv_floor`, `indicator_gte/lte`, `rs_percentile`, `near_52w_high`, `prior_move`, `adr_floor`, `extension_cap`, `consolidation`, `regime_ema` |
-| Pattern Detectors (5) | `vcp`, `flag`, `gap_up`, `parabolic_run`, `pattern_any` |
-| Entry Conditions (3) | `breakout_above`, `gap_entry`, `score_threshold` |
-| Stop Generators (3) | `atr_capped_low`, `fixed_pct`, `gap_day_low` |
-| Mask Combiners (3) | `and`, `or`, `not` |
-| Signal Pipeline (1) | `signal_pipeline` (wraps 18-algorithm L0-L3 pipeline, stub) |
-| Cross-Sectional (3) | `ising_susceptibility`, `vn_entropy`, `quorum` (stubs, return all-pass) |
-
-### Filter Fusion
-
-Consecutive blocks that check a single indicator against a threshold (fusable blocks: `price_floor`, `volume_floor`, `near_52w_high`, `prior_move`) are auto-coalesced into a single `FusedFilter` — one pass over all indicator matrices with short-circuit evaluation per cell. Reproduces the performance of the handwritten `breakout_filter`.
-
-### CMA-ES Pipeline Evolution
-
-`GenomeSpec::from_pipeline_params()` auto-generates a genome spec from a strategy's `params` block. Numeric params with `min`/`max` bounds become genes. Bool params with `"evolvable": true` become continuous [0,1] genes thresholded at 0.5. The optimizer can evolve both numeric thresholds AND toggle pipeline steps on/off.
-
-### Key Types
-
-```
-Slot:       Mask(WideMask) | Matrix(WideMatrix) | Signals(SignalSet) | Scalar(Vec<f32>)
-Blackboard: HashMap<String, Slot> with ordered insertion (implicit chaining)
-Block:      trait { name, output_type, input_type, execute(BlockContext), fusable_spec }
-FusedFilter: Vec<FusedCondition> — single-pass vectorized scan
-DynamicSetup: from_json/from_file → implements Setup trait via DynamicSetupAdapter
-```
 
 ---
 
@@ -335,7 +380,7 @@ Markets are a signal extraction problem. Your backtest is a hypothesis — live 
 ## References — Key Excerpts
 
 ### [`qullamaggie-rules.md`](references/qullamaggie-rules.md)
-Primary rules for all three setups (breakout, EP, parabolic short). Entry criteria, position sizing, stop placement, partial exits, hold rules. The canonical playbook this system implements. Includes verified performance data and direct quotes from Twitch/interview transcripts.
+Rules for the legacy breakout/EP/parabolic setups. Entry criteria, position sizing, stop placement, partial exits, hold rules. The playbook the first hardcoded strategies were based on.
 
 ### [`backtesting-sins-and-biases.md`](references/backtesting-sins-and-biases.md)
 > "90% of backtests fail in live trading. The gap between backtest performance and live performance is not bad luck — it is almost always traceable to one or more systematic errors."
@@ -361,7 +406,7 @@ Slippage models, bid-ask spread impact, market impact at scale, realistic cost a
 All edges die. HFT edges last days; swing edges 6-18 months. Rolling Sharpe monitoring cadence, regime change detection, when to pause vs. kill a strategy. Includes capacity limits per strategy tier.
 
 ### [`short-horizon-crypto-momentum.md`](references/short-horizon-crypto-momentum.md)
-Blueprint for exactly this system: Qullamaggie-style breakouts on crypto with short holds. Covers universe selection, RS ranking, entry/exit mechanics, why crypto behaves differently from equities (24/7, no uptick rule, thinner order books, higher vol).
+Short-hold momentum on crypto. Universe selection, RS ranking, entry/exit mechanics, why crypto behaves differently from equities (24/7, no uptick rule, thinner order books, higher vol).
 
 ### [`crypto-algo-trading.md`](references/crypto-algo-trading.md)
 Structural differences between crypto and equities that matter for backtesting: exchange fragmentation, funding rates, wash trading in volume data, exchange-specific quirks (Binance delists, rebrands). Realistic edge expectations for crypto.
@@ -396,7 +441,7 @@ Why psychology matters even in systematic trading: abandoning strategies during 
 Minimum viable stack (data, backtest, paper trading, live execution, monitoring). Where to put execution logic vs. signal logic. Latency tiers and what matters at each. NautilusTrader's place in this stack.
 
 ### [`cameron-rules.md`](references/cameron-rules.md) / [`strategy-comparison.md`](references/strategy-comparison.md)
-Ross Cameron's intraday day-trading rules (for contrast). Strategy comparison table: Qullamaggie vs. Cameron — different timeframes, different edge sources, different risk profiles. Useful for understanding what this system is *not*.
+Ross Cameron's intraday day-trading rules (for contrast). Strategy comparison table: different timeframes, different edge sources, different risk profiles.
 
 ---
 

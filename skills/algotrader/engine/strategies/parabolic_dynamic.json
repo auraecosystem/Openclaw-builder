@@ -1,0 +1,27 @@
+{
+    "name": "parabolic_dynamic",
+    "direction": "short",
+    "fill_mode": "next_day_open",
+    "equity_fraction": 1.0,
+    "pipeline": [
+        { "type": "exclude_etf" },
+        { "type": "price_floor", "min": "@min_price" },
+        { "type": "volume_floor", "min": "@min_vol" },
+        { "type": "adv_floor", "min": "@min_adv" },
+        { "type": "parabolic_run", "large_cap_price": "@large_cap_price", "large_cap_run": "@large_cap_run", "small_cap_run": "@small_cap_run" },
+        { "type": "parabolic_entry" }
+    ],
+    "stop": { "type": "fixed_pct", "pct": 0.10 },
+    "exits": [
+        { "type": "sma_cover", "sma1": "sma_10", "sma2": "sma_20" },
+        { "type": "stop_loss" }
+    ],
+    "params": {
+        "min_price": { "value": 5.0, "min": 1.0, "max": 50.0 },
+        "min_vol": { "value": 300000.0, "min": 10000.0, "max": 1000000.0 },
+        "min_adv": { "value": 150000000.0, "min": 5000000.0, "max": 500000000.0 },
+        "large_cap_price": { "value": 50.0, "min": 20.0, "max": 100.0 },
+        "large_cap_run": { "value": 0.50, "min": 0.20, "max": 1.0 },
+        "small_cap_run": { "value": 3.00, "min": 1.0, "max": 10.0 }
+    }
+}

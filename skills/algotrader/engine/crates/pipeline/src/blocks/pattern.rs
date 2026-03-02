@@ -146,10 +146,10 @@ impl Block for FlagDetect {
 
 /// Gap-up detector for EP (Episodic Pivot) strategy.
 ///
-/// Passes cells where the overnight gap (close / prev_close - 1) exceeds a
+/// Passes cells where the overnight gap (open / prev_close - 1) exceeds a
 /// minimum threshold, volume spikes relative to the 20-day SMA, and dollar
-/// volume meets minimum ADV requirements. Row 0 is always skipped (no
-/// previous close available).
+/// volume (actual day volume * close) meets minimum requirements. Row 0 is
+/// always skipped (no previous close available).
 pub struct GapUp;
 
 impl Block for GapUp {
@@ -167,6 +167,7 @@ impl Block for GapUp {
         let nc = ctx.store.axes.n_cols;
 
         let close_m = ctx.store.close();
+        let open_m = ctx.store.open();
         let vol_m = ctx.store.volume();
         let vol_sma = ctx.store.get(Indicator::VolSma20);
 
@@ -179,11 +180,13 @@ impl Block for GapUp {
                     continue;
                 }
                 let close = close_m.get(row, col);
+                let open_val = open_m.get(row, col);
                 let prev_close = close_m.get(row - 1, col);
-                if prev_close.is_nan() || prev_close <= 0.0 || close.is_nan() {
+                if prev_close.is_nan() || prev_close <= 0.0 || open_val.is_nan() {
                     continue;
                 }
-                let gap = close / prev_close - 1.0;
+                // Gap measured from open, not close (matches hardcoded EP).
+                let gap = open_val / prev_close - 1.0;
                 if gap < min_gap_pct {
                     continue;
                 }
@@ -194,8 +197,8 @@ impl Block for GapUp {
                     continue;
                 }
 
-                // Dollar volume filter (ADV proxy)
-                if min_dollar_vol > 0.0 && vsma * close < min_dollar_vol {
+                // Dollar volume: actual day volume * close (not SMA volume).
+                if min_dollar_vol > 0.0 && vol * close < min_dollar_vol {
                     continue;
                 }
 
@@ -214,7 +217,7 @@ impl Block for GapUp {
 ///
 /// Identifies stocks that have made an extreme 10-day move (threshold depends
 /// on market-cap proxy via price), are showing their first red day (close < open),
-/// and optionally had low prior 6-month returns (prior neglect filter).
+/// and had 3+ consecutive green days prior (momentum buildup before reversal).
 pub struct ParabolicRun;
 
 impl Block for ParabolicRun {
@@ -225,7 +228,7 @@ impl Block for ParabolicRun {
         let large_cap_price = get_f32_or(ctx.config, "large_cap_price", 50.0);
         let large_cap_run = get_f32_or(ctx.config, "large_cap_run", 0.50);
         let small_cap_run = get_f32_or(ctx.config, "small_cap_run", 3.00);
-        let max_prior_return = get_f32_or(ctx.config, "max_prior_return", 0.30);
+        let min_green_days = get_f32_or(ctx.config, "min_green_days", 3.0);
 
         let input = ctx.input_mask().ok_or_else(|| anyhow::anyhow!("parabolic_run: no input mask"))?;
 
@@ -235,7 +238,7 @@ impl Block for ParabolicRun {
         let close_m = ctx.store.close();
         let open_m = ctx.store.open();
         let pct_10d = ctx.store.get(Indicator::Pct10d);
-        let ret_126 = ctx.store.get(Indicator::Ret126);
+        let consec_green = ctx.store.get(Indicator::ConsecGreen);
 
         let mut out = WideMask::new_false(nr, nc);
 
@@ -266,9 +269,14 @@ impl Block for ParabolicRun {
                     continue;
                 }
 
-                // Prior neglect: 6-month return should be low
-                let ret = ret_126.get(row, col);
-                if !ret.is_nan() && ret >= max_prior_return {
+                // Prior momentum: 3+ consecutive green days before this red day.
+                // Check row-1 because consec_green at row-1 counts the streak
+                // ending the day before the current (red) day.
+                if row == 0 {
+                    continue;
+                }
+                let green = consec_green.get(row - 1, col);
+                if green.is_nan() || green < min_green_days {
                     continue;
                 }
 

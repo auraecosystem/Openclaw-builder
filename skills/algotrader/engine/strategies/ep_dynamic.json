@@ -2,23 +2,28 @@
     "name": "ep_dynamic",
     "direction": "long",
     "fill_mode": "same_day_open",
-    "equity_fraction": 0.5,
+    "equity_fraction": 1.0,
     "pipeline": [
-        { "use": "stock_universe" },
-        { "type": "gap_up", "min_gap_pct": "@ep_min_gap_pct", "min_vol_ratio": "@ep_min_vol_ratio" },
+        { "type": "exclude_etf" },
+        { "type": "price_floor", "min": "@min_price" },
+        { "type": "volume_floor", "min": "@min_vol" },
+        { "type": "adv_floor", "min": "@min_adv" },
+        { "type": "indicator_lte", "indicator": "ret_126", "value": "@ep_max_prior_6m_return", "pass_nan": true },
+        { "type": "gap_up", "min_gap_pct": "@ep_min_gap_pct", "min_vol_ratio": "@ep_min_vol_ratio", "min_dollar_vol": "@ep_min_gap_day_dollar_vol" },
         { "type": "gap_entry" }
     ],
     "stop": { "type": "gap_day_low" },
     "exits": [
-        { "type": "profit_target", "min_bars": 5 },
         { "type": "sma_trail", "period": 10 },
         { "type": "stop_loss" }
     ],
     "params": {
         "min_price": { "value": 5.0, "min": 1.0, "max": 50.0 },
-        "min_vol": { "value": 300000, "min": 10000, "max": 1000000 },
-        "min_adv": { "value": 150000000, "min": 5000000, "max": 500000000 },
+        "min_vol": { "value": 300000.0, "min": 10000.0, "max": 1000000.0 },
+        "min_adv": { "value": 150000000.0, "min": 5000000.0, "max": 500000000.0 },
         "ep_min_gap_pct": { "value": 0.10, "min": 0.05, "max": 0.30 },
-        "ep_min_vol_ratio": { "value": 2.0, "min": 1.5, "max": 5.0 }
+        "ep_min_vol_ratio": { "value": 2.0, "min": 1.5, "max": 5.0 },
+        "ep_min_gap_day_dollar_vol": { "value": 100000000.0, "min": 10000000.0, "max": 500000000.0 },
+        "ep_max_prior_6m_return": { "value": 0.30, "min": 0.10, "max": 1.0 }
     }
 }
