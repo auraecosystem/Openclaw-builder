@@ -1,6 +1,6 @@
 # Algotrader — Developer Reference
 
-Qullamaggie-style crypto momentum backtester. Three live setups (breakout, EP, parabolic short) plus a fourth Rust-only signal_breakout. Primary engine is NautilusTrader; Rust engine is for fast parameter search only.
+Qullamaggie-style momentum backtester for crypto and US equities. Five hardcoded setups (breakout, EP, parabolic short, signal_breakout, pattern_breakout) plus a dynamic config-driven pipeline system for defining new strategies as JSON. Primary engine is NautilusTrader; Rust engine is for fast parameter search and evolutionary optimization.
 
 ---
 
@@ -10,12 +10,15 @@ Qullamaggie-style crypto momentum backtester. Three live setups (breakout, EP, p
 data pipeline          backtest engines          optimization
 ─────────────          ────────────────          ────────────
 Binance CSVs           NautilusTrader            Rust engine
-  → ohlcv.parquet  →   nautilus/strategy.py  →   engine/ (cargo)
-  → cache/*.parquet     (production)              (param search)
+IBKR bars        →     nautilus/strategy.py  →   engine/ (cargo)
+  → ohlcv.parquet      (production)              (param search)
+  → cache/*.parquet                               ↓
+                                                  engine-pipeline
+                                                  (JSON strategies)
 ```
 
-- **NautilusTrader** (`nautilus/`): event-driven, NETTING semantics, Binance adapter. Production backtesting.
-- **Rust engine** (`engine/`): Cargo workspace, 3 crates. Fast parameter sweeps only, not production.
+- **NautilusTrader** (`nautilus/`): event-driven, NETTING semantics, Binance + IBKR adapters. Production backtesting.
+- **Rust engine** (`engine/`): Cargo workspace, 6 crates. Fast parameter sweeps, CMA-ES evolution, dynamic pipeline.
 - **Python libs** (`lib/`): indicators, patterns, universe filters, risk sizing, cache I/O.
 
 ---
@@ -56,6 +59,8 @@ This principle applies to `lib/universe.py`, `lib/signals.py`, the Rust signal s
 | `strategy.py` | `QullamaggieBreakout` + `PrecomputedBreakout` + `QullamaggieConfig` (18 params) |
 | `indicators.py` | NT custom indicators: VCPDetector, FlagDetector, RollingHigh, RollingReturn, VolumeSMA |
 | `run_backtest.py` | Single backtest via NT BacktestEngine API |
+| `run_backtest_ibkr.py` | Backtest on IBKR US equity data (parquet from `data-ibkr/`) |
+| `run_ib_live.py` | Data-only NT node connected to IB Gateway (no execution, validates connection) |
 | `evolve.py` | Multiprocess evolutionary optimizer (pre-compute arrays, reuse engine) |
 | `validate.py` | Validate a param set; supports `--resample 1h` |
 | `walkforward.py` | Rolling IS/OOS windows, computes Walk-Forward Efficiency |
@@ -75,25 +80,87 @@ This principle applies to `lib/universe.py`, `lib/signals.py`, the Rust signal s
 | `nautilus_backtest.py` | Load Binance CSV → NT BacktestEngine |
 | `portfolio.py` | Aggregate backtest results → portfolio report |
 
-### `engine/` — Rust Cargo workspace
+### `scripts/ibkr/` — IBKR tools (PEP 723, run with `uv run`)
+
+| File | Purpose |
+|---|---|
+| `daemon.py` | REST API daemon wrapping TWS API (FastAPI + uvicorn + ib_async) |
+| `fetch_bars.py` | Fetch historical OHLCV bars, save to parquet/CSV |
+| `fetch_universe.py` | Fetch 10 years of hourly bars for US equity universe |
+| `test_scanner.py` | Test market scanners (75+ scan codes) |
+
+### `engine/` — Rust Cargo workspace (6 crates, 440 tests)
 
 | Crate | Path | Purpose |
 |---|---|---|
-| `engine-types` | `crates/types/` | Params, Trade, Direction, SignalParams, 6 config structs, matrix types |
-| `engine-data` | `crates/data/` | DataStore, polars loader, Indicator enum |
+| `engine-types` | `crates/types/` | Params, Trade, Direction, SignalParams, PatternParams, 6 config structs, WideMatrix/WideMask |
+| `engine-data` | `crates/data/` | DataStore, polars loader, 26-variant Indicator enum |
 | `engine-signals` | `crates/signals/` | 18 algorithms in flat `algorithms/` dir, `pipeline.rs`, `scorer.rs`, `execution_signals.rs`, `arena.rs` |
+| `engine-patterns` | `crates/patterns/` | Fuzzy pattern scoring with NEON acceleration |
+| `engine-pipeline` | `crates/pipeline/` | **Dynamic config-driven strategy pipeline** — 30 composable blocks, filter fusion, JSON configs, DynamicSetup |
 | root crate | `src/` | `run_single()`, `run_batch()`, execution, strategy, analysis, evolution, CLI, TCP server |
 
 Key deps: polars 0.46, rayon, rustfft 6, faer 0.20, kiddo 4.
 Build: `cd engine && cargo build --release` (~2.5 min full, ~1s incremental for signal-only changes).
 **`engine/target/` is regenerable — delete freely to reclaim ~13GB.**
 
-### `references/` — 18 research files
+### `engine/strategies/` — JSON strategy configs
+
+| File | Purpose |
+|---|---|
+| `blocks.json` | Shared block library (reusable step chains like `stock_universe`) |
+| `breakout_quick.json` | Dynamic equivalent of BreakoutQuick (9 evolvable params) |
+| `ep_dynamic.json` | Dynamic equivalent of EpisodicPivot (5 evolvable params) |
+
+Unknown strategy names passed to `create_setups()` are looked up as `strategies/{name}.json` and loaded as `DynamicSetup`.
+
+### `references/` — 20 research files
 
 Core: `qullamaggie-rules.md`, `short-horizon-crypto-momentum.md`, `crypto-algo-trading.md`
-Methods: `walk-forward-and-validation.md`, `backtesting-sins-and-biases.md`, `signal-processing-dump.md`
+Methods: `walk-forward-and-validation.md`, `backtesting-sins-and-biases.md`, `signal-processing-timeseries.md`
+Signal processing: `signal-processing-cryptography-overlap.md`, `cross-disciplinary-signal-analysis.md`
 Risk: `risk-management-position-sizing.md`, `transaction-costs-and-slippage.md`
-Meta: `who-succeeds-at-algo-trading.md`, `strategy-decay-and-lifecycle.md`
+Meta: `who-succeeds-at-algo-trading.md`, `how-to-succeed-at-algo-trading.md`, `strategy-decay-and-lifecycle.md`
+
+---
+
+## Dynamic Strategy Pipeline (`engine-pipeline`)
+
+Strategies can be defined as JSON config files without recompilation. The system has three layers:
+
+1. **Config (JSON)**: Human-readable strategy files with `@param` interpolation, `"use"` block imports, `"when"` conditionals, and evolvable param bounds.
+2. **Logical Plan**: Parsed config → validated steps with resolved types and dependencies.
+3. **Physical Plan**: Optimized for execution — consecutive simple filters fused into a single vectorized scan.
+
+### Block Registry (31 blocks)
+
+| Category | Blocks |
+|---|---|
+| Universe Filters (13) | `exclude_etf`, `price_floor`, `volume_floor`, `adv_floor`, `indicator_gte/lte`, `rs_percentile`, `near_52w_high`, `prior_move`, `adr_floor`, `extension_cap`, `consolidation`, `regime_ema` |
+| Pattern Detectors (5) | `vcp`, `flag`, `gap_up`, `parabolic_run`, `pattern_any` |
+| Entry Conditions (3) | `breakout_above`, `gap_entry`, `score_threshold` |
+| Stop Generators (3) | `atr_capped_low`, `fixed_pct`, `gap_day_low` |
+| Mask Combiners (3) | `and`, `or`, `not` |
+| Signal Pipeline (1) | `signal_pipeline` (wraps 18-algorithm L0-L3 pipeline, stub) |
+| Cross-Sectional (3) | `ising_susceptibility`, `vn_entropy`, `quorum` (stubs, return all-pass) |
+
+### Filter Fusion
+
+Consecutive blocks that check a single indicator against a threshold (fusable blocks: `price_floor`, `volume_floor`, `near_52w_high`, `prior_move`) are auto-coalesced into a single `FusedFilter` — one pass over all indicator matrices with short-circuit evaluation per cell. Reproduces the performance of the handwritten `breakout_filter`.
+
+### CMA-ES Pipeline Evolution
+
+`GenomeSpec::from_pipeline_params()` auto-generates a genome spec from a strategy's `params` block. Numeric params with `min`/`max` bounds become genes. Bool params with `"evolvable": true` become continuous [0,1] genes thresholded at 0.5. The optimizer can evolve both numeric thresholds AND toggle pipeline steps on/off.
+
+### Key Types
+
+```
+Slot:       Mask(WideMask) | Matrix(WideMatrix) | Signals(SignalSet) | Scalar(Vec<f32>)
+Blackboard: HashMap<String, Slot> with ordered insertion (implicit chaining)
+Block:      trait { name, output_type, input_type, execute(BlockContext), fusable_spec }
+FusedFilter: Vec<FusedCondition> — single-pass vectorized scan
+DynamicSetup: from_json/from_file → implements Setup trait via DynamicSetupAdapter
+```
 
 ---
 
@@ -103,13 +170,22 @@ Meta: `who-succeeds-at-algo-trading.md`, `strategy-decay-and-lifecycle.md`
 
 | Path | Size | Shape | Format |
 |---|---|---|---|
-| `data/ohlcv.parquet` | 403MB | 16145 rows × 40311 cols | Wide MultiIndex `("open","GTX")`, float32, ZSTD |
-| `data-crypto/ohlcv_daily.parquet` | 4.7MB | 3090 × 501 | Wide MultiIndex `("open","BTCUSDT")`, float32, ZSTD |
-| `data-crypto-5m/ohlcv.parquet` | 690MB | 889253 × 501 | Wide MultiIndex, float32, ZSTD |
+| `data/ohlcv.parquet` | 403MB | 16145 rows x 40311 cols | Wide MultiIndex `("open","GTX")`, float32, ZSTD |
+| `data-crypto/ohlcv_daily.parquet` | 4.7MB | 3090 x 501 | Wide MultiIndex `("open","BTCUSDT")`, float32, ZSTD |
+| `data-crypto-5m/ohlcv.parquet` | 690MB | 889253 x 501 | Wide MultiIndex, float32, ZSTD |
 | `data-crypto/universe.json` | 5.6KB | — | 100 USDT pair definitions |
 | `data-crypto/raw/` | 7.5GB | 13,328 CSVs | Raw Binance monthly klines, headerless, 12 cols |
 
-`data/ohlcv.parquet` columns: 5 fields × 8063 tickers = 40311. `data-crypto` columns: 5 fields × 100 tickers + 1 timestamp = 501.
+`data/ohlcv.parquet` columns: 5 fields x 8063 tickers = 40311. `data-crypto` columns: 5 fields x 100 tickers + 1 timestamp = 501.
+
+### IBKR data (`data-ibkr/`)
+
+| File | Contents |
+|---|---|
+| `daily.parquet` | SPY, AAPL, QQQ, MSFT, NVDA — 1Y daily bars |
+| `nvda_5y_daily.parquet` | NVDA — 5Y daily bars |
+| `qqq_spy_15y_daily.parquet` | QQQ + SPY — 15Y daily bars |
+| `universe_hourly.parquet` | US equity universe — 10Y hourly bars |
 
 ### Indicator caches (regenerable — delete to save space)
 
@@ -117,17 +193,15 @@ Caches live in `<data_dir>/cache/`. Invalidated by `ohlcv.parquet` mtime (stored
 
 | Cache dir | Shape per file | dtype | Codec | Rebuild command |
 |---|---|---|---|---|
-| `data/cache/*.parquet` (24 files) | 16145 × 8063 | float32 | ZSTD | `uv run scripts/crypto_build.py --data-dir data-crypto --indicators` |
-| `data-crypto-5m/cache/*.parquet` (22 files) | 889253 × 101 | float32 | ZSTD | `uv run scripts/crypto_build_5m.py --data-dir data-crypto --indicators` |
-| `data-crypto/cache/*.parquet` | 3090 × varies | float32 | ZSTD | same as daily build |
-
-**Note**: `data/cache/` also previously contained `intermediates.duckdb` (6.6GB tall-format duplicate of the parquet caches — redundant, deleted).
+| `data/cache/*.parquet` (24 files) | 16145 x 8063 | float32 | ZSTD | `uv run scripts/crypto_build.py --data-dir data-crypto --indicators` |
+| `data-crypto-5m/cache/*.parquet` (22 files) | 889253 x 101 | float32 | ZSTD | `uv run scripts/crypto_build_5m.py --data-dir data-crypto --indicators` |
+| `data-crypto/cache/*.parquet` | 3090 x varies | float32 | ZSTD | same as daily build |
 
 ### Known structural quirks
 
 - `data/ohlcv.parquet` — MultiIndex col names stored as string tuples `"('open', 'GTX')"` (vectorbt convention). Cache files use plain ticker names.
 - `data-crypto-5m/cache/*.parquet` — has explicit `timestamp` col (col 0). `data/cache/*.parquet` uses implicit row index for dates.
-- `data-crypto/raw/` — Binance timestamp gotcha: older files use ms (13 digits), newer use µs (16 digits). `crypto_build.py` normalizes via `ts.where(ts < 1e13, ts // 1000)`.
+- `data-crypto/raw/` — Binance timestamp gotcha: older files use ms (13 digits), newer use us (16 digits). `crypto_build.py` normalizes via `ts.where(ts < 1e13, ts // 1000)`.
 
 ---
 
@@ -145,7 +219,7 @@ Full experiment narratives: `INDEX.md`. Raw data: `lab-notebook.jsonl` (append-o
 ### EXP-003 key findings
 - `risk_pct=0.03` strongest lever (+3.3x baseline)
 - `split_frac=0` (no partial exits) +1.7x
-- `rs_lookback=7–21` ~2x
+- `rs_lookback=7-21` ~2x
 - Best combined: `risk_pct=0.02, split_frac=0.50, max_hold_bars=10, rs_lookback=21`
 
 ### EXP-004 lessons (5m failure)
@@ -157,7 +231,7 @@ Full experiment narratives: `INDEX.md`. Raw data: `lab-notebook.jsonl` (append-o
 
 ## Decision Framework (7 stages)
 
-0. Hypothesis → 1. Initial Screen (PF>1, trades≥30) → 2. Robustness (2/3 sub-periods, ±20% stable) → 3. Optimization (Sharpe<3, sensitivity) → 4. Walk-Forward (WFE>0.50) → 5. Validation (Sharpe>0.5× training) → 6. Holdout (ONE SHOT, Sharpe>1, PF>1.3, MDD<25%)
+0. Hypothesis → 1. Initial Screen (PF>1, trades>=30) → 2. Robustness (2/3 sub-periods, +/-20% stable) → 3. Optimization (Sharpe<3, sensitivity) → 4. Walk-Forward (WFE>0.50) → 5. Validation (Sharpe>0.5x training) → 6. Holdout (ONE SHOT, Sharpe>1, PF>1.3, MDD<25%)
 
 **Hard stops**: Sharpe>3.5, trades<10, >10 tunable params, holdout touched early, WFE<0.30
 
@@ -173,14 +247,6 @@ Full rules: `decision-framework.md`
 - Canadian restriction: cannot algo-trade Canadian-listed securities (CIRO DMR 3200); US markets fine
 - NautilusTrader has a built-in IB adapter (`InteractiveBrokersDataClient` + `InteractiveBrokersExecClient`)
 - NT streaming bars require Level 1 market data subscription ($1/mo) — historical one-shot requests work without it
-
-### `scripts/ibkr/` — IBKR tools (PEP 723, run with `uv run`)
-
-| File | Purpose |
-|---|---|
-| `daemon.py` | REST API daemon wrapping TWS API (FastAPI + uvicorn + ib_async) |
-| `fetch_bars.py` | Fetch historical OHLCV bars, save to parquet/CSV |
-| `test_scanner.py` | Test market scanners (75+ scan codes) |
 
 ### `scripts/ibkr/daemon.py` — IBKR REST API
 
@@ -204,14 +270,6 @@ Swagger docs at `http://localhost:8000/docs`.
 - Historical bars: 60 requests/10min, 6/2sec same contract, 15sec identical request cooldown
 - Scanners: max 50 results, max 10 concurrent subscriptions, US market hours only
 - Scanner gotchas: use `STK.US` (not `STK.US.MAJOR`), `market_cap_above=0` (cap filter needs fundamentals sub)
-
-### `data-ibkr/` — fetched IBKR data
-
-| File | Contents |
-|---|---|
-| `daily.parquet` | SPY, AAPL, QQQ, MSFT, NVDA — 1Y daily bars |
-| `nvda_5y_daily.parquet` | NVDA — 5Y daily bars |
-| `qqq_spy_15y_daily.parquet` | QQQ + SPY — 15Y daily bars |
 
 ---
 
@@ -258,19 +316,19 @@ Markets are a signal extraction problem. Your backtest is a hypothesis — live 
 
 **Finding edges**: Academic factors (momentum, mean reversion), market microstructure, structural quirks (illiquid instruments institutions can't touch). Avoid anything needing >10 parameters or showing Sharpe >3.5 in backtest (overfit).
 
-**Validation (where 90% die)**: Split data into in-sample / validation / holdout. Walk-forward analysis > single split. Perturb params ±20% — if returns collapse, it's fragile. Monte Carlo to check if it was lucky ordering.
+**Validation (where 90% die)**: Split data into in-sample / validation / holdout. Walk-forward analysis > single split. Perturb params +/-20% — if returns collapse, it's fragile. Monte Carlo to check if it was lucky ordering.
 
 **Risk > Returns**: 83% of successful algo traders rank risk management #1. Use half/quarter Kelly for sizing. Run multiple uncorrelated strategies (7 strategies at <30% correlation can halve total risk). Hard drawdown rules before going live.
 
-**Costs kill you**: Slippage + spread + market impact. Momentum strategies suffer most (chasing moves = worse fills). Add 0.1–0.2% round-trip minimum for daily strategies.
+**Costs kill you**: Slippage + spread + market impact. Momentum strategies suffer most (chasing moves = worse fills). Add 0.1-0.2% round-trip minimum for daily strategies.
 
-**Edges decay**: HFT lasts days, intraday momentum 3–6 months, swing systems 6–18 months, macro/factor 1–3+ years. Monitor rolling 60-day Sharpe, pause below 0.5.
+**Edges decay**: HFT lasts days, intraday momentum 3-6 months, swing systems 6-18 months, macro/factor 1-3+ years. Monitor rolling 60-day Sharpe, pause below 0.5.
 
-**Going live**: 30+ days paper trading first. Start at 10–25% capital. Scale up after 60–90 days matching expectations.
+**Going live**: 30+ days paper trading first. Start at 10-25% capital. Scale up after 60-90 days matching expectations.
 
 **What matters (in order)**: Don't lose money → Don't fool yourself → Realistic costs → Strategy durability → Returns (last).
 
-**Benchmarks**: Sharpe 1.0 = minimum viable, 1.5–2.0 = good, >2.5 = exceptional. S&P buy-and-hold is ~0.5.
+**Benchmarks**: Sharpe 1.0 = minimum viable, 1.5-2.0 = good, >2.5 = exceptional. S&P buy-and-hold is ~0.5.
 
 ---
 
@@ -292,15 +350,15 @@ Walk-forward methodology, WFE calculation, how to structure IS/OOS windows for t
 ### [`risk-management-position-sizing.md`](references/risk-management-position-sizing.md)
 > "Risk management is the first priority. Returns are the last."
 
-ATR-based sizing (what `lib/risk.py` implements), Kelly criterion, half/quarter Kelly, drawdown-scaled position reduction. Hard rules: max 25% in one position, stop at 2× ATR, never average down.
+ATR-based sizing (what `lib/risk.py` implements), Kelly criterion, half/quarter Kelly, drawdown-scaled position reduction. Hard rules: max 25% in one position, stop at 2x ATR, never average down.
 
 ### [`transaction-costs-and-slippage.md`](references/transaction-costs-and-slippage.md)
 > "Many strategies that appear profitable in backtests are net losers once realistic costs are modeled."
 
-Slippage models, bid-ask spread impact, market impact at scale, realistic cost assumptions per strategy type. Minimum 0.1–0.2% round-trip for daily momentum.
+Slippage models, bid-ask spread impact, market impact at scale, realistic cost assumptions per strategy type. Minimum 0.1-0.2% round-trip for daily momentum.
 
 ### [`strategy-decay-and-lifecycle.md`](references/strategy-decay-and-lifecycle.md)
-All edges die. HFT edges last days; swing edges 6–18 months. Rolling Sharpe monitoring cadence, regime change detection, when to pause vs. kill a strategy. Includes capacity limits per strategy tier.
+All edges die. HFT edges last days; swing edges 6-18 months. Rolling Sharpe monitoring cadence, regime change detection, when to pause vs. kill a strategy. Includes capacity limits per strategy tier.
 
 ### [`short-horizon-crypto-momentum.md`](references/short-horizon-crypto-momentum.md)
 Blueprint for exactly this system: Qullamaggie-style breakouts on crypto with short holds. Covers universe selection, RS ranking, entry/exit mechanics, why crypto behaves differently from equities (24/7, no uptick rule, thinner order books, higher vol).
@@ -313,7 +371,7 @@ Structural differences between crypto and equities that matter for backtesting: 
 
 Why correlation matters more than individual Sharpe ratios. 7 uncorrelated strategies at 30% correlation can halve total risk. Strategy diversification roadmap.
 
-### [`who-succeeds-at-algo-trading.md`](references/who-succeeds-at-algo-trading.md)
+### [`who-succeeds-at-algo-trading.md`](references/who-succeeds-at-algo-trading.md) / [`how-to-succeed-at-algo-trading.md`](references/how-to-succeed-at-algo-trading.md)
 Renaissance Medallion: 66% gross annual returns since 1988. Their hiring policy — physics/math PhDs, not finance people. Pattern across successful quants: strong math/stats, domain knowledge second, finance background last. What separates the 10% who succeed.
 
 ### [`algo-edge-sources-alpha.md`](references/algo-edge-sources-alpha.md)
@@ -344,8 +402,11 @@ Ross Cameron's intraday day-trading rules (for contrast). Strategy comparison ta
 
 ## Next Steps (as of 2026-03-02)
 
-- OOS validation of EXP-003 best config on 2022–2026 data
+- Define new strategies via JSON pipeline configs and test with CMA-ES evolution
+- Implement cross-sectional blocks (Ising susceptibility, vN entropy, quorum) beyond stubs
+- Wire `signal_pipeline` block to engine-signals crate (currently stub)
+- OOS validation of EXP-003 best config on 2022-2026 data
 - Try 1h bars (`bars_per_day=24`, pattern lookback=2.5 days)
 - Dual-timeframe: daily signals for direction, 5m for entry timing
-- Evolutionary optimization with new param ranges
+- GPU compute path for FusedFilter on large datasets (wgpu, behind feature flag)
 - Explore NautilusTrader IB adapter for live US equity trading
