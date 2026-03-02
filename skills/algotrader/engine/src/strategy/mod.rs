@@ -152,7 +152,7 @@ fn load_dynamic_setup(name: &str) -> Vec<Box<dyn Setup>> {
 }
 
 /// Build candidate file paths for a dynamic strategy config.
-fn dynamic_strategy_paths(name: &str) -> Vec<PathBuf> {
+pub(crate) fn dynamic_strategy_paths(name: &str) -> Vec<PathBuf> {
     let filename = format!("{name}.json");
     let mut paths = Vec::with_capacity(2);
 
@@ -178,8 +178,8 @@ fn dynamic_strategy_paths(name: &str) -> Vec<PathBuf> {
 /// Adapter that wraps a pipeline `DynamicSetup` and implements the root crate's
 /// `Setup` trait. Handles the type conversions between `DynamicExitRule` and
 /// `ExitRule`, and between `FillModeConfig` and `FillMode`.
-struct DynamicSetupAdapter {
-    inner: engine_pipeline::DynamicSetup,
+pub(crate) struct DynamicSetupAdapter {
+    pub(crate) inner: engine_pipeline::DynamicSetup,
 }
 
 impl Setup for DynamicSetupAdapter {

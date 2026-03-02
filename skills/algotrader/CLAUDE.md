@@ -447,11 +447,19 @@ Ross Cameron's intraday day-trading rules (for contrast). Strategy comparison ta
 
 ## Next Steps (as of 2026-03-02)
 
-- Define new strategies via JSON pipeline configs and test with CMA-ES evolution
-- Implement cross-sectional blocks (Ising susceptibility, vN entropy, quorum) beyond stubs
-- Wire `signal_pipeline` block to engine-signals crate (currently stub)
+**Major pivot decided**: migrate from Rust JSON block pipeline to **SQLMesh + DuckDB + Rust extensions**. Full rationale, migration checklist, and active pre-migration tasks in [`TODO.md`](TODO.md).
+
+### Pre-migration (current Rust engine)
+
+- Rebuild RS pctrank caches to unblock breakout parity test
 - OOS validation of EXP-003 best config on 2022-2026 data
-- Try 1h bars (`bars_per_day=24`, pattern lookback=2.5 days)
-- Dual-timeframe: daily signals for direction, 5m for entry timing
-- GPU compute path for FusedFilter on large datasets (wgpu, behind feature flag)
+- Wire `signal_pipeline` block to engine-signals crate (currently stub)
 - Explore NautilusTrader IB adapter for live US equity trading
+
+### Migration (SQLMesh + DuckDB)
+
+- Convert wide-matrix data model to tall/long for DuckDB
+- Port pattern detectors and signal algorithms as Rust DuckDB extensions
+- Set up SQLMesh project with SQL models per pipeline stage
+- Integrate CMA-ES with SQLMesh's DAG-aware caching
+- New parity test: SQLMesh strategy output == Rust engine output

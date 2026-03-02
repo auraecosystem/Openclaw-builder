@@ -87,6 +87,26 @@ fn main() -> Result<()> {
         );
         let json = serde_json::to_string(&reports)?;
         println!("{}", json);
+    } else if let Some(ref compare_arg) = args.compare {
+        let params = base_params.clone();
+        let t1 = Instant::now();
+
+        if compare_arg == "all" {
+            let results = algotrader_engine::compare::compare_all(&store, &params);
+            eprintln!("  Comparison complete in {:.2}s ({} pairs)", t1.elapsed().as_secs_f64(), results.len());
+            let json = serde_json::to_string_pretty(&results)?;
+            println!("{}", json);
+        } else {
+            // Parse "hardcoded:dynamic" format
+            let parts: Vec<&str> = compare_arg.split(':').collect();
+            if parts.len() != 2 {
+                anyhow::bail!("--compare expects 'all' or 'hardcoded:dynamic' (e.g. 'ep:ep_dynamic')");
+            }
+            let result = algotrader_engine::compare::compare_strategies(&store, &params, parts[0], parts[1])?;
+            eprintln!("  Comparison complete in {:.2}s", t1.elapsed().as_secs_f64());
+            let json = serde_json::to_string_pretty(&result)?;
+            println!("{}", json);
+        }
     } else if let Some(csv_path) = &args.dump_trades {
         let params = base_params.clone();
         let t1 = Instant::now();

@@ -5,6 +5,7 @@
 //! that calls into this library.
 
 pub mod analysis;
+pub mod compare;
 pub mod evolution;
 pub mod execution;
 pub mod portfolio;

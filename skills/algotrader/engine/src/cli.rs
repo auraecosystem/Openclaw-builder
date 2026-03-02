@@ -157,6 +157,11 @@ pub struct Cli {
     #[arg(long)]
     pub seed: Option<u64>,
 
+    /// Compare hardcoded strategy against dynamic JSON equivalent.
+    /// Use "all" to compare all strategy pairs, or a specific pair like "ep:ep_dynamic"
+    #[arg(long)]
+    pub compare: Option<String>,
+
     /// Dump individual trades to CSV for cross-engine validation
     #[arg(long)]
     pub dump_trades: Option<String>,

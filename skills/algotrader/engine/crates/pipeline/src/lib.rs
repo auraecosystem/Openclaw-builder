@@ -179,6 +179,41 @@ impl DynamicSetup {
         })
     }
 
+    /// Load with param overrides applied before interpolation.
+    ///
+    /// Keys in `overrides` that match entries in the JSON's `params` block get
+    /// their concrete value replaced. Unmatched keys are silently ignored so
+    /// callers can pass a superset of all possible params.
+    pub fn from_json_with_overrides(
+        json_str: &str,
+        overrides: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> anyhow::Result<Self> {
+        let mut pipeline: StrategyPipeline = serde_json::from_str(json_str)?;
+
+        // Patch param values before interpolation resolves @-references.
+        for (key, val) in overrides {
+            if let Some(param) = pipeline.params.get_mut(key) {
+                param.set_value(val.clone());
+            }
+        }
+
+        let registry = build_default_registry();
+        parse::assign_step_ids(&mut pipeline);
+        let _ = parse::interpolate_params(&mut pipeline);
+        validate::validate_pipeline(&pipeline, &registry)?;
+
+        Ok(Self {
+            name: pipeline.name.clone(),
+            direction: pipeline.direction.clone(),
+            equity_fraction: pipeline.equity_fraction,
+            fill_mode: pipeline.fill_mode.clone(),
+            exit_defs: pipeline.exits.clone(),
+            stop_def: pipeline.stop.clone(),
+            pipeline_config: pipeline,
+            registry: Arc::new(registry),
+        })
+    }
+
     /// Load a DynamicSetup from a JSON file path.
     pub fn from_file(path: &Path) -> anyhow::Result<Self> {
         let json_str = std::fs::read_to_string(path)?;

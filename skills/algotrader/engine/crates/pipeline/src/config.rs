@@ -108,6 +108,14 @@ impl ParamValue {
     pub fn as_bool(&self) -> Option<bool> {
         self.value().as_bool()
     }
+
+    /// Replace the concrete value, preserving bounds metadata.
+    pub fn set_value(&mut self, new_val: serde_json::Value) {
+        match self {
+            Self::WithBounds { value, .. } => *value = new_val,
+            Self::Simple(v) => *v = new_val,
+        }
+    }
 }
 
 fn default_direction() -> DirectionConfig {
