@@ -9,13 +9,18 @@ pub mod fitness;
 pub mod ga;
 pub mod genome;
 
+// Re-export config types from engine-types so existing paths still resolve.
+pub use engine_types::cmaes_config;
+pub use engine_types::fitness_config;
+pub use engine_types::ga_config;
+
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use rayon::prelude::*;
 use serde::Serialize;
 
-use crate::data::DataStore;
-use crate::types::Params;
+use engine_data::DataStore;
+use engine_types::Params;
 
 use self::fitness::{evaluate, FitnessMetric};
 use self::genome::GenomeSpec;
@@ -216,7 +221,7 @@ pub fn evolve_walk_forward(
         // Evaluate the best params on the test window.
         let best_params: Params =
             serde_json::from_value(result.best_params.clone()).unwrap_or_else(|_| base.clone());
-        let (test_report, test_fitness) = evaluate(store, &best_params, &config.fitness_metric);
+        let (test_report, test_fitness) = evaluate(store, &best_params, &config.fitness_metric, &best_params.fitness);
 
         folds.push(WfFold {
             fold_idx,
@@ -251,7 +256,7 @@ fn run_cmaes(
     best_report_json: &mut serde_json::Value,
 ) {
     let initial_mean = spec.encode(base);
-    let mut optimizer = cmaes::CmaEs::new(spec.dim(), initial_mean, config.initial_sigma);
+    let mut optimizer = cmaes::CmaEs::new(spec.dim(), initial_mean, config.initial_sigma, base.cmaes.clone());
 
     for gen in 0..config.generations {
         let population = optimizer.ask(rng);
@@ -270,7 +275,7 @@ fn run_cmaes(
             .par_iter()
             .map(|genome| {
                 let params = spec.decode(genome, base);
-                evaluate(store, &params, &config.fitness_metric)
+                evaluate(store, &params, &config.fitness_metric, &base.fitness)
             })
             .collect();
 
@@ -326,7 +331,7 @@ fn run_ga(
     } else {
         100
     };
-    let mut optimizer = ga::Ga::new(spec.dim(), pop_size, 0.25);
+    let mut optimizer = ga::Ga::new(spec.dim(), pop_size, 0.25, base.ga.clone());
 
     let bounds: Vec<(f64, f64, bool, bool)> = spec
         .bounds
@@ -343,7 +348,7 @@ fn run_ga(
             .par_iter()
             .map(|genome| {
                 let params = spec.decode(genome, base);
-                evaluate(store, &params, &config.fitness_metric)
+                evaluate(store, &params, &config.fitness_metric, &base.fitness)
             })
             .collect();
 

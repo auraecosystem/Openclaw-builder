@@ -10,8 +10,8 @@
 
 use rayon::prelude::*;
 
-use crate::data::{DataStore, Indicator};
-use crate::types::{Direction, ResolvedParams, SignalSet, Trade};
+use engine_data::{DataStore, Indicator};
+use engine_types::{Direction, ResolvedParams, SignalSet, Trade};
 
 use super::exits::{ExitContext, ExitRule};
 use super::fills::{check_5m_stop, resolve_fill, FillMode};
@@ -155,9 +155,11 @@ fn simulate_ticker(
 
             if !exited {
                 // Pre-computed signal exits (e.g. BOCPD regime-death) close
-                // at market price. Skip during first 3 bars to avoid
-                // conflating the entry breakout with a changepoint signal.
-                if bars_since >= 3 && signals.exits.get(row, col) {
+                // at market price. Skip during the min_hold_bars window to
+                // avoid conflating the entry breakout with a changepoint signal.
+                if bars_since >= params.execution.min_hold_bars as usize
+                    && signals.exits.get(row, col)
+                {
                     let pnl = compute_pnl(direction, close, entry_price, shares);
                     trades.push(Trade {
                         ticker_col: col,

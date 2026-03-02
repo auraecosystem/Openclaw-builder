@@ -5,6 +5,7 @@
 //! `create_setups()` factory maps a setup name to one or more concrete Setup
 //! implementations that the simulation engine runs independently.
 
+pub use engine_types::strategy_config as config;
 mod breakout;
 mod ep;
 mod parabolic;
@@ -12,9 +13,9 @@ mod signal_breakout;
 
 use std::ops::Range;
 
-use crate::data::{DataStore, WideMask};
+use engine_data::{DataStore, WideMask};
 use crate::execution::{ExitRule, FillMode};
-use crate::types::{Direction, Params, SignalSet};
+use engine_types::{Direction, Params, SignalSet};
 
 pub use breakout::{BreakoutQuick, BreakoutRunner};
 pub use ep::EpisodicPivot;
@@ -42,7 +43,7 @@ pub trait Setup: Send + Sync {
     }
 
     /// Ordered list of exit rules evaluated each bar while a position is open.
-    fn exit_rules(&self) -> Vec<ExitRule>;
+    fn exit_rules(&self, params: &Params) -> Vec<ExitRule>;
 
     /// Build a universe filter mask for the given date-row range.
     /// Returns a WideMask spanning the full matrix, but only rows in `range`

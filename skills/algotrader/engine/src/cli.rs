@@ -178,6 +178,12 @@ impl Cli {
             min_price: self.min_price,
             min_vol: self.min_vol,
             signal_params: None,
+            execution: Default::default(),
+            strategy: Default::default(),
+            fitness: Default::default(),
+            ga: Default::default(),
+            cmaes: Default::default(),
+            analysis: Default::default(),
         }
     }
 }

@@ -13,12 +13,11 @@
 
 use std::ops::Range;
 
-use crate::data::{DataStore, Indicator, WideMask, WideMatrix};
+use engine_data::{DataStore, Indicator, WideMask, WideMatrix};
+use engine_signals::arena::ThreadArena;
+use engine_signals::pipeline::{self, CharacterizationState, run_pipeline};
 use crate::execution::{ExitRule, FillMode};
-use crate::signals::arena::ThreadArena;
-use crate::signals::layer0::{self, CharacterizationState};
-use crate::signals::pipeline::run_pipeline;
-use crate::types::{Direction, Params, SignalSet};
+use engine_types::{Direction, Params, SignalSet};
 
 use super::Setup;
 
@@ -37,9 +36,11 @@ impl Setup for SignalBreakout {
         FillMode::NextDayOpen
     }
 
-    fn exit_rules(&self) -> Vec<ExitRule> {
+    fn exit_rules(&self, params: &Params) -> Vec<ExitRule> {
         vec![
-            ExitRule::ProfitTarget { min_bars: 5 },
+            ExitRule::ProfitTarget {
+                min_bars: params.strategy.profit_target_min_bars as usize,
+            },
             ExitRule::SmaCross { sma: Indicator::Sma10 },
             ExitRule::StopLoss,
         ]
@@ -163,7 +164,7 @@ fn signal_breakout_signals(store: &DataStore, universe: &WideMask, params: &Para
             let vol_window = &vol_col[w_start..=row];
 
             // Need minimum data for meaningful signal computation
-            if close_window.len() < 30 {
+            if close_window.len() < params.strategy.min_signal_data as usize {
                 continue;
             }
 
@@ -172,13 +173,12 @@ fn signal_breakout_signals(store: &DataStore, universe: &WideMask, params: &Para
                 let ret_end = row.min(returns_col.len());
                 let ret_start = ret_end.saturating_sub(sp.hurst_window);
                 let ret_slice = &returns_col[ret_start..ret_end];
-                l0_state = layer0::characterize(
+                l0_state = pipeline::characterize(
                     close_window,
                     ret_slice,
                     None, // multi-asset returns (RMT) not available per-ticker
                     row,
-                    sp.l0_recompute_interval,
-                    sp.hurst_window,
+                    &sp,
                     &l0_state,
                 );
             }
@@ -205,7 +205,7 @@ fn signal_breakout_signals(store: &DataStore, universe: &WideMask, params: &Para
                 } else if !low.is_nan() {
                     low
                 } else {
-                    close * 0.95 // fallback 5% stop
+                    close * (1.0 - params.strategy.stop_fallback_pct) // fallback stop
                 };
             }
 

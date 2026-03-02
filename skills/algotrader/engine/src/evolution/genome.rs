@@ -4,9 +4,7 @@
 //! ordered bounds, encode/decode routines, and clamping. Genome vectors are
 //! plain `Vec<f64>` so they work with any optimizer (CMA-ES, DE, GA).
 
-use crate::signals::SCANNER_FEATURE_COUNT;
-use crate::signals::params::SignalParams;
-use crate::types::Params;
+use engine_types::{Params, SignalParams, SCANNER_FEATURE_COUNT};
 
 // ---------------------------------------------------------------------------
 // Gene bound metadata

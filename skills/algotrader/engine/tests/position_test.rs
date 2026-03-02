@@ -4,6 +4,7 @@
 //! cap, max position cap, slippage model, direction handling, and edge cases.
 
 use algotrader_engine::execution::PositionSizer;
+use algotrader_engine::execution::config::ExecutionConfig;
 use algotrader_engine::types::Direction;
 
 const EPS_F32: f32 = 1e-4;
@@ -14,6 +15,7 @@ fn default_sizer() -> PositionSizer {
         risk_pct: 0.005,
         max_pos_pct: 0.20,
         slippage_k: 0.1,
+        exec: ExecutionConfig::default(),
     }
 }
 
@@ -220,6 +222,7 @@ fn slippage_capped_at_five_percent() {
         risk_pct: 0.005,
         max_pos_pct: 0.99, // Very high cap so shares are large
         slippage_k: 10.0,  // Very high slippage coefficient
+        exec: ExecutionConfig::default(),
     };
     let equity = 100_000_000.0; // $100M
     let fill = 10.0_f32;

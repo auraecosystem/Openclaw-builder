@@ -1,8 +1,8 @@
 use serde::Serialize;
 
 use super::metrics;
-use crate::data::Axes;
-use crate::types::{Params, Trade};
+use engine_data::Axes;
+use engine_types::{Params, Trade};
 
 #[derive(Serialize)]
 pub struct Report {
@@ -91,7 +91,7 @@ pub fn generate_report(trades: &[Trade], axes: &Axes, params: &Params, n_trials:
             } else {
                 // Intraday: estimate fraction of day from row distance
                 let rows = t.exit_row.saturating_sub(t.entry_row) as f64;
-                rows / 288.0 // 288 5m bars per day (crypto 24/7); harmless overestimate for daily
+                rows / params.analysis.intraday_bars_per_day
             }
         })
         .sum();
@@ -165,7 +165,8 @@ pub fn generate_report(trades: &[Trade], axes: &Axes, params: &Params, n_trials:
                 if cal_days > 0.0 {
                     cal_days
                 } else {
-                    t.exit_row.saturating_sub(t.entry_row) as f64 / 288.0
+                    t.exit_row.saturating_sub(t.entry_row) as f64
+                        / params.analysis.intraday_bars_per_day
                 }
             })
             .sum();

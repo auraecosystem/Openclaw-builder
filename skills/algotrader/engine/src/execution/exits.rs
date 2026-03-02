@@ -5,8 +5,8 @@
 //! the first rule that fires. `update_stop()` runs unconditionally each bar
 //! so trailing/breakeven logic can upgrade the active stop before exit checks.
 
-use crate::data::{DataStore, Indicator};
-use crate::types::Direction;
+use engine_data::{DataStore, Indicator};
+use engine_types::Direction;
 
 /// Per-bar snapshot passed to every exit rule evaluation.
 pub struct ExitContext {

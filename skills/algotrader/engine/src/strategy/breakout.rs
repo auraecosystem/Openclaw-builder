@@ -11,9 +11,9 @@
 
 use std::ops::Range;
 
-use crate::data::{DataStore, Indicator, WideMask, WideMatrix};
+use engine_data::{DataStore, Indicator, WideMask, WideMatrix};
 use crate::execution::{ExitRule, FillMode};
-use crate::types::{Direction, Params, SignalSet};
+use engine_types::{Direction, Params, SignalSet};
 
 use super::Setup;
 
@@ -284,7 +284,7 @@ impl Setup for BreakoutQuick {
         FillMode::NextDayOpen
     }
 
-    fn exit_rules(&self) -> Vec<ExitRule> {
+    fn exit_rules(&self, _params: &Params) -> Vec<ExitRule> {
         vec![
             ExitRule::ProfitTarget { min_bars: 5 },
             ExitRule::SmaCross {
@@ -329,7 +329,7 @@ impl Setup for BreakoutRunner {
         FillMode::NextDayOpen
     }
 
-    fn exit_rules(&self) -> Vec<ExitRule> {
+    fn exit_rules(&self, _params: &Params) -> Vec<ExitRule> {
         vec![
             ExitRule::BreakevenUpgrade { after_bars: 5 },
             ExitRule::SmaCross {

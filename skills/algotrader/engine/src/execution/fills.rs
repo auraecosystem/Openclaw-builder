@@ -5,8 +5,8 @@
 //! - `SameDayOpen` -- EP (episodic pivot): signal already shifted to entry day.
 //! - `DualTimeframe` -- daily signal + 5m bar confirmation on day N+1.
 
-use crate::data::DataStore;
-use crate::types::Direction;
+use engine_data::DataStore;
+use engine_types::Direction;
 
 #[derive(Clone, Copy, Debug)]
 pub enum FillMode {
@@ -77,7 +77,7 @@ pub fn check_5m_stop(
     let (start, end) = intraday.day_mapping[daily_row];
 
     // Intraday close is stored in the Close slot of intraday matrices
-    let close_5m = &intraday.matrices[crate::data::Indicator::Close as usize];
+    let close_5m = &intraday.matrices[engine_data::Indicator::Close as usize];
 
     for r5 in start..end {
         let c5 = close_5m.get(r5, col);
@@ -117,12 +117,12 @@ fn find_5m_entry(store: &DataStore, daily_row: usize, col: usize) -> Option<(f32
         return None;
     }
 
-    let close_5m = &intraday.matrices[crate::data::Indicator::Close as usize];
-    let volume_5m = &intraday.matrices[crate::data::Indicator::Volume as usize];
+    let close_5m = &intraday.matrices[engine_data::Indicator::Close as usize];
+    let volume_5m = &intraday.matrices[engine_data::Indicator::Volume as usize];
 
     // Read the consolidation high from daily data
     let consol_high = store
-        .get(crate::data::Indicator::ConsolHigh)
+        .get(engine_data::Indicator::ConsolHigh)
         .get(daily_row, col);
     if consol_high.is_nan() {
         return None;

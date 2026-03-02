@@ -8,9 +8,12 @@ use rand::Rng;
 
 use std::f64::consts::PI;
 
+use engine_types::CmaEsConfig;
+
 /// CMA-ES optimizer state.
 pub struct CmaEs {
     dim: usize,
+    config: CmaEsConfig,
     // Distribution parameters
     mean: Vec<f64>,
     sigma: f64,
@@ -42,7 +45,7 @@ impl CmaEs {
     ///
     /// All strategy parameters are computed from `dim` following the Hansen 2016
     /// defaults. The covariance matrix starts as identity.
-    pub fn new(dim: usize, initial_mean: Vec<f64>, initial_sigma: f64) -> Self {
+    pub fn new(dim: usize, initial_mean: Vec<f64>, initial_sigma: f64, config: CmaEsConfig) -> Self {
         assert!(dim >= 1, "dimension must be at least 1");
         assert_eq!(initial_mean.len(), dim);
 
@@ -80,6 +83,7 @@ impl CmaEs {
 
         Self {
             dim,
+            config,
             mean: initial_mean,
             sigma: initial_sigma,
             c,
@@ -171,7 +175,7 @@ impl CmaEs {
         let expected_norm = expected_chi(n);
         self.sigma *= ((cs / self.d_sigma) * (ps_norm / expected_norm - 1.0)).exp();
         // Clamp sigma to prevent explosion on flat landscapes.
-        self.sigma = self.sigma.clamp(1e-20, 1e2);
+        self.sigma = self.sigma.clamp(1e-20, self.config.sigma_clamp_hi);
 
         // --- 3. Update covariance ---
         // h_sigma: indicator for stalling detection.
@@ -231,7 +235,7 @@ impl CmaEs {
         }
 
         // --- 4. Eigendecompose C periodically ---
-        let decomp_interval = (n / 10).max(1);
+        let decomp_interval = (n / self.config.decomp_interval_div).max(1);
         if self.generation - self.eigendecomp_gen >= decomp_interval {
             self.update_eigenbasis();
             self.eigendecomp_gen = self.generation;
@@ -352,9 +356,13 @@ fn expected_chi(n: usize) -> f64 {
 mod tests {
     use super::*;
 
+    fn default_cfg() -> CmaEsConfig {
+        CmaEsConfig::default()
+    }
+
     #[test]
     fn strategy_params_from_dim() {
-        let cma = CmaEs::new(10, vec![0.0; 10], 1.0);
+        let cma = CmaEs::new(10, vec![0.0; 10], 1.0, default_cfg());
         assert!(cma.lambda >= 6);
         assert!(cma.mu > 0 && cma.mu <= cma.lambda);
         assert!(cma.c_sigma > 0.0 && cma.c_sigma < 1.0);
@@ -362,7 +370,7 @@ mod tests {
 
     #[test]
     fn ask_produces_correct_count() {
-        let mut cma = CmaEs::new(5, vec![0.0; 5], 1.0);
+        let mut cma = CmaEs::new(5, vec![0.0; 5], 1.0, default_cfg());
         let mut rng = rand::thread_rng();
         let pop = cma.ask(&mut rng);
         assert_eq!(pop.len(), cma.lambda);
@@ -375,7 +383,7 @@ mod tests {
     fn rosenbrock_2d_converges() {
         // CMA-ES should find near (1,1) on the 2D Rosenbrock function.
         // f(x,y) = (1-x)^2 + 100*(y-x^2)^2, minimum at (1,1).
-        let mut cma = CmaEs::new(2, vec![0.0, 0.0], 0.5);
+        let mut cma = CmaEs::new(2, vec![0.0, 0.0], 0.5, default_cfg());
         let mut rng = rand::thread_rng();
 
         for _ in 0..200 {
@@ -407,7 +415,7 @@ mod tests {
     #[test]
     fn sigma_adapts() {
         // On a sphere function, sigma should decrease as we approach the optimum.
-        let mut cma = CmaEs::new(3, vec![5.0; 3], 2.0);
+        let mut cma = CmaEs::new(3, vec![5.0; 3], 2.0, default_cfg());
         let mut rng = rand::thread_rng();
         let initial_sigma = cma.sigma();
 

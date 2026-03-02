@@ -9,8 +9,8 @@
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::data::DataStore;
-use crate::types::Params;
+use engine_data::DataStore;
+use engine_types::Params;
 
 /// Configuration for a walk-forward optimization run.
 #[derive(Clone, Debug, Serialize, Deserialize)]

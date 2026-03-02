@@ -4,6 +4,7 @@
 //! This module replaces the three near-identical simulation loops from the
 //! original simulate.rs with one parameterized `simulate()` function.
 
+pub use engine_types::execution_config as config;
 mod exits;
 mod fills;
 mod position;

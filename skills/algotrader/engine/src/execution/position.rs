@@ -3,15 +3,16 @@
 //! Computes shares and slippage-adjusted fill price using:
 //! - Risk-based sizing (equity * risk_pct / price_risk)
 //! - Max position cap (equity * max_pos_pct / fill_price)
-//! - Liquidity cap (1% of average daily dollar volume / fill_price)
+//! - Liquidity cap (configurable fraction of average daily dollar volume / fill_price)
 //! - Market-impact slippage model (sqrt of participation rate)
 
-use crate::types::{Direction, Params};
+use engine_types::{Direction, ExecutionConfig, Params};
 
 pub struct PositionSizer {
     pub risk_pct: f32,
     pub max_pos_pct: f32,
     pub slippage_k: f32,
+    pub exec: ExecutionConfig,
 }
 
 impl PositionSizer {
@@ -20,6 +21,7 @@ impl PositionSizer {
             risk_pct: params.risk_pct,
             max_pos_pct: params.max_pos_pct,
             slippage_k: params.slippage_k,
+            exec: params.execution.clone(),
         }
     }
 
@@ -51,17 +53,21 @@ impl PositionSizer {
 
         let adv_dollar = adv as f64 * close as f64;
         let liquidity_cap = if adv_dollar > 0.0 {
-            0.01 * adv_dollar / fill_price as f64
+            self.exec.liquidity_cap_coeff as f64 * adv_dollar / fill_price as f64
         } else {
             f64::MAX
         };
 
-        let shares = risk_shares.min(max_shares).min(liquidity_cap).max(1.0) as f32;
+        let shares = risk_shares
+            .min(max_shares)
+            .min(liquidity_cap)
+            .max(self.exec.min_shares as f64) as f32;
 
         let slippage = if adv > 0.0 {
-            (0.001 + self.slippage_k * (shares / adv).sqrt()).min(0.05)
+            (self.exec.slippage_base + self.slippage_k * (shares / adv).sqrt())
+                .min(self.exec.slippage_max)
         } else {
-            0.001
+            self.exec.slippage_fallback
         };
 
         let adjusted_fill = match direction {

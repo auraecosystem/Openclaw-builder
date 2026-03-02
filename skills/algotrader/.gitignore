@@ -1,7 +1,7 @@
 # Data (large parquet files, raw downloads)
-data/
-data-crypto/
-data-crypto-5m/
+/data/
+/data-crypto/
+/data-crypto-5m/
 
 # Rust engine build artifacts
 engine/target/

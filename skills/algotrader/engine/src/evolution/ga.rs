@@ -5,17 +5,17 @@
 
 use rand::Rng;
 
+use engine_types::GaConfig;
+
 /// GA optimizer state.
 pub struct Ga {
     _dim: usize,
     pop_size: usize,
     elite_frac: f32,
+    config: GaConfig,
     // Adaptive mutation state
-    base_sigma: f64,
     sigma: f64,
     stale_gens: usize,
-    stale_limit: usize,
-    cataclysm_limit: usize,
     // Tracking
     best_fitness: f64,
     generation: usize,
@@ -26,18 +26,17 @@ impl Ga {
     ///
     /// `elite_frac` controls what fraction of the population survives
     /// unchanged into the next generation (typically 0.2-0.3).
-    pub fn new(dim: usize, pop_size: usize, elite_frac: f32) -> Self {
+    pub fn new(dim: usize, pop_size: usize, elite_frac: f32, config: GaConfig) -> Self {
+        let sigma = config.base_sigma;
         Self {
             _dim: dim,
             pop_size,
             elite_frac,
-            base_sigma: 0.15,
-            sigma: 0.15,
+            sigma,
             stale_gens: 0,
-            stale_limit: 5,
-            cataclysm_limit: 12,
             best_fitness: -999.0,
             generation: 0,
+            config,
         }
     }
 
@@ -61,10 +60,11 @@ impl Ga {
         if top_fitness > self.best_fitness {
             self.best_fitness = top_fitness;
             self.stale_gens = 0;
-            self.sigma = self.base_sigma;
+            self.sigma = self.config.base_sigma;
         } else {
             self.stale_gens += 1;
-            self.sigma = self.base_sigma * (1.0 + self.stale_gens as f64 * 0.3);
+            self.sigma = self.config.base_sigma
+                * (1.0 + self.stale_gens as f64 * self.config.stale_sigma_step);
         }
 
         // Start next generation with the elite.
@@ -76,17 +76,17 @@ impl Ga {
             .collect();
 
         // Injection on stagnation.
-        if self.stale_gens >= self.cataclysm_limit {
-            // Cataclysm: nuke half the slots with random individuals.
-            let n_random = self.pop_size / 2;
+        if self.stale_gens >= self.config.cataclysm_limit {
+            // Cataclysm: replace a fraction of slots with random individuals.
+            let n_random = (self.pop_size as f64 * self.config.cataclysm_random_frac) as usize;
             for _ in 0..n_random {
                 next_pop.push(random_individual(bounds, rng));
             }
             self.stale_gens = 0;
-            self.sigma = self.base_sigma * 2.0;
-        } else if self.stale_gens >= self.stale_limit {
-            // Mild injection: 30% random individuals.
-            let n_random = (self.pop_size as f64 * 0.3) as usize;
+            self.sigma = self.config.base_sigma * self.config.cataclysm_sigma_mult;
+        } else if self.stale_gens >= self.config.stale_limit {
+            // Mild injection: inject a fraction of random individuals.
+            let n_random = (self.pop_size as f64 * self.config.mild_injection_frac) as usize;
             for _ in 0..n_random {
                 next_pop.push(random_individual(bounds, rng));
             }
@@ -94,10 +94,10 @@ impl Ga {
 
         // Fill remaining slots via tournament + crossover + mutation.
         while next_pop.len() < self.pop_size {
-            let a = tournament_select(population, 3, rng);
-            let b = tournament_select(population, 3, rng);
-            let mut child = crossover(&a, &b, rng);
-            mutate(&mut child, bounds, 0.3, self.sigma, rng);
+            let a = tournament_select(population, self.config.tournament_k, rng);
+            let b = tournament_select(population, self.config.tournament_k, rng);
+            let mut child = crossover(&a, &b, self.config.crossover_prob, rng);
+            mutate(&mut child, bounds, self.config.mutation_rate, self.sigma, rng);
             next_pop.push(child);
         }
 
@@ -141,11 +141,11 @@ fn tournament_select<R: Rng>(scored: &[(Vec<f64>, f64)], k: usize, rng: &mut R) 
     scored[best_idx].0.clone()
 }
 
-/// Uniform crossover: for each gene, pick from `a` or `b` with 50% probability.
-fn crossover<R: Rng>(a: &[f64], b: &[f64], rng: &mut R) -> Vec<f64> {
+/// Uniform crossover: for each gene, pick from `a` or `b` with given probability.
+fn crossover<R: Rng>(a: &[f64], b: &[f64], prob: f64, rng: &mut R) -> Vec<f64> {
     a.iter()
         .zip(b.iter())
-        .map(|(&va, &vb)| if rng.gen_bool(0.5) { va } else { vb })
+        .map(|(&va, &vb)| if rng.gen_bool(prob) { va } else { vb })
         .collect()
 }
 
@@ -204,9 +204,13 @@ pub(super) fn random_individual<R: Rng>(bounds: &[(f64, f64, bool, bool)], rng: 
 mod tests {
     use super::*;
 
+    fn default_cfg() -> GaConfig {
+        GaConfig::default()
+    }
+
     #[test]
     fn population_size_preserved() {
-        let mut ga = Ga::new(3, 20, 0.25);
+        let mut ga = Ga::new(3, 20, 0.25, default_cfg());
         let mut rng = rand::thread_rng();
         let bounds = vec![(0.0, 1.0, false, false); 3];
 
@@ -219,7 +223,7 @@ mod tests {
 
     #[test]
     fn stagnation_increases_sigma() {
-        let mut ga = Ga::new(3, 10, 0.25);
+        let mut ga = Ga::new(3, 10, 0.25, default_cfg());
         let mut rng = rand::thread_rng();
         let bounds = vec![(0.0, 1.0, false, false); 3];
         let initial_sigma = ga.sigma();
@@ -240,7 +244,7 @@ mod tests {
 
     #[test]
     fn improvement_resets_stale() {
-        let mut ga = Ga::new(3, 10, 0.25);
+        let mut ga = Ga::new(3, 10, 0.25, default_cfg());
         let mut rng = rand::thread_rng();
         let bounds = vec![(0.0, 1.0, false, false); 3];
 
@@ -263,7 +267,7 @@ mod tests {
         // GA should move toward origin on sphere function.
         let dim = 5;
         let pop_size = 50;
-        let mut ga = Ga::new(dim, pop_size, 0.25);
+        let mut ga = Ga::new(dim, pop_size, 0.25, default_cfg());
         let mut rng = rand::thread_rng();
         let bounds: Vec<(f64, f64, bool, bool)> = vec![(-5.0, 5.0, false, false); dim];
 

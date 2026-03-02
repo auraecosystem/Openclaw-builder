@@ -14,8 +14,8 @@ use anyhow::Result;
 use rayon::prelude::*;
 
 use crate::analysis::Report;
-use crate::data::DataStore;
-use crate::types::Params;
+use engine_data::DataStore;
+use engine_types::Params;
 
 /// Start a TCP server that accepts batch backtest requests.
 ///

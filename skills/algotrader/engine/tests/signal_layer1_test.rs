@@ -5,12 +5,13 @@
 //! internal state.
 
 use algotrader_engine::signals::feature::SCANNER_FEATURE_COUNT;
-use algotrader_engine::signals::layer1::ScannerOutput;
-use algotrader_engine::signals::layer1::perm_entropy;
-use algotrader_engine::signals::layer1::kalman;
-use algotrader_engine::signals::layer1::scorer;
-use algotrader_engine::signals::layer1::bocpd::BocpdState;
-use algotrader_engine::signals::layer1::vpin;
+use algotrader_engine::signals::pipeline::ScannerOutput;
+use algotrader_engine::signals::algorithms::perm_entropy;
+use algotrader_engine::signals::algorithms::kalman;
+use algotrader_engine::signals::scorer;
+use algotrader_engine::signals::algorithms::bocpd::BocpdState;
+use algotrader_engine::signals::algorithms::vpin;
+use algotrader_engine::signals::params::SignalParams;
 
 // ---------------------------------------------------------------------------
 // ScannerOutput
@@ -19,7 +20,8 @@ use algotrader_engine::signals::layer1::vpin;
 #[test]
 fn scorer_array_length() {
     let s = ScannerOutput::default();
-    let arr = s.to_scorer_array();
+    let params = SignalParams::default();
+    let arr = s.to_scorer_array(&params);
     assert_eq!(arr.len(), SCANNER_FEATURE_COUNT);
     assert_eq!(arr.len(), 13);
 }
@@ -27,7 +29,8 @@ fn scorer_array_length() {
 #[test]
 fn scorer_array_default_is_zeros() {
     let s = ScannerOutput::default();
-    let arr = s.to_scorer_array();
+    let params = SignalParams::default();
+    let arr = s.to_scorer_array(&params);
     for (i, val) in arr.iter().enumerate() {
         assert!(
             (val - 0.0).abs() < 1e-6,
@@ -57,8 +60,10 @@ fn scorer_array_normalizes_price_scale_features() {
         hurst: 0.6,
         hmm_state: 2.0,
         last_close: 50000.0,
+        ..Default::default()
     };
-    let arr = s.to_scorer_array();
+    let params = SignalParams::default();
+    let arr = s.to_scorer_array(&params);
 
     // All values should be in a reasonable normalized range
     for (i, &val) in arr.iter().enumerate() {

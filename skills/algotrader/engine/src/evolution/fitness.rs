@@ -4,8 +4,8 @@
 //! minimum-trade-count gate and a trade-confidence ramp so the optimizer
 //! does not chase overfitted parameter sets that fire rarely.
 
-use crate::data::DataStore;
-use crate::types::Params;
+use engine_data::DataStore;
+use engine_types::{FitnessConfig, Params};
 
 // ---------------------------------------------------------------------------
 // Fitness metric selection
@@ -54,10 +54,11 @@ pub fn evaluate(
     store: &DataStore,
     params: &Params,
     metric: &FitnessMetric,
+    fitness_cfg: &FitnessConfig,
 ) -> (serde_json::Value, f64) {
     let report = crate::run_single(store, params);
     let report_json = serde_json::to_value(&report).unwrap_or_default();
-    let score = extract_fitness(&report_json, metric);
+    let score = extract_fitness(&report_json, metric, fitness_cfg);
     (report_json, score)
 }
 
@@ -71,34 +72,40 @@ pub fn evaluate(
 /// Between 10 and 50 trades, a linear confidence ramp scales the score
 /// from 0.3x to 1.0x so the optimizer cannot game the metric by firing
 /// on a handful of cherry-picked setups.
-pub fn extract_fitness(report: &serde_json::Value, metric: &FitnessMetric) -> f64 {
+pub fn extract_fitness(
+    report: &serde_json::Value,
+    metric: &FitnessMetric,
+    cfg: &FitnessConfig,
+) -> f64 {
     let trades = report["total_trades"].as_u64().unwrap_or(0) as usize;
-    if trades < 10 {
-        return -999.0;
+    if (trades as u64) < cfg.min_trades_gate {
+        return cfg.penalty_score;
     }
 
-    // Linear ramp: 0.3 at 10 trades, 1.0 at 50+ trades.
-    let trade_confidence = (0.3 + 0.7 * (trades as f64 - 10.0) / 40.0).min(1.0);
+    // Linear ramp: confidence_base at min_trades_gate, 1.0 at gate + range.
+    let trade_confidence = (cfg.confidence_base
+        + cfg.confidence_slope * (trades as f64 - cfg.min_trades_gate as f64) / cfg.confidence_range)
+        .min(1.0);
 
     // Sharpe overfit guard: scale the ceiling with trade count because
     // many trades in a bull market can legitimately produce higher Sharpe.
-    // Floor at 3.5 (few trades = easy to game), grows with log10(trades).
+    // Floor at sharpe_cap_base (few trades = easy to game), grows with log10(trades).
     let sharpe_val = report["sharpe"].as_f64().unwrap_or(0.0);
-    let sharpe_cap = 3.5 + (trades as f64).log10();
+    let sharpe_cap = cfg.sharpe_cap_base + (trades as f64).log10();
     if sharpe_val > sharpe_cap {
-        return -999.0;
+        return cfg.penalty_score;
     }
 
     let score = match metric {
-        FitnessMetric::Sharpe => report["sharpe"].as_f64().unwrap_or(-999.0),
+        FitnessMetric::Sharpe => report["sharpe"].as_f64().unwrap_or(cfg.penalty_score),
 
-        FitnessMetric::Sortino => report["sortino"].as_f64().unwrap_or(-999.0),
+        FitnessMetric::Sortino => report["sortino"].as_f64().unwrap_or(cfg.penalty_score),
 
-        FitnessMetric::Return => report["total_return"].as_f64().unwrap_or(-999.0),
+        FitnessMetric::Return => report["total_return"].as_f64().unwrap_or(cfg.penalty_score),
 
         FitnessMetric::ProfitFactor => report["profit_factor"].as_f64().unwrap_or(0.0),
 
-        FitnessMetric::Cagr => report["cagr"].as_f64().unwrap_or(-999.0),
+        FitnessMetric::Cagr => report["cagr"].as_f64().unwrap_or(cfg.penalty_score),
 
         FitnessMetric::Growth => {
             let init = report["init_cash"].as_f64().unwrap_or(1.0);
@@ -106,7 +113,7 @@ pub fn extract_fitness(report: &serde_json::Value, metric: &FitnessMetric) -> f6
             if init > 0.0 {
                 final_eq / init
             } else {
-                -999.0
+                cfg.penalty_score
             }
         }
 
@@ -116,10 +123,13 @@ pub fn extract_fitness(report: &serde_json::Value, metric: &FitnessMetric) -> f6
             let wr = report["win_rate"].as_f64().unwrap_or(0.0);
             let dd = report["max_drawdown"].as_f64().unwrap_or(1.0);
 
-            // Penalize strategies where drawdown exceeds 50% of equity.
-            let dd_penalty = (1.0 - dd * 2.0).max(0.0);
+            // Penalize strategies where drawdown exceeds a threshold.
+            let dd_penalty = (1.0 - dd * cfg.drawdown_penalty_mult).max(0.0);
 
-            (sharpe * 0.4 + ret * 10.0 * 0.3 + wr * 0.3) * dd_penalty
+            (sharpe * cfg.composite_w_sharpe
+                + ret * cfg.composite_return_scale * cfg.composite_w_return
+                + wr * cfg.composite_w_winrate)
+                * dd_penalty
         }
     };
 
@@ -134,6 +144,10 @@ pub fn extract_fitness(report: &serde_json::Value, metric: &FitnessMetric) -> f6
 mod tests {
     use super::*;
 
+    fn default_cfg() -> FitnessConfig {
+        FitnessConfig::default()
+    }
+
     #[test]
     fn low_trade_count_penalized() {
         let report = serde_json::json!({
@@ -143,7 +157,7 @@ mod tests {
             "win_rate": 0.6,
             "max_drawdown": 0.1,
         });
-        assert_eq!(extract_fitness(&report, &FitnessMetric::Sharpe), -999.0);
+        assert_eq!(extract_fitness(&report, &FitnessMetric::Sharpe, &default_cfg()), -999.0);
     }
 
     #[test]
@@ -164,12 +178,13 @@ mod tests {
             "init_cash": 100000.0,
             "final_equity": 120000.0,
         });
-        let score = extract_fitness(&report, &FitnessMetric::Composite);
+        let score = extract_fitness(&report, &FitnessMetric::Composite, &default_cfg());
         assert!((score - 1.092).abs() < 0.01, "got {score}");
     }
 
     #[test]
     fn trade_confidence_ramp() {
+        let cfg = default_cfg();
         let base = serde_json::json!({
             "sharpe": 2.0,
             "total_return": 0.3,
@@ -190,8 +205,8 @@ mod tests {
             r
         };
 
-        let f10 = extract_fitness(&r10, &FitnessMetric::Sharpe);
-        let f50 = extract_fitness(&r50, &FitnessMetric::Sharpe);
+        let f10 = extract_fitness(&r10, &FitnessMetric::Sharpe, &cfg);
+        let f50 = extract_fitness(&r50, &FitnessMetric::Sharpe, &cfg);
 
         assert!(f50 > f10, "more trades should have higher confidence");
         assert!(
@@ -212,7 +227,7 @@ mod tests {
             "init_cash": 100000.0,
             "final_equity": 150000.0,
         });
-        let score = extract_fitness(&report, &FitnessMetric::Growth);
+        let score = extract_fitness(&report, &FitnessMetric::Growth, &default_cfg());
         assert!((score - 1.5).abs() < 0.01);
     }
 
@@ -243,7 +258,7 @@ mod tests {
             "init_cash": 0.0,
             "final_equity": 150000.0,
         });
-        let score = extract_fitness(&report, &FitnessMetric::Growth);
+        let score = extract_fitness(&report, &FitnessMetric::Growth, &default_cfg());
         assert_eq!(score, -999.0);
     }
 
@@ -257,7 +272,7 @@ mod tests {
             "win_rate": 0.75,
             "max_drawdown": 0.03,
         });
-        assert_eq!(extract_fitness(&report, &FitnessMetric::Composite), -999.0);
+        assert_eq!(extract_fitness(&report, &FitnessMetric::Composite, &default_cfg()), -999.0);
     }
 
     #[test]
@@ -270,7 +285,7 @@ mod tests {
             "win_rate": 0.55,
             "max_drawdown": 0.15,
         });
-        assert!(extract_fitness(&report, &FitnessMetric::Composite) > 0.0);
+        assert!(extract_fitness(&report, &FitnessMetric::Composite, &default_cfg()) > 0.0);
     }
 
     #[test]
@@ -283,7 +298,7 @@ mod tests {
             "win_rate": 0.6,
             "max_drawdown": 0.1,
         });
-        assert!(extract_fitness(&report, &FitnessMetric::Sharpe) > 0.0);
+        assert!(extract_fitness(&report, &FitnessMetric::Sharpe, &default_cfg()) > 0.0);
     }
 
     #[test]
@@ -296,7 +311,7 @@ mod tests {
             "win_rate": 0.70,
             "max_drawdown": 0.60,
         });
-        let score = extract_fitness(&report, &FitnessMetric::Composite);
+        let score = extract_fitness(&report, &FitnessMetric::Composite, &default_cfg());
         assert!(
             score.abs() < 1e-9,
             "60% drawdown should zero out composite, got {score}"

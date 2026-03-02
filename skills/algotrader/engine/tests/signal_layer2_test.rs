@@ -4,7 +4,7 @@
 //! state, narrowing with consistent calibration data, NaN handling, and
 //! rolling window capacity.
 
-use algotrader_engine::signals::layer2::conformal::ConformalCalibrator;
+use algotrader_engine::signals::algorithms::conformal::ConformalCalibrator;
 
 // ---------------------------------------------------------------------------
 // Empty / insufficient calibration

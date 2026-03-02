@@ -3,9 +3,9 @@
 //! Tests validate contracts from SIGNAL_SPEC.md: output ranges, edge cases
 //! (short input, NaN), and behavioral expectations for known signal types.
 
-use algotrader_engine::signals::layer0::hurst;
-use algotrader_engine::signals::layer0::hmm;
-use algotrader_engine::signals::layer0::CharacterizationState;
+use algotrader_engine::signals::algorithms::hurst;
+use algotrader_engine::signals::algorithms::hmm;
+use algotrader_engine::signals::CharacterizationState;
 
 // ---------------------------------------------------------------------------
 // Hurst exponent tests

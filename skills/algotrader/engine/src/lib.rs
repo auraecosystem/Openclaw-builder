@@ -5,14 +5,18 @@
 //! that calls into this library.
 
 pub mod analysis;
-pub mod data;
 pub mod evolution;
 pub mod execution;
 pub mod server;
-pub mod signals;
 pub mod strategy;
-pub mod types;
 pub mod walk_forward;
+
+// Re-export sub-crates so existing `algotrader_engine::types::X`,
+// `algotrader_engine::data::X`, and `algotrader_engine::signals::X`
+// paths continue to resolve (tests, main.rs, cli.rs all rely on this).
+pub use engine_types as types;
+pub use engine_data as data;
+pub use engine_signals as signals;
 
 use std::fs;
 use std::path::Path;
@@ -21,12 +25,12 @@ use anyhow::Result;
 use rayon::prelude::*;
 
 use analysis::Report;
-use data::{resolve_date_row, DataStore};
+use engine_data::{resolve_date_row, DataStore};
 use execution::PositionSizer;
 use strategy::create_setups;
-use types::{Params, ResolvedParams};
+use engine_types::{Params, ResolvedParams};
 
-pub use data::{load_data_store, Axes};
+pub use engine_data::{load_data_store, Axes};
 
 /// Run a single backtest: resolve dates, create setups, filter/signal/simulate
 /// for each sub-strategy, merge trades, produce a report.
@@ -67,7 +71,7 @@ pub fn run_single(store: &DataStore, params: &Params) -> Report {
             &signals,
             &rp,
             &sizer,
-            &setup.exit_rules(),
+            &setup.exit_rules(params),
             setup.direction(),
             setup.equity_fraction(),
             setup.fill_mode(),
@@ -80,7 +84,7 @@ pub fn run_single(store: &DataStore, params: &Params) -> Report {
 }
 
 /// Like `run_single()` but also returns the raw trades for CSV export.
-pub fn run_single_with_trades(store: &DataStore, params: &Params) -> (Report, Vec<types::Trade>) {
+pub fn run_single_with_trades(store: &DataStore, params: &Params) -> (Report, Vec<engine_types::Trade>) {
     let nr = store.axes.n_rows;
 
     let start_row = params
@@ -117,7 +121,7 @@ pub fn run_single_with_trades(store: &DataStore, params: &Params) -> (Report, Ve
             &signals,
             &rp,
             &sizer,
-            &setup.exit_rules(),
+            &setup.exit_rules(params),
             setup.direction(),
             setup.equity_fraction(),
             setup.fill_mode(),
@@ -186,7 +190,7 @@ fn run_batch_single(store: &DataStore, params: &Params, n_trials: usize) -> Repo
             &signals,
             &rp,
             &sizer,
-            &setup.exit_rules(),
+            &setup.exit_rules(params),
             setup.direction(),
             setup.equity_fraction(),
             setup.fill_mode(),

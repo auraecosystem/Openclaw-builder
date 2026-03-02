@@ -6,9 +6,9 @@
 
 use std::ops::Range;
 
-use crate::data::{DataStore, Indicator, WideMask, WideMatrix};
+use engine_data::{DataStore, Indicator, WideMask, WideMatrix};
 use crate::execution::{ExitRule, FillMode};
-use crate::types::{Direction, Params, SignalSet};
+use engine_types::{Direction, Params, SignalSet};
 
 use super::Setup;
 
@@ -165,7 +165,7 @@ impl Setup for ParabolicShort {
         FillMode::NextDayOpen
     }
 
-    fn exit_rules(&self) -> Vec<ExitRule> {
+    fn exit_rules(&self, _params: &Params) -> Vec<ExitRule> {
         vec![
             ExitRule::SmaCover {
                 sma1: Indicator::Sma10,
