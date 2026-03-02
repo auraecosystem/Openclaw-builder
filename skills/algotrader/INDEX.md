@@ -37,7 +37,7 @@ Same crypto-adapted params run through both engines on 2017–2021 training data
 | PF | 4.49 | 1.44 |
 | Return | +44.4% | +28.1% |
 
-**Decision**: Adopt NautilusTrader exclusively. The Rust engine's higher PF/WR reflects opaque heuristic filters that are hard to validate and may mask overfitting. NautilusTrader provides proper event-driven execution, realistic NETTING account semantics, full order lifecycle, and a well-tested open-source matching engine. Rust engine build artifacts deleted; source retained as reference. All future experiments use NautilusTrader.
+**Decision**: Adopt NautilusTrader as the production engine. The Rust engine's higher PF/WR reflects opaque heuristic filters that are hard to validate and may mask overfitting. NautilusTrader provides proper event-driven execution, realistic NETTING account semantics, full order lifecycle, and a well-tested open-source matching engine. The Rust engine is retained for fast parameter search and signal pipeline research (refactored into a Cargo workspace with runtime-configurable constants — see `engine/REFACTOR_SPEC.md`).
 
 ---
 

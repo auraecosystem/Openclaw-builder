@@ -138,13 +138,32 @@ from nautilus_trader.persistence.catalog.parquet import ParquetDataCatalog
 - `risk.py` — Position sizing, Kelly criterion
 - `cache.py` — Parquet cache with mtime-based invalidation
 
+### Rust Engine (`engine/`)
+
+Fast parameter search and signal research engine. Cargo workspace with 4 crates:
+
+- `engine-types` (`crates/types`) — shared types, config structs, `SignalParams`
+- `engine-data` (`crates/data`) — polars data loading
+- `engine-signals` (`crates/signals`) — 18 signal algorithms in flat `algorithms/` directory
+- Root crate — execution, strategy, evolution (CMA-ES + GA), CLI
+
+**Build:** `cd engine && cargo build --release`
+**Run:** `cargo run --release --bin algotrader-engine -- --data-dir ../data-crypto --crypto ...`
+
+All ~50 previously hardcoded constants are now runtime-configurable via JSON config structs (`ExecutionConfig`, `StrategyConfig`, `FitnessConfig`, `GaConfig`, `CmaEsConfig`, `AnalysisConfig`). Signal pipeline algorithms are composable modules — any algorithm can be used at any pipeline stage.
+
+Key deps: rustfft 6 (VMD, scattering, STOMP, template, SWT), faer 0.20 (RMT), kiddo 4 (transfer entropy, KNN, Renyi TE).
+
+**Role**: Parameter optimization and signal research only. NautilusTrader is the production engine.
+
 ---
 
-## Three Setups
+## Four Setups
 
 1. **Continuation Breakout** (`breakout`) — Long. VCP/flag base + RS leader + volume spike breakout. Quick half (SMA_10 trail) + runner half.
 2. **Episodic Pivot** (`ep`) — Long. Gap >= 10% on catalyst + volume >= 2x average. Rare, high-impact.
 3. **Parabolic Short** (`parabolic`) — Short. Overextended run + first red day = mean reversion entry.
+4. **Signal Breakout** (`signal_breakout`) — Long. Uses the composable signal pipeline (18 algorithms, weighted scorer) instead of pattern-based entry. Rust engine only.
 
 ---
 
@@ -155,7 +174,7 @@ All parameters are defined as typed fields on the `StrategyConfig` dataclass. De
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
 | `rs_pct` | `0.02` | 0.01–0.80 | RS percentile rank threshold (top N%). Crypto uses wider (0.15–0.40) |
-| `vol_ratio` | `1.5` | 1.2–3.0 | Volume spike threshold (× 20d avg) |
+| `vol_ratio` | `1.5` | 1.2–3.0 | Volume spike threshold (x 20d avg) |
 | `max_range_pct` | `0.15` | 0.10–0.30 | Max base range as % of price |
 | `max_dist_52w` | `0.25` | 0.10–0.50 | Max distance from 52-week high |
 | `min_adv` | `150000000` | 5e6–3e8 | Min average dollar volume |

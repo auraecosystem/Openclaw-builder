@@ -17,7 +17,7 @@ metadata:
 
 # Swingtrader
 
-Qullamaggie-style swing trading backtester. Three setups, 11k+ tickers, 27 years of history.
+Qullamaggie-style swing trading backtester. Four setups (breakout, EP, parabolic, signal_breakout), 11k+ tickers, 27 years of history. Rust engine for fast parameter search; NautilusTrader for production backtesting.
 
 ## When to use
 

@@ -1,4 +1,4 @@
-# Signal Module — Rust Implementation Contracts
+# Signal Module -- Rust Implementation Contracts
 
 Algorithm details: `../signal-stack.md`. This doc covers Rust types, signatures, and conventions only.
 
@@ -13,38 +13,31 @@ Algorithm details: `../signal-stack.md`. This doc covers Rust types, signatures,
 ## File Layout
 
 ```
-src/signals/
-├── mod.rs              # pub use re-exports
+crates/signals/src/
+├── lib.rs              # pub use re-exports
 ├── arena.rs            # ThreadArena (pre-allocated scratch per rayon thread)
-├── params.rs           # SignalParams (~50 tunable fields, all serde defaults)
-├── feature.rs          # FeatureVec: [f32; SCANNER_FEATURE_COUNT]
-├── pipeline.rs         # run_pipeline() → SignalOutput
-├── layer0/
-│   ├── mod.rs          # CharacterizationState, characterize()
-│   ├── hurst.rs        # 0.1 DFA
-│   ├── hmm.rs          # 0.2 HMM Viterbi (manual 3×3)
-│   ├── rmt.rs          # 0.3 RMT eigen (faer)
-│   └── transfer.rs     # 0.4 Transfer Entropy (kiddo)
-├── layer1/
-│   ├── mod.rs          # ScannerOutput, run_scanner(), SCANNER_FEATURE_COUNT
-│   ├── perm_entropy.rs # 1.1
-│   ├── bocpd.rs        # 1.2 (manual Bayesian online changepoint)
-│   ├── kalman.rs       # 1.3 (manual 2×2)
-│   ├── vmd.rs          # 1.4 (rustfft)
-│   ├── knn_anomaly.rs  # 1.5 (kiddo)
-│   ├── scattering.rs   # 1.6 (rustfft)
-│   ├── vpin.rs         # 1.7 (manual)
-│   ├── stomp.rs        # 1.8 (rustfft)
-│   ├── template.rs     # 1.9 (rustfft)
-│   ├── swt.rs          # 1.10 (rustfft)
-│   └── scorer.rs       # dot(features, weights) + sigmoid
-├── layer2/
-│   ├── mod.rs          # investigate()
-│   ├── conformal.rs    # 2.1
-│   ├── renyi.rs        # 2.2 (kiddo)
-│   └── kronos.rs       # 2.3 stub (pyo3, cold path)
-└── layer3/
-    └── mod.rs          # execution_signals(): reuses L1 state
+├── pipeline.rs         # run_pipeline() -> SignalOutput (consolidated orchestrator)
+├── scorer.rs           # dot(features, weights) + sigmoid
+├── execution_signals.rs # adaptive stops, exits, sizing (was layer3/mod.rs)
+└── algorithms/
+    ├── mod.rs          # re-exports
+    ├── bocpd.rs        # 1.2 Bayesian changepoint
+    ├── conformal.rs    # 2.1 conformal prediction
+    ├── hmm.rs          # 0.2 HMM Viterbi
+    ├── hurst.rs        # 0.1 DFA Hurst exponent
+    ├── kalman.rs       # 1.3 Kalman filter (2x2)
+    ├── knn_anomaly.rs  # 1.5 KNN anomaly
+    ├── kronos.rs       # 2.3 foundation model (stub)
+    ├── perm_entropy.rs # 1.1 permutation entropy
+    ├── renyi.rs        # 2.2 Renyi transfer entropy
+    ├── rmt.rs          # 0.3 RMT eigendecomposition
+    ├── scattering.rs   # 1.6 wavelet scattering
+    ├── stomp.rs        # 1.8 matrix profile
+    ├── swt.rs          # 1.10 wavelet denoising
+    ├── template.rs     # 1.9 LIGO template matching
+    ├── transfer.rs     # 0.4 transfer entropy
+    ├── vmd.rs          # 1.4 VMD decomposition
+    └── vpin.rs         # 1.7 VPIN order flow
 ```
 
 ## Key Types
@@ -52,42 +45,62 @@ src/signals/
 ### SCANNER_FEATURE_COUNT = 13
 
 ```rust
-// layer1/mod.rs
+// crates/types/src/feature.rs
 pub const SCANNER_FEATURE_COUNT: usize = 13;
+pub type FeatureVec = [f32; SCANNER_FEATURE_COUNT];
+```
 
-pub struct ScannerOutput {
+`RawAlgorithmOutputs` (in `pipeline.rs`) stores raw algorithm values. The old `ScannerOutput` struct and `to_array()` are replaced by `normalize_for_scorer()` which maps price-scale features to scorer-friendly ranges. A backward-compatible type alias `ScannerOutput = RawAlgorithmOutputs` exists during migration.
+
+```rust
+// crates/signals/src/pipeline.rs
+pub struct RawAlgorithmOutputs {
     pub perm_entropy: f32,   // 1.1
     pub bocpd_prob: f32,     // 1.2
-    pub kalman_level: f32,   // 1.3
-    pub kalman_trend: f32,   // 1.3
-    pub vmd_sta_lta: f32,    // 1.4
+    pub kalman_level: f32,   // 1.3 (raw price units)
+    pub kalman_trend: f32,   // 1.3 (raw price units/bar)
+    pub vmd_sta_lta: f32,    // 1.4 (raw, typically 0-10)
     pub knn_anomaly: f32,    // 1.5
     pub scatter_class: f32,  // 1.6
     pub vpin: f32,           // 1.7
     pub mp_novelty: f32,     // 1.8
     pub template_corr: f32,  // 1.9
-    pub swt_denoised: f32,   // 1.10
+    pub swt_denoised: f32,   // 1.10 (raw price units)
     pub hurst: f32,          // 0.1 pass-through
     pub hmm_state: f32,      // 0.2 pass-through
+    pub last_close: f32,     // used by normalize_for_scorer()
+    // Investigation outputs (previously Layer 2)
+    pub conformal_lo: f32,
+    pub conformal_hi: f32,
+    pub renyi_te_standard: f32,
+    pub renyi_te_tail: f32,
+    pub kronos_direction: f32,
+    pub kronos_confidence: f32,
 }
 
-impl ScannerOutput {
-    pub fn to_array(&self) -> [f32; SCANNER_FEATURE_COUNT];
+impl RawAlgorithmOutputs {
+    /// Normalize features to ~[0,1] or ~[-1,1] for the composite scorer.
+    /// Price-scale features (kalman, swt) are divided by last_close.
+    /// Raw fields are preserved for execution signals.
+    pub fn normalize_for_scorer(&self, params: &SignalParams) -> [f32; SCANNER_FEATURE_COUNT];
+
+    /// Backward-compatible alias for normalize_for_scorer().
+    pub fn to_scorer_array(&self, params: &SignalParams) -> [f32; SCANNER_FEATURE_COUNT];
 }
 ```
 
 ### SignalOutput
 
 ```rust
-// pipeline.rs
+// crates/signals/src/pipeline.rs
 pub struct SignalOutput {
-    pub scanner: ScannerOutput,
+    pub scanner: RawAlgorithmOutputs,
     pub score: f32,               // composite scorer output
     pub is_candidate: bool,       // score > threshold
-    // Layer 2 (None if not candidate)
+    // Investigation (None if not candidate)
     pub conformal_lo: Option<f32>,
     pub conformal_hi: Option<f32>,
-    // Layer 3 execution signals
+    // Execution signals
     pub kalman_stop: f32,         // reuses 1.3
     pub bocpd_exit: bool,         // reuses 1.2
     pub vmd_entry_trigger: bool,  // reuses 1.4
@@ -97,18 +110,19 @@ pub struct SignalOutput {
 ### CharacterizationState
 
 ```rust
-// layer0/mod.rs
+// crates/signals/src/pipeline.rs
 pub struct CharacterizationState {
     pub hurst: f32,
     pub hmm_state: u8,           // 0, 1, or 2
-    pub cleaned_corr: Option<Vec<f32>>, // N×N flattened, from RMT
+    pub cleaned_corr: Option<Vec<f32>>, // N*N flattened, from RMT
     pub te_scores: Option<Vec<f32>>,    // N, from transfer entropy
     pub last_updated: usize,     // bar index of last recompute
 }
 
 pub fn characterize(
-    close: &[f32],       // full close column for one ticker
-    all_returns: Option<&[&[f32]]>, // N tickers' returns (for RMT/TE)
+    close: &[f32],
+    returns: &[f32],
+    all_returns: Option<(&[f32], usize, usize)>,
     bar_idx: usize,
     params: &SignalParams,
     prev: &CharacterizationState,
@@ -118,7 +132,7 @@ pub fn characterize(
 ### ThreadArena
 
 ```rust
-// arena.rs
+// crates/signals/src/arena.rs
 pub struct ThreadArena {
     // FFT (shared across VMD, STOMP, SWT, scattering, template)
     pub fft_scratch: Vec<rustfft::num_complex::Complex32>,
@@ -129,7 +143,7 @@ pub struct ThreadArena {
     pub vol_w: Vec<f32>,
     pub high_w: Vec<f32>,
     pub low_w: Vec<f32>,
-    // VMD modes: K × fft_len
+    // VMD modes: K * fft_len
     pub vmd_modes: Vec<Vec<rustfft::num_complex::Complex32>>,
     // STOMP distance profile
     pub stomp_dp: Vec<f32>,
@@ -153,7 +167,7 @@ impl ThreadArena {
 ### SignalParams
 
 ```rust
-// params.rs — all fields have serde defaults
+// crates/types/src/signal_params.rs -- all fields have serde defaults
 pub struct SignalParams {
     // Global
     pub window_len: usize,          // default 200
@@ -163,6 +177,7 @@ pub struct SignalParams {
     // Per-algorithm (examples, not exhaustive)
     pub pe_order: usize,            // default 5
     pub pe_delay: usize,            // default 1
+    pub pe_window: usize,           // default 30
     pub bocpd_lambda: f32,          // default 100.0
     pub kalman_q: f32,              // default 0.001
     pub kalman_r: f32,              // default 1.0
@@ -180,10 +195,42 @@ pub struct SignalParams {
     pub rmt_window: usize,          // default 500
     pub conformal_coverage: f32,    // default 0.90
     pub conformal_window: usize,    // default 200
+    pub vpin_n_buckets: usize,      // default 50
 
     // Scorer weights
     pub scorer_weights: [f32; SCANNER_FEATURE_COUNT], // default all 1.0/13
     pub scorer_bias: f32,           // default 0.0
+
+    // Execution signals
+    pub kalman_stop_atr_mult: f32,  // default 2.0
+    pub bocpd_exit_threshold: f32,  // default 0.7
+    pub vmd_entry_threshold: f32,   // default 2.0
+
+    // Algorithm internals (promoted from hardcoded constants)
+    pub atr_period: usize,          // default 14
+    pub vmd_n_iter: usize,          // default 15
+    pub vmd_tau: f32,               // default 0.0
+    pub bocpd_kappa0: f32,          // default 1.0
+    pub bocpd_mu0: f32,             // default 0.0
+    pub bocpd_alpha0: f32,          // default 1.0
+    pub bocpd_beta0: f32,           // default 1.0
+    pub hmm_transition: [[f32; 3]; 3],  // default [[0.90,0.05,0.05],[0.10,0.80,0.10],[0.05,0.10,0.85]]
+    pub hmm_emission_mean: [f32; 3],    // default [0.0, 0.0, 0.002]
+    pub hmm_emission_var: [f32; 3],     // default [0.0001, 0.001, 0.0004]
+    pub hmm_init_probs: [f32; 3],       // default [0.4, 0.3, 0.3]
+
+    // Normalization constants (scorer input mapping)
+    pub kalman_vel_clamp: f32,      // default 1.0
+    pub swt_norm_clamp: f32,        // default 0.1
+    pub swt_norm_scale: f32,        // default 10.0
+    pub vmd_norm_divisor: f32,      // default 5.0
+
+    // Execution signal constants (adaptive stop/sizing)
+    pub kalman_trend_amplifier: f32,   // default 100.0
+    pub kalman_trend_up_cap: f32,      // default 1.0
+    pub kalman_trend_down_cap: f32,    // default 0.5
+    pub conformal_size_floor: f32,     // default 0.1
+    pub conformal_size_ceil: f32,      // default 3.0
 
     // Evolution helpers
     // pub fn to_genome(&self) -> Vec<f64>;
@@ -193,7 +240,7 @@ pub struct SignalParams {
 
 ## Function Signatures (per-algorithm)
 
-Every Layer 1 algorithm follows the same pattern:
+Every algorithm module in `algorithms/` follows the same pattern:
 
 ```rust
 pub fn compute_<name>(
@@ -203,9 +250,11 @@ pub fn compute_<name>(
 ) -> f32;                    // single normalized output
 ```
 
-Layer 0 functions take broader context (multiple tickers, longer history).
-Layer 2 functions take `ScannerOutput` + additional context.
-Layer 3 functions reuse Layer 1 state from `ThreadArena`.
+The pipeline orchestrator in `pipeline.rs` calls each algorithm and feeds the collected outputs through `normalize_for_scorer()` into the scorer. Algorithms do not know about layers or each other -- they receive `&[f32]` slices and return scalars.
+
+Characterization algorithms (hurst, hmm, rmt, transfer) take broader context (multiple tickers, longer history) and are called on a slower cadence (`l0_recompute_interval` bars).
+
+Investigation algorithms (conformal, renyi, kronos) take `RawAlgorithmOutputs` plus additional context and only run for candidates that passed the scorer threshold.
 
 ## Integration Points
 
@@ -218,9 +267,9 @@ SignalBocpdExit { threshold: f32 },
 SignalKalmanStop { atr_mult: f32 },
 ```
 
-### Params extension in `types.rs`
+### Params extension in `crates/types/src/types.rs`
 ```rust
-pub signal_params: Option<SignalParams>,  // serde default None, backward compatible
+pub signal_params: Option<crate::signal_params::SignalParams>,  // serde default None, backward compatible
 ```
 
 ### Factory extension in `strategy/mod.rs`
@@ -230,8 +279,10 @@ pub signal_params: Option<SignalParams>,  // serde default None, backward compat
 
 ## Conventions
 
-- `f32` everywhere (not f64) — matches existing WideMatrix
-- Zero heap alloc in hot loop — use ThreadArena scratch buffers
+- `f32` everywhere (not f64) -- matches existing WideMatrix
+- Zero heap alloc in hot loop -- use ThreadArena scratch buffers
 - Each algorithm in its own file, single `pub fn compute_*` entry point
 - NaN propagation: if input contains NaN, return NaN (or 0.0 for scores)
-- All Layer 1 algorithms are independent — no cross-dependencies
+- All algorithms are independent -- no cross-dependencies between algorithm modules
+- `engine-signals` depends only on `engine-types`, NOT on `engine-data` (signals take `&[f32]` slices, never touch polars)
+- Config structs live in `engine-types` -- signals reference them via `engine_types::SignalParams`

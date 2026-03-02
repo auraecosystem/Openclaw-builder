@@ -1,6 +1,8 @@
 # Signal Extraction Stack — Complete Algorithm Reference
 
-21 algorithms across 4 layers. The architecture is a funnel: cheap/fast functions run on every bar across all tickers (high recall), progressively more expensive functions run only on candidates (high precision), and an LLM agent makes the final go/no-go decision.
+21 algorithms across 4 conceptual layers. The architecture is a funnel: cheap/fast functions run on every bar across all tickers (high recall), progressively more expensive functions run only on candidates (high precision), and an LLM agent makes the final go/no-go decision.
+
+**Implementation note:** In the Rust engine, all 18 implemented algorithms live in a flat `engine/crates/signals/src/algorithms/` directory. Any algorithm can be composed into any pipeline stage — the 4 layers below are conceptual (describing the funnel architecture), not directory structure.
 
 ```
 100 tickers × 1 bar (every 5 min)
@@ -600,6 +602,8 @@ position_size = min(raw_size * confidence_scale, max_position_size)
 
 ## Package Dependencies
 
+### Python
+
 ```
 # Signal Processing Core
 PyWavelets          # wavelet denoising (SWT)
@@ -633,9 +637,19 @@ kronos              # financial time series foundation model
 nautilus_trader     # backtest + live engine
 ```
 
+### Rust (`engine-signals` crate)
+
+```
+rustfft = "6"       # VMD, scattering, STOMP, template matching, SWT
+faer = "0.20"       # RMT eigendecomposition
+kiddo = "4"         # k-d tree for transfer entropy, KNN anomaly, Renyi TE
+```
+
 ---
 
 ## Implementation Phases
+
+**Status**: All 21 algorithms are implemented in the Rust engine (`engine/crates/signals/src/algorithms/`). The signal pipeline is operational. The phases below are historical planning context.
 
 ### Phase 1 — "Can we detect coiling?" (1-2 weeks)
 
