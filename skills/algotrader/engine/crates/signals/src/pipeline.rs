@@ -575,7 +575,7 @@ pub fn run_pattern_pipeline(
 ///
 /// Uses |close[i] - close[i-1]| as a proxy for true range when high/low
 /// are unavailable.
-fn simple_atr(close: &[f32], period: usize) -> f32 {
+pub fn simple_atr(close: &[f32], period: usize) -> f32 {
     let n = close.len();
     if n < 2 || period == 0 {
         return f32::NAN;

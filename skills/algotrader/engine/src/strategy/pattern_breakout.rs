@@ -14,11 +14,11 @@ use std::ops::Range;
 use engine_data::{DataStore, Indicator, WideMask, WideMatrix};
 use engine_patterns::compute_pattern_score;
 use engine_signals::arena::ThreadArena;
-use engine_signals::pipeline::{self, CharacterizationState, run_pipeline, run_pattern_pipeline};
+use engine_signals::pipeline::{self, simple_atr, CharacterizationState, run_pipeline, run_pattern_pipeline};
 use engine_types::{Direction, PatternParams, Params, SignalSet};
 use crate::execution::{ExitRule, FillMode};
 
-use super::Setup;
+use super::{Setup, atr_stop, simple_price_vol_filter};
 
 pub struct PatternBreakout;
 
@@ -46,43 +46,12 @@ impl Setup for PatternBreakout {
     }
 
     fn filter(&self, store: &DataStore, params: &Params, range: Range<usize>) -> WideMask {
-        pattern_filter(store, params, range)
+        simple_price_vol_filter(store, params, range)
     }
 
     fn signals(&self, store: &DataStore, universe: &WideMask, params: &Params) -> SignalSet {
         pattern_breakout_signals(store, universe, params)
     }
-}
-
-// ---------------------------------------------------------------------------
-// Universe filter (same lightweight filter as signal_breakout)
-// ---------------------------------------------------------------------------
-
-fn pattern_filter(store: &DataStore, params: &Params, range: Range<usize>) -> WideMask {
-    let nr = store.axes.n_rows;
-    let nc = store.axes.n_cols;
-    let mut mask = WideMask::new_false(nr, nc);
-
-    let close_m = store.close();
-    let vol_sma = store.get(Indicator::VolSma20);
-
-    for row in range {
-        for col in 0..nc {
-            if store.axes.etf_cols[col] {
-                continue;
-            }
-            let close = close_m.get(row, col);
-            if close.is_nan() || close <= params.min_price {
-                continue;
-            }
-            let vol = vol_sma.get(row, col);
-            if vol.is_nan() || vol <= params.min_vol {
-                continue;
-            }
-            mask.set(row, col, true);
-        }
-    }
-    mask
 }
 
 // ---------------------------------------------------------------------------
@@ -205,16 +174,12 @@ fn pattern_breakout_signals(
             if blended > sp.candidate_threshold {
                 let i = row * nc + col;
                 entries.data[i] = true;
-
-                let atr = atr_m.get(row, col);
-                let low = low_m.get(row, col);
-                stops[i] = if !atr.is_nan() && (close - low) > atr {
-                    close - atr
-                } else if !low.is_nan() {
-                    low
-                } else {
-                    close * (1.0 - params.strategy.stop_fallback_pct)
-                };
+                stops[i] = atr_stop(
+                    close,
+                    low_m.get(row, col),
+                    atr_m.get(row, col),
+                    params.strategy.stop_fallback_pct,
+                );
             }
 
             if sig_out.bocpd_exit {
@@ -283,10 +248,15 @@ fn extract_intraday_tf(
         return (vec![], vec![], vec![], vec![], f32::NAN);
     };
 
-    let (matrices, n_rows_per_day) = if tf_idx == 0 {
-        (&intraday.matrices_30m, 16usize) // 8h × 2 = 16 bars/day
+    // bars_per_day = trading_hours * bars_per_hour; 30m = ÷2, 1h = ÷1
+    let bars_factor = if tf_idx == 0 { 2.0 } else { 1.0 }; // relative to 1h
+    let n_rows_per_day = (store.axes.trading_hours as f32 * bars_factor).round() as usize;
+    let n_rows_per_day = n_rows_per_day.max(1);
+
+    let matrices = if tf_idx == 0 {
+        &intraday.matrices_30m
     } else {
-        (&intraday.matrices_1h, 8usize)   // 8 bars/day
+        &intraday.matrices_1h
     };
 
     if matrices.is_empty() {
@@ -309,7 +279,7 @@ fn extract_intraday_tf(
     let low: Vec<f32> = (0..end_row).map(|r| matrices[2].get(r, col)).collect();
     let vol: Vec<f32> = (0..end_row).map(|r| matrices[4].get(r, col)).collect();
 
-    let atr = simple_range_atr(&close, 14);
+    let atr = simple_atr(&close, 14);
     (close, high, low, vol, atr)
 }
 
@@ -342,25 +312,6 @@ fn extract_5m_tf(
     let low: Vec<f32> = (0..end_5m).map(|r| intraday.matrices[2].get(r, col)).collect();
     let vol: Vec<f32> = (0..end_5m).map(|r| intraday.matrices[4].get(r, col)).collect();
 
-    let atr = simple_range_atr(&close, 14);
+    let atr = simple_atr(&close, 14);
     (close, high, low, vol, atr)
-}
-
-/// Simple ATR from close prices (|close[i] - close[i-1]| approximation).
-fn simple_range_atr(close: &[f32], period: usize) -> f32 {
-    let n = close.len();
-    if n < 2 {
-        return f32::NAN;
-    }
-    let start = if n > period { n - period } else { 1 };
-    let mut sum = 0.0_f32;
-    let mut count = 0;
-    for i in start..n {
-        let tr = (close[i] - close[i - 1]).abs();
-        if !tr.is_nan() {
-            sum += tr;
-            count += 1;
-        }
-    }
-    if count > 0 { sum / count as f32 } else { f32::NAN }
 }

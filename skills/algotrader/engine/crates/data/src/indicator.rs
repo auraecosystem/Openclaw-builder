@@ -41,22 +41,27 @@ pub enum Indicator {
 
 impl Indicator {
     /// Returns the parquet cache filename for this indicator, or `None` for
-    /// OHLCV fields (those are loaded separately from the combined parquet).
+    /// OHLCV fields and runtime-computed indicators (no cache file needed).
     pub fn cache_filename(&self) -> Option<&'static str> {
         match self {
+            // OHLCV: loaded from combined parquet
             Self::Open | Self::High | Self::Low | Self::Close | Self::Volume => None,
-            Self::Atr14 => Some("atr_14.parquet"),
-            Self::Sma10 => Some("sma_10.parquet"),
-            Self::Sma20 => Some("sma_20.parquet"),
-            Self::VolSma20 => Some("vol_sma_20.parquet"),
+            // Runtime-computed: derived from OHLCV at load time (no cache)
+            Self::Atr14 => None,
+            Self::Sma10 => None,
+            Self::Sma20 => None,
+            Self::VolSma20 => None,
+            Self::Dist52w => None,
+            Self::Ret63 => None,
+            Self::Ret126 => None,
+            Self::Pct10d => None,
+            Self::ConsolHigh => None,
+            Self::ConsecGreen => None,
+            // Cross-sectional: must stay cached (needs all tickers simultaneously)
             Self::RsPctrank1m => Some("rs_pctrank_1m.parquet"),
             Self::RsPctrank3m => Some("rs_pctrank_3m.parquet"),
             Self::RsPctrank6m => Some("rs_pctrank_6m.parquet"),
-            Self::Dist52w => Some("dist_52w.parquet"),
-            Self::Ret63 => Some("ret_63.parquet"),
-            Self::Ret126 => Some("ret_126.parquet"),
-            Self::Pct10d => Some("pct_10d.parquet"),
-            Self::ConsecGreen => Some("consec_green.parquet"),
+            // Multi-pass pattern detection: stays cached
             Self::VcpNumContractions => Some("vcp_num_contractions.parquet"),
             Self::VcpLastContractionPct => Some("vcp_last_contraction_pct.parquet"),
             Self::VcpTighteningRatio => Some("vcp_tightening_ratio.parquet"),
@@ -65,16 +70,32 @@ impl Indicator {
             Self::FlagRetracePct => Some("flag_retrace_pct.parquet"),
             Self::FlagDays => Some("flag_days.parquet"),
             Self::FlagVolRatio => Some("flag_vol_ratio.parquet"),
-            Self::ConsolHigh => Some("consol_high.parquet"),
         }
     }
 
-    /// True for Open/High/Low/Close/Volume -- loaded from the combined OHLCV
-    /// parquet rather than individual cache files.
+    /// True for OHLCV fields (loaded from the combined OHLCV parquet).
     pub fn is_ohlcv(&self) -> bool {
         matches!(
             self,
             Self::Open | Self::High | Self::Low | Self::Close | Self::Volume
+        )
+    }
+
+    /// True for indicators computed at runtime from OHLCV (no cache file needed).
+    /// These 10 are single-pass, column-local, SIMD-friendly operations.
+    pub fn is_runtime_computed(&self) -> bool {
+        matches!(
+            self,
+            Self::Atr14
+                | Self::Sma10
+                | Self::Sma20
+                | Self::VolSma20
+                | Self::Dist52w
+                | Self::Ret63
+                | Self::Ret126
+                | Self::Pct10d
+                | Self::ConsolHigh
+                | Self::ConsecGreen
         )
     }
 }

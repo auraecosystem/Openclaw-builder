@@ -1,6 +1,7 @@
 //! Data loading and storage crate: polars-based parquet I/O isolated here
 //! so the rest of the workspace avoids the heavy polars dependency.
 
+pub mod compute;
 mod indicator;
 mod loader;
 pub mod resample;

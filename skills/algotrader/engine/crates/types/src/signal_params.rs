@@ -202,10 +202,16 @@ pub struct SignalParams {
     pub hmm_transition: [[f32; 3]; 3],
 
     /// HMM: emission means per state.
+    ///
+    /// Defaults are calibrated to daily crypto log-returns (high-vol, 24/7).
+    /// For US equities, shrink variances ~10× (daily returns are ~10× less volatile).
+    /// Override via `signal_params.hmm_emission_mean` in your strategy JSON.
     #[serde(default = "default_hmm_emission_mean")]
     pub hmm_emission_mean: [f32; 3],
 
     /// HMM: emission variances per state.
+    ///
+    /// Defaults calibrated for crypto. For equities use e.g. [0.000005, 0.0001, 0.00004].
     #[serde(default = "default_hmm_emission_var")]
     pub hmm_emission_var: [f32; 3],
 

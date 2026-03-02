@@ -31,10 +31,10 @@ fn ep_filter(store: &DataStore, params: &Params, range: Range<usize>) -> WideMas
     let nr = store.axes.n_rows;
     let nc = store.axes.n_cols;
 
-    let min_gap_pct: f32 = 0.10;
-    let min_vol_ratio: f32 = 2.0;
-    let min_gap_day_dollar_vol: f32 = 100_000_000.0;
-    let max_prior_6m_return: f32 = 0.30;
+    let min_gap_pct = params.strategy.ep_min_gap_pct;
+    let min_vol_ratio = params.strategy.ep_min_vol_ratio;
+    let min_gap_day_dollar_vol = params.strategy.ep_min_gap_day_dollar_vol;
+    let max_prior_6m_return = params.strategy.ep_max_prior_6m_return;
 
     let close_m = store.close();
     let open_m = store.open();

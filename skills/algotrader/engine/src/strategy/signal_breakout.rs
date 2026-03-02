@@ -19,7 +19,7 @@ use engine_signals::pipeline::{self, CharacterizationState, run_pipeline};
 use crate::execution::{ExitRule, FillMode};
 use engine_types::{Direction, Params, SignalSet};
 
-use super::Setup;
+use super::{Setup, atr_stop, simple_price_vol_filter};
 
 pub struct SignalBreakout;
 
@@ -47,49 +47,12 @@ impl Setup for SignalBreakout {
     }
 
     fn filter(&self, store: &DataStore, params: &Params, range: Range<usize>) -> WideMask {
-        signal_filter(store, params, range)
+        simple_price_vol_filter(store, params, range)
     }
 
     fn signals(&self, store: &DataStore, universe: &WideMask, params: &Params) -> SignalSet {
         signal_breakout_signals(store, universe, params)
     }
-}
-
-// ---------------------------------------------------------------------------
-// Universe filter
-// ---------------------------------------------------------------------------
-
-/// Simple price/volume/ETF filter for the signal-driven strategy.
-///
-/// Intentionally lighter than `breakout_filter` (no RS ranking, no VCP
-/// consolidation checks) because the signal pipeline handles selectivity
-/// through its composite score. The filter only removes obviously untradeable
-/// tickers.
-fn signal_filter(store: &DataStore, params: &Params, range: Range<usize>) -> WideMask {
-    let nr = store.axes.n_rows;
-    let nc = store.axes.n_cols;
-    let mut mask = WideMask::new_false(nr, nc);
-
-    let close_m = store.close();
-    let vol_sma = store.get(Indicator::VolSma20);
-
-    for row in range {
-        for col in 0..nc {
-            if store.axes.etf_cols[col] {
-                continue;
-            }
-            let close = close_m.get(row, col);
-            if close.is_nan() || close <= params.min_price {
-                continue;
-            }
-            let vol = vol_sma.get(row, col);
-            if vol.is_nan() || vol <= params.min_vol {
-                continue;
-            }
-            mask.set(row, col, true);
-        }
-    }
-    mask
 }
 
 // ---------------------------------------------------------------------------
@@ -196,17 +159,12 @@ fn signal_breakout_signals(store: &DataStore, universe: &WideMask, params: &Para
             if output.is_candidate {
                 let i = row * nc + col;
                 entries.data[i] = true;
-
-                // Stop: low-of-day, capped at 1x ATR below close
-                let low = low_m.get(row, col);
-                let atr = atr_m.get(row, col);
-                stops[i] = if !atr.is_nan() && (close - low) > atr {
-                    close - atr
-                } else if !low.is_nan() {
-                    low
-                } else {
-                    close * (1.0 - params.strategy.stop_fallback_pct) // fallback stop
-                };
+                stops[i] = atr_stop(
+                    close,
+                    low_m.get(row, col),
+                    atr_m.get(row, col),
+                    params.strategy.stop_fallback_pct,
+                );
             }
 
             // BOCPD exit signal (from Layer 3 reusing L1 state)

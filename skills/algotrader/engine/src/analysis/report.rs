@@ -4,6 +4,17 @@ use super::metrics;
 use engine_data::Axes;
 use engine_types::{Params, Trade};
 
+/// Equity curve sampled at each trade exit, aligned by row index.
+///
+/// `values[i]` is the running equity after the i-th exit (length = n_trades + 1;
+/// index 0 is init_cash before any trade). `exit_rows[i]` is the daily row of
+/// the (i+1)-th exit so callers can align to a shared date grid.
+#[derive(Serialize, Clone)]
+pub struct EquityCurve {
+    pub values: Vec<f64>,
+    pub exit_rows: Vec<usize>,
+}
+
 #[derive(Serialize)]
 pub struct Report {
     pub total_trades: usize,
@@ -27,6 +38,9 @@ pub struct Report {
     pub dsr: f64,
     pub per_setup: serde_json::Value,
     pub params: Params,
+    /// Equity curve (omitted from JSON unless `params.analysis.emit_equity_curve`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub equity_curve: Option<EquityCurve>,
 }
 
 /// `n_trials`: number of independent parameter sets tested (for DSR multiple-testing correction).
@@ -52,6 +66,7 @@ pub fn generate_report(trades: &[Trade], axes: &Axes, params: &Params, n_trials:
             dsr: 0.0,
             per_setup: serde_json::json!({}),
             params: params.clone(),
+            equity_curve: None,
         };
     }
 
@@ -101,15 +116,17 @@ pub fn generate_report(trades: &[Trade], axes: &Axes, params: &Params, n_trials:
     let mut sorted_trades: Vec<&Trade> = trades.iter().collect();
     sorted_trades.sort_by_key(|t| t.exit_row);
 
-    let mut equity_curve: Vec<f64> = Vec::with_capacity(sorted_trades.len() + 1);
-    equity_curve.push(params.init_cash);
+    let mut equity_values: Vec<f64> = Vec::with_capacity(sorted_trades.len() + 1);
+    let mut exit_rows: Vec<usize> = Vec::with_capacity(sorted_trades.len());
+    equity_values.push(params.init_cash);
     let mut running_eq = params.init_cash;
     for t in &sorted_trades {
         running_eq += t.pnl;
-        equity_curve.push(running_eq);
+        equity_values.push(running_eq);
+        exit_rows.push(t.exit_row);
     }
 
-    let max_dd = metrics::max_drawdown(&equity_curve);
+    let max_dd = metrics::max_drawdown(&equity_values);
 
     // CAGR: use calendar days between first entry and last exit
     let cagr_val = if sorted_trades.len() >= 2 {
@@ -125,8 +142,8 @@ pub fn generate_report(trades: &[Trade], axes: &Axes, params: &Params, n_trials:
 
     // Sharpe/Sortino/PSR/DSR from trade-level returns with calendar-based annualization
     // Minimum 3 trades for meaningful stats (skewness needs n>=3)
-    let (sharpe_val, sortino_val, psr_val, dsr_val) = if equity_curve.len() > 3 {
-        let returns = metrics::equity_to_returns(&equity_curve);
+    let (sharpe_val, sortino_val, psr_val, dsr_val) = if equity_values.len() > 3 {
+        let returns = metrics::equity_to_returns(&equity_values);
         let first_row = sorted_trades.first().map(|t| t.entry_row).unwrap_or(0);
         let last_row = sorted_trades.last().map(|t| t.exit_row).unwrap_or(0);
         let first_date = axes.dates.get(first_row).copied().unwrap_or(0);
@@ -181,6 +198,12 @@ pub fn generate_report(trades: &[Trade], axes: &Axes, params: &Params, n_trials:
         );
     }
 
+    let equity_curve = if params.analysis.emit_equity_curve {
+        Some(EquityCurve { values: equity_values, exit_rows })
+    } else {
+        None
+    };
+
     Report {
         total_trades: n,
         win_rate: round3(win_rate),
@@ -199,6 +222,7 @@ pub fn generate_report(trades: &[Trade], axes: &Axes, params: &Params, n_trials:
         dsr: round4(dsr_val),
         per_setup: serde_json::Value::Object(setup_map),
         params: params.clone(),
+        equity_curve,
     }
 }
 

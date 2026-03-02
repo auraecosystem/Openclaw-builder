@@ -21,6 +21,8 @@ pub struct Axes {
     pub n_rows: usize,
     /// Number of columns (tickers).
     pub n_cols: usize,
+    /// Trading hours per day (6.5 for equities, 24.0 for crypto).
+    pub trading_hours: f32,
 }
 
 /// Optional intraday (5-minute) data.  Replaces the 7 `Option<>` fields

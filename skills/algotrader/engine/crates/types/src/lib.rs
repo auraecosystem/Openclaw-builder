@@ -3,6 +3,7 @@
 
 pub mod analysis_config;
 pub mod cmaes_config;
+pub mod data_config;
 pub mod execution_config;
 pub mod feature;
 pub mod fitness_config;
@@ -16,6 +17,7 @@ pub mod types;
 // Re-export key types at crate root for ergonomic imports.
 pub use analysis_config::AnalysisConfig;
 pub use cmaes_config::CmaEsConfig;
+pub use data_config::{DataConfig, OhlcvFormat};
 pub use execution_config::ExecutionConfig;
 pub use feature::{FeatureVec, SCANNER_FEATURE_COUNT};
 pub use fitness_config::FitnessConfig;

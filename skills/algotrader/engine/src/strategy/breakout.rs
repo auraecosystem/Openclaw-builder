@@ -15,7 +15,7 @@ use engine_data::{DataStore, Indicator, WideMask, WideMatrix};
 use crate::execution::{ExitRule, FillMode};
 use engine_types::{Direction, Params, SignalSet};
 
-use super::Setup;
+use super::{Setup, atr_stop};
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -239,16 +239,7 @@ fn breakout_signals(store: &DataStore, universe: &WideMask, params: &Params) -> 
             }
 
             entries.data[i] = true;
-
-            // Stop: low-of-day, capped at 1x ATR below close
-            let low = low_m.get(row, col);
-            let atr = atr_m.get(row, col);
-            let stop = if !atr.is_nan() && close > 0.0 && (close - low) > atr {
-                close - atr
-            } else {
-                low
-            };
-            stops[i] = stop;
+            stops[i] = atr_stop(close, low_m.get(row, col), atr_m.get(row, col), params.strategy.stop_fallback_pct);
         }
     }
 

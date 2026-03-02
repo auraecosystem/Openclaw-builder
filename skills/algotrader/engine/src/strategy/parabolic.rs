@@ -27,9 +27,9 @@ fn parabolic_filter(store: &DataStore, params: &Params, range: Range<usize>) -> 
     let nr = store.axes.n_rows;
     let nc = store.axes.n_cols;
 
-    let large_cap_price: f32 = 50.0;
-    let large_cap_run: f32 = 0.50;
-    let small_cap_run: f32 = 3.00;
+    let large_cap_price = params.strategy.large_cap_price;
+    let large_cap_run = params.strategy.large_cap_run;
+    let small_cap_run = params.strategy.small_cap_run;
     let min_green_days: f32 = 3.0;
 
     let close_m = store.close();

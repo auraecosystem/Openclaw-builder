@@ -243,6 +243,42 @@ pub fn evolve_walk_forward(
 }
 
 // ---------------------------------------------------------------------------
+// Shared: parallel evaluation + sort
+// ---------------------------------------------------------------------------
+
+/// Evaluate a population in parallel and return `(genomes, scores, best_report)`
+/// sorted best-first by fitness.
+fn evaluate_population(
+    store: &DataStore,
+    base: &Params,
+    config: &EvolutionConfig,
+    spec: &GenomeSpec,
+    population: Vec<Vec<f64>>,
+) -> (Vec<(Vec<f64>, f64)>, serde_json::Value) {
+    let results: Vec<(serde_json::Value, f64)> = population
+        .par_iter()
+        .map(|genome| {
+            let params = spec.decode(genome, base);
+            evaluate(store, &params, &config.fitness_metric, &base.fitness)
+        })
+        .collect();
+
+    let mut scored: Vec<(Vec<f64>, f64)> = population
+        .into_iter()
+        .zip(results.iter().map(|(_, f)| *f))
+        .collect();
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let best_report = results
+        .iter()
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(r, _)| r.clone())
+        .unwrap_or_default();
+
+    (scored, best_report)
+}
+
+// ---------------------------------------------------------------------------
 // CMA-ES dispatch (private)
 // ---------------------------------------------------------------------------
 
@@ -262,52 +298,16 @@ fn run_cmaes(
     let mut optimizer = cmaes::CmaEs::new(spec.dim(), initial_mean, config.initial_sigma, base.cmaes.clone());
 
     for gen in 0..config.generations {
-        let population = optimizer.ask(rng);
-
-        // Clamp sampled genomes to gene bounds.
-        let clamped: Vec<Vec<f64>> = population
+        let population = optimizer
+            .ask(rng)
             .into_iter()
-            .map(|mut g| {
-                spec.clamp(&mut g);
-                g
-            })
+            .map(|mut g| { spec.clamp(&mut g); g })
             .collect();
 
-        // Evaluate fitness in parallel.
-        let results: Vec<(serde_json::Value, f64)> = clamped
-            .par_iter()
-            .map(|genome| {
-                let params = spec.decode(genome, base);
-                evaluate(store, &params, &config.fitness_metric, &base.fitness)
-            })
-            .collect();
+        let (scored, best_report) = evaluate_population(store, base, config, spec, population);
 
-        // Pair genomes with fitness, sorted best-first.
-        let mut scored: Vec<(Vec<f64>, f64)> = clamped
-            .into_iter()
-            .zip(results.iter().map(|(_, f)| *f))
-            .collect();
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        let gen_best_report = results
-            .iter()
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(r, _)| r.clone())
-            .unwrap_or_default();
-
-        record_generation(
-            gen,
-            config,
-            spec,
-            base,
-            &scored,
-            &gen_best_report,
-            &optimizer.sigma(),
-            history,
-            best_fitness,
-            best_params_json,
-            best_report_json,
-        );
+        record_generation(gen, config, spec, base, &scored, &best_report,
+            &optimizer.sigma(), history, best_fitness, best_params_json, best_report_json);
 
         optimizer.tell(&scored);
     }
@@ -329,11 +329,7 @@ fn run_ga(
     best_params_json: &mut serde_json::Value,
     best_report_json: &mut serde_json::Value,
 ) {
-    let pop_size = if config.pop_size > 0 {
-        config.pop_size
-    } else {
-        100
-    };
+    let pop_size = if config.pop_size > 0 { config.pop_size } else { 100 };
     let mut optimizer = ga::Ga::new(spec.dim(), pop_size, 0.25, base.ga.clone());
 
     let bounds: Vec<(f64, f64, bool, bool)> = spec
@@ -342,47 +338,14 @@ fn run_ga(
         .map(|b| (b.min, b.max, b.is_integer, b.is_boolean))
         .collect();
 
-    // Seed population randomly within bounds.
     let mut population: Vec<Vec<f64>> = (0..pop_size).map(|_| spec.random(rng)).collect();
 
     for gen in 0..config.generations {
-        // Evaluate fitness in parallel.
-        let results: Vec<(serde_json::Value, f64)> = population
-            .par_iter()
-            .map(|genome| {
-                let params = spec.decode(genome, base);
-                evaluate(store, &params, &config.fitness_metric, &base.fitness)
-            })
-            .collect();
+        let (scored, best_report) = evaluate_population(store, base, config, spec, population);
 
-        // Pair genomes with fitness, sorted best-first.
-        let mut scored: Vec<(Vec<f64>, f64)> = population
-            .into_iter()
-            .zip(results.iter().map(|(_, f)| *f))
-            .collect();
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        record_generation(gen, config, spec, base, &scored, &best_report,
+            &optimizer.sigma(), history, best_fitness, best_params_json, best_report_json);
 
-        let gen_best_report = results
-            .iter()
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(r, _)| r.clone())
-            .unwrap_or_default();
-
-        record_generation(
-            gen,
-            config,
-            spec,
-            base,
-            &scored,
-            &gen_best_report,
-            &optimizer.sigma(),
-            history,
-            best_fitness,
-            best_params_json,
-            best_report_json,
-        );
-
-        // Evolve next generation.
         population = optimizer.evolve_step(&scored, &bounds, rng);
     }
 }

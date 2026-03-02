@@ -7,6 +7,7 @@
 pub mod analysis;
 pub mod evolution;
 pub mod execution;
+pub mod portfolio;
 pub mod server;
 pub mod strategy;
 pub mod walk_forward;
@@ -32,9 +33,8 @@ use engine_types::{Params, ResolvedParams};
 
 pub use engine_data::{load_data_store, Axes};
 
-/// Run a single backtest: resolve dates, create setups, filter/signal/simulate
-/// for each sub-strategy, merge trades, produce a report.
-pub fn run_single(store: &DataStore, params: &Params) -> Report {
+/// Core backtest loop: resolve dates, run all setups, return merged trades.
+pub(crate) fn run_core(store: &DataStore, params: &Params) -> (Vec<engine_types::Trade>, usize, usize) {
     let nr = store.axes.n_rows;
 
     let start_row = params
@@ -57,7 +57,7 @@ pub fn run_single(store: &DataStore, params: &Params) -> Report {
     let setups = create_setups(&params.setup);
     if setups.is_empty() {
         eprintln!("  Unknown setup: {}", params.setup);
-        return analysis::generate_report(&[], &store.axes, params, 1);
+        return (Vec::new(), start_row, end_row);
     }
 
     let sizer = PositionSizer::from_params(params);
@@ -80,58 +80,21 @@ pub fn run_single(store: &DataStore, params: &Params) -> Report {
         all_trades.extend(trades);
     }
 
-    analysis::generate_report(&all_trades, &store.axes, params, 1)
+    (all_trades, start_row, end_row)
+}
+
+/// Run a single backtest: resolve dates, create setups, filter/signal/simulate
+/// for each sub-strategy, merge trades, produce a report.
+pub fn run_single(store: &DataStore, params: &Params) -> Report {
+    let (trades, _, _) = run_core(store, params);
+    analysis::generate_report(&trades, &store.axes, params, 1)
 }
 
 /// Like `run_single()` but also returns the raw trades for CSV export.
 pub fn run_single_with_trades(store: &DataStore, params: &Params) -> (Report, Vec<engine_types::Trade>) {
-    let nr = store.axes.n_rows;
-
-    let start_row = params
-        .start
-        .as_ref()
-        .and_then(|s| resolve_date_row(&store.axes, s))
-        .unwrap_or(0);
-    let end_row = params
-        .end
-        .as_ref()
-        .and_then(|s| resolve_date_row(&store.axes, s))
-        .unwrap_or(nr);
-
-    let rp = ResolvedParams {
-        params: params.clone(),
-        start_row,
-        end_row,
-    };
-
-    let setups = create_setups(&params.setup);
-    if setups.is_empty() {
-        eprintln!("  Unknown setup: {}", params.setup);
-        return (analysis::generate_report(&[], &store.axes, params, 1), Vec::new());
-    }
-
-    let sizer = PositionSizer::from_params(params);
-    let mut all_trades = Vec::new();
-
-    for setup in &setups {
-        let universe = setup.filter(store, params, start_row..end_row);
-        let signals = setup.signals(store, &universe, params);
-        let trades = execution::simulate(
-            store,
-            &signals,
-            &rp,
-            &sizer,
-            &setup.exit_rules(params),
-            setup.direction(),
-            setup.equity_fraction(),
-            setup.fill_mode(),
-            setup.name(),
-        );
-        all_trades.extend(trades);
-    }
-
-    let report = analysis::generate_report(&all_trades, &store.axes, params, 1);
-    (report, all_trades)
+    let (trades, _, _) = run_core(store, params);
+    let report = analysis::generate_report(&trades, &store.axes, params, 1);
+    (report, trades)
 }
 
 /// Run a batch of backtests with different parameter sets, sharing one DataStore.
@@ -146,58 +109,11 @@ pub fn run_batch(store: &DataStore, params_file: &Path) -> Result<Vec<Report>> {
 
     let reports: Vec<Report> = param_sets
         .par_iter()
-        .map(|params| run_batch_single(store, params, n_trials))
+        .map(|params| {
+            let (trades, _, _) = run_core(store, params);
+            analysis::generate_report(&trades, &store.axes, params, n_trials)
+        })
         .collect();
 
     Ok(reports)
-}
-
-/// Single backtest within a batch — passes n_trials for DSR correction.
-fn run_batch_single(store: &DataStore, params: &Params, n_trials: usize) -> Report {
-    let nr = store.axes.n_rows;
-
-    let start_row = params
-        .start
-        .as_ref()
-        .and_then(|s| resolve_date_row(&store.axes, s))
-        .unwrap_or(0);
-    let end_row = params
-        .end
-        .as_ref()
-        .and_then(|s| resolve_date_row(&store.axes, s))
-        .unwrap_or(nr);
-
-    let rp = ResolvedParams {
-        params: params.clone(),
-        start_row,
-        end_row,
-    };
-
-    let setups = create_setups(&params.setup);
-    if setups.is_empty() {
-        eprintln!("  Unknown setup: {}", params.setup);
-        return analysis::generate_report(&[], &store.axes, params, n_trials);
-    }
-
-    let sizer = PositionSizer::from_params(params);
-    let mut all_trades = Vec::new();
-
-    for setup in &setups {
-        let universe = setup.filter(store, params, start_row..end_row);
-        let signals = setup.signals(store, &universe, params);
-        let trades = execution::simulate(
-            store,
-            &signals,
-            &rp,
-            &sizer,
-            &setup.exit_rules(params),
-            setup.direction(),
-            setup.equity_fraction(),
-            setup.fill_mode(),
-            setup.name(),
-        );
-        all_trades.extend(trades);
-    }
-
-    analysis::generate_report(&all_trades, &store.axes, params, n_trials)
 }

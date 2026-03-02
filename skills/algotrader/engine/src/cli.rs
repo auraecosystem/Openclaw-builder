@@ -56,9 +56,8 @@ pub struct Cli {
     #[arg(long, default_value = "0.25")]
     pub max_dist_52w: f32,
 
-    /// Minimum average dollar volume
-    #[arg(long, default_value = "150000000")]
-    pub min_adv: f32,
+    // min_adv moved to Option<f32> below (alongside min_price/min_vol)
+    // to avoid clap defaults overwriting --crypto presets
 
     /// Slippage impact factor
     #[arg(long, default_value = "0.1")]
@@ -100,13 +99,17 @@ pub struct Cli {
     #[arg(long, default_value = "1")]
     pub bars_per_day: u32,
 
-    /// Minimum price filter (5.0 for stocks, 0.0 for crypto)
-    #[arg(long, default_value = "5.0")]
-    pub min_price: f32,
+    /// Minimum price filter (default: 5.0 for stocks; --crypto sets 0.0)
+    #[arg(long)]
+    pub min_price: Option<f32>,
 
-    /// Minimum volume SMA filter
-    #[arg(long, default_value = "300000")]
-    pub min_vol: f32,
+    /// Minimum volume SMA filter (default: 300000 for stocks; --crypto sets 1000)
+    #[arg(long)]
+    pub min_vol: Option<f32>,
+
+    /// Minimum average dollar volume (default: 150M for stocks; --crypto sets 0)
+    #[arg(long)]
+    pub min_adv: Option<f32>,
 
     // -- Evolution options --------------------------------------------------
 
@@ -161,6 +164,11 @@ pub struct Cli {
     /// Load base params from a JSON config file (CLI flags override)
     #[arg(long)]
     pub config: Option<String>,
+
+    /// Run all *.json strategy configs in a directory as a portfolio.
+    /// Outputs per-strategy reports + pairwise correlation matrix.
+    #[arg(long)]
+    pub portfolio: Option<String>,
 }
 
 impl Cli {
@@ -170,13 +178,30 @@ impl Cli {
     /// base Params (preserving signal_params, pattern_params, fitness, etc.).
     /// CLI flags then override the core fields on top of that base.
     pub fn to_params(&self) -> algotrader_engine::types::Params {
+        // --crypto sets data-agnostic crypto presets as the base; --config then
+        // overlays JSON; individual CLI flags always win on top.
+        let crypto_base = if self.crypto {
+            algotrader_engine::types::Params::crypto_defaults()
+        } else {
+            algotrader_engine::types::Params::default()
+        };
+
         let mut p = if let Some(ref cfg_path) = self.config {
             let content = fs::read_to_string(cfg_path)
                 .unwrap_or_else(|e| panic!("Failed to read config {cfg_path}: {e}"));
-            serde_json::from_str::<algotrader_engine::types::Params>(&content)
-                .unwrap_or_else(|e| panic!("Failed to parse config {cfg_path}: {e}"))
+            let mut from_json = serde_json::from_str::<algotrader_engine::types::Params>(&content)
+                .unwrap_or_else(|e| panic!("Failed to parse config {cfg_path}: {e}"));
+            // Apply crypto presets on top of JSON-loaded params
+            if self.crypto {
+                from_json.data = crypto_base.data.clone();
+                from_json.min_price = crypto_base.min_price;
+                from_json.min_vol = crypto_base.min_vol;
+                from_json.min_adv = crypto_base.min_adv;
+                from_json.regime = crypto_base.regime;
+            }
+            from_json
         } else {
-            algotrader_engine::types::Params::default()
+            crypto_base
         };
 
         // CLI flags always override core fields.
@@ -188,7 +213,7 @@ impl Cli {
         p.vol_ratio = self.vol_ratio;
         p.max_range_pct = self.max_range;
         p.max_dist_52w = self.max_dist_52w;
-        p.min_adv = self.min_adv;
+        if let Some(v) = self.min_adv { p.min_adv = v; }
         p.slippage_k = self.slippage_k;
         p.min_prior_move = self.min_prior_move;
         p.max_sma_ext = self.max_sma_ext;
@@ -199,8 +224,8 @@ impl Cli {
         p.min_adr_pct = self.min_adr_pct;
         p.min_consol_days = self.min_consol_days;
         p.bars_per_day = self.bars_per_day;
-        p.min_price = self.min_price;
-        p.min_vol = self.min_vol;
+        if let Some(v) = self.min_price { p.min_price = v; }
+        if let Some(v) = self.min_vol { p.min_vol = v; }
 
         p
     }

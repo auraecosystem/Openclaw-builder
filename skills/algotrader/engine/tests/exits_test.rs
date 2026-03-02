@@ -34,6 +34,7 @@ fn make_test_store(n_rows: usize, n_cols: usize, values: &[(Indicator, Vec<f32>)
         etf_cols: vec![false; n_cols],
         n_rows,
         n_cols,
+        trading_hours: 6.5,
     };
 
     DataStore::new(axes, daily, None)

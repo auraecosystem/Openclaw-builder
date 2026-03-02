@@ -12,12 +12,26 @@ fn main() -> Result<()> {
     let args = cli::Cli::parse();
     let data_dir = Path::new(&args.data_dir);
 
+    // Build base params early so DataConfig is available for data loading.
+    // The --crypto flag and --config file both affect DataConfig.
+    let base_params = args.to_params();
+
     eprintln!("Loading data from {}...", data_dir.display());
     let t0 = Instant::now();
-    let store = algotrader_engine::load_data_store(data_dir)?;
+    let store = algotrader_engine::load_data_store(data_dir, &base_params.data)?;
     eprintln!("  Loaded in {:.2}s", t0.elapsed().as_secs_f64());
 
-    if args.evolve {
+    if let Some(portfolio_dir) = &args.portfolio {
+        let t1 = Instant::now();
+        let result = algotrader_engine::portfolio::run_portfolio(&store, Path::new(portfolio_dir))?;
+        eprintln!(
+            "  Portfolio complete in {:.2}s ({} strategies)",
+            t1.elapsed().as_secs_f64(),
+            result.strategies.len(),
+        );
+        let json = serde_json::to_string_pretty(&result)?;
+        println!("{}", json);
+    } else if args.evolve {
         use algotrader_engine::evolution::fitness::FitnessMetric;
         use algotrader_engine::evolution::{Algorithm, EvolutionConfig};
 
@@ -33,7 +47,7 @@ fn main() -> Result<()> {
             seed: args.seed,
         };
 
-        let base = args.to_params();
+        let base = base_params.clone();
 
         let t1 = Instant::now();
         if args.wf_folds > 0 {
@@ -74,7 +88,7 @@ fn main() -> Result<()> {
         let json = serde_json::to_string(&reports)?;
         println!("{}", json);
     } else if let Some(csv_path) = &args.dump_trades {
-        let params = args.to_params();
+        let params = base_params.clone();
         let t1 = Instant::now();
         let (report, trades) = algotrader_engine::run_single_with_trades(&store, &params);
         eprintln!(
@@ -86,7 +100,7 @@ fn main() -> Result<()> {
         let json = serde_json::to_string_pretty(&report)?;
         println!("{}", json);
     } else {
-        let params = args.to_params();
+        let params = base_params;
         let t1 = Instant::now();
         let report = algotrader_engine::run_single(&store, &params);
         eprintln!(
