@@ -251,6 +251,27 @@
 - Agents MUST NOT create or push merge commits on `main`. If `main` has advanced, rebase local commits onto the latest `origin/main` before pushing.
 - Bulk PR close/reopen safety: if a close action would affect more than 5 PRs, first ask for explicit user confirmation with the exact PR count and target scope/query.
 
+## GitHub Search (`gh`)
+
+- Prefer targeted keyword search before proposing new work or duplicating fixes.
+- Use `--repo openclaw/openclaw` + `--match title,body` first; add `--match comments` when triaging follow-up threads.
+- PRs: `gh search prs --repo openclaw/openclaw --match title,body --limit 50 -- "auto-update"`
+- Issues: `gh search issues --repo openclaw/openclaw --match title,body --limit 50 -- "auto-update"`
+- Structured output example:
+  `gh search issues --repo openclaw/openclaw --match title,body --limit 50 --json number,title,state,url,updatedAt -- "auto update" --jq '.[] | "\(.number) | \(.state) | \(.title) | \(.url)"'`
+
+## Exec Approvals Architecture
+
+- Two config files control exec permissions; **both** must agree:
+  - `~/.openclaw/openclaw.json` → `tools.exec.security` (agent-side default; hardcodes `"allowlist"` if unset)
+  - `~/.openclaw/exec-approvals.json` → per-agent `security` (node-host side)
+- Effective security = `minSecurity(agentSide, nodeHostSide)` — always picks the **most restrictive**. Setting `"full"` in only one file is insufficient.
+- In `"allowlist"` mode, **all shell wrapper invocations** (`zsh -c "..."`, `bash -c "..."`) are **unconditionally blocked** at the policy level (`exec-policy.ts:63`), regardless of inner-command allowlist matches. The system forces `analysisOk = false` and `allowlistSatisfied = false`, then triggers the ask flow.
+- Ask flow requires an approval UI (companion app or Discord with `approvals.exec` forwarding). When no UI is connected, prompts time out (120s) and `askFallback` (default `"deny"`) blocks the command.
+- `autoAllowSkills` lets skills auto-trust binaries declared in `requires.bins` (SKILL.md metadata). Default is `false`.
+- Gateway resolves executable paths using its own (minimal) PATH — typically `/usr/bin:/bin:/usr/sbin:/sbin` plus homebrew. Mise, pyenv, nvm shims are NOT in the gateway PATH. Use `**` glob patterns in allowlists (e.g. `**/python3*`) to cover path mismatches.
+- Key code path: `bash-tools.exec.ts:317` → `bash-tools.exec-host-node.ts:56` → `exec-policy.ts:63` → `invoke-system-run.ts:354`.
+- To allow an agent to run commands freely: set `tools.exec.security: "full"` in `openclaw.json` (requires gateway restart). The `exec-approvals.json` `security` alone cannot override the agent-side default.
 ## Security & Configuration Tips
 
 - Web provider stores creds at `~/.openclaw/credentials/`; rerun `openclaw login` if logged out.
