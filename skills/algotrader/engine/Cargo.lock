@@ -646,6 +646,7 @@ dependencies = [
  "engine-types",
  "serde",
  "serde_json",
+ "strum",
 ]
 
 [[package]]
