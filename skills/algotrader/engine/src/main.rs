@@ -28,6 +28,7 @@ fn main() -> Result<()> {
             fitness_metric: FitnessMetric::parse(&args.fitness),
             initial_sigma: args.sigma,
             evolve_signals: args.evolve_signals,
+            evolve_patterns: args.evolve_patterns,
             crypto: args.crypto,
             seed: args.seed,
         };

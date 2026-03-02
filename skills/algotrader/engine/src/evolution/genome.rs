@@ -4,7 +4,7 @@
 //! ordered bounds, encode/decode routines, and clamping. Genome vectors are
 //! plain `Vec<f64>` so they work with any optimizer (CMA-ES, DE, GA).
 
-use engine_types::{Params, SignalParams, SCANNER_FEATURE_COUNT};
+use engine_types::{Params, PatternParams, SignalParams, PATTERN_FEATURE_COUNT, SCANNER_FEATURE_COUNT};
 
 // ---------------------------------------------------------------------------
 // Gene bound metadata
@@ -115,10 +115,58 @@ impl GenomeSpec {
         Self { bounds }
     }
 
+    /// Build a spec for the ~19 evolvable `PatternParams` fields (bull flag tuning).
+    pub fn pattern_params_spec() -> Self {
+        let mut bounds = vec![
+            // Bull flag components
+            gene("flag_pole_mid", 0.02, 0.15),
+            gene("flag_pole_k", 5.0, 50.0),
+            igene("flag_pole_min_bars", 2.0, 15.0),
+            gene("flag_slope_center", -0.5, 0.1),
+            gene("flag_slope_sigma", 0.05, 1.0),
+            gene("flag_retrace_lo", 0.10, 0.50),
+            gene("flag_retrace_hi", 0.30, 0.80),
+            gene("flag_vol_mid", 0.3, 1.2),
+            gene("flag_vol_k", -30.0, -1.0),
+            igene("flag_max_bars", 10.0, 60.0),
+            igene("flag_lookback", 20.0, 120.0),
+            // Composite scoring
+            gene("pattern_scorer_bias", -2.0, 2.0),
+            gene("pattern_alpha", 0.0, 1.0),
+        ];
+
+        // 4 bull flag component weights: [pole, slope, retracement, volume]
+        for i in 0..4 {
+            bounds.push(gene(flag_weight_name(i), 0.0, 1.0));
+        }
+
+        // 4 multi-timeframe scorer weights: [daily, 1h, 30m, 5m]
+        for i in 0..PATTERN_FEATURE_COUNT {
+            bounds.push(gene(pattern_scorer_weight_name(i), 0.0, 3.0));
+        }
+
+        Self { bounds }
+    }
+
     /// Concatenation of params_spec + signal_params_spec for joint optimization.
     pub fn combined_spec(crypto: bool) -> Self {
         let mut combined = Self::params_spec(crypto);
         combined.bounds.extend(Self::signal_params_spec().bounds);
+        combined
+    }
+
+    /// Concatenation of params_spec + signal_params_spec + pattern_params_spec.
+    pub fn combined_with_patterns_spec(crypto: bool) -> Self {
+        let mut combined = Self::params_spec(crypto);
+        combined.bounds.extend(Self::signal_params_spec().bounds);
+        combined.bounds.extend(Self::pattern_params_spec().bounds);
+        combined
+    }
+
+    /// params_spec + pattern_params_spec (no signals).
+    pub fn params_with_patterns_spec(crypto: bool) -> Self {
+        let mut combined = Self::params_spec(crypto);
+        combined.bounds.extend(Self::pattern_params_spec().bounds);
         combined
     }
 }
@@ -241,6 +289,22 @@ fn scorer_weight_name(i: usize) -> &'static str {
     SCORER_WEIGHT_NAMES[i]
 }
 
+static FLAG_WEIGHT_NAMES: [&str; 4] = [
+    "flag_w0", "flag_w1", "flag_w2", "flag_w3",
+];
+
+fn flag_weight_name(i: usize) -> &'static str {
+    FLAG_WEIGHT_NAMES[i]
+}
+
+static PATTERN_SCORER_WEIGHT_NAMES: [&str; PATTERN_FEATURE_COUNT] = [
+    "pat_scorer_w0", "pat_scorer_w1", "pat_scorer_w2", "pat_scorer_w3",
+];
+
+fn pattern_scorer_weight_name(i: usize) -> &'static str {
+    PATTERN_SCORER_WEIGHT_NAMES[i]
+}
+
 // ---------------------------------------------------------------------------
 // Field-level encode: Params/SignalParams -> f64
 // ---------------------------------------------------------------------------
@@ -262,6 +326,9 @@ fn encode_field(name: &str, params: &Params) -> f64 {
         "min_adr_pct" => params.min_adr_pct as f64,
         "min_consol_days" => params.min_consol_days as f64,
         "regime" => if params.regime { 1.0 } else { 0.0 },
+
+        // -- PatternParams fields --
+        n if is_pattern_gene(n) => encode_pattern_field(name, params.pattern_params.as_ref()),
 
         // -- SignalParams fields (default to SignalParams::default() if absent) --
         _ => encode_signal_field(name, params.signal_params.as_ref()),
@@ -313,6 +380,98 @@ fn encode_signal_field(name: &str, sp: Option<&SignalParams>) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
+// Field-level encode/decode: PatternParams
+// ---------------------------------------------------------------------------
+
+/// Check whether a gene name belongs to the pattern params group.
+fn is_pattern_gene(name: &str) -> bool {
+    matches!(
+        name,
+        "flag_pole_mid"
+            | "flag_pole_k"
+            | "flag_pole_min_bars"
+            | "flag_slope_center"
+            | "flag_slope_sigma"
+            | "flag_retrace_lo"
+            | "flag_retrace_hi"
+            | "flag_vol_mid"
+            | "flag_vol_k"
+            | "flag_max_bars"
+            | "flag_lookback"
+            | "pattern_scorer_bias"
+            | "pattern_alpha"
+    ) || name.starts_with("flag_w")
+        || name.starts_with("pat_scorer_w")
+}
+
+fn encode_pattern_field(name: &str, pp: Option<&PatternParams>) -> f64 {
+    let defaults = PatternParams::default();
+    let pp = pp.unwrap_or(&defaults);
+
+    match name {
+        "flag_pole_mid" => pp.flag_pole_mid as f64,
+        "flag_pole_k" => pp.flag_pole_k as f64,
+        "flag_pole_min_bars" => pp.flag_pole_min_bars as f64,
+        "flag_slope_center" => pp.flag_slope_center as f64,
+        "flag_slope_sigma" => pp.flag_slope_sigma as f64,
+        "flag_retrace_lo" => pp.flag_retrace_lo as f64,
+        "flag_retrace_hi" => pp.flag_retrace_hi as f64,
+        "flag_vol_mid" => pp.flag_vol_mid as f64,
+        "flag_vol_k" => pp.flag_vol_k as f64,
+        "flag_max_bars" => pp.flag_max_bars as f64,
+        "flag_lookback" => pp.flag_lookback as f64,
+        "pattern_scorer_bias" => pp.pattern_scorer_bias as f64,
+        "pattern_alpha" => pp.pattern_alpha as f64,
+
+        // flag_w0..flag_w3 (bull flag component weights)
+        n if n.starts_with("flag_w") => {
+            let idx: usize = n["flag_w".len()..].parse().unwrap_or(0);
+            pp.flag_weights[idx] as f64
+        }
+
+        // pat_scorer_w0..pat_scorer_w3 (multi-timeframe weights)
+        n if n.starts_with("pat_scorer_w") => {
+            let idx: usize = n["pat_scorer_w".len()..].parse().unwrap_or(0);
+            pp.pattern_scorer_weights[idx] as f64
+        }
+
+        unknown => panic!("encode_pattern_field: unknown gene name '{unknown}'"),
+    }
+}
+
+fn decode_pattern_field(name: &str, v: f64, pp: &mut PatternParams) {
+    match name {
+        "flag_pole_mid" => pp.flag_pole_mid = v as f32,
+        "flag_pole_k" => pp.flag_pole_k = v as f32,
+        "flag_pole_min_bars" => pp.flag_pole_min_bars = v as usize,
+        "flag_slope_center" => pp.flag_slope_center = v as f32,
+        "flag_slope_sigma" => pp.flag_slope_sigma = v as f32,
+        "flag_retrace_lo" => pp.flag_retrace_lo = v as f32,
+        "flag_retrace_hi" => pp.flag_retrace_hi = v as f32,
+        "flag_vol_mid" => pp.flag_vol_mid = v as f32,
+        "flag_vol_k" => pp.flag_vol_k = v as f32,
+        "flag_max_bars" => pp.flag_max_bars = v as usize,
+        "flag_lookback" => pp.flag_lookback = v as usize,
+        "pattern_scorer_bias" => pp.pattern_scorer_bias = v as f32,
+        "pattern_alpha" => pp.pattern_alpha = v as f32,
+
+        // flag_w0..flag_w3
+        n if n.starts_with("flag_w") => {
+            let idx: usize = n["flag_w".len()..].parse().unwrap_or(0);
+            pp.flag_weights[idx] = v as f32;
+        }
+
+        // pat_scorer_w0..pat_scorer_w3
+        n if n.starts_with("pat_scorer_w") => {
+            let idx: usize = n["pat_scorer_w".len()..].parse().unwrap_or(0);
+            pp.pattern_scorer_weights[idx] = v as f32;
+        }
+
+        unknown => panic!("decode_pattern_field: unknown gene name '{unknown}'"),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Field-level decode: f64 -> Params/SignalParams
 // ---------------------------------------------------------------------------
 
@@ -342,6 +501,12 @@ fn decode_field(bound: &GeneBound, raw: f64, params: &mut Params) {
         "min_adr_pct" => params.min_adr_pct = v as f32,
         "min_consol_days" => params.min_consol_days = v as u32,
         "regime" => params.regime = v >= 0.5,
+
+        // -- PatternParams fields --
+        n if is_pattern_gene(n) => {
+            let pp = params.pattern_params.get_or_insert_with(PatternParams::default);
+            decode_pattern_field(bound.name, v, pp);
+        }
 
         // -- SignalParams fields --
         _ => {
@@ -491,6 +656,39 @@ mod tests {
         assert!((dsp.scorer_weights[0] - 2.5).abs() < 1e-4);
         assert!((dsp.scorer_weights[12] - 0.1).abs() < 1e-4);
         assert!((dsp.scorer_weights[6] - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn round_trip_pattern_params() {
+        let spec = GenomeSpec::pattern_params_spec();
+        let mut params = Params::default();
+        let mut pp = PatternParams::default();
+        pp.flag_pole_mid = 0.08;
+        pp.flag_weights = [0.40, 0.10, 0.30, 0.20];
+        pp.pattern_alpha = 0.7;
+        params.pattern_params = Some(pp);
+
+        let genome = spec.encode(&params);
+        assert_eq!(genome.len(), spec.dim());
+        let decoded = spec.decode(&genome, &Params::default());
+        assert!(decoded.pattern_params.is_some());
+        let dp = decoded.pattern_params.as_ref().unwrap();
+        assert!((dp.flag_pole_mid - 0.08).abs() < 1e-4);
+        assert!((dp.flag_weights[0] - 0.40).abs() < 1e-4);
+        assert!((dp.pattern_alpha - 0.7).abs() < 1e-4);
+    }
+
+    #[test]
+    fn round_trip_combined_with_patterns() {
+        let spec = GenomeSpec::combined_with_patterns_spec(true);
+        let mut params = Params::default();
+        params.signal_params = Some(SignalParams::default());
+        params.pattern_params = Some(PatternParams::default());
+        let genome = spec.encode(&params);
+        assert_eq!(genome.len(), spec.dim());
+        let decoded = spec.decode(&genome, &Params::default());
+        assert!(decoded.signal_params.is_some());
+        assert!(decoded.pattern_params.is_some());
     }
 
     #[test]

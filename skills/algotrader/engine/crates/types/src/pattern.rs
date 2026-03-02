@@ -26,6 +26,84 @@ pub enum PatternTimeframe {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PatternKind {
     BullFlag,
+    BreakoutDetect,
+}
+
+/// Tunable knobs for the retrospective breakout detector.
+///
+/// Answers "did a breakout already happen in the last N bars?" by scoring
+/// return magnitude, volume surge, and range expansion.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BreakoutDetectParams {
+    /// How many recent bars to check for the breakout.
+    #[serde(default = "default_detect_lookback")]
+    pub detect_lookback: usize,
+
+    /// Prior window (before the lookback) used as the baseline for volume/range.
+    #[serde(default = "default_detect_prior_window")]
+    pub detect_prior_window: usize,
+
+    // -- Return component ---------------------------------------------------
+
+    /// Sigmoid midpoint for N-bar return (e.g. 0.05 = 5% move).
+    #[serde(default = "default_detect_return_mid")]
+    pub detect_return_mid: f32,
+
+    /// Sigmoid steepness for return (higher = sharper threshold).
+    #[serde(default = "default_detect_return_k")]
+    pub detect_return_k: f32,
+
+    // -- Volume surge component ---------------------------------------------
+
+    /// Sigmoid midpoint for volume ratio (recent_vol / prior_vol).
+    #[serde(default = "default_detect_vol_surge_mid")]
+    pub detect_vol_surge_mid: f32,
+
+    /// Sigmoid steepness for volume ratio.
+    #[serde(default = "default_detect_vol_surge_k")]
+    pub detect_vol_surge_k: f32,
+
+    // -- Range expansion component ------------------------------------------
+
+    /// Sigmoid midpoint for range ratio (recent_range / prior_range).
+    #[serde(default = "default_detect_range_mid")]
+    pub detect_range_mid: f32,
+
+    /// Sigmoid steepness for range ratio.
+    #[serde(default = "default_detect_range_k")]
+    pub detect_range_k: f32,
+
+    // -- Weights ------------------------------------------------------------
+
+    /// Weights for [return, volume, range] components.
+    #[serde(default = "default_detect_weights")]
+    pub detect_weights: [f32; 3],
+}
+
+fn default_detect_lookback() -> usize { 10 }
+fn default_detect_prior_window() -> usize { 20 }
+fn default_detect_return_mid() -> f32 { 0.05 }
+fn default_detect_return_k() -> f32 { 30.0 }
+fn default_detect_vol_surge_mid() -> f32 { 1.5 }
+fn default_detect_vol_surge_k() -> f32 { 5.0 }
+fn default_detect_range_mid() -> f32 { 1.5 }
+fn default_detect_range_k() -> f32 { 5.0 }
+fn default_detect_weights() -> [f32; 3] { [0.50, 0.25, 0.25] }
+
+impl Default for BreakoutDetectParams {
+    fn default() -> Self {
+        Self {
+            detect_lookback: default_detect_lookback(),
+            detect_prior_window: default_detect_prior_window(),
+            detect_return_mid: default_detect_return_mid(),
+            detect_return_k: default_detect_return_k(),
+            detect_vol_surge_mid: default_detect_vol_surge_mid(),
+            detect_vol_surge_k: default_detect_vol_surge_k(),
+            detect_range_mid: default_detect_range_mid(),
+            detect_range_k: default_detect_range_k(),
+            detect_weights: default_detect_weights(),
+        }
+    }
 }
 
 /// Fixed-size array holding pattern confidence scores for one ticker.

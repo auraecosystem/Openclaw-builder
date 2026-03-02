@@ -18,17 +18,14 @@ const EPS: f64 = 1e-6;
 fn sharpe_known_returns() {
     // Returns: [0.01, -0.02, 0.03, -0.01, 0.02]
     // mean  = 0.006
-    // var   = sum((r - 0.006)^2) / 5
-    //       = (0.004^2 + (-0.026)^2 + 0.024^2 + (-0.016)^2 + 0.014^2) / 5
-    //       = (0.000016 + 0.000676 + 0.000576 + 0.000256 + 0.000196) / 5
-    //       = 0.001720 / 5
-    //       = 0.000344
-    // std   = sqrt(0.000344) = 0.018547236...
-    // annualization = 1.0
-    // sharpe = 0.006 / 0.018547236 * 1.0 = 0.323498...
+    // sample var = sum((r - 0.006)^2) / (5 - 1)   (Bessel's correction)
+    //           = 0.001720 / 4 = 0.000430
+    // std   = sqrt(0.000430) = 0.020736441...
+    // sharpe = 0.006 / 0.020736441 * 1.0 = 0.28934...
     let returns = vec![0.01, -0.02, 0.03, -0.01, 0.02];
     let result = sharpe(&returns, 1.0);
-    let expected = 0.006 / (0.000344_f64).sqrt();
+    let sample_var: f64 = 0.001720 / 4.0;
+    let expected = 0.006 / sample_var.sqrt();
     assert!(
         (result - expected).abs() < EPS,
         "sharpe_known_returns: got {}, expected {}",
@@ -39,11 +36,12 @@ fn sharpe_known_returns() {
 
 #[test]
 fn sharpe_with_annualization() {
-    // Same returns, annualized with sqrt(252)
+    // Same returns, annualized with sqrt(252), using sample std dev
     let returns = vec![0.01, -0.02, 0.03, -0.01, 0.02];
     let af = 252.0_f64.sqrt();
     let result = sharpe(&returns, af);
-    let expected = (0.006 / (0.000344_f64).sqrt()) * af;
+    let sample_var: f64 = 0.001720 / 4.0;
+    let expected = (0.006 / sample_var.sqrt()) * af;
     assert!(
         (result - expected).abs() < EPS,
         "sharpe_with_annualization: got {}, expected {}",

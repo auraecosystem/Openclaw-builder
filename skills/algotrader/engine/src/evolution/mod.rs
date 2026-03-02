@@ -54,6 +54,7 @@ pub struct EvolutionConfig {
     pub fitness_metric: FitnessMetric,
     pub initial_sigma: f64,
     pub evolve_signals: bool,
+    pub evolve_patterns: bool,
     pub crypto: bool,
     pub seed: Option<u64>,
 }
@@ -67,6 +68,7 @@ impl Default for EvolutionConfig {
             fitness_metric: FitnessMetric::Composite,
             initial_sigma: 0.3,
             evolve_signals: false,
+            evolve_patterns: false,
             crypto: false,
             seed: None,
         }
@@ -122,10 +124,11 @@ pub struct WfFold {
 /// optimizers evaluate fitness in parallel via rayon. Returns the best
 /// parameters found along with generation-by-generation history.
 pub fn evolve(store: &DataStore, base: &Params, config: &EvolutionConfig) -> EvolutionResult {
-    let spec = if config.evolve_signals {
-        GenomeSpec::combined_spec(config.crypto)
-    } else {
-        GenomeSpec::params_spec(config.crypto)
+    let spec = match (config.evolve_signals, config.evolve_patterns) {
+        (true, true) => GenomeSpec::combined_with_patterns_spec(config.crypto),
+        (true, false) => GenomeSpec::combined_spec(config.crypto),
+        (false, true) => GenomeSpec::params_with_patterns_spec(config.crypto),
+        (false, false) => GenomeSpec::params_spec(config.crypto),
     };
 
     let mut rng = match config.seed {

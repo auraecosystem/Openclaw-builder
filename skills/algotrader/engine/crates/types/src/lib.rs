@@ -21,7 +21,7 @@ pub use feature::{FeatureVec, SCANNER_FEATURE_COUNT};
 pub use fitness_config::FitnessConfig;
 pub use ga_config::GaConfig;
 pub use matrix::{WideMask, WideMatrix};
-pub use pattern::{PatternParams, PatternScores, PATTERN_FEATURE_COUNT};
+pub use pattern::{BreakoutDetectParams, PatternParams, PatternScores, PATTERN_FEATURE_COUNT};
 pub use signal_params::SignalParams;
 pub use strategy_config::StrategyConfig;
 pub use types::{Direction, Params, ResolvedParams, SignalSet, Trade};

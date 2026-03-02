@@ -1,3 +1,5 @@
+use std::fs;
+
 use clap::Parser;
 
 #[derive(Parser)]
@@ -136,6 +138,10 @@ pub struct Cli {
     #[arg(long)]
     pub evolve_signals: bool,
 
+    /// Also evolve PatternParams (bull flag tuning, +19D)
+    #[arg(long)]
+    pub evolve_patterns: bool,
+
     /// Use crypto parameter ranges
     #[arg(long)]
     pub crypto: bool,
@@ -151,40 +157,51 @@ pub struct Cli {
     /// Dump individual trades to CSV for cross-engine validation
     #[arg(long)]
     pub dump_trades: Option<String>,
+
+    /// Load base params from a JSON config file (CLI flags override)
+    #[arg(long)]
+    pub config: Option<String>,
 }
 
 impl Cli {
+    /// Build Params from CLI args, optionally loading a JSON config as base.
+    ///
+    /// When `--config path.json` is provided, the JSON is deserialized as the
+    /// base Params (preserving signal_params, pattern_params, fitness, etc.).
+    /// CLI flags then override the core fields on top of that base.
     pub fn to_params(&self) -> algotrader_engine::types::Params {
-        algotrader_engine::types::Params {
-            setup: self.setup.clone(),
-            start: self.start.clone(),
-            end: self.end.clone(),
-            init_cash: self.init_cash,
-            rs_pct: self.rs_pct,
-            vol_ratio: self.vol_ratio,
-            max_range_pct: self.max_range,
-            max_dist_52w: self.max_dist_52w,
-            min_adv: self.min_adv,
-            slippage_k: self.slippage_k,
-            min_prior_move: self.min_prior_move,
-            max_sma_ext: self.max_sma_ext,
-            regime: !self.no_regime,
-            risk_pct: self.risk_pct,
-            max_pos_pct: self.max_pos_pct,
-            split_frac: self.split_frac,
-            min_adr_pct: self.min_adr_pct,
-            min_consol_days: self.min_consol_days,
-            bars_per_day: self.bars_per_day,
-            min_price: self.min_price,
-            min_vol: self.min_vol,
-            signal_params: None,
-            pattern_params: None,
-            execution: Default::default(),
-            strategy: Default::default(),
-            fitness: Default::default(),
-            ga: Default::default(),
-            cmaes: Default::default(),
-            analysis: Default::default(),
-        }
+        let mut p = if let Some(ref cfg_path) = self.config {
+            let content = fs::read_to_string(cfg_path)
+                .unwrap_or_else(|e| panic!("Failed to read config {cfg_path}: {e}"));
+            serde_json::from_str::<algotrader_engine::types::Params>(&content)
+                .unwrap_or_else(|e| panic!("Failed to parse config {cfg_path}: {e}"))
+        } else {
+            algotrader_engine::types::Params::default()
+        };
+
+        // CLI flags always override core fields.
+        p.setup = self.setup.clone();
+        p.start = self.start.clone();
+        p.end = self.end.clone();
+        p.init_cash = self.init_cash;
+        p.rs_pct = self.rs_pct;
+        p.vol_ratio = self.vol_ratio;
+        p.max_range_pct = self.max_range;
+        p.max_dist_52w = self.max_dist_52w;
+        p.min_adv = self.min_adv;
+        p.slippage_k = self.slippage_k;
+        p.min_prior_move = self.min_prior_move;
+        p.max_sma_ext = self.max_sma_ext;
+        p.regime = !self.no_regime;
+        p.risk_pct = self.risk_pct;
+        p.max_pos_pct = self.max_pos_pct;
+        p.split_frac = self.split_frac;
+        p.min_adr_pct = self.min_adr_pct;
+        p.min_consol_days = self.min_consol_days;
+        p.bars_per_day = self.bars_per_day;
+        p.min_price = self.min_price;
+        p.min_vol = self.min_vol;
+
+        p
     }
 }
