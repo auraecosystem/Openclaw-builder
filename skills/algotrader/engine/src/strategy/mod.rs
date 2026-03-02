@@ -9,6 +9,7 @@ pub use engine_types::strategy_config as config;
 mod breakout;
 mod ep;
 mod parabolic;
+mod pattern_breakout;
 mod signal_breakout;
 
 use std::ops::Range;
@@ -20,6 +21,7 @@ use engine_types::{Direction, Params, SignalSet};
 pub use breakout::{BreakoutQuick, BreakoutRunner};
 pub use ep::EpisodicPivot;
 pub use parabolic::ParabolicShort;
+pub use pattern_breakout::PatternBreakout;
 pub use signal_breakout::SignalBreakout;
 
 /// Core abstraction: a trading setup that can filter a universe, generate
@@ -66,6 +68,7 @@ pub fn create_setups(name: &str) -> Vec<Box<dyn Setup>> {
         "ep" => vec![Box::new(EpisodicPivot)],
         "parabolic" => vec![Box::new(ParabolicShort)],
         "signal_breakout" => vec![Box::new(SignalBreakout)],
+        "pattern_breakout" => vec![Box::new(PatternBreakout)],
         _ => vec![],
     }
 }

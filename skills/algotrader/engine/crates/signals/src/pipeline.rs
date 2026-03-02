@@ -5,7 +5,7 @@
 //! It runs characterization (when due), scanning, composite scoring,
 //! conditional investigation, and execution signal extraction.
 
-use engine_types::SCANNER_FEATURE_COUNT;
+use engine_types::{PatternParams, PatternScores, SCANNER_FEATURE_COUNT};
 use engine_types::SignalParams;
 
 use super::algorithms::{
@@ -516,6 +516,59 @@ pub fn run_pipeline(
         bocpd_exit: exec.bocpd_exit,
         vmd_entry_trigger: exec.vmd_entry_trigger,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Pattern pipeline entry point
+// ---------------------------------------------------------------------------
+
+/// Run fuzzy pattern scoring across four timeframes for one bar of one ticker.
+///
+/// Returns a `PatternScores` array `[daily, 1h, 30m, 5m]` where each value
+/// is a bull flag confidence in [0, 1], or NaN if there is insufficient data.
+///
+/// Each slice is the full OHLCV column up to and including the current bar.
+/// Pass empty slices for timeframes that are unavailable.
+pub fn run_pattern_pipeline(
+    // Daily OHLCV (ending at current daily bar)
+    daily_close: &[f32],
+    daily_high: &[f32],
+    daily_low: &[f32],
+    daily_volume: &[f32],
+    daily_atr: f32,
+    // 1h OHLCV
+    h1_close: &[f32],
+    h1_high: &[f32],
+    h1_low: &[f32],
+    h1_volume: &[f32],
+    h1_atr: f32,
+    // 30m OHLCV
+    m30_close: &[f32],
+    m30_high: &[f32],
+    m30_low: &[f32],
+    m30_volume: &[f32],
+    m30_atr: f32,
+    // 5m OHLCV
+    m5_close: &[f32],
+    m5_high: &[f32],
+    m5_low: &[f32],
+    m5_volume: &[f32],
+    m5_atr: f32,
+    params: &PatternParams,
+) -> PatternScores {
+    let score_tf = |c: &[f32], h: &[f32], l: &[f32], v: &[f32], atr: f32| -> f32 {
+        if c.is_empty() || h.is_empty() || l.is_empty() || v.is_empty() {
+            return f32::NAN;
+        }
+        engine_patterns::bull_flag_confidence(c, h, l, v, atr, params)
+    };
+
+    [
+        score_tf(daily_close, daily_high, daily_low, daily_volume, daily_atr),
+        score_tf(h1_close, h1_high, h1_low, h1_volume, h1_atr),
+        score_tf(m30_close, m30_high, m30_low, m30_volume, m30_atr),
+        score_tf(m5_close, m5_high, m5_low, m5_volume, m5_atr),
+    ]
 }
 
 /// Simple ATR estimate from close prices only (true range approximation).

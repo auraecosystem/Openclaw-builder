@@ -13,7 +13,10 @@ pub mod scorer;
 // Re-export key types so callers can use short paths.
 pub use arena::ThreadArena;
 pub use execution_signals::ExecutionSignals;
-pub use pipeline::{CharacterizationState, InvestigationResult, RawAlgorithmOutputs, SignalOutput};
+pub use pipeline::{
+    CharacterizationState, InvestigationResult, RawAlgorithmOutputs, SignalOutput,
+    run_pattern_pipeline,
+};
 
 // Re-export types from engine-types that are part of the signals public API.
 pub use engine_types::{SignalParams, SCANNER_FEATURE_COUNT};

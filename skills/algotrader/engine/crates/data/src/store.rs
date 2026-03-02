@@ -33,6 +33,14 @@ pub struct IntradayData {
     pub timestamps: Vec<i64>,
     /// Maps daily row index -> (start_5m_row, end_5m_row) range.
     pub day_mapping: Vec<(usize, usize)>,
+    /// OHLCV matrices for 30m bars (factor=6 resampled from 5m).
+    pub matrices_30m: Vec<WideMatrix>,
+    /// Timestamps for 30m rows (start of each 30m period).
+    pub timestamps_30m: Vec<i64>,
+    /// OHLCV matrices for 1h bars (factor=12 resampled from 5m).
+    pub matrices_1h: Vec<WideMatrix>,
+    /// Timestamps for 1h rows (start of each 1h period).
+    pub timestamps_1h: Vec<i64>,
 }
 
 /// All pre-computed indicator matrices.  Loaded once, immutable, shared via

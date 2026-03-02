@@ -63,6 +63,10 @@ pub struct Params {
     #[serde(default)]
     pub signal_params: Option<crate::signal_params::SignalParams>,
 
+    /// Fuzzy pattern recognition parameters (None = use defaults).
+    #[serde(default)]
+    pub pattern_params: Option<crate::pattern::PatternParams>,
+
     /// Execution constants (position sizing, slippage, hold limits).
     #[serde(default)]
     pub execution: ExecutionConfig,
@@ -171,6 +175,7 @@ impl Default for Params {
             min_price: default_min_price(),
             min_vol: default_min_vol(),
             signal_params: None,
+            pattern_params: None,
             execution: ExecutionConfig::default(),
             strategy: StrategyConfig::default(),
             fitness: FitnessConfig::default(),

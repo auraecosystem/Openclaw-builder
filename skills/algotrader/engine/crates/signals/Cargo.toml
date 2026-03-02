@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 engine-types = { path = "../types" }
+engine-patterns = { path = "../patterns" }
 rustfft = "6"
 faer = "0.20"
 kiddo = "4"

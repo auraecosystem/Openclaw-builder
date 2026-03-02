@@ -10,6 +10,7 @@ use strum::{EnumCount, IntoEnumIterator};
 use engine_types::WideMatrix;
 
 use super::indicator::Indicator;
+use super::resample;
 use super::store::{Axes, DataStore, IntradayData};
 
 // ---------------------------------------------------------------------------
@@ -117,10 +118,21 @@ pub fn load_data_store(data_dir: &Path) -> Result<DataStore> {
         let timestamps = extract_5m_timestamps(&fivemin_path)?;
         let day_mapping = build_day_to_5m(&dates, &timestamps);
         eprintln!("  5m data: {} rows x {} cols", o5.n_rows(), o5.n_cols());
+
+        // Resample to 30m (factor=6) and 1h (factor=12)
+        let [o30, h30, l30, c30, v30] = resample::resample_ohlcv(&o5, &h5, &l5, &c5, &v5, 6);
+        let ts_30m = resample::resample_timestamps(&timestamps, 6);
+        let [o1h, h1h, l1h, c1h, v1h] = resample::resample_ohlcv(&o5, &h5, &l5, &c5, &v5, 12);
+        let ts_1h = resample::resample_timestamps(&timestamps, 12);
+
         Some(IntradayData {
             matrices: vec![o5, h5, l5, c5, v5],
             timestamps,
             day_mapping,
+            matrices_30m: vec![o30, h30, l30, c30, v30],
+            timestamps_30m: ts_30m,
+            matrices_1h: vec![o1h, h1h, l1h, c1h, v1h],
+            timestamps_1h: ts_1h,
         })
     } else {
         None

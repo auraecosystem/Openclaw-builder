@@ -1,0 +1,11 @@
+# Apple Silicon / ARM64 build configuration.
+#
+# target-cpu=apple-m1 enables all M-series extensions (NEON, FP16, dotprod).
+# fp-contract=fast lets LLVM fuse multiply-add into FMA instructions, which
+# is safe for our use case (we don't need IEEE 754 reproducibility).
+[target.aarch64-apple-darwin]
+rustflags = [
+    "-C", "target-cpu=apple-m1",
+    "-C", "target-feature=+neon",
+    "-C", "llvm-args=-fp-contract=fast",
+]
