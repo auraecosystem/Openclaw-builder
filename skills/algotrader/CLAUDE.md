@@ -260,6 +260,7 @@ Caches live in `<data_dir>/cache/`. Invalidated by `ohlcv.parquet` mtime (stored
 | EXP-004 | 5m intraday breakout | Negative — daily logic doesn't scale to 5m | NT |
 | EXP-010 | Pipeline parity smoke test | EP + Parabolic bit-identical; filter 14-25x slower | Rust |
 | EXP-013 | JIT filter compilation (Cranelift) | Feasible on Apple Silicon; `&&`→`&` gives 8x; JIT within 10% of optimal | Rust |
+| EXP-014 | JIT + structural evolution | JIT cached 11x faster; 0.15ms compile, 71% cache hit rate; superset 1.8x slower | Rust |
 
 Full experiment narratives: `INDEX.md`. Raw data: `lab-notebook.jsonl` (append-only).
 

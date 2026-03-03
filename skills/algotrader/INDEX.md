@@ -504,6 +504,42 @@ While touching `indicators.py`, apply two micro-optimizations:
 - Numpy allocation overhead overwhelming the vectorization gain on 60-element arrays
 - `sliding_window_view` creating copies instead of views (check with `.base is not None`)
 
+### Results
+
+**Status: Completed (negative result on vectorization, minor win on O(1) indicator fixes)**
+
+Three approaches tested, all validated bit-identical against the baseline (101,908 rows, 15 columns):
+
+| Approach | Total Wall Time | Pattern _detect Time | vs Baseline |
+|----------|----------------|---------------------|-------------|
+| **Baseline (original)** | 10.56s | VCP 1.82s + Flag 1.68s = 3.50s | — |
+| **A: numpy sliding_window_view** | 14.30s | _find_swings 5.20s cumtime | **1.35x slower** |
+| **B: numpy buffer + Python loop** | 11.67s | VCP 1.72s + Flag 1.57s = 3.29s | **1.10x slower** |
+| **C: Original detectors + O(1) fixes** | 10.14s | VCP 1.78s + Flag 1.65s = 3.43s | **1.04x faster** |
+
+**Approach A failed**: numpy `sliding_window_view` + `ufunc.reduce` adds ~26μs per-call dispatch overhead. At 198K calls (VCP+Flag × 99K bars), that's 5.2s in numpy machinery alone — far exceeding the computation it replaces. The 660-iteration Python loop on 60 elements completes in ~18μs; numpy can't beat that because its per-call overhead is comparable to the entire Python loop runtime.
+
+**Approach B failed**: Accessing numpy array elements in a Python loop (`buf_h[j]`) returns `np.float64` objects — slower than native Python floats. `.tolist()` conversion to get native floats costs 0.19s, and numpy `.mean()` on 5-15 element slices adds 0.94s vs 0.18s for the original Python loop (323K calls × ~3μs overhead per `.mean()`).
+
+**Approach C (shipped)**: Kept pattern detectors unchanged. Applied two O(1) micro-optimizations:
+- `RollingHigh`: monotonic deque max tracking replaces `max(deque)` O(252) scan → O(1) amortized
+- `VolumeSMA`: running sum replaces `sum(deque)/len(deque)` O(20) scan → O(1)
+
+These save ~0.4s combined (252K `max()` calls eliminated + 102K `sum()` calls eliminated).
+
+### Key Insight
+
+**Numpy is not faster than Python loops on 60-element arrays.** The per-call overhead of numpy operations (type checking, ufunc dispatch, array creation, scalar boxing) is 1-5μs. On arrays of 60 elements, the actual computation takes <1μs — the overhead dominates. Numpy only wins on arrays of ~1000+ elements or when operations can be batched across many arrays.
+
+For the pattern detectors, the only viable acceleration paths are:
+1. **Pre-computation** (already proven via `PrecomputedBreakout` — runs indicators once on full arrays)
+2. **Cython or Rust PyO3 extension** (eliminates Python interpreter overhead entirely)
+3. **Numba JIT** (compiles the Python loop to LLVM; ~1μs per call instead of ~18μs)
+
+### Decision
+
+**Rejected** for vectorized pattern detection. **Merged** the RollingHigh (monotonic deque) and VolumeSMA (running sum) O(1) fixes — minor but free improvement, bit-identical outputs.
+
 ---
 
 ## EXP-013 — JIT Filter Compilation: Cranelift on Apple Silicon
@@ -608,3 +644,101 @@ Test crate at `/tmp/cranelift-test/` (disposable). Cargo deps: `cranelift 0.116`
 - The 8x `&&` vs `&` gap is data-dependent. At very low pass rates (<1%), short-circuit `&&` may outperform `&` because it avoids loading subsequent indicator matrices. Profile on real market data (where most cells fail the first 1-2 conditions) before committing to branchless everywhere.
 - Cranelift 0.116 is pinned to Wasmtime 29. Major version bumps may change the IR API (e.g., `bint` was removed between versions).
 - The benchmark uses flat `*const f32` arrays. The actual pipeline uses `WideMatrix::get(row, col)` which adds bounds-check overhead. The real-world gap may be smaller than measured here.
+
+---
+
+## EXP-014 — JIT Filter + Structural Evolution Benchmark
+
+**Date**: 2026-03-02 | **Status**: Completed | **Engine**: Rust (Cranelift 0.116, aarch64-apple-darwin)
+
+### Hypothesis
+
+When CMA-ES evolves pipeline **structure** (toggling blocks on/off per genome via `"when"` + evolvable booleans), does JIT recompilation overhead negate the filter execution speedup? Different genomes in the same generation may have different active block sets, requiring either per-genome recompilation or a caching strategy.
+
+### Environment
+
+- Machine: Apple Silicon (same as EXP-013)
+- Compiler: rustc 1.92.0, `--release` (opt-level=3, LTO thin)
+- New crate: `engine-jit` (behind `--features jit` flag)
+- Cranelift 0.116.1 (`cranelift-jit`, `cranelift-module`, `cranelift-native`)
+
+### Design
+
+Benchmark binary `exp014-bench` simulates 20 generations × 20 individuals with randomized block toggles across 7 fusable conditions (mimicking `breakout_quick.json`). Each genome has 50% probability per block, min 2 active. Four strategies compared:
+
+1. **Interpreted short-circuit** — current `FusedFilter::execute()` with `.all()`
+2. **Interpreted branchless** — new `execute_branchless()` with `&=`
+3. **JIT cached** — Cranelift compile per unique active-block signature, `HashMap` cache
+4. **JIT superset** — compile ALL 7 conditions once, disable via bypass thresholds (`-inf`/`+inf`)
+
+### Results
+
+#### Quick scale (8M cells, 400 evaluations)
+
+| Strategy | Total | Per-eval | vs JIT cached |
+|---|---|---|---|
+| Interpreted short-circuit | 25,762ms | 64.4ms | 11.1x |
+| Interpreted branchless | 18,247ms | 45.6ms | 7.8x |
+| **JIT cached** | **2,326ms** | **5.8ms** | **1.0x** |
+| JIT superset | 4,459ms | 11.1ms | 1.9x |
+
+#### Medium scale (33M cells, 400 evaluations)
+
+| Strategy | Total | Per-eval | vs JIT cached |
+|---|---|---|---|
+| Interpreted short-circuit | 102,850ms | 257ms | 11.2x |
+| Interpreted branchless | 70,006ms | 175ms | 7.6x |
+| **JIT cached** | **9,177ms** | **23ms** | **1.0x** |
+| JIT superset | 16,483ms | 41ms | 1.8x |
+
+#### Cache statistics (representative)
+
+- Unique configs: 114-117 out of 400 evaluations
+- Unique per generation: 18.6-18.8 avg (of 20 individuals)
+- Cache hit rate: 71%
+- Total compile time: 15-18ms across all unique configs (0.13-0.15ms per config)
+- Compile overhead per evaluation: 0.04ms (negligible)
+
+### Key Findings
+
+**1. JIT cached is the decisive winner at 11x over current implementation.**
+
+The per-unique-config compile cost (~0.15ms) is negligible compared to execution time. At 71% cache hit rate with 7 toggleable blocks and lambda=20, most evaluations reuse a pre-compiled function. Even with 117 unique configs across 400 evaluations, total compile overhead is only 15-18ms.
+
+**2. Branchless interpreted helps but isn't enough.**
+
+Switching `.all()` → `&=` in the existing `FusedFilter` gives a 1.4x speedup (short-circuit → branchless). This is less dramatic than EXP-013's 8x because the interpreted loop overhead (per-cell `Vec` iteration, `WideMatrix::get()` bounds math) dominates over branch prediction effects.
+
+**3. Superset gating is 1.8x slower than cached.**
+
+Always evaluating all 7 conditions (even with bypass thresholds) wastes cycles on disabled blocks. Each disabled condition still loads a float, compares, and ANDs. With avg ~4 conditions active, cached functions skip ~3 loads entirely. Superset's simplicity (no cache, no recompilation) doesn't justify the 1.8x penalty.
+
+**4. Cache hit rate scales well with realistic evolution parameters.**
+
+With 7 blocks and 50% toggle probability, there are 2^7 - 8 = 120 valid configs (excluding 0-1 active). Lambda=20 with ~19 unique per generation means the cache fills fast and subsequent generations mostly hit. For real pipelines with 4-6 toggleable blocks, the cache would be even more effective.
+
+**5. JIT compile cost does NOT negate execution speedup.**
+
+At 0.04ms compile overhead per evaluation vs 23ms execution time, compilation is 0.17% of total cost. Even in the worst case (every evaluation requires a new compilation), the 0.15ms compile + 23ms execute = 23.15ms is still 11x faster than the interpreted 257ms.
+
+### Implications
+
+**Decision: Integrate JIT cached approach into production pipeline.**
+
+- JIT+cache saves 91% of filter phase wall-clock time (11x speedup)
+- Compile overhead negligible at <0.2% of total cost
+- Cache is simple (HashMap, ~100 LOC) and thread-safe via `Arc<JitFilter>`
+- Branchless interpreted is the fallback for non-JIT builds (still 1.4x over current)
+
+### Integration Path
+
+1. `PhysicalStep::Jit(Arc<JitFilter>)` variant in `plan.rs`
+2. `execute_filter_phase()` dispatches to JIT when available
+3. `JitCache` passed through evolution loop, shared across individuals
+4. Feature-gated behind `--features jit` (54 new deps)
+
+### Red Flags
+
+- The `WideMatrix::get(row, col)` overhead in interpreted execution inflates the gap. JIT operates on flat `*const f32` pointers. Real-world JIT advantage may be less than 11x once data layout is aligned.
+- 54 new crate dependencies (cranelift ecosystem). Acceptable behind a feature flag, but increases CI build time.
+- NaN handling: Cranelift `fcmp` with ordered comparisons returns false for NaN (matching `FusedCondition::check`). Verified in unit tests but not yet tested with real market data containing NaN gaps.

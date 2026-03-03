@@ -7,8 +7,6 @@ pattern detectors expose additional attributes for multi-dimensional signals.
 
 from collections import deque
 
-import numpy as np
-
 from nautilus_trader.indicators import Indicator
 from nautilus_trader.model.data import Bar
 
@@ -177,23 +175,19 @@ class VolumeSMA(Indicator):
 class VCPDetector(Indicator):
     """Detect VCP (Volatility Contraction Pattern) from bar data.
 
-    Uses numpy arrays as the lookback buffer to avoid per-bar list(deque)
-    materialization. Swing-point detection stays as a Python loop — on
-    60-element arrays, Python loops beat numpy's per-call dispatch overhead.
-    Volume averages use numpy slice .sum() for the few calls per _detect.
+    Maintains a lookback buffer of OHLCV data. On each bar, identifies
+    swing highs/lows, pairs them into contractions, and counts progressive
+    contractions where each range is smaller than the prior.
+
+    Primary output (self.value) is the contraction count. Additional
+    attributes provide tightening quality metrics.
     """
 
     def __init__(self, lookback: int = 60, swing_order: int = 5):
         super().__init__(params=[lookback, swing_order])
         self.lookback = lookback
         self.swing_order = swing_order
-
-        # Pre-allocated numpy buffers — avoids list(deque) allocation per bar
-        self._buf_h = np.empty(lookback, dtype=np.float64)
-        self._buf_l = np.empty(lookback, dtype=np.float64)
-        self._buf_c = np.empty(lookback, dtype=np.float64)
-        self._buf_v = np.empty(lookback, dtype=np.float64)
-        self._n = 0
+        self._bars: deque[tuple[float, float, float, float]] = deque(maxlen=lookback)
 
         # Outputs
         self.value: float = 0.0
@@ -207,28 +201,13 @@ class VCPDetector(Indicator):
         l = bar.low.as_double()
         c = bar.close.as_double()
         v = bar.volume.as_double()
-
-        if self._n < self.lookback:
-            self._buf_h[self._n] = h
-            self._buf_l[self._n] = l
-            self._buf_c[self._n] = c
-            self._buf_v[self._n] = v
-            self._n += 1
-        else:
-            # Shift left by 1, append new value at end
-            self._buf_h[:-1] = self._buf_h[1:]
-            self._buf_l[:-1] = self._buf_l[1:]
-            self._buf_c[:-1] = self._buf_c[1:]
-            self._buf_v[:-1] = self._buf_v[1:]
-            self._buf_h[-1] = h
-            self._buf_l[-1] = l
-            self._buf_c[-1] = c
-            self._buf_v[-1] = v
+        self._bars.append((h, l, c, v))
 
         if not self.has_inputs:
             self._set_has_inputs(True)
 
-        if self._n < self.lookback:
+        n = len(self._bars)
+        if n < self.lookback:
             return
         if not self.initialized:
             self._set_initialized(True)
@@ -237,27 +216,24 @@ class VCPDetector(Indicator):
 
     def _detect(self, current_close: float) -> None:
         """Run swing-point detection and contraction counting."""
-        n = self._n
+        bars = list(self._bars)
+        n = len(bars)
         order = self.swing_order
 
-        # Convert to Python lists for the inner loop — numpy scalar access
-        # (buf[i] returns np.float64) is slower than Python float access.
-        # tolist() is one C call that returns native Python floats.
-        highs = self._buf_h[:n].tolist()
-        lows = self._buf_l[:n].tolist()
-
+        # Identify swing highs and swing lows
+        # A swing high at i: bars[i].high is the max high in [i-order, i+order]
         swing_highs: list[tuple[int, float]] = []
         swing_lows: list[tuple[int, float]] = []
 
         for i in range(order, n - order):
-            hi = highs[i]
-            lo = lows[i]
+            hi = bars[i][0]
+            lo = bars[i][1]
             is_sh = True
             is_sl = True
             for j in range(i - order, i + order + 1):
-                if highs[j] > hi:
+                if bars[j][0] > hi:
                     is_sh = False
-                if lows[j] < lo:
+                if bars[j][1] < lo:
                     is_sl = False
                 if not is_sh and not is_sl:
                     break
@@ -304,16 +280,27 @@ class VCPDetector(Indicator):
         else:
             self.tightening_ratio = 1.0
 
-        # Volume trend: numpy slice mean (only ~2 calls per _detect)
-        buf_v = self._buf_v
-        c0s, c0e = contractions[0][2], min(contractions[0][3] + 1, n)
-        cLs, cLe = contractions[-1][2], min(contractions[-1][3] + 1, n)
-        vol_first = float(buf_v[c0s:c0e].mean()) if c0e > c0s else 0.0
-        vol_last = float(buf_v[cLs:cLe].mean()) if cLe > cLs else 0.0
+        # Volume trend: avg volume in last contraction vs first
+        vol_first = self._avg_vol(bars, contractions[0][2], contractions[0][3])
+        vol_last = self._avg_vol(bars, contractions[-1][2], contractions[-1][3])
         self.vol_trend = (vol_last / vol_first) if vol_first > 0.0 else 1.0
 
+    @staticmethod
+    def _avg_vol(
+        bars: list[tuple[float, float, float, float]],
+        start: int,
+        end: int,
+    ) -> float:
+        """Average volume between bar indices [start, end] inclusive."""
+        total = 0.0
+        count = 0
+        for i in range(start, min(end + 1, len(bars))):
+            total += bars[i][3]
+            count += 1
+        return total / count if count > 0 else 0.0
+
     def _reset(self) -> None:
-        self._n = 0
+        self._bars.clear()
         self.value = 0.0
         self.num_contractions = 0
         self.last_contraction_pct = 0.0
@@ -328,8 +315,12 @@ class VCPDetector(Indicator):
 class FlagDetector(Indicator):
     """Detect bull flag patterns from bar data.
 
-    Same buffer strategy as VCPDetector: numpy arrays avoid per-bar
-    list(deque) allocation. Swing detection stays as Python loop.
+    Searches for a strong impulse move (pole) followed by a tight
+    consolidation (flag). The pole is identified by a swing_low -> swing_high
+    pair with sufficient gain over a short duration.
+
+    Primary output (self.value) is the pole percentage gain. Additional
+    attributes describe flag quality.
     """
 
     def __init__(
@@ -344,13 +335,7 @@ class FlagDetector(Indicator):
         self.swing_order = swing_order
         self.max_flag_bars = max_flag_bars
         self.max_pole_bars = max_pole_bars
-
-        # Pre-allocated numpy buffers
-        self._buf_h = np.empty(lookback, dtype=np.float64)
-        self._buf_l = np.empty(lookback, dtype=np.float64)
-        self._buf_c = np.empty(lookback, dtype=np.float64)
-        self._buf_v = np.empty(lookback, dtype=np.float64)
-        self._n = 0
+        self._bars: deque[tuple[float, float, float, float]] = deque(maxlen=lookback)
 
         # Outputs
         self.value: float = 0.0
@@ -364,27 +349,13 @@ class FlagDetector(Indicator):
         l = bar.low.as_double()
         c = bar.close.as_double()
         v = bar.volume.as_double()
-
-        if self._n < self.lookback:
-            self._buf_h[self._n] = h
-            self._buf_l[self._n] = l
-            self._buf_c[self._n] = c
-            self._buf_v[self._n] = v
-            self._n += 1
-        else:
-            self._buf_h[:-1] = self._buf_h[1:]
-            self._buf_l[:-1] = self._buf_l[1:]
-            self._buf_c[:-1] = self._buf_c[1:]
-            self._buf_v[:-1] = self._buf_v[1:]
-            self._buf_h[-1] = h
-            self._buf_l[-1] = l
-            self._buf_c[-1] = c
-            self._buf_v[-1] = v
+        self._bars.append((h, l, c, v))
 
         if not self.has_inputs:
             self._set_has_inputs(True)
 
-        if self._n < self.lookback:
+        n = len(self._bars)
+        if n < self.lookback:
             return
         if not self.initialized:
             self._set_initialized(True)
@@ -393,26 +364,24 @@ class FlagDetector(Indicator):
 
     def _detect(self) -> None:
         """Find the best pole + flag pattern in the lookback window."""
-        n = self._n
+        bars = list(self._bars)
+        n = len(bars)
         order = self.swing_order
         current_idx = n - 1
 
-        # tolist() for fast Python-native float access in inner loop
-        highs = self._buf_h[:n].tolist()
-        lows = self._buf_l[:n].tolist()
-
+        # Identify swing highs and swing lows
         swing_highs: list[tuple[int, float]] = []
         swing_lows: list[tuple[int, float]] = []
 
         for i in range(order, n - order):
-            hi = highs[i]
-            lo = lows[i]
+            hi = bars[i][0]
+            lo = bars[i][1]
             is_sh = True
             is_sl = True
             for j in range(i - order, i + order + 1):
-                if highs[j] > hi:
+                if bars[j][0] > hi:
                     is_sh = False
-                if lows[j] < lo:
+                if bars[j][1] < lo:
                     is_sl = False
                 if not is_sh and not is_sl:
                     break
@@ -423,26 +392,28 @@ class FlagDetector(Indicator):
 
         # Search for best pole: swing_low -> swing_high with gain >= 20%, bars <= 20
         best_pole_gain = 0.0
-        best_pole: tuple[int, float, int, float] | None = None
+        best_pole: tuple[int, float, int, float] | None = None  # (sl_idx, sl_price, sh_idx, sh_price)
 
         for sh_idx, sh_price in swing_highs:
+            # Only consider peaks recent enough to form a flag to the current bar
             bars_since_peak = current_idx - sh_idx
             if bars_since_peak < 0 or bars_since_peak > self.max_flag_bars:
                 continue
 
+            # Find the swing low before this peak
             for sl_idx, sl_price in reversed(swing_lows):
                 if sl_idx >= sh_idx:
                     continue
                 pole_bars = sh_idx - sl_idx
                 if pole_bars > self.max_pole_bars:
-                    break
+                    break  # too far back
                 if sl_price <= 0.0:
                     continue
                 gain = (sh_price - sl_price) / sl_price
                 if gain >= 0.20 and gain > best_pole_gain:
                     best_pole_gain = gain
                     best_pole = (sl_idx, sl_price, sh_idx, sh_price)
-                break
+                break  # only check the nearest swing low
 
         if best_pole is None:
             self.pole_pct = 0.0
@@ -460,22 +431,34 @@ class FlagDetector(Indicator):
         self.value = pole_gain
         self.flag_days = current_idx - sh_idx
 
-        current_close = float(self._buf_c[current_idx])
+        # Retrace: how much of the pole move given back at current close
+        current_close = bars[current_idx][2]
         if move_size > 0.0:
             self.retrace_pct = (sh_price - current_close) / move_size
         else:
             self.retrace_pct = 0.0
 
-        # Volume ratio: numpy slice mean (only 2 calls)
-        buf_v = self._buf_v
-        pe = min(sh_idx + 1, n)
-        vol_pole = float(buf_v[sl_idx:pe].mean()) if pe > sl_idx else 0.0
-        fe = min(current_idx + 1, n)
-        vol_flag = float(buf_v[sh_idx:fe].mean()) if fe > sh_idx else 0.0
+        # Volume ratio: avg volume in flag / avg volume in pole
+        vol_pole = self._avg_vol(bars, sl_idx, sh_idx)
+        vol_flag = self._avg_vol(bars, sh_idx, current_idx)
         self.vol_ratio = (vol_flag / vol_pole) if vol_pole > 0.0 else 1.0
 
+    @staticmethod
+    def _avg_vol(
+        bars: list[tuple[float, float, float, float]],
+        start: int,
+        end: int,
+    ) -> float:
+        """Average volume between bar indices [start, end] inclusive."""
+        total = 0.0
+        count = 0
+        for i in range(start, min(end + 1, len(bars))):
+            total += bars[i][3]
+            count += 1
+        return total / count if count > 0 else 0.0
+
     def _reset(self) -> None:
-        self._n = 0
+        self._bars.clear()
         self.value = 0.0
         self.pole_pct = 0.0
         self.retrace_pct = 0.0
