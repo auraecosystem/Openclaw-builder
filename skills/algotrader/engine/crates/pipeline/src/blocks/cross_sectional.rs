@@ -153,6 +153,7 @@ mod tests {
             range: 0..n_rows,
             blackboard: &bb,
             input_id: None,
+            alive_cols: None,
         };
         let slot = block.execute(&ctx).unwrap();
         slot.as_scalar().unwrap().clone()

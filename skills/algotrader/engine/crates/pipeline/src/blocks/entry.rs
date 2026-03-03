@@ -110,6 +110,7 @@ impl Block for BreakoutAbove {
 
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
 
         let close_m = ctx.store.close();
         let vol_m = ctx.store.volume();
@@ -122,7 +123,8 @@ impl Block for BreakoutAbove {
         let mut stops = vec![f32::NAN; nr * nc];
 
         for row in 0..nr {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if !input.get(row, col) {
                     continue;
                 }
@@ -185,6 +187,7 @@ impl Block for GapEntry {
 
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
 
         let low_m = ctx.store.low();
 
@@ -193,7 +196,8 @@ impl Block for GapEntry {
 
         // Shift entry to row+1; stop = gap day's (row) low.
         for row in 0..nr {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if !input.get(row, col) {
                     continue;
                 }
@@ -251,6 +255,7 @@ impl Block for ScoreThreshold {
 
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
 
         let close_m = ctx.store.close();
         let low_m = ctx.store.low();
@@ -260,7 +265,8 @@ impl Block for ScoreThreshold {
         let mut stops = vec![f32::NAN; nr * nc];
 
         for row in 0..nr {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 let score = score_mat.get(row, col);
                 if score.is_nan() || score < threshold {
                     continue;
@@ -305,6 +311,7 @@ impl Block for ParabolicEntry {
 
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
 
         let close_m = ctx.store.close();
         let high_m = ctx.store.high();
@@ -316,7 +323,8 @@ impl Block for ParabolicEntry {
         let mut stops = vec![f32::NAN; nr * nc];
 
         for row in 0..nr {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 let i = row * nc + col;
                 let close = close_m.get(row, col);
                 let s10 = sma10.get(row, col);

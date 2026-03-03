@@ -71,9 +71,11 @@ impl Block for VcpDetect {
         let vcp_vol = ctx.store.get(Indicator::VcpVolTrend);
 
         let mut out = WideMask::new_false(nr, nc);
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
 
         for row in 0..nr {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if !input.get(row, col) {
                     continue;
                 }
@@ -116,9 +118,11 @@ impl Block for FlagDetect {
         let fv = ctx.store.get(Indicator::FlagVolRatio);
 
         let mut out = WideMask::new_false(nr, nc);
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
 
         for row in 0..nr {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if !input.get(row, col) {
                     continue;
                 }
@@ -172,10 +176,12 @@ impl Block for GapUp {
         let vol_sma = ctx.store.get(Indicator::VolSma20);
 
         let mut out = WideMask::new_false(nr, nc);
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
 
         // Start at row 1: need prev_close from row-1.
         for row in 1..nr {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if !input.get(row, col) {
                     continue;
                 }
@@ -241,9 +247,11 @@ impl Block for ParabolicRun {
         let consec_green = ctx.store.get(Indicator::ConsecGreen);
 
         let mut out = WideMask::new_false(nr, nc);
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
 
         for row in 0..nr {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if !input.get(row, col) {
                     continue;
                 }

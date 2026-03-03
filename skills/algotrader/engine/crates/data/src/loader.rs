@@ -140,6 +140,10 @@ pub fn load_data_store(data_dir: &Path, data_config: &DataConfig) -> Result<Data
     eprintln!("  Computing cross-sectional RS percentile ranks...");
     let [rs_1m, rs_3m, rs_6m] = compute::compute_rs_pctrank(&ret21, &ret63, &ret126);
 
+    // Derived indicators for filter fusion (computed before moving base indicators)
+    let adr_pct_mat = compute::adr_pct(&atr14, &close);
+    let extension_atr_mat = compute::extension_atr(&close, &consol_high, &atr14);
+
     indicator_map.insert(Indicator::Sma10 as u8, sma10);
     indicator_map.insert(Indicator::Sma20 as u8, sma20);
     indicator_map.insert(Indicator::VolSma20 as u8, vol_sma20);
@@ -154,6 +158,8 @@ pub fn load_data_store(data_dir: &Path, data_config: &DataConfig) -> Result<Data
     indicator_map.insert(Indicator::RsPctrank1m as u8, rs_1m);
     indicator_map.insert(Indicator::RsPctrank3m as u8, rs_3m);
     indicator_map.insert(Indicator::RsPctrank6m as u8, rs_6m);
+    indicator_map.insert(Indicator::AdrPct as u8, adr_pct_mat);
+    indicator_map.insert(Indicator::ExtensionAtr as u8, extension_atr_mat);
 
     indicator_map.insert(Indicator::Open as u8, open);
     indicator_map.insert(Indicator::High as u8, high);

@@ -28,6 +28,9 @@ pub struct BlockContext<'a> {
     pub range: Range<usize>,
     pub blackboard: &'a Blackboard,
     pub input_id: Option<&'a str>,
+    /// Column indices still alive (have at least one `true` cell in the current mask).
+    /// When `None`, all columns are alive. Blocks should iterate `col_indices()`.
+    pub alive_cols: Option<&'a [u32]>,
 }
 
 impl<'a> BlockContext<'a> {
@@ -40,10 +43,16 @@ impl<'a> BlockContext<'a> {
         };
         slot.and_then(|s| s.as_mask())
     }
+
+    /// Iterate alive column indices. Returns the alive set if available,
+    /// otherwise falls back to `all_cols` (a pre-built 0..nc vec from the orchestrator).
+    pub fn col_indices(&self, all_cols: &'a [u32]) -> &'a [u32] {
+        self.alive_cols.unwrap_or(all_cols)
+    }
 }
 
 /// Comparison operator for fusable filter conditions.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CmpOp {
     Gt,
     Ge,

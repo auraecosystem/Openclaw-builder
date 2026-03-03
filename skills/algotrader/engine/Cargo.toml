@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/types", "crates/data", "crates/signals", "crates/patterns", "crates/pipeline", "."]
+members = ["crates/types", "crates/data", "crates/signals", "crates/patterns", "crates/pipeline", "crates/jit", "."]
 
 [package]
 name = "algotrader-engine"
@@ -13,6 +13,7 @@ engine-data = { path = "crates/data" }
 engine-signals = { path = "crates/signals" }
 engine-patterns = { path = "crates/patterns" }
 engine-pipeline = { path = "crates/pipeline" }
+engine-jit = { path = "crates/jit", optional = true }
 rayon = "1.10"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
@@ -33,6 +34,7 @@ pyo3 = { version = "0.23", features = ["extension-module"], optional = true }
 
 [features]
 default = []
+jit = ["engine-jit", "engine-pipeline/jit"]
 python = ["pyo3"]
 
 [lib]
@@ -47,6 +49,11 @@ path = "src/main.rs"
 [[bin]]
 name = "build-cache"
 path = "src/bin/build_cache.rs"
+
+[[bin]]
+name = "exp014-bench"
+path = "src/bin/exp014_bench.rs"
+required-features = ["jit"]
 
 [profile.dev]
 opt-level = 1

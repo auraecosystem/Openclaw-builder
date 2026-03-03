@@ -50,6 +50,7 @@ impl Block for AtrCappedLow {
 
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
 
         let close_m = ctx.store.close();
         let low_m = ctx.store.low();
@@ -58,7 +59,8 @@ impl Block for AtrCappedLow {
         let mut stops = vec![f32::NAN; nr * nc];
 
         for row in 0..nr {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if !input.get(row, col) {
                     continue;
                 }
@@ -104,12 +106,14 @@ impl Block for FixedPct {
 
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
 
         let close_m = ctx.store.close();
         let mut stops = vec![f32::NAN; nr * nc];
 
         for row in 0..nr {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if !input.get(row, col) {
                     continue;
                 }
@@ -142,12 +146,14 @@ impl Block for GapDayLow {
 
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
 
         let low_m = ctx.store.low();
         let mut stops = vec![f32::NAN; nr * nc];
 
         for row in 0..nr {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if !input.get(row, col) {
                     continue;
                 }

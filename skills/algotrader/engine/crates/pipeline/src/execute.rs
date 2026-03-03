@@ -43,11 +43,31 @@ fn when_enabled(config: &HashMap<String, serde_json::Value>, when_key: &str) -> 
     }
 }
 
+/// Compute which columns still have at least one `true` cell in the mask.
+///
+/// Returns a packed vec of alive column indices. Breaks early per column
+/// on the first `true` cell, so this is fast for sparse masks.
+fn compute_alive_cols(mask: &WideMask, range: &Range<usize>, nc: usize) -> Vec<u32> {
+    let mut alive = Vec::with_capacity(nc);
+    for col in 0..nc {
+        for row in range.clone() {
+            if mask.get(row, col) {
+                alive.push(col as u32);
+                break;
+            }
+        }
+    }
+    alive
+}
+
 /// Execute the filter phase of a physical plan.
 ///
 /// Seeds a blackboard with an all-true mask, then runs each step in order.
 /// Fused steps apply their conditions in a single vectorized pass. Single steps
 /// dispatch to the block registry. Returns the final mask after all filters.
+///
+/// Column elimination: after each step, computes which columns are still alive
+/// and passes only those to subsequent steps, avoiding work on dead columns.
 pub fn execute_filter_phase(
     steps: &[PhysicalStep],
     store: &DataStore,
@@ -58,9 +78,10 @@ pub fn execute_filter_phase(
     let nc = store.axes.n_cols;
     let mut bb = Blackboard::new();
 
-    // Seed with full universe.
+    // Seed with full universe. alive_cols starts as None (all alive).
     let seed = all_true_mask(nr, nc);
     bb.put("__seed".to_string(), Slot::Mask(seed));
+    let mut alive_cols: Option<Vec<u32>> = None;
 
     for step in steps {
         match step {
@@ -69,7 +90,8 @@ pub fn execute_filter_phase(
                     .last()
                     .and_then(|s| s.as_mask())
                     .ok_or_else(|| anyhow::anyhow!("fused step: no input mask on blackboard"))?;
-                let result = fused.execute(store, input, range.clone());
+                let result = fused.execute(store, input, range.clone(), alive_cols.as_deref());
+                alive_cols = Some(compute_alive_cols(&result, &range, nc));
                 bb.put(fused.step_id.clone(), Slot::Mask(result));
             }
             PhysicalStep::Single {
@@ -100,15 +122,99 @@ pub fn execute_filter_phase(
                     range: range.clone(),
                     blackboard: &bb,
                     input_id: input_id.as_deref(),
+                    alive_cols: alive_cols.as_deref(),
                 };
 
                 let result = block.execute(&ctx)?;
+                if let Some(mask) = result.as_mask() {
+                    alive_cols = Some(compute_alive_cols(mask, &range, nc));
+                }
                 bb.put(step_id.clone(), result);
             }
         }
     }
 
     // Return the final mask from the blackboard.
+    bb.last()
+        .and_then(|s| s.as_mask())
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("filter phase produced no mask"))
+}
+
+// ---------------------------------------------------------------------------
+// Filter phase (JIT-accelerated)
+// ---------------------------------------------------------------------------
+
+/// JIT-accelerated filter phase: identical to `execute_filter_phase` but
+/// dispatches fused steps through Cranelift-compiled native code.
+///
+/// Column elimination applies to Single blocks. The JIT fused path operates on
+/// flat arrays and ignores alive_cols (it runs early when most columns are alive).
+#[cfg(feature = "jit")]
+pub fn execute_filter_phase_jit(
+    steps: &[PhysicalStep],
+    store: &DataStore,
+    registry: &BlockRegistry,
+    range: Range<usize>,
+    cache: &mut engine_jit::JitCache,
+) -> anyhow::Result<WideMask> {
+    let nr = store.axes.n_rows;
+    let nc = store.axes.n_cols;
+    let mut bb = Blackboard::new();
+
+    let seed = all_true_mask(nr, nc);
+    bb.put("__seed".to_string(), Slot::Mask(seed));
+    let mut alive_cols: Option<Vec<u32>> = None;
+
+    for step in steps {
+        match step {
+            PhysicalStep::Fused(fused) => {
+                let input = bb
+                    .last()
+                    .and_then(|s| s.as_mask())
+                    .ok_or_else(|| anyhow::anyhow!("fused step: no input mask on blackboard"))?;
+                let result = fused.execute_jit(store, input, range.clone(), cache);
+                alive_cols = Some(compute_alive_cols(&result, &range, nc));
+                bb.put(fused.step_id.clone(), Slot::Mask(result));
+            }
+            PhysicalStep::Single {
+                block_name,
+                config,
+                step_id,
+                input_id,
+                when,
+            } => {
+                if let Some(when_key) = when {
+                    if !when_enabled(config, when_key) {
+                        if let Some(prev) = bb.last().and_then(|s| s.as_mask()) {
+                            bb.put(step_id.clone(), Slot::Mask(prev.clone()));
+                        }
+                        continue;
+                    }
+                }
+
+                let block = registry
+                    .get(block_name)
+                    .ok_or_else(|| anyhow::anyhow!("unknown block: {block_name}"))?;
+
+                let ctx = BlockContext {
+                    store,
+                    config,
+                    range: range.clone(),
+                    blackboard: &bb,
+                    input_id: input_id.as_deref(),
+                    alive_cols: alive_cols.as_deref(),
+                };
+
+                let result = block.execute(&ctx)?;
+                if let Some(mask) = result.as_mask() {
+                    alive_cols = Some(compute_alive_cols(mask, &range, nc));
+                }
+                bb.put(step_id.clone(), result);
+            }
+        }
+    }
+
     bb.last()
         .and_then(|s| s.as_mask())
         .cloned()
@@ -168,6 +274,7 @@ pub fn execute_signal_phase(
         range: 0..nr,
         blackboard: &bb,
         input_id: None,
+        alive_cols: None,
     };
 
     let result = block.execute(&ctx)?;

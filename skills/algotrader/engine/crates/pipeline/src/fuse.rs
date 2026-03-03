@@ -68,6 +68,7 @@ impl FusedFilter {
         store: &DataStore,
         input: &WideMask,
         range: Range<usize>,
+        alive_cols: Option<&[u32]>,
     ) -> WideMask {
         let nr = store.axes.n_rows;
         let nc = store.axes.n_cols;
@@ -80,9 +81,12 @@ impl FusedFilter {
             .collect();
 
         let mut output = WideMask::new_false(nr, nc);
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
+        let cols = alive_cols.unwrap_or(&all_cols);
 
         for row in range {
-            for col in 0..nc {
+            for &col in cols {
+                let col = col as usize;
                 // Skip cells not in the input mask.
                 if !input.get(row, col) {
                     continue;
@@ -101,6 +105,131 @@ impl FusedFilter {
                 if pass {
                     output.set(row, col, true);
                 }
+            }
+        }
+
+        output
+    }
+    /// Branchless variant: evaluates ALL conditions per cell using `&=` instead
+    /// of short-circuiting via `.all()`. Avoids branch misprediction at the cost
+    /// of always evaluating every condition, even after a failure.
+    ///
+    /// EXP-013 showed this is ~8x faster than short-circuit at realistic pass
+    /// rates (~17% combined) due to eliminated branch mispredictions.
+    pub fn execute_branchless(
+        &self,
+        store: &DataStore,
+        input: &WideMask,
+        range: Range<usize>,
+        alive_cols: Option<&[u32]>,
+    ) -> WideMask {
+        let nr = store.axes.n_rows;
+        let nc = store.axes.n_cols;
+
+        let matrices: Vec<&engine_types::WideMatrix> = self
+            .conditions
+            .iter()
+            .map(|c| store.get(c.indicator))
+            .collect();
+
+        let mut output = WideMask::new_false(nr, nc);
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
+        let cols = alive_cols.unwrap_or(&all_cols);
+
+        for row in range {
+            for &col in cols {
+                let col = col as usize;
+                if !input.get(row, col) {
+                    continue;
+                }
+
+                let mut pass = true;
+                for (cond, mat) in self.conditions.iter().zip(matrices.iter()) {
+                    pass &= cond.check(mat.get(row, col));
+                }
+
+                if pass {
+                    output.set(row, col, true);
+                }
+            }
+        }
+
+        output
+    }
+
+    /// JIT-compiled execution: compiles conditions into native branchless code
+    /// via Cranelift, caching by condition signature so recompilation only
+    /// happens when the active block set changes.
+    ///
+    /// Falls back to the same semantics as `execute()` but operates on flat
+    /// pointer arrays, bypassing per-cell `WideMatrix::get()` overhead.
+    #[cfg(feature = "jit")]
+    pub fn execute_jit(
+        &self,
+        store: &DataStore,
+        input: &WideMask,
+        range: Range<usize>,
+        cache: &mut engine_jit::JitCache,
+    ) -> WideMask {
+        let nr = store.axes.n_rows;
+        let nc = store.axes.n_cols;
+
+        // Convert FusedConditions to JitConditions (breaks cyclic dep).
+        let jit_conds: Vec<engine_jit::JitCondition> = self
+            .conditions
+            .iter()
+            .map(|c| engine_jit::JitCondition {
+                indicator: c.indicator,
+                op: match c.op {
+                    CmpOp::Gt => engine_jit::CmpOp::Gt,
+                    CmpOp::Ge => engine_jit::CmpOp::Ge,
+                    CmpOp::Lt => engine_jit::CmpOp::Lt,
+                    CmpOp::Le => engine_jit::CmpOp::Le,
+                },
+                threshold: c.threshold,
+            })
+            .collect();
+        let jit_fn = cache.get_or_compile(&jit_conds);
+
+        // Extract flat data pointers for each condition's indicator matrix.
+        let data_ptrs: Vec<*const f32> = self
+            .conditions
+            .iter()
+            .map(|c| {
+                let mat = store.get(c.indicator);
+                // Offset to the start of the range.
+                unsafe { mat.data.as_ptr().add(range.start * nc) }
+            })
+            .collect();
+
+        // Convert bool mask to u8 for the range slice.
+        let range_len = range.len() * nc;
+        let range_offset = range.start * nc;
+        let input_u8: Vec<u8> = input.data[range_offset..range_offset + range_len]
+            .iter()
+            .map(|&b| b as u8)
+            .collect();
+
+        let mut output_u8 = vec![0u8; range_len];
+        let thresholds: Vec<f32> = self.conditions.iter().map(|c| c.threshold).collect();
+
+        unsafe {
+            jit_fn.call_raw(
+                &data_ptrs,
+                input_u8.as_ptr(),
+                output_u8.as_mut_ptr(),
+                range_len as i64,
+                &thresholds,
+            );
+        }
+
+        // Convert output u8 back to WideMask.
+        let mut output = WideMask::new_false(nr, nc);
+        for (i, &v) in output_u8.iter().enumerate() {
+            if v != 0 {
+                let row = range.start + i / nc;
+                let col = i % nc;
+                output.set(row, col, true);
             }
         }
 
@@ -131,14 +260,27 @@ pub fn fuse_steps(
     let mut pending_ids: Vec<String> = Vec::new();
 
     for ls in logical_steps {
-        // Check if this step can be fused.
-        let can_fuse = ls.when.is_none()
+        // Check single-condition fusion first.
+        let single_fuse = ls.when.is_none()
             && ls.input.is_none()
             && try_build_condition(ls, registry).is_some();
 
-        if can_fuse {
+        // Check multi-condition decomposition (e.g. rs_percentile → 3 conditions).
+        let multi_fuse = !single_fuse
+            && ls.when.is_none()
+            && ls.input.is_none();
+        let multi_conds = if multi_fuse {
+            try_build_multi_conditions(ls)
+        } else {
+            None
+        };
+
+        if single_fuse {
             let cond = try_build_condition(ls, registry).unwrap();
             pending_conditions.push(cond);
+            pending_ids.push(ls.step_id.clone());
+        } else if let Some(conds) = multi_conds {
+            pending_conditions.extend(conds);
             pending_ids.push(ls.step_id.clone());
         } else {
             // Non-fusable step: flush any accumulated fused conditions first.
@@ -185,6 +327,42 @@ fn try_build_condition(
         op: spec.op,
         threshold,
     })
+}
+
+/// Try to decompose a multi-indicator block into multiple FusedConditions.
+///
+/// Currently handles `rs_percentile`: reads `timeframes` array and `min_pct`,
+/// emits one Ge condition per timeframe against the RS pctrank indicator.
+fn try_build_multi_conditions(ls: &LogicalStep) -> Option<Vec<FusedCondition>> {
+    if ls.block_name != "rs_percentile" {
+        return None;
+    }
+
+    let min_pct = ls.config.get("min_pct")
+        .and_then(|v| v.as_f64())
+        .map(|v| v as f32)?;
+    let threshold = 1.0 - min_pct;
+
+    let timeframes = ls.config.get("timeframes")
+        .and_then(|v| v.as_array())?;
+
+    let mut conds = Vec::with_capacity(timeframes.len());
+    for tf_val in timeframes {
+        let tf = tf_val.as_str()?;
+        let indicator = match tf {
+            "1m" => Indicator::RsPctrank1m,
+            "3m" => Indicator::RsPctrank3m,
+            "6m" => Indicator::RsPctrank6m,
+            _ => return None,
+        };
+        conds.push(FusedCondition {
+            indicator,
+            op: CmpOp::Ge,
+            threshold,
+        });
+    }
+
+    if conds.is_empty() { None } else { Some(conds) }
 }
 
 /// Flush accumulated fusable conditions into the result vec.
@@ -431,7 +609,7 @@ mod tests {
             step_id: "test".into(),
         };
 
-        let result = filter.execute(&store, &input, 0..2);
+        let result = filter.execute(&store, &input, 0..2, None);
 
         // (0,0): close=10>5 AND vol=200>100 -> true
         assert!(result.get(0, 0));
@@ -472,7 +650,7 @@ mod tests {
             step_id: "test".into(),
         };
 
-        let result = filter.execute(&store, &input, 0..1);
+        let result = filter.execute(&store, &input, 0..1, None);
 
         // (0,0): 10>5, 200>100, 0.1<=0.25 -> true
         assert!(result.get(0, 0));
@@ -497,7 +675,7 @@ mod tests {
             step_id: "test".into(),
         };
 
-        let result = filter.execute(&store, &input, 0..1);
+        let result = filter.execute(&store, &input, 0..1, None);
         assert!(result.get(0, 0));
         assert!(!result.get(0, 1));
     }
@@ -518,7 +696,7 @@ mod tests {
             step_id: "test".into(),
         };
 
-        let result = filter.execute(&store, &input, 0..1);
+        let result = filter.execute(&store, &input, 0..1, None);
         assert!(!result.get(0, 0)); // NaN fails
         assert!(result.get(0, 1));
     }
@@ -535,7 +713,7 @@ mod tests {
             step_id: "test".into(),
         };
 
-        let result = filter.execute(&store, &input, 0..2);
+        let result = filter.execute(&store, &input, 0..2, None);
         for r in 0..2 { for c in 0..2 { assert!(!result.get(r, c)); } }
     }
 
@@ -555,7 +733,7 @@ mod tests {
             step_id: "test".into(),
         };
 
-        let result = filter.execute(&store, &input, 1..2);
+        let result = filter.execute(&store, &input, 1..2, None);
         // Row 0 was not scanned, should remain false.
         assert!(!result.get(0, 0));
         assert!(!result.get(0, 1));

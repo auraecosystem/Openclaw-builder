@@ -26,7 +26,7 @@ use engine_data::{DataStore, Indicator};
 use engine_types::{Direction, SignalSet, WideMask};
 
 use crate::config::{DirectionConfig, ExitDef, FillModeConfig, StrategyPipeline, StopDef};
-use crate::execute::{execute_filter_phase, execute_signal_phase};
+use crate::execute::execute_signal_phase;
 use crate::plan::PhysicalPlan;
 use crate::registry::BlockRegistry;
 
@@ -139,6 +139,8 @@ pub struct DynamicSetup {
     stop_def: StopDef,
     pipeline_config: StrategyPipeline,
     registry: Arc<BlockRegistry>,
+    #[cfg(feature = "jit")]
+    jit_cache: std::sync::Mutex<engine_jit::JitCache>,
 }
 
 // Safety: BlockRegistry contains only Send+Sync blocks, and DynamicSetup is
@@ -176,6 +178,8 @@ impl DynamicSetup {
             stop_def: pipeline.stop.clone(),
             pipeline_config: pipeline,
             registry: Arc::new(registry),
+            #[cfg(feature = "jit")]
+            jit_cache: std::sync::Mutex::new(engine_jit::JitCache::new()),
         })
     }
 
@@ -211,6 +215,8 @@ impl DynamicSetup {
             stop_def: pipeline.stop.clone(),
             pipeline_config: pipeline,
             registry: Arc::new(registry),
+            #[cfg(feature = "jit")]
+            jit_cache: std::sync::Mutex::new(engine_jit::JitCache::new()),
         })
     }
 
@@ -348,13 +354,28 @@ pub fn map_exit_defs(defs: &[ExitDef]) -> anyhow::Result<Vec<DynamicExitRule>> {
 
 impl DynamicSetup {
     /// Run the filter phase: compile plan and execute it.
+    ///
+    /// When the `jit` feature is enabled, fused filter steps are dispatched
+    /// through Cranelift-compiled native code (11x faster per EXP-014).
     pub fn run_filter(
         &self,
         store: &DataStore,
         range: Range<usize>,
     ) -> anyhow::Result<WideMask> {
         let plan = self.compile_plan()?;
-        execute_filter_phase(&plan.filter_steps, store, &self.registry, range)
+
+        #[cfg(feature = "jit")]
+        {
+            let mut cache = self.jit_cache.lock().unwrap();
+            execute::execute_filter_phase_jit(
+                &plan.filter_steps, store, &self.registry, range, &mut cache,
+            )
+        }
+
+        #[cfg(not(feature = "jit"))]
+        {
+            execute::execute_filter_phase(&plan.filter_steps, store, &self.registry, range)
+        }
     }
 
     /// Run the signal phase against a universe mask.

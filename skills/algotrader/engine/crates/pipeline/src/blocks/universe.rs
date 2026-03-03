@@ -70,6 +70,8 @@ fn parse_indicator(s: &str) -> anyhow::Result<Indicator> {
         "flag_retrace_pct" => Ok(Indicator::FlagRetracePct),
         "flag_days" => Ok(Indicator::FlagDays),
         "flag_vol_ratio" => Ok(Indicator::FlagVolRatio),
+        "adr_pct" => Ok(Indicator::AdrPct),
+        "extension_atr" => Ok(Indicator::ExtensionAtr),
         other => anyhow::bail!("unknown indicator: {other}"),
     }
 }
@@ -100,10 +102,12 @@ impl Block for ExcludeEtf {
     fn execute(&self, ctx: &BlockContext) -> anyhow::Result<Slot> {
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
         let mut mask = WideMask::new_false(nr, nc);
 
         for row in ctx.range.clone() {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if ctx.store.axes.etf_cols[col] {
                     continue;
                 }
@@ -133,11 +137,13 @@ impl Block for PriceFloor {
         let min = get_f32(&ctx.config, "min", "price_floor")?;
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
         let mut mask = WideMask::new_false(nr, nc);
         let close = ctx.store.close();
 
         for row in ctx.range.clone() {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if let Some(inp) = ctx.input_mask() {
                     if !inp.get(row, col) { continue; }
                 }
@@ -175,11 +181,13 @@ impl Block for VolumeFloor {
         let min = get_f32(&ctx.config, "min", "volume_floor")?;
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
         let mut mask = WideMask::new_false(nr, nc);
         let vol_sma = ctx.store.get(Indicator::VolSma20);
 
         for row in ctx.range.clone() {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if let Some(inp) = ctx.input_mask() {
                     if !inp.get(row, col) { continue; }
                 }
@@ -218,12 +226,14 @@ impl Block for AdvFloor {
         let min = get_f32(&ctx.config, "min", "adv_floor")?;
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
         let mut mask = WideMask::new_false(nr, nc);
         let close = ctx.store.close();
         let vol_sma = ctx.store.get(Indicator::VolSma20);
 
         for row in ctx.range.clone() {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if let Some(inp) = ctx.input_mask() {
                     if !inp.get(row, col) { continue; }
                 }
@@ -260,11 +270,13 @@ impl Block for IndicatorGte {
 
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
         let mut mask = WideMask::new_false(nr, nc);
         let mat = ctx.store.get(ind);
 
         for row in ctx.range.clone() {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if let Some(inp) = ctx.input_mask() {
                     if !inp.get(row, col) { continue; }
                 }
@@ -311,11 +323,13 @@ impl Block for IndicatorLte {
 
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
         let mut mask = WideMask::new_false(nr, nc);
         let mat = ctx.store.get(ind);
 
         for row in ctx.range.clone() {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if let Some(inp) = ctx.input_mask() {
                     if !inp.get(row, col) { continue; }
                 }
@@ -375,10 +389,12 @@ impl Block for RsPercentile {
 
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
         let mut mask = WideMask::new_false(nr, nc);
 
         for row in ctx.range.clone() {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if let Some(inp) = ctx.input_mask() {
                     if !inp.get(row, col) { continue; }
                 }
@@ -411,11 +427,13 @@ impl Block for Near52wHigh {
         let max_dist = get_f32(&ctx.config, "max_dist", "near_52w_high")?;
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
         let mut mask = WideMask::new_false(nr, nc);
         let dist = ctx.store.get(Indicator::Dist52w);
 
         for row in ctx.range.clone() {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if let Some(inp) = ctx.input_mask() {
                     if !inp.get(row, col) { continue; }
                 }
@@ -453,11 +471,13 @@ impl Block for PriorMove {
         let min = get_f32(&ctx.config, "min", "prior_move")?;
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
         let mut mask = WideMask::new_false(nr, nc);
         let ret = ctx.store.get(Indicator::Ret63);
 
         for row in ctx.range.clone() {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if let Some(inp) = ctx.input_mask() {
                     if !inp.get(row, col) { continue; }
                 }
@@ -483,8 +503,8 @@ impl Block for PriorMove {
 // 10. AdrFloor (Average Daily Range %)
 // ---------------------------------------------------------------------------
 
-/// Passes cells where `atr_14 / close >= config["min_pct"]`.
-/// NOT fusable: ratio of two indicator values.
+/// Passes cells where `adr_pct >= config["min_pct"]`.
+/// Uses precomputed `AdrPct` indicator (= ATR14 / Close).
 pub struct AdrFloor;
 
 impl Block for AdrFloor {
@@ -496,23 +516,31 @@ impl Block for AdrFloor {
         let min_pct = get_f32(&ctx.config, "min_pct", "adr_floor")?;
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
         let mut mask = WideMask::new_false(nr, nc);
-        let close = ctx.store.close();
-        let atr = ctx.store.get(Indicator::Atr14);
+        let adr = ctx.store.get(Indicator::AdrPct);
 
         for row in ctx.range.clone() {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if let Some(inp) = ctx.input_mask() {
                     if !inp.get(row, col) { continue; }
                 }
-                let a = atr.get(row, col);
-                let c = close.get(row, col);
-                if !a.is_nan() && !c.is_nan() && c > 0.0 && (a / c) >= min_pct {
+                let v = adr.get(row, col);
+                if !v.is_nan() && v >= min_pct {
                     mask.set(row, col, true);
                 }
             }
         }
         Ok(Slot::Mask(mask))
+    }
+
+    fn fusable_spec(&self) -> Option<FusableSpec> {
+        Some(FusableSpec {
+            indicator: Indicator::AdrPct,
+            op: CmpOp::Ge,
+            threshold_key: "min_pct".to_string(),
+        })
     }
 }
 
@@ -520,9 +548,9 @@ impl Block for AdrFloor {
 // 11. ExtensionCap
 // ---------------------------------------------------------------------------
 
-/// Passes cells where `(close - consol_high) <= config["max_atr_above"] * atr_14`.
-/// Prevents entries on stocks that have already extended too far above their base.
-/// NOT fusable: complex expression involving multiple indicators.
+/// Passes cells where `extension_atr <= config["max_atr_above"]`.
+/// Uses precomputed `ExtensionAtr` indicator (= (Close - ConsolHigh) / ATR14).
+/// Missing data → NEG_INFINITY in the precomputed indicator → always passes Le check.
 pub struct ExtensionCap;
 
 impl Block for ExtensionCap {
@@ -534,33 +562,32 @@ impl Block for ExtensionCap {
         let max_atr_above = get_f32(&ctx.config, "max_atr_above", "extension_cap")?;
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
         let mut mask = WideMask::new_false(nr, nc);
-        let close = ctx.store.close();
-        let consol_high = ctx.store.get(Indicator::ConsolHigh);
-        let atr = ctx.store.get(Indicator::Atr14);
+        let ext = ctx.store.get(Indicator::ExtensionAtr);
 
         for row in ctx.range.clone() {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if let Some(inp) = ctx.input_mask() {
                     if !inp.get(row, col) { continue; }
                 }
-                let c = close.get(row, col);
-                let ch = consol_high.get(row, col);
-                let a = atr.get(row, col);
-                // Skip if consol_high or ATR is NaN — cannot evaluate the condition.
-                if ch.is_nan() || a.is_nan() {
-                    // When data is missing, pass the cell (matches breakout.rs
-                    // behavior where NaN consol_high does not reject).
-                    mask.set(row, col, true);
-                    continue;
-                }
-                // ATR <= 0 means we can't check extension — pass the cell.
-                if a <= 0.0 || (c - ch) <= max_atr_above * a {
+                let v = ext.get(row, col);
+                // NEG_INFINITY (missing data) always passes Le check
+                if v <= max_atr_above {
                     mask.set(row, col, true);
                 }
             }
         }
         Ok(Slot::Mask(mask))
+    }
+
+    fn fusable_spec(&self) -> Option<FusableSpec> {
+        Some(FusableSpec {
+            indicator: Indicator::ExtensionAtr,
+            op: CmpOp::Le,
+            threshold_key: "max_atr_above".to_string(),
+        })
     }
 }
 
@@ -585,12 +612,14 @@ impl Block for Consolidation {
         let max_range = get_f32(&ctx.config, "max_range", "consolidation")?;
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
         let mut mask = WideMask::new_false(nr, nc);
 
         // A min_days of 0 means no consolidation check — pass everything.
         if min_days == 0 {
             for row in ctx.range.clone() {
-                for col in 0..nc {
+                for &col in ctx.col_indices(&all_cols) {
+                    let col = col as usize;
                     if let Some(inp) = ctx.input_mask() {
                         if !inp.get(row, col) { continue; }
                     }
@@ -603,7 +632,8 @@ impl Block for Consolidation {
         let vcp_last = ctx.store.get(Indicator::VcpLastContractionPct);
 
         for row in ctx.range.clone() {
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if let Some(inp) = ctx.input_mask() {
                     if !inp.get(row, col) { continue; }
                 }
@@ -645,6 +675,7 @@ impl Block for RegimeEma {
     fn execute(&self, ctx: &BlockContext) -> anyhow::Result<Slot> {
         let nr = ctx.store.axes.n_rows;
         let nc = ctx.store.axes.n_cols;
+        let all_cols: Vec<u32> = (0..nc as u32).collect();
         let regime = compute_regime(ctx.store);
         let mut mask = WideMask::new_false(nr, nc);
 
@@ -652,7 +683,8 @@ impl Block for RegimeEma {
             if !regime[row] {
                 continue;
             }
-            for col in 0..nc {
+            for &col in ctx.col_indices(&all_cols) {
+                let col = col as usize;
                 if let Some(inp) = ctx.input_mask() {
                     if !inp.get(row, col) { continue; }
                 }
@@ -780,6 +812,7 @@ mod tests {
             range: 0..store.axes.n_rows,
             blackboard,
             input_id: None,
+            alive_cols: None,
         }
     }
 
@@ -990,6 +1023,7 @@ mod tests {
             range: 0..n_rows,
             blackboard: &bb,
             input_id: None,
+            alive_cols: None,
         };
 
         let result = RegimeEma.execute(&ctx).unwrap();
@@ -1009,14 +1043,11 @@ mod tests {
 
     #[test]
     fn test_extension_cap_nan_passthrough() {
-        // When consol_high is NaN, the cell should pass (matches breakout.rs behavior).
-        let close_data = vec![100.0, 200.0];
-        let consol_data = vec![f32::NAN, 180.0];
-        let atr_data = vec![5.0, 10.0];
+        // When consol_high is NaN, ExtensionAtr = NEG_INFINITY → passes Le check.
+        // (0,0): ch=NaN → NEG_INFINITY, (0,1): (200-180)/10 = 2.0
+        let ext_data = vec![f32::NEG_INFINITY, 2.0];
         let store = make_store(1, 2, &[
-            (Indicator::Close, close_data),
-            (Indicator::ConsolHigh, consol_data),
-            (Indicator::Atr14, atr_data),
+            (Indicator::ExtensionAtr, ext_data),
         ]);
         let mut cfg = HashMap::new();
         cfg.insert("max_atr_above".into(), serde_json::json!(1.0));
@@ -1046,12 +1077,14 @@ mod tests {
         assert!(Near52wHigh.fusable_spec().is_some());
         assert!(PriorMove.fusable_spec().is_some());
 
+        // Newly fusable (via precomputed indicators).
+        assert!(AdrFloor.fusable_spec().is_some());
+        assert!(ExtensionCap.fusable_spec().is_some());
+
         // Non-fusable blocks.
         assert!(ExcludeEtf.fusable_spec().is_none());
         assert!(AdvFloor.fusable_spec().is_none());
         assert!(RsPercentile.fusable_spec().is_none());
-        assert!(AdrFloor.fusable_spec().is_none());
-        assert!(ExtensionCap.fusable_spec().is_none());
         assert!(Consolidation.fusable_spec().is_none());
         assert!(RegimeEma.fusable_spec().is_none());
         assert!(IndicatorGte.fusable_spec().is_none());

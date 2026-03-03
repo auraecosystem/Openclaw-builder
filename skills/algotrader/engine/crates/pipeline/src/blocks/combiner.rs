@@ -172,6 +172,7 @@ mod tests {
             range: 0..2,
             blackboard: &bb,
             input_id: Some("input_step"),
+            alive_cols: None,
         };
         block.execute(&ctx)
     }
@@ -207,6 +208,7 @@ mod tests {
             range: 0..2,
             blackboard: &bb,
             input_id: Some("prev"),
+            alive_cols: None,
         };
         let result = Not.execute(&ctx).unwrap();
         let m = result.as_mask().unwrap();
@@ -225,6 +227,7 @@ mod tests {
             range: 0..2,
             blackboard: &bb,
             input_id: Some("s"),
+            alive_cols: None,
         };
         assert!(And.execute(&ctx).is_err());
     }

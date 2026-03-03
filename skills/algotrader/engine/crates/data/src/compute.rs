@@ -361,6 +361,52 @@ pub fn consec_green(open: &WideMatrix, close: &WideMatrix, n_rows: usize, n_cols
 }
 
 // ---------------------------------------------------------------------------
+// Derived indicators for filter fusion
+// ---------------------------------------------------------------------------
+
+/// ADR% = ATR14 / Close. NaN if either input is NaN or close <= 0.
+pub fn adr_pct(atr14: &WideMatrix, close: &WideMatrix) -> WideMatrix {
+    let n_rows = atr14.n_rows();
+    let n_cols = atr14.n_cols();
+    let mut out = vec![f32::NAN; n_rows * n_cols];
+
+    for row in 0..n_rows {
+        for col in 0..n_cols {
+            let a = atr14.get(row, col);
+            let c = close.get(row, col);
+            if !a.is_nan() && !c.is_nan() && c > 0.0 {
+                out[row * n_cols + col] = a / c;
+            }
+        }
+    }
+
+    WideMatrix::new(out, n_rows, n_cols)
+}
+
+/// Extension in ATR units = (Close - ConsolHigh) / ATR14.
+/// When ConsolHigh or ATR14 is NaN (or ATR <= 0), returns NEG_INFINITY so that
+/// a `<= threshold` fusable check always passes (matching the block's NaN-passthrough behavior).
+pub fn extension_atr(close: &WideMatrix, consol_high: &WideMatrix, atr14: &WideMatrix) -> WideMatrix {
+    let n_rows = close.n_rows();
+    let n_cols = close.n_cols();
+    let mut out = vec![f32::NEG_INFINITY; n_rows * n_cols];
+
+    for row in 0..n_rows {
+        for col in 0..n_cols {
+            let c = close.get(row, col);
+            let ch = consol_high.get(row, col);
+            let a = atr14.get(row, col);
+            if !ch.is_nan() && !a.is_nan() && a > 0.0 {
+                out[row * n_cols + col] = (c - ch) / a;
+            }
+            // else: stays NEG_INFINITY → passes Le threshold check
+        }
+    }
+
+    WideMatrix::new(out, n_rows, n_cols)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

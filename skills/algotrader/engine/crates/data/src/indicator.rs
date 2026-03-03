@@ -39,6 +39,9 @@ pub enum Indicator {
     FlagVolRatio,
     // --- Other ---
     ConsolHigh,
+    // --- Derived (precomputed for filter fusion) ---
+    AdrPct,
+    ExtensionAtr,
 }
 
 impl Indicator {
@@ -64,6 +67,9 @@ impl Indicator {
             Self::RsPctrank1m => None,
             Self::RsPctrank3m => None,
             Self::RsPctrank6m => None,
+            // Derived: runtime-computed for fusion
+            Self::AdrPct => None,
+            Self::ExtensionAtr => None,
             // Multi-pass pattern detection: stays cached
             Self::VcpNumContractions => Some("vcp_num_contractions.parquet"),
             Self::VcpLastContractionPct => Some("vcp_last_contraction_pct.parquet"),
@@ -102,6 +108,8 @@ impl Indicator {
                 | Self::RsPctrank1m
                 | Self::RsPctrank3m
                 | Self::RsPctrank6m
+                | Self::AdrPct
+                | Self::ExtensionAtr
         )
     }
 }
