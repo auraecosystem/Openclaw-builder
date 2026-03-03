@@ -252,3 +252,359 @@ Measure wall-clock time for both paths on the full dataset:
 **Breakout: blocked on RS cache rebuild.** Once `RsPctrank` indicators are cached, re-run `--compare breakout:breakout_quick` to validate.
 
 **Performance**: Filter overhead (4-25x) is acceptable for backtest but may need optimization for CMA-ES. Candidates: fuse pattern blocks, cache blackboard reads, or fall back to hardcoded filter for evolution runs.
+
+---
+
+## EXP-011 — NautilusTrader Performance Profiling Baseline
+
+**Date**: 2026-03-02 | **Status**: Completed (baseline established) | **Engine**: NautilusTrader 1.223.0
+
+Profiled the NautilusTrader backtest pipeline to establish a performance baseline before optimization work. Two workloads: (1) BarCounterStrategy (trivial callback, isolates data loading + engine overhead), (2) QullamaggieBreakout (real strategy with pattern detectors, indicators, and order management). Python 3.12, cProfile.
+
+### Environment
+
+- **NautilusTrader**: 1.223.0 (Rust core with Python bindings)
+- **Python**: 3.12 via `/Users/ad/work/ai/openclaw/.venv/`
+- **Data**: `data-crypto/raw/` (Binance monthly CSVs, 100 tickers, daily bars)
+- **Machine**: Apple Silicon Mac
+
+### Run 1: BarCounterStrategy — 100 Tickers, Daily
+
+Trivial `on_bar` (dict increment). Isolates data loading and NT engine overhead.
+
+| Metric | Value |
+|--------|-------|
+| Tickers | 100 |
+| Total bars | 201,387 |
+| Total wall time | 8.7s |
+| Data loading (CSV) | 6.1s (70%) |
+| Engine run | 2.1s (24%) |
+| Throughput | 96,813 bars/sec |
+| `pd.read_csv` calls | 6,664 |
+| `on_bar` tottime | 0.081s |
+
+**Finding**: 70% of wall time is pandas CSV parsing. The actual NT engine is fast at 97K bars/sec with a trivial callback.
+
+### Run 2: QullamaggieBreakout — 11 Tickers, Daily
+
+Default ticker set (BTCUSDT + 10 alts). Real strategy with VCP/Flag pattern detection, 6 custom indicators, entry evaluation, position management.
+
+| Metric | Value |
+|--------|-------|
+| Tickers | 11 |
+| Total bars | 18,342 |
+| Total wall time | 2.3s |
+| Data loading (CSV) | 0.5s |
+| Engine run | 1.2s |
+| Order fills | 34 |
+| Positions | 15 |
+
+### Run 3: QullamaggieBreakout — 50 Tickers, Daily (Primary Benchmark)
+
+50 mid/large-cap tickers. Most representative workload for optimization baseline.
+
+| Metric | Value |
+|--------|-------|
+| Tickers | 50 |
+| Total bars | 101,908 |
+| Total wall time | 10.6s |
+| Order fills | ~80 |
+| Positions | ~30 |
+
+**Time breakdown** (cProfile, 50-ticker run):
+
+| Component | Time (s) | % of Total | Calls | Per-Call |
+|-----------|----------|------------|-------|---------|
+| VCPDetector._detect | 1.82 | 17.2% | 98,958 | 18.4 us |
+| FlagDetector._detect | 1.68 | 15.9% | 98,958 | 17.0 us |
+| NT Rust engine (main self-time) | 1.99 | 18.8% | 1 | — |
+| CSV loading (pandas read_csv) | ~2.5 | 23.7% | 3,371 | 0.74 ms |
+| Other indicators (handle_bar) | ~1.0 | 9.5% | ~510K | — |
+| _evaluate_entry | 0.26 | 2.4% | 53,148 | 4.9 us |
+| Import/setup | ~1.0 | 9.5% | — | — |
+
+### Hotspot Analysis
+
+**1. Pattern Detectors (33% combined — VCP + Flag)**
+
+Both VCPDetector and FlagDetector are O(n*k) per bar where n=lookback(60) and k=swing_order*2+1(11). Called ~99K times each = ~130M inner-loop iterations.
+
+Root causes:
+- `bars = list(self._bars)` materializes a 60-element deque into a new list on every bar
+- All swing highs/lows are recomputed from scratch each bar, even though only one new bar entered the window
+- The inner swing detection loop (`for j in range(i-order, i+order+1)`) is pure Python with no vectorization
+
+**2. CSV Loading (24%)**
+
+3,371 `pd.read_csv()` calls (monthly CSVs × 50 tickers). Each call has ~0.74ms overhead from parser initialization. The pre-built `ohlcv_daily.parquet` exists but `run_backtest.py` loads from raw CSVs via `load_ticker_csv()`.
+
+**3. NT Rust Engine (19%)**
+
+Opaque from Python cProfile — `main()` self-time of 1.99s covers the Rust `engine.run()` call (event dispatch, order book matching, cache lookups, bar routing). At 102K bars with real strategy callbacks, throughput is ~51K bars/sec — 47% slower than BarCounterStrategy's 97K bars/sec due to Python↔Rust callback overhead.
+
+**4. RollingHigh.handle_bar — O(252) per call**
+
+Calls `max(self._highs)` on a 252-element deque every bar. A monotonic deque tracking max index would make this O(1) amortized.
+
+**5. VolumeSMA.handle_bar — O(20) per call**
+
+Calls `sum(self._volumes) / len(self._volumes)` every bar. A running sum would make this O(1).
+
+### Optimization Opportunities (Priority Order)
+
+| # | Optimization | Est. Savings | Effort |
+|---|-------------|-------------|--------|
+| 1 | Pattern detectors → incremental swing updates | ~3.5s (33%) | Medium |
+| 2 | Load from parquet instead of raw CSVs | ~2.5s (24%) | Low |
+| 3 | Pre-compute patterns vectorized (like PrecomputedBreakout) | ~3.5s (33%) | Low (already exists) |
+| 4 | RollingHigh → monotonic deque | ~0.3s (3%) | Low |
+| 5 | VolumeSMA → running sum | ~0.1s (1%) | Low |
+
+Note: Optimizations 1 and 3 are alternatives (both address pattern detection). Option 3 (pre-compute) is simpler and already implemented in `PrecomputedBreakout`, but requires pre-computing arrays outside the event loop.
+
+### Profiles Saved
+
+- `/tmp/nt_profile_100_daily.prof` — 100-ticker BarCounterStrategy
+- `/tmp/nt_profile_qullam_daily.prof` — 11-ticker QullamaggieBreakout
+- `/tmp/nt_profile_qullam_50_daily.prof` — 50-ticker QullamaggieBreakout (primary)
+
+### Limitations
+
+- **Python cProfile can't see inside Rust**: The NT engine's internal bottlenecks (data iterator cloning, matching engine, cache borrows) are invisible. Would need py-spy or Rust-side profiling (e.g. `cargo flamegraph`) to drill into engine internals.
+- **100-ticker run crashed**: Quantity overflow on meme coin volumes (`raw value 340282366920930000000000000000 exceeds QUANTITY_RAW_MAX`). The `size_precision=0` and `volume.clip(upper=QUANTITY_MAX)` workaround in `nautilus_backtest.py` doesn't cover all edge cases. 50-ticker subset avoids the crash.
+- **5m data not profiled**: The 889K-row 5m dataset was not tested because `run_backtest.py` uses the CSV loader path and EXP-004 showed daily strategy logic doesn't work on 5m. A 5m profile would stress the pattern detectors ~288x more (288 bars/day vs 1) but the results would be architecturally the same — just proportionally worse.
+
+### Conclusion
+
+The NautilusTrader Python-side bottleneck is dominated by **pattern detection (33%)** and **CSV I/O (24%)**. The Rust engine itself is reasonably fast (~51K bars/sec with real callbacks). For optimization work, the highest-leverage targets are: (1) vectorized/pre-computed pattern detection (already proven via PrecomputedBreakout), (2) parquet data loading, (3) incremental indicator updates. The Rust engine internals (data iterator, matching engine) are secondary targets that require Rust-side profiling to assess.
+
+---
+
+## EXP-012 — Vectorized Pattern Detection in NT Indicators
+
+**Date**: 2026-03-02 | **Status**: Pending | **Engine**: NautilusTrader 1.223.0 | **Parent**: EXP-011
+
+Replace pure-Python swing-point loops in VCPDetector and FlagDetector with numpy-vectorized equivalents. The indicators stay event-driven (called per-bar inside the NT event loop) — this is not pre-computation or caching, just faster math on the same lookback buffer.
+
+### Hypothesis
+
+Replacing the O(n*k) Python swing-detection loop with numpy `maximum_filter1d` / `sliding_window_view` will reduce VCP+Flag `_detect` time by ~4-5x (from ~3.5s to ~0.7s on the 50-ticker daily benchmark) without changing any output values.
+
+### Mechanism
+
+The current `_detect` methods spend ~130M Python-level loop iterations (99K calls × 60 bars × 11 neighbors) to answer a simple question per bar position: "is this a local max/min over a window of 11?" That question is a rolling-max comparison — one C-level pass over 60 floats.
+
+### Falsification Criteria
+
+Reject if:
+- Any output value differs between original and vectorized implementation on the 50-ticker benchmark (bit-exact f64 match required)
+- Wall time improvement is less than 2x on pattern detection
+- Any lookahead bias is introduced (verified by: vectorized buffer contains only bars ≤ current time, same as the deque it replaces)
+
+### No Lookahead Guarantee
+
+The lookback buffer at time t contains bars `[t-59, ..., t]`. Swing detection runs on indices `[order, n-order)` = `[5, 54]`. Position 54 looks "forward" to positions 55-59, which are bars `t-4` through `t` — all historical. `maximum_filter1d(size=11)` centered at i checks `[i-5, i+5]`, identical to the existing loop. The no-lookahead property comes from the buffer construction (only past bars enter), not from the detection algorithm. Both implementations share this property.
+
+### Changes
+
+**1. Buffer: deque[tuple] → pre-allocated numpy arrays**
+
+Current (`indicators.py:169`):
+```python
+self._bars: deque[tuple[float, float, float, float]] = deque(maxlen=lookback)
+```
+
+New:
+```python
+self._buf_h = np.empty(lookback, dtype=np.float64)
+self._buf_l = np.empty(lookback, dtype=np.float64)
+self._buf_c = np.empty(lookback, dtype=np.float64)
+self._buf_v = np.empty(lookback, dtype=np.float64)
+self._n = 0  # bars received so far
+```
+
+`handle_bar` writes to position `min(self._n, lookback-1)` and shifts the array left once full (`_buf_h[:-1] = _buf_h[1:]; _buf_h[-1] = new_val`). On 60 elements the shift is ~50ns.
+
+**2. Swing detection: nested Python loop → numpy rolling max/min**
+
+Current (`indicators.py:207-222`, same pattern in FlagDetector):
+```python
+for i in range(order, n - order):
+    hi = bars[i][0]
+    is_sh = True
+    for j in range(i - order, i + order + 1):
+        if bars[j][0] > hi:
+            is_sh = False
+        ...
+```
+
+New (pure numpy, no scipy dependency):
+```python
+window = 2 * order + 1
+h = self._buf_h[:n]
+l = self._buf_l[:n]
+
+# rolling max/min via sliding_window_view
+wins_h = np.lib.stride_tricks.sliding_window_view(h, window)
+wins_l = np.lib.stride_tricks.sliding_window_view(l, window)
+roll_max = wins_h.max(axis=1)  # shape (n - window + 1,)
+roll_min = wins_l.min(axis=1)
+
+# swing points: center of window equals the window's extreme
+center = order  # index within each window
+sh_mask = (h[order:n-order] == roll_max)
+sl_mask = (l[order:n-order] == roll_min)
+
+swing_highs = [(i + order, h[i + order]) for i in np.where(sh_mask)[0]]
+swing_lows  = [(i + order, l[i + order]) for i in np.where(sl_mask)[0]]
+```
+
+**3. Contraction/pole pairing: unchanged**
+
+The downstream logic (VCP contraction counting, Flag pole+flag search) operates on ~5-15 swing points. Already fast. No changes needed.
+
+**4. VolumeSMA / RollingHigh (opportunistic)**
+
+While touching `indicators.py`, apply two micro-optimizations:
+- `RollingHigh`: replace `max(self._highs)` O(252) deque scan with monotonic-deque max tracking → O(1) amortized
+- `VolumeSMA`: replace `sum(self._volumes) / len(self._volumes)` with a running sum → O(1)
+
+### Validation Protocol
+
+1. Run 50-ticker daily benchmark with **original** indicators, capture all VCP/Flag output values per (ticker, bar) pair to CSV
+2. Swap in vectorized indicators
+3. Run same benchmark, capture same outputs
+4. Diff the two CSVs — must be bit-identical (no tolerance, same dtype, same operations)
+5. Compare wall time: `_detect` cumtime in cProfile
+
+### Expected Results
+
+| Metric | Original (EXP-011) | Vectorized (expected) |
+|--------|--------------------|-----------------------|
+| VCPDetector._detect tottime | 1.82s | ~0.4s |
+| FlagDetector._detect tottime | 1.68s | ~0.35s |
+| Pattern detection total | 3.50s (33%) | ~0.75s (9%) |
+| Overall wall time (50-ticker) | 10.6s | ~7.8s |
+| Speedup (pattern detection) | — | ~4-5x |
+| Speedup (overall) | — | ~1.35x |
+| Output values changed | — | 0 (bit-exact) |
+
+### Decision Gates
+
+| Outcome | Action |
+|---------|--------|
+| Bit-exact outputs, ≥3x pattern speedup | Merge. Update EXP-011 baseline. |
+| Bit-exact outputs, 2-3x speedup | Merge. Acceptable but investigate remaining overhead. |
+| Bit-exact outputs, <2x speedup | Investigate. Likely numpy call overhead dominates on small arrays — consider Cython or Rust PyO3 extension. |
+| Any output difference | Bug. Trace to specific (ticker, bar), compare intermediate swing points, fix. |
+
+### Red Flags
+
+- Output diffs (logic bug or floating-point ordering difference in max/min)
+- Numpy allocation overhead overwhelming the vectorization gain on 60-element arrays
+- `sliding_window_view` creating copies instead of views (check with `.base is not None`)
+
+---
+
+## EXP-013 — JIT Filter Compilation: Cranelift on Apple Silicon
+
+**Date**: 2026-03-02 | **Status**: Completed (feasibility proven) | **Engine**: Rust (engine-pipeline) | **Parent**: EXP-010
+
+EXP-010 showed the dynamic pipeline's filter phase is 14-25x slower than hardcoded strategies on 130M cells. This experiment investigates whether Cranelift JIT compilation can close that gap, and whether it works on aarch64-apple-darwin (Apple Silicon).
+
+### Hypothesis
+
+The dynamic filter overhead comes from two sources: (1) iterating a heap-allocated `Vec<FusedCondition>` per cell prevents LLVM from vectorizing the outer loop, and (2) the `&&` short-circuit chains in existing hardcoded strategies generate branch-heavy code that thrashes the branch predictor at high pass rates. A JIT-compiled filter with conditions baked as branchless `band` operations should match or beat the hardcoded path.
+
+### Environment
+
+- **Machine**: Apple Silicon Mac (aarch64-apple-darwin)
+- **Rust**: 1.92.0 (2025-12-08)
+- **Cranelift**: 0.116.1 (`cranelift`, `cranelift-jit`, `cranelift-module`, `cranelift-native`)
+- **Dataset**: Synthetic 16384 x 8064 = 132M cells, 5 indicator conditions, ~17% pass rate
+
+### Feasibility: Does cranelift-jit build and run on Apple Silicon?
+
+**Yes.** `cranelift-jit` v0.116.1 compiles clean on `aarch64-apple-darwin` with rustc 1.92.0. No special entitlements, no W^X workarounds needed — the crate handles `MAP_JIT` and `pthread_jit_write_protect_np` internally. 54 transitive crate dependencies. JIT compilation time for a 5-condition filter function: **<1ms**.
+
+### Benchmark Design
+
+Four implementations of the same filter (5 conditions: 4x `Gt`, 1x `Le` across 5 indicator matrices):
+
+| Variant | Description |
+|---------|-------------|
+| **Hardcoded (`&&`)** | Idiomatic Rust with short-circuit `&&` chain. Matches existing strategy code style. |
+| **Hardcoded (`&`)** | Bitwise AND of all conditions — branchless. Same logic, no short-circuit. |
+| **Cranelift JIT** | Conditions baked into IR at strategy load time. Thresholds passed as f32 args (CMA-ES can vary without recompile). Uses `band` (inherently branchless). |
+| **Interpreted (Vec)** | Dynamic `Vec<Condition>` iterated per cell. Mirrors current `FusedFilter::execute`. |
+
+All four are `#[inline(never)]` to prevent LLVM from optimizing away the benchmark. Correctness verified via `assert_eq!` across all four output buffers. Each variant runs 5 iterations after a warmup pass.
+
+### Results (132M cells, 5 conditions, ~17% pass rate)
+
+Stable across 3 consecutive runs:
+
+```
+  ┌───────────────────────┬──────────┬──────────┐
+  │                       │   Time   │ vs JIT   │
+  ├───────────────────────┼──────────┼──────────┤
+  │ Hardcoded (&&)        │   810ms  │   7.6x   │
+  │ Hardcoded (&)         │    97ms  │   0.9x   │
+  │ Cranelift JIT         │   106ms  │   1.0x   │
+  │ Interpreted (Vec)     │  1050ms  │   9.9x   │
+  └───────────────────────┴──────────┴──────────┘
+```
+
+JIT compile time: <1ms (one-time per strategy).
+
+### Key Findings
+
+**1. Short-circuit `&&` is the dominant bottleneck in hardcoded strategies.**
+
+At ~17% overall pass rate (each condition passes ~70%), the branch predictor sees a near-random pattern on 132M cells. The `&&` chain generates 5 conditional branches per cell — ~660M branches, many mispredicted. Switching from `&&` to bitwise `&` gives an **8.4x speedup** with zero logic changes. This is a free win for existing hardcoded strategies independent of any JIT work.
+
+**2. Cranelift JIT matches optimal LLVM within 10%.**
+
+The JIT emits `band` instructions (branchless by construction), producing code comparable to LLVM's branchless output. The ~10% gap vs `Hardcoded (&)` is expected — Cranelift doesn't apply NEON auto-vectorization as aggressively as LLVM. For CMA-ES workloads where strategies are loaded once and run thousands of times, the <1ms compile cost is negligible.
+
+**3. The "25x dynamic overhead" from EXP-010 decomposes as:**
+
+- ~8-10x from `&&` short-circuit branches in the hardcoded baseline (the baseline was slower than it should be)
+- ~1.3x from `Vec<Condition>` iteration overhead in the interpreted path (LLVM can't unroll/vectorize a dynamic-length inner loop)
+- ~1.0x from blackboard/registry dispatch overhead (negligible for fused blocks)
+
+This means the true overhead of dynamic dispatch vs optimal code is only ~1.3x, not 25x. The 25x number was inflated by the hardcoded path being branch-impaired.
+
+**4. Thresholds as function args enable CMA-ES without recompilation.**
+
+The JIT function signature takes indicator pointers (baked at compile time, fixed per strategy) and threshold values as f32 arguments (varied per CMA-ES iteration). Structure changes (adding/removing conditions) require recompilation (<1ms). Threshold sweeps do not.
+
+### Implications for engine-pipeline
+
+Three paths forward, in order of increasing complexity:
+
+| Approach | Effort | Filter speedup vs current dynamic | Notes |
+|----------|--------|-----------------------------------|-------|
+| Fix hardcoded `&&` → `&` | 1 line per strategy | 8x on hardcoded path | Free win. Does not help dynamic pipeline. |
+| Const-generic specialization | ~100 LOC in `fuse.rs` | ~3-8x | Dispatch on `conditions.len()` to monomorphized `execute_n::<N>` paths. LLVM unrolls + vectorizes. No new deps. |
+| Cranelift JIT in `FusedFilter` | ~300 LOC + 54 crate deps | ~10x (parity with optimal) | Compile filter function at `DynamicSetup::from_json()` time. Cache on the `FusedFilter`. |
+
+The const-generic approach is the pragmatic middle ground — no new dependencies, ships in an afternoon, closes most of the gap. Cranelift JIT is justified if CMA-ES evolution needs sub-200ms filter phase on 130M cells.
+
+### Benchmark Code
+
+Test crate at `/tmp/cranelift-test/` (disposable). Cargo deps: `cranelift 0.116`, `cranelift-jit 0.116`, `cranelift-module 0.116`, `cranelift-native 0.116`.
+
+### Decision
+
+**Cranelift JIT is feasible on Apple Silicon and delivers near-optimal performance.** However, the discovery that `&&` → `&` gives 8x on hardcoded code changes the calculus:
+
+1. **Immediate**: Change hardcoded strategy filters from `&&` to `&`. Re-benchmark EXP-010 with the fix — the "25x gap" should collapse to ~2-3x.
+2. **Short-term**: Add const-generic specialization to `FusedFilter` for the remaining 2-3x gap.
+3. **If needed**: Cranelift JIT is proven feasible and can be added behind a feature flag.
+
+### Red Flags
+
+- The 8x `&&` vs `&` gap is data-dependent. At very low pass rates (<1%), short-circuit `&&` may outperform `&` because it avoids loading subsequent indicator matrices. Profile on real market data (where most cells fail the first 1-2 conditions) before committing to branchless everywhere.
+- Cranelift 0.116 is pinned to Wasmtime 29. Major version bumps may change the IR API (e.g., `bint` was removed between versions).
+- The benchmark uses flat `*const f32` arrays. The actual pipeline uses `WideMatrix::get(row, col)` which adds bounds-check overhead. The real-world gap may be smaller than measured here.
