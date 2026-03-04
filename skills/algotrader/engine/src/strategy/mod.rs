@@ -151,6 +151,46 @@ fn load_dynamic_setup(name: &str) -> Vec<Box<dyn Setup>> {
     vec![]
 }
 
+/// Load a DynamicSetup with param overrides applied before interpolation.
+///
+/// Used by the evolution loop to inject mutated parameters into a dynamic
+/// JSON strategy. Falls back to `create_setups` for hardcoded strategies.
+pub fn create_setups_with_overrides(
+    name: &str,
+    overrides: &std::collections::HashMap<String, serde_json::Value>,
+) -> Vec<Box<dyn Setup>> {
+    // Hardcoded strategies don't use pipeline overrides.
+    match name {
+        "breakout" | "ep" | "parabolic" | "signal_breakout" | "pattern_breakout" => {
+            return create_setups(name);
+        }
+        _ => {}
+    }
+
+    let candidates = dynamic_strategy_paths(name);
+    for path in &candidates {
+        if path.exists() {
+            let json_str = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("warning: failed to read {}: {e}", path.display());
+                    return vec![];
+                }
+            };
+            match engine_pipeline::DynamicSetup::from_json_with_overrides(&json_str, overrides) {
+                Ok(inner) => {
+                    return vec![Box::new(DynamicSetupAdapter { inner })];
+                }
+                Err(e) => {
+                    eprintln!("warning: failed to load dynamic strategy with overrides: {e}");
+                    return vec![];
+                }
+            }
+        }
+    }
+    vec![]
+}
+
 /// Build candidate file paths for a dynamic strategy config.
 pub(crate) fn dynamic_strategy_paths(name: &str) -> Vec<PathBuf> {
     let filename = format!("{name}.json");

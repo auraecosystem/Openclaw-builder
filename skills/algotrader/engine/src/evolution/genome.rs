@@ -266,6 +266,51 @@ impl GenomeSpec {
         p
     }
 
+    /// Decode a genome into a JSON override map for dynamic pipeline strategies.
+    ///
+    /// Gene names map to the JSON strategy's `params` block keys. Values are
+    /// converted to the appropriate JSON type (bool for boolean genes, integer
+    /// for integer genes, float otherwise).
+    pub fn decode_to_overrides(&self, genome: &[f64]) -> HashMap<String, serde_json::Value> {
+        let mut overrides = HashMap::new();
+        for (i, b) in self.bounds.iter().enumerate() {
+            let raw = genome[i].clamp(b.min, b.max);
+            let val = if b.is_boolean {
+                serde_json::Value::Bool(raw >= 0.5)
+            } else if b.is_integer {
+                serde_json::json!(raw.round() as i64)
+            } else {
+                serde_json::json!(raw)
+            };
+            overrides.insert(b.name.to_string(), val);
+        }
+        overrides
+    }
+
+    /// Encode initial genome mean from the pipeline params' default values.
+    ///
+    /// Used to initialize CMA-ES around the JSON config's defaults.
+    pub fn encode_from_pipeline_params(
+        &self,
+        params: &HashMap<String, engine_pipeline::config::ParamValue>,
+    ) -> Vec<f64> {
+        self.bounds
+            .iter()
+            .map(|b| {
+                params
+                    .get(b.name)
+                    .and_then(|pv| {
+                        if b.is_boolean {
+                            pv.as_bool().map(|v| if v { 1.0 } else { 0.0 })
+                        } else {
+                            pv.as_f64()
+                        }
+                    })
+                    .unwrap_or((b.min + b.max) / 2.0)
+            })
+            .collect()
+    }
+
     /// Clamp each gene to its bounds, round integers, threshold booleans.
     pub fn clamp(&self, genome: &mut [f64]) {
         for (i, b) in self.bounds.iter().enumerate() {

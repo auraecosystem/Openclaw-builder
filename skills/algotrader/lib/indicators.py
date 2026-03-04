@@ -121,3 +121,25 @@ def _consecutive_green_numba(is_green: pd.DataFrame) -> pd.DataFrame:
 
     result = _streak(is_green.values)
     return pd.DataFrame(result, index=is_green.index, columns=is_green.columns)
+
+
+def adr_pct(atr_14: pd.DataFrame, close: pd.DataFrame) -> pd.DataFrame:
+    """Average Daily Range as percentage of close price.
+
+    ADR% = ATR(14) / Close. NaN where close <= 0 or either input is NaN.
+    Higher values = more volatile stock = wider stops = smaller position size.
+    """
+    safe_close = close.where(close > 0)
+    return atr_14 / safe_close
+
+
+def extension_atr(
+    close: pd.DataFrame, consol_high: pd.DataFrame, atr_14: pd.DataFrame
+) -> pd.DataFrame:
+    """How far price is extended above consolidation high, in ATR units.
+
+    (Close - ConsolHigh) / ATR(14). Negative = still below breakout level.
+    NaN where ATR <= 0 or any input is NaN.
+    """
+    safe_atr = atr_14.where(atr_14 > 0)
+    return (close - consol_high) / safe_atr

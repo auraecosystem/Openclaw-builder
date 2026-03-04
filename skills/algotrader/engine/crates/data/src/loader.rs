@@ -352,10 +352,16 @@ fn extract_dates_configurable(path: &Path, index_columns: &[String]) -> Result<V
     let series = df.column(index_col.as_str())?;
 
     if let Ok(ca) = series.datetime() {
-        // milliseconds since epoch -> days
+        // Polars iterates in the column's native unit (ns, us, or ms).
+        // Convert to days since epoch regardless of unit.
+        let divisor: i64 = match ca.time_unit() {
+            polars::prelude::TimeUnit::Nanoseconds => 86_400_000_000_000,
+            polars::prelude::TimeUnit::Microseconds => 86_400_000_000,
+            polars::prelude::TimeUnit::Milliseconds => 86_400_000,
+        };
         Ok(ca
             .into_iter()
-            .map(|opt| opt.map(|ms| (ms / 86_400_000) as i32).unwrap_or(0))
+            .map(|opt| opt.map(|v| (v / divisor) as i32).unwrap_or(0))
             .collect())
     } else if let Ok(ca) = series.date() {
         Ok(ca.into_iter().map(|opt| opt.unwrap_or(0)).collect())

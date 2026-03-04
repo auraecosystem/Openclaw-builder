@@ -9,6 +9,8 @@ pub mod compare;
 pub mod evolution;
 pub mod execution;
 pub mod portfolio;
+#[cfg(feature = "python")]
+pub mod python;
 pub mod server;
 pub mod strategy;
 pub mod walk_forward;
@@ -89,6 +91,73 @@ pub(crate) fn run_core(store: &DataStore, params: &Params) -> (Vec<engine_types:
 pub fn run_single(store: &DataStore, params: &Params) -> Report {
     let (trades, _, _) = run_core(store, params);
     analysis::generate_report(&trades, &store.axes, params, 1)
+}
+
+/// Run a single backtest with pipeline param overrides for dynamic JSON strategies.
+///
+/// Re-creates the DynamicSetup with the given overrides applied before `@param`
+/// interpolation. Used by the evolution loop to inject mutated parameters.
+pub fn run_single_dynamic(
+    store: &DataStore,
+    params: &Params,
+    overrides: &std::collections::HashMap<String, serde_json::Value>,
+) -> Report {
+    let (trades, _, _) = run_core_dynamic(store, params, overrides);
+    analysis::generate_report(&trades, &store.axes, params, 1)
+}
+
+/// Core backtest loop with pipeline param overrides.
+fn run_core_dynamic(
+    store: &DataStore,
+    params: &Params,
+    overrides: &std::collections::HashMap<String, serde_json::Value>,
+) -> (Vec<engine_types::Trade>, usize, usize) {
+    let nr = store.axes.n_rows;
+
+    let start_row = params
+        .start
+        .as_ref()
+        .and_then(|s| resolve_date_row(&store.axes, s))
+        .unwrap_or(0);
+    let end_row = params
+        .end
+        .as_ref()
+        .and_then(|s| resolve_date_row(&store.axes, s))
+        .unwrap_or(nr);
+
+    let rp = ResolvedParams {
+        params: params.clone(),
+        start_row,
+        end_row,
+    };
+
+    let setups = strategy::create_setups_with_overrides(&params.setup, overrides);
+    if setups.is_empty() {
+        eprintln!("  Unknown setup: {}", params.setup);
+        return (Vec::new(), start_row, end_row);
+    }
+
+    let sizer = PositionSizer::from_params(params);
+    let mut all_trades = Vec::new();
+
+    for setup in &setups {
+        let universe = setup.filter(store, params, start_row..end_row);
+        let signals = setup.signals(store, &universe, params);
+        let trades = execution::simulate(
+            store,
+            &signals,
+            &rp,
+            &sizer,
+            &setup.exit_rules(params),
+            setup.direction(),
+            setup.equity_fraction(),
+            setup.fill_mode(),
+            setup.name(),
+        );
+        all_trades.extend(trades);
+    }
+
+    (all_trades, start_row, end_row)
 }
 
 /// Like `run_single()` but also returns the raw trades for CSV export.

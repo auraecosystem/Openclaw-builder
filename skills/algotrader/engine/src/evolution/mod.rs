@@ -22,7 +22,7 @@ use serde::Serialize;
 use engine_data::DataStore;
 use engine_types::Params;
 
-use self::fitness::{evaluate, FitnessMetric};
+use self::fitness::{evaluate, evaluate_dynamic, FitnessMetric};
 use self::genome::GenomeSpec;
 
 // ---------------------------------------------------------------------------
@@ -123,13 +123,33 @@ pub struct WfFold {
 /// Dispatches to CMA-ES or GA depending on `config.algorithm`. Both
 /// optimizers evaluate fitness in parallel via rayon. Returns the best
 /// parameters found along with generation-by-generation history.
+///
+/// For dynamic JSON strategies (loaded from `strategies/{name}.json`), the
+/// genome spec is built from the JSON's `params` block and each evaluation
+/// re-creates the DynamicSetup with overridden params. For hardcoded
+/// strategies, the legacy `Params` struct genome spec is used.
 pub fn evolve(store: &DataStore, base: &Params, config: &EvolutionConfig) -> EvolutionResult {
-    let spec = match (config.evolve_signals, config.evolve_patterns) {
-        (true, true) => GenomeSpec::combined_with_patterns_spec(config.crypto),
-        (true, false) => GenomeSpec::combined_spec(config.crypto),
-        (false, true) => GenomeSpec::params_with_patterns_spec(config.crypto),
-        (false, false) => GenomeSpec::params_spec(config.crypto),
+    // Check if this is a dynamic JSON strategy with its own evolvable params.
+    let pipeline_params = load_pipeline_params(&base.setup);
+
+    let spec = if pipeline_params.is_some() {
+        let pp = pipeline_params.as_ref().unwrap();
+        eprintln!(
+            "  Dynamic strategy '{}': evolving {} pipeline params",
+            base.setup,
+            pp.len()
+        );
+        GenomeSpec::from_pipeline_params(pp)
+    } else {
+        match (config.evolve_signals, config.evolve_patterns) {
+            (true, true) => GenomeSpec::combined_with_patterns_spec(config.crypto),
+            (true, false) => GenomeSpec::combined_spec(config.crypto),
+            (false, true) => GenomeSpec::params_with_patterns_spec(config.crypto),
+            (false, false) => GenomeSpec::params_spec(config.crypto),
+        }
     };
+
+    let is_dynamic = pipeline_params.is_some();
 
     let mut rng = match config.seed {
         Some(s) => StdRng::seed_from_u64(s),
@@ -153,6 +173,8 @@ pub fn evolve(store: &DataStore, base: &Params, config: &EvolutionConfig) -> Evo
                 &mut best_fitness,
                 &mut best_params_json,
                 &mut best_report_json,
+                is_dynamic,
+                pipeline_params.as_ref(),
             );
         }
         Algorithm::Ga => {
@@ -166,6 +188,7 @@ pub fn evolve(store: &DataStore, base: &Params, config: &EvolutionConfig) -> Evo
                 &mut best_fitness,
                 &mut best_params_json,
                 &mut best_report_json,
+                is_dynamic,
             );
         }
     }
@@ -176,6 +199,36 @@ pub fn evolve(store: &DataStore, base: &Params, config: &EvolutionConfig) -> Evo
         best_fitness,
         generations_run: config.generations,
         history,
+    }
+}
+
+/// Try to load the `params` block from a dynamic JSON strategy config.
+///
+/// Returns `None` for hardcoded strategy names or if the JSON file is missing.
+fn load_pipeline_params(
+    setup_name: &str,
+) -> Option<std::collections::HashMap<String, engine_pipeline::config::ParamValue>> {
+    match setup_name {
+        "breakout" | "ep" | "parabolic" | "signal_breakout" | "pattern_breakout" => None,
+        _ => {
+            let candidates = crate::strategy::dynamic_strategy_paths(setup_name);
+            for path in &candidates {
+                if path.exists() {
+                    if let Ok(json_str) = std::fs::read_to_string(path) {
+                        if let Ok(pipeline) =
+                            serde_json::from_str::<engine_pipeline::config::StrategyPipeline>(
+                                &json_str,
+                            )
+                        {
+                            if !pipeline.params.is_empty() {
+                                return Some(pipeline.params);
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        }
     }
 }
 
@@ -248,18 +301,33 @@ pub fn evolve_walk_forward(
 
 /// Evaluate a population in parallel and return `(genomes, scores, best_report)`
 /// sorted best-first by fitness.
+///
+/// When `is_dynamic` is true, each genome is decoded to a JSON override map
+/// and the DynamicSetup is re-created with overridden params per evaluation.
 fn evaluate_population(
     store: &DataStore,
     base: &Params,
     config: &EvolutionConfig,
     spec: &GenomeSpec,
     population: Vec<Vec<f64>>,
+    is_dynamic: bool,
 ) -> (Vec<(Vec<f64>, f64)>, serde_json::Value) {
     let results: Vec<(serde_json::Value, f64)> = population
         .par_iter()
         .map(|genome| {
-            let params = spec.decode(genome, base);
-            evaluate(store, &params, &config.fitness_metric, &base.fitness)
+            if is_dynamic {
+                let overrides = spec.decode_to_overrides(genome);
+                evaluate_dynamic(
+                    store,
+                    base,
+                    &overrides,
+                    &config.fitness_metric,
+                    &base.fitness,
+                )
+            } else {
+                let params = spec.decode(genome, base);
+                evaluate(store, &params, &config.fitness_metric, &base.fitness)
+            }
         })
         .collect();
 
@@ -293,8 +361,14 @@ fn run_cmaes(
     best_fitness: &mut f64,
     best_params_json: &mut serde_json::Value,
     best_report_json: &mut serde_json::Value,
+    is_dynamic: bool,
+    pipeline_params: Option<&std::collections::HashMap<String, engine_pipeline::config::ParamValue>>,
 ) {
-    let initial_mean = spec.encode(base);
+    let initial_mean = if let Some(pp) = pipeline_params {
+        spec.encode_from_pipeline_params(pp)
+    } else {
+        spec.encode(base)
+    };
     let mut optimizer = cmaes::CmaEs::new(spec.dim(), initial_mean, config.initial_sigma, base.cmaes.clone());
 
     for gen in 0..config.generations {
@@ -304,10 +378,10 @@ fn run_cmaes(
             .map(|mut g| { spec.clamp(&mut g); g })
             .collect();
 
-        let (scored, best_report) = evaluate_population(store, base, config, spec, population);
+        let (scored, best_report) = evaluate_population(store, base, config, spec, population, is_dynamic);
 
         record_generation(gen, config, spec, base, &scored, &best_report,
-            &optimizer.sigma(), history, best_fitness, best_params_json, best_report_json);
+            &optimizer.sigma(), history, best_fitness, best_params_json, best_report_json, is_dynamic);
 
         optimizer.tell(&scored);
     }
@@ -328,6 +402,7 @@ fn run_ga(
     best_fitness: &mut f64,
     best_params_json: &mut serde_json::Value,
     best_report_json: &mut serde_json::Value,
+    is_dynamic: bool,
 ) {
     let pop_size = if config.pop_size > 0 { config.pop_size } else { 100 };
     let mut optimizer = ga::Ga::new(spec.dim(), pop_size, 0.25, base.ga.clone());
@@ -341,10 +416,10 @@ fn run_ga(
     let mut population: Vec<Vec<f64>> = (0..pop_size).map(|_| spec.random(rng)).collect();
 
     for gen in 0..config.generations {
-        let (scored, best_report) = evaluate_population(store, base, config, spec, population);
+        let (scored, best_report) = evaluate_population(store, base, config, spec, population, is_dynamic);
 
         record_generation(gen, config, spec, base, &scored, &best_report,
-            &optimizer.sigma(), history, best_fitness, best_params_json, best_report_json);
+            &optimizer.sigma(), history, best_fitness, best_params_json, best_report_json, is_dynamic);
 
         population = optimizer.evolve_step(&scored, &bounds, rng);
     }
@@ -368,6 +443,7 @@ fn record_generation(
     best_fitness: &mut f64,
     best_params_json: &mut serde_json::Value,
     best_report_json: &mut serde_json::Value,
+    is_dynamic: bool,
 ) {
     let gen_best = scored[0].1;
     let gen_mean = scored.iter().map(|(_, f)| f).sum::<f64>() / scored.len() as f64;
@@ -375,8 +451,15 @@ fn record_generation(
     let improved = gen_best > *best_fitness;
     if improved {
         *best_fitness = gen_best;
-        *best_params_json =
-            serde_json::to_value(spec.decode(&scored[0].0, base)).unwrap_or_default();
+        let best_genome = &scored[0].0;
+        if is_dynamic {
+            // Dynamic pipelines: gene names are JSON param keys, not Params fields.
+            *best_params_json =
+                serde_json::to_value(spec.decode_to_overrides(best_genome)).unwrap_or_default();
+        } else {
+            *best_params_json =
+                serde_json::to_value(spec.decode(best_genome, base)).unwrap_or_default();
+        }
         *best_report_json = gen_best_report.clone();
     }
 

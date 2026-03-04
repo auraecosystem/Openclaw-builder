@@ -149,6 +149,10 @@ pub struct Cli {
     #[arg(long)]
     pub crypto: bool,
 
+    /// Minimum total trades for fitness gate (below = penalty)
+    #[arg(long)]
+    pub min_trades: Option<u64>,
+
     /// Walk-forward folds (0 = no walk-forward)
     #[arg(long, default_value = "0")]
     pub wf_folds: usize,

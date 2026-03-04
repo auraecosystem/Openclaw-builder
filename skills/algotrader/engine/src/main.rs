@@ -47,7 +47,12 @@ fn main() -> Result<()> {
             seed: args.seed,
         };
 
-        let base = base_params.clone();
+        let mut base = base_params.clone();
+        if let Some(mt) = args.min_trades {
+            base.fitness.min_trades_gate = mt;
+            // Scale confidence ramp to reach 1.0 at 2x the gate
+            base.fitness.confidence_range = mt as f64;
+        }
 
         let t1 = Instant::now();
         if args.wf_folds > 0 {

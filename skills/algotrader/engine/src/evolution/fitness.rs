@@ -62,6 +62,23 @@ pub fn evaluate(
     (report_json, score)
 }
 
+/// Run a backtest with pipeline param overrides for dynamic JSON strategies.
+///
+/// Re-creates the DynamicSetup with overridden params each call. The overhead
+/// is negligible vs. a full backtest (~1ms parse vs ~3s simulation).
+pub fn evaluate_dynamic(
+    store: &DataStore,
+    base: &Params,
+    overrides: &std::collections::HashMap<String, serde_json::Value>,
+    metric: &FitnessMetric,
+    fitness_cfg: &FitnessConfig,
+) -> (serde_json::Value, f64) {
+    let report = crate::run_single_dynamic(store, base, overrides);
+    let report_json = serde_json::to_value(&report).unwrap_or_default();
+    let score = extract_fitness(&report_json, metric, fitness_cfg);
+    (report_json, score)
+}
+
 // ---------------------------------------------------------------------------
 // Fitness extraction (ported from evolve.py)
 // ---------------------------------------------------------------------------
