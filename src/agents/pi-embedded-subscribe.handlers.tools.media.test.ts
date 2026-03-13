@@ -1,4 +1,20 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+const saveMediaBufferMock = vi.hoisted(() =>
+  vi.fn(async () => ({
+    id: "saved-media",
+    path: "/tmp/materialized-inline-image.png",
+    size: 4,
+    contentType: "image/png",
+  })),
+);
+vi.mock("../media/store.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../media/store.js")>();
+  return {
+    ...actual,
+    saveMediaBuffer: (...args: Parameters<typeof actual.saveMediaBuffer>) =>
+      saveMediaBufferMock(...args),
+  };
+});
 import {
   handleToolExecutionEnd,
   handleToolExecutionStart,
@@ -119,6 +135,10 @@ async function emitMcpMediaToolResult(ctx: EmbeddedPiSubscribeContext, mediaPath
 }
 
 describe("handleToolExecutionEnd media emission", () => {
+  beforeEach(() => {
+    saveMediaBufferMock.mockClear();
+  });
+
   it("does not warn for read tool when path is provided via file_path alias", async () => {
     const ctx = createMockContext();
 
@@ -444,5 +464,28 @@ describe("handleToolExecutionEnd media emission", () => {
 
     expect(ctx.state.pendingToolMediaUrls).toEqual(["/tmp/reply.opus"]);
     expect(ctx.state.pendingToolAudioAsVoice).toBe(true);
+  });
+
+  it("materializes inline image data when image content has no MEDIA: path", async () => {
+    const onToolResult = vi.fn();
+    const ctx = createMockContext({ shouldEmitToolOutput: false, onToolResult });
+
+    await handleToolExecutionEnd(ctx, {
+      type: "tool_execution_end",
+      toolName: "read",
+      toolCallId: "tc-1",
+      isError: false,
+      result: {
+        content: [
+          { type: "text", text: "Read image file [image/png]" },
+          { type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+        ],
+      },
+    });
+
+    expect(saveMediaBufferMock).toHaveBeenCalledTimes(1);
+    expect(onToolResult).toHaveBeenCalledWith({
+      mediaUrls: ["/tmp/materialized-inline-image.png"],
+    });
   });
 });

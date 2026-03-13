@@ -4,7 +4,8 @@ description: >
   Umbrella workflow for discretionary and systematic stock-trading support using
   the mounted NautilusTrader repo. Use when asked to scan stocks, analyze market
   context, journal ideas, link executions, compare intraday vs swing playbooks,
-  or combine TWS, tradedb, and macro-dashboard outputs into one trading view.
+  combine TWS, tradedb, and macro-dashboard outputs into one trading view, or
+  render and share trading charts.
 metadata: { "openclaw": { "emoji": "📈", "requires": { "bins": ["uv"] } } }
 ---
 
@@ -25,6 +26,7 @@ Primary tool docs:
 - `/nautilus_trader/toolbox/yfinance/README.md`
 - `/nautilus_trader/toolbox/yfinance/macro_dashboard.py`
 - `/nautilus_trader/toolbox/sec/README.md`
+- `/Users/ad/work/ai/openclaw/skills/stock-charting/SKILL.md`
 
 Deeper setup / methodology docs:
 
@@ -44,6 +46,7 @@ Deeper setup / methodology docs:
 - "compare a Qullamaggie swing versus a Ross Cameron intraday trade"
 - "show me candidate longs/shorts and record the thesis"
 - "link this order / position / review to the idea"
+- "plot this and send the chart"
 
 ## Workflow
 
@@ -100,6 +103,22 @@ Targeted section:
 cd /nautilus_trader && uv run --with yfinance python -m toolbox.yfinance macro-dashboard --section 9 --json
 ```
 
+### `stock-charting` for rendered charts and Discord-ready images
+
+Use when you need:
+
+- line or candlestick charts
+- support / resistance and trend lines
+- indicator overlays and lower panels
+- equity curves or backtest charts
+- a real PNG/JPG uploaded back to chat
+
+Important:
+
+- render locally
+- send the file with the message tool
+- do not rely on `read` as the attachment mechanism
+
 ### `tradedb` for idea journaling and execution linkage
 
 Use when you need:
@@ -123,6 +142,29 @@ cd /nautilus_trader && uv run python -m toolbox.tradedb idea list --view active 
 cd /nautilus_trader && uv run python -m toolbox.tradedb idea observe <idea-id> --source bot --observed-at 2026-03-12T14:35:00+00:00 --payload '{"price": 211.2, "approved_for_entry": true}' --json
 cd /nautilus_trader && uv run python -m toolbox.tradedb idea evaluate --idea-id <idea-id> --json
 cd /nautilus_trader && uv run python -m toolbox.tradedb order ingest --payload '{"external_order_id":"ord-001","venue":"SIM","account":"acct-1","side":"buy","quantity":100,"status":"new","idea_id":"<idea-id>","symbol":"AAPL"}' --json
+```
+
+Daily quick set (concise):
+
+```bash
+# 1) Active ideas
+cd /nautilus_trader && uv run python -m toolbox.tradedb idea list --view active --json
+
+# 2) Add observation
+cd /nautilus_trader && uv run python -m toolbox.tradedb idea observe <idea-id> --source bot --observed-at <iso8601> --payload '{"price":123.4,"note":"..."}' --json
+
+# 3) Re-evaluate lifecycle state
+cd /nautilus_trader && uv run python -m toolbox.tradedb idea evaluate --idea-id <idea-id> --json
+
+# 4) Link executions/positions
+cd /nautilus_trader && uv run python -m toolbox.tradedb order ingest --payload '{..."idea_id":"<idea-id>"...}' --json
+cd /nautilus_trader && uv run python -m toolbox.tradedb position ingest --payload '{..."idea_id":"<idea-id>"...}' --json
+
+# 5) Add review
+cd /nautilus_trader && uv run python -m toolbox.tradedb idea review add <idea-id> --outcome win|loss|scratch --score 0.0-1.0 --lessons "..." --text "..." --json
+
+# 6) Search prior setups
+cd /nautilus_trader && uv run python -m toolbox.tradedb idea find "keyword catalyst setup" --json
 ```
 
 ### `sec` for SEC / EDGAR filing intake and repair
@@ -183,6 +225,31 @@ cd /nautilus_trader && uv run python -m toolbox.sec export --format json
    - execution linkage
 5. If needed, compare the setup to intraday or swing playbooks before choosing the holding period.
 
+## Universal guardrails
+
+Apply these to any strategy or playbook unless the user explicitly overrides them.
+
+- Enter on confirmation, not anticipation.
+  Do not buy blind catches, early knife-catches, or unconfirmed breakouts just because price is lower or moving fast.
+- Define invalidation before entry.
+  Every trade should have a clear "I am wrong" line plus hard-stop and soft-stop behavior.
+- Use fixed-fraction risk and stable sizing.
+  Risk per trade should be pre-sized from stop distance; do not increase size because emotions rise or the trade is under water.
+- Never average down into a loser.
+  Adds are only for improved confirmation or a fresh trigger, not for loss repair.
+- Exit failed momentum quickly.
+  If the expected extension does not happen, or reclaim/breakout structure fails, reduce or exit without debate.
+- Re-enter only on a new setup.
+  A stopped-out trade may be re-entered only on a fresh trigger with a fresh plan, not by repairing the prior mistake.
+- Respect daily loss and cool-off controls.
+  Use max daily loss, max consecutive-loss, and post-stop cooldown rules to prevent tilt and size-creep behavior.
+- Check regime and data quality first.
+  Reduce size or do not trade when the macro tape, liquidity, spread/volume quality, or catalyst quality is hostile or unreliable.
+- Log thesis, trigger, invalidation, and risk in `tradedb`.
+  Treat journaling as part of trade approval, not post-hoc cleanup.
+- Separate execution quality from thesis quality.
+  A good thesis with bad execution is still a bad trade; record both explicitly in reviews.
+
 ## Decision heuristics
 
 - Use intraday momentum playbooks when:
@@ -200,6 +267,33 @@ cd /nautilus_trader && uv run python -m toolbox.sec export --format json
   - a sizing input
   - a hold-time input
     not as the exact entry trigger
+
+## Equity curve benchmarking (0% to 5% daily bands)
+
+Use this when the user wants to compare live account progress against fixed daily compounding scenarios (for example 0%, 1%, 2%, 3%, 4%, 5%).
+
+1. Pull current account value from TWS (prefer NetLiquidation):
+
+```bash
+cd /nautilus_trader && uv run tws --format json account overview
+```
+
+2. Render multi-line projection chart with log Y-axis using Python tooling.
+
+Reference script pattern (adapt start value/date/rates as requested):
+
+```bash
+python3 scripts/compound_projection_multi.py   --start-value <latest_net_liq>   --start-date YYYY-MM-DD   --end-date YYYY-MM-DD   --rates 0.00 0.01 0.02 0.03 0.04 0.05   --output compound_projection_multi_0to5pct_logy.png
+```
+
+3. Share the chart back to chat as a real media attachment/path (not plain text).
+
+Notes:
+
+- Keep all rates on the same figure.
+- Prefer log Y-axis so early and late periods are both legible.
+- Include title, axis labels, legend, and grid.
+- If requested, overlay an observed live equity series on top of the scenario bands.
 
 ## Defaults
 

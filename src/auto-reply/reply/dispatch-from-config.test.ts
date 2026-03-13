@@ -1101,6 +1101,56 @@ describe("dispatchReplyFromConfig", () => {
     expect(dispatcher.sendFinalReply).toHaveBeenCalledWith({ text: "NO_REPLY" });
   });
 
+  it("replaces NO_REPLY with a fallback for explicit Discord mentions", async () => {
+    setNoAbort();
+    const cfg = emptyConfig;
+    const dispatcher = createDispatcher();
+    const ctx = buildTestCtx({
+      Provider: "discord",
+      Surface: "discord",
+      ChatType: "group",
+      WasMentioned: true,
+      Body: "@crabman how is the oil market today",
+      BodyForAgent: "@crabman how is the oil market today",
+      BodyForCommands: "@crabman how is the oil market today",
+    });
+
+    const replyResolver = async () => {
+      return { text: "NO_REPLY" } satisfies ReplyPayload;
+    };
+
+    await dispatchReplyFromConfig({ ctx, cfg, dispatcher, replyResolver });
+
+    expect(dispatcher.sendFinalReply).toHaveBeenCalledWith({
+      text: "I saw your @mention, but my previous reply was suppressed incorrectly. Please ask again.",
+    });
+  });
+
+  it("synthesizes a fallback when an explicit Discord mention yields no final reply", async () => {
+    setNoAbort();
+    const cfg = emptyConfig;
+    const dispatcher = createDispatcher();
+    const ctx = buildTestCtx({
+      Provider: "discord",
+      Surface: "discord",
+      ChatType: "group",
+      WasMentioned: true,
+      Body: "@crabman tell me i'm pretty",
+      BodyForAgent: "@crabman tell me i'm pretty",
+      BodyForCommands: "@crabman tell me i'm pretty",
+    });
+
+    const replyResolver = async () => {
+      return undefined;
+    };
+
+    await dispatchReplyFromConfig({ ctx, cfg, dispatcher, replyResolver });
+
+    expect(dispatcher.sendFinalReply).toHaveBeenCalledWith({
+      text: "I saw your @mention, but my previous reply was suppressed incorrectly. Please ask again.",
+    });
+  });
+
   it("sends tool results via dispatcher in DM sessions", async () => {
     setNoAbort();
     const cfg = emptyConfig;
