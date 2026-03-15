@@ -1,11 +1,12 @@
 ---
 name: stock-trading
 description: >
-  Umbrella workflow for discretionary and systematic stock-trading support using
-  the mounted NautilusTrader repo. Use when asked to scan stocks, analyze market
-  context, journal ideas, link executions, compare intraday vs swing playbooks,
-  combine TWS, tradedb, and macro-dashboard outputs into one trading view, or
-  render and share trading charts.
+  Umbrella workflow for discretionary and systematic stock-trading support
+  using the standalone trading-tools workspace plus adjacent NautilusTrader
+  research docs. Use when asked to scan stocks, analyze market context,
+  journal ideas, link executions, compare intraday vs swing playbooks, combine
+  TWS, tradedb, and macro-dashboard outputs into one trading view, or render
+  and share trading charts.
 metadata: { "openclaw": { "emoji": "📈", "requires": { "bins": ["uv"] } } }
 ---
 
@@ -21,11 +22,12 @@ Use this as the top-level stock trading workflow when the task spans more than o
 
 Primary tool docs:
 
-- `/nautilus_trader/toolbox/tws/README.md`
-- `/nautilus_trader/toolbox/tradedb/README.md`
-- `/nautilus_trader/toolbox/yfinance/README.md`
-- `/nautilus_trader/toolbox/yfinance/macro_dashboard.py`
-- `/nautilus_trader/toolbox/sec/README.md`
+- `/Users/ad/work/trading-tools/README.md`
+- `/Users/ad/work/trading-tools/trading_tools/tws/README.md`
+- `/Users/ad/work/trading-tools/trading_tools/tradedb/README.md`
+- `/Users/ad/work/trading-tools/trading_tools/yfinance/README.md`
+- `/Users/ad/work/trading-tools/trading_tools/yfinance/macro_dashboard.py`
+- `/Users/ad/work/trading-tools/trading_tools/sec/README.md`
 - `/Users/ad/work/ai/openclaw/skills/stock-charting/SKILL.md`
 
 Deeper setup / methodology docs:
@@ -77,16 +79,16 @@ Use when you need:
 Default entrypoint:
 
 ```bash
-cd /nautilus_trader && uv run tws ...
+tws ...
 ```
 
 Common examples:
 
 ```bash
-cd /nautilus_trader && uv run tws scanner run --scan-code TOP_PERC_GAIN
-cd /nautilus_trader && uv run tws market snapshot AAPL --delayed
-cd /nautilus_trader && uv run tws market bars AAPL NVDA --duration "30 D" --bar-size "1 day" --what-to-show TRADES
-cd /nautilus_trader && uv run tws account positions
+tws scanner run --scan-code TOP_PERC_GAIN
+tws market snapshot AAPL --delayed
+tws market bars AAPL NVDA --duration "30 D" --bar-size "1 day" --what-to-show TRADES
+tws account positions
 ```
 
 ### `macro-dashboard` for cross-asset regime context
@@ -101,13 +103,13 @@ Use when you need:
 Default entrypoint:
 
 ```bash
-cd /nautilus_trader && uv run --with yfinance python -m toolbox.yfinance macro-dashboard --json
+yfinance macro-dashboard --json
 ```
 
 Targeted section:
 
 ```bash
-cd /nautilus_trader && uv run --with yfinance python -m toolbox.yfinance macro-dashboard --section 9 --json
+yfinance macro-dashboard --section 9 --json
 ```
 
 ### `stock-charting` for rendered charts and Discord-ready images
@@ -139,39 +141,39 @@ Use when you need:
 Default entrypoint:
 
 ```bash
-cd /nautilus_trader && uv run python -m toolbox.tradedb ...
+tradedb ...
 ```
 
 Common examples:
 
 ```bash
-cd /nautilus_trader && uv run python -m toolbox.tradedb idea list --view active --json
-cd /nautilus_trader && uv run python -m toolbox.tradedb idea observe <idea-id> --source bot --observed-at 2026-03-12T14:35:00+00:00 --payload '{"price": 211.2, "approved_for_entry": true}' --json
-cd /nautilus_trader && uv run python -m toolbox.tradedb idea evaluate --idea-id <idea-id> --json
-cd /nautilus_trader && uv run python -m toolbox.tradedb order ingest --payload '{"external_order_id":"ord-001","venue":"SIM","account":"acct-1","side":"buy","quantity":100,"status":"new","idea_id":"<idea-id>","symbol":"AAPL"}' --json
+tradedb idea list --view active --json
+tradedb idea observe <idea-id> --source bot --observed-at 2026-03-12T14:35:00+00:00 --payload '{"price": 211.2, "approved_for_entry": true}' --json
+tradedb idea evaluate --idea-id <idea-id> --json
+tradedb order ingest --payload '{"external_order_id":"ord-001","venue":"SIM","account":"acct-1","side":"buy","quantity":100,"status":"new","idea_id":"<idea-id>","symbol":"AAPL"}' --json
 ```
 
 Daily quick set (concise):
 
 ```bash
 # 1) Active ideas
-cd /nautilus_trader && uv run python -m toolbox.tradedb idea list --view active --json
+tradedb idea list --view active --json
 
 # 2) Add observation
-cd /nautilus_trader && uv run python -m toolbox.tradedb idea observe <idea-id> --source bot --observed-at <iso8601> --payload '{"price":123.4,"note":"..."}' --json
+tradedb idea observe <idea-id> --source bot --observed-at <iso8601> --payload '{"price":123.4,"note":"..."}' --json
 
 # 3) Re-evaluate lifecycle state
-cd /nautilus_trader && uv run python -m toolbox.tradedb idea evaluate --idea-id <idea-id> --json
+tradedb idea evaluate --idea-id <idea-id> --json
 
 # 4) Link executions/positions
-cd /nautilus_trader && uv run python -m toolbox.tradedb order ingest --payload '{..."idea_id":"<idea-id>"...}' --json
-cd /nautilus_trader && uv run python -m toolbox.tradedb position ingest --payload '{..."idea_id":"<idea-id>"...}' --json
+tradedb order ingest --payload '{..."idea_id":"<idea-id>"...}' --json
+tradedb position ingest --payload '{..."idea_id":"<idea-id>"...}' --json
 
 # 5) Add review
-cd /nautilus_trader && uv run python -m toolbox.tradedb idea review add <idea-id> --outcome win|loss|scratch --score 0.0-1.0 --lessons "..." --text "..." --json
+tradedb idea review add <idea-id> --outcome win|loss|scratch --score 0.0-1.0 --lessons "..." --text "..." --json
 
 # 6) Search prior setups
-cd /nautilus_trader && uv run python -m toolbox.tradedb idea find "keyword catalyst setup" --json
+tradedb idea find "keyword catalyst setup" --json
 ```
 
 ### `sec` for SEC / EDGAR filing intake and repair
@@ -186,16 +188,16 @@ Use when you need:
 Default entrypoint:
 
 ```bash
-cd /nautilus_trader && SEC_USER_AGENT="Your Name your_email@example.com" uv run python -m toolbox.sec ...
+SEC_USER_AGENT="Your Name your_email@example.com" sec ...
 ```
 
 Common examples:
 
 ```bash
-cd /nautilus_trader && SEC_USER_AGENT="Your Name your_email@example.com" uv run python -m toolbox.sec latest --forms 8-K,6-K --format json
-cd /nautilus_trader && SEC_USER_AGENT="Your Name your_email@example.com" uv run python -m toolbox.sec latest --forms 8-K --company NVIDIA --format json
-cd /nautilus_trader && SEC_USER_AGENT="Your Name your_email@example.com" uv run python -m toolbox.sec reconcile --date 2026-03-11 --format json
-cd /nautilus_trader && uv run python -m toolbox.sec export --format json
+SEC_USER_AGENT="Your Name your_email@example.com" sec latest --forms 8-K,6-K --format json
+SEC_USER_AGENT="Your Name your_email@example.com" sec latest --forms 8-K --company NVIDIA --format json
+SEC_USER_AGENT="Your Name your_email@example.com" sec reconcile --date 2026-03-11 --format json
+sec export --format json
 ```
 
 ## How to combine them
@@ -289,7 +291,7 @@ Use this when the user wants to compare live account progress against fixed dail
 1. Pull current account value from TWS (prefer NetLiquidation):
 
 ```bash
-cd /nautilus_trader && uv run tws --format json account overview
+tws --format json account overview
 ```
 
 2. Render multi-line projection chart with log Y-axis using Python tooling.

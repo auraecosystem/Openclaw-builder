@@ -2,18 +2,21 @@
 name: tws
 description: >
   Interactive Brokers / TWS CLI for market data, scanners, account state,
-  contracts, options, depth, news, and momentum workflows via the NautilusTrader
-  toolbox. Use when asked about: IBKR, TWS, Gateway, stock scans, historical
-  bars, quote snapshots, delayed quotes, positions, executions, option chains,
-  option greeks, market depth, or news from the mounted Nautilus repo.
+  contracts, options, depth, news, and momentum workflows via the standalone
+  trading-tools workspace. Use when asked about: IBKR, TWS, Gateway, stock
+  scans, historical bars, quote snapshots, delayed quotes, positions,
+  executions, option chains, option greeks, market depth, or news.
 metadata: { "openclaw": { "emoji": "📡", "requires": { "bins": ["uv"] } } }
 ---
 
 # tws
 
-Use the NautilusTrader TWS CLI from the mounted repo at `/nautilus_trader`.
+Use the standalone `tws` CLI from `/Users/ad/work/trading-tools`.
 
-Primary doc: `/nautilus_trader/toolbox/tws/README.md`
+Primary docs:
+
+- `/Users/ad/work/trading-tools/README.md`
+- `/Users/ad/work/trading-tools/trading_tools/tws/README.md`
 
 ## When to use
 
@@ -26,8 +29,8 @@ Primary doc: `/nautilus_trader/toolbox/tws/README.md`
 
 ## Defaults
 
-- Run from the repo root: `cd /nautilus_trader && ...`
-- Prefer `uv run tws ...`
+- Prefer the shim command: `tws ...`
+- Fallback: `uv run --project /Users/ad/work/trading-tools tws ...`
 - Prefer delayed quotes unless the user explicitly needs live data:
   - add `--delayed` for snapshot/watch quote commands when appropriate
 - The last verified live TWS setup used port `7496`, while the CLI default is `7497`
@@ -40,47 +43,47 @@ Primary doc: `/nautilus_trader/toolbox/tws/README.md`
 Connectivity / low-risk checks:
 
 ```bash
-cd /nautilus_trader && uv run tws account overview
-cd /nautilus_trader && uv run tws contracts resolve AAPL
-cd /nautilus_trader && uv run tws market snapshot AAPL --delayed
+tws account overview
+tws contracts resolve AAPL
+tws market snapshot AAPL --delayed
 ```
 
 Scanner:
 
 ```bash
-cd /nautilus_trader && uv run tws scanner params
-cd /nautilus_trader && uv run tws scanner run --scan-code TOP_PERC_GAIN
+tws scanner params
+tws scanner run --scan-code TOP_PERC_GAIN
 ```
 
 Historical market data:
 
 ```bash
-cd /nautilus_trader && uv run tws market bars AAPL MSFT --duration "30 D" --bar-size "1 day" --what-to-show TRADES
-cd /nautilus_trader && uv run tws market ticks trades AAPL --end "20260312 13:26:50 US/Eastern" --num-ticks 10
+tws market bars AAPL MSFT --duration "30 D" --bar-size "1 day" --what-to-show TRADES
+tws market ticks trades AAPL --end "20260312 13:26:50 US/Eastern" --num-ticks 10
 ```
 
 Account / executions:
 
 ```bash
-cd /nautilus_trader && uv run tws account summary
-cd /nautilus_trader && uv run tws account positions
-cd /nautilus_trader && uv run tws account pnl
-cd /nautilus_trader && uv run tws executions list --limit 20
+tws account summary
+tws account positions
+tws account pnl
+tws executions list --limit 20
 ```
 
 Options:
 
 ```bash
-cd /nautilus_trader && uv run tws options chain AAPL
-cd /nautilus_trader && uv run tws options quote AAPL --expiry 20260320 --strike 255 --right C
-cd /nautilus_trader && uv run tws options greeks AAPL --expiry 20260320 --strike 255 --right C
+tws options chain AAPL
+tws options quote AAPL --expiry 20260320 --strike 255 --right C
+tws options greeks AAPL --expiry 20260320 --strike 255 --right C
 ```
 
 News:
 
 ```bash
-cd /nautilus_trader && uv run tws news providers
-cd /nautilus_trader && uv run tws news history --symbol AAPL --limit 5
+tws news providers
+tws news history --symbol AAPL --limit 5
 ```
 
 ## Safe workflow

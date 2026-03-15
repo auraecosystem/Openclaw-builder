@@ -3,17 +3,20 @@ name: tradedb
 description: >
   Local-first trade idea journal CLI for structured idea creation, observation
   ingestion, lifecycle evaluation, execution linkage, review capture, and FTS
-  search via the NautilusTrader toolbox. Use when asked about: trade ideas,
-  journaling, thesis tracking, idea state transitions, observations, reviews,
-  execution linkage, or searching prior ideas from the mounted Nautilus repo.
+  search via the standalone trading-tools workspace. Use when asked about:
+  trade ideas, journaling, thesis tracking, idea state transitions,
+  observations, reviews, execution linkage, or searching prior ideas.
 metadata: { "openclaw": { "emoji": "🗃️", "requires": { "bins": ["uv"] } } }
 ---
 
 # tradedb
 
-Use the NautilusTrader `tradedb` CLI from the mounted repo at `/nautilus_trader`.
+Use the standalone `tradedb` CLI from `/Users/ad/work/trading-tools`.
 
-Primary doc: `/nautilus_trader/toolbox/tradedb/README.md`
+Primary docs:
+
+- `/Users/ad/work/trading-tools/README.md`
+- `/Users/ad/work/trading-tools/trading_tools/tradedb/README.md`
 
 ## When to use
 
@@ -26,8 +29,8 @@ Primary doc: `/nautilus_trader/toolbox/tradedb/README.md`
 
 ## Defaults
 
-- Run from the repo root: `cd /nautilus_trader && ...`
-- Prefer `uv run python -m toolbox.tradedb ...`
+- Prefer the shim command: `tradedb ...`
+- Fallback: `uv run --project /Users/ad/work/trading-tools tradedb ...`
 - Prefer `--json` for automation or when the result will be summarized
 - Preserve source event time when known:
   - use `idea observe --observed-at <iso8601>`
@@ -40,31 +43,31 @@ Primary doc: `/nautilus_trader/toolbox/tradedb/README.md`
 Database and family setup:
 
 ```bash
-cd /nautilus_trader && uv run python -m toolbox.tradedb db init --json
-cd /nautilus_trader && uv run python -m toolbox.tradedb family register --file toolbox/tradedb/examples/families/momentum.yaml --json
+tradedb db init --json
+tradedb family register --file /Users/ad/work/trading-tools/trading_tools/tradedb/examples/families/momentum.yaml --json
 ```
 
 Create and inspect ideas:
 
 ```bash
-cd /nautilus_trader && uv run python -m toolbox.tradedb idea list --view active --json
-cd /nautilus_trader && uv run python -m toolbox.tradedb idea show <idea-id> --json
-cd /nautilus_trader && uv run python -m toolbox.tradedb idea find "catalyst momentum" --json
+tradedb idea list --view active --json
+tradedb idea show <idea-id> --json
+tradedb idea find "catalyst momentum" --json
 ```
 
 Observations and evaluation:
 
 ```bash
-cd /nautilus_trader && uv run python -m toolbox.tradedb idea observe <idea-id> --source bot --observed-at 2026-03-12T14:35:00+00:00 --payload '{"approved_for_entry": true, "price": 211.2}' --json
-cd /nautilus_trader && uv run python -m toolbox.tradedb idea evaluate --idea-id <idea-id> --json
+tradedb idea observe <idea-id> --source bot --observed-at 2026-03-12T14:35:00+00:00 --payload '{"approved_for_entry": true, "price": 211.2}' --json
+tradedb idea evaluate --idea-id <idea-id> --json
 ```
 
 Execution linkage and review:
 
 ```bash
-cd /nautilus_trader && uv run python -m toolbox.tradedb order ingest --payload '{"external_order_id":"ord-001","venue":"SIM","account":"acct-1","side":"buy","quantity":100,"status":"new","idea_id":"<idea-id>","symbol":"AAPL"}' --json
-cd /nautilus_trader && uv run python -m toolbox.tradedb position ingest --payload '{"venue":"SIM","account":"acct-1","net_quantity":100,"idea_id":"<idea-id>","symbol":"AAPL","average_price":211.5}' --json
-cd /nautilus_trader && uv run python -m toolbox.tradedb idea review add <idea-id> --outcome win --score 0.8 --lessons "Catalyst worked" --text "Execution was late" --json
+tradedb order ingest --payload '{"external_order_id":"ord-001","venue":"SIM","account":"acct-1","side":"buy","quantity":100,"status":"new","idea_id":"<idea-id>","symbol":"AAPL"}' --json
+tradedb position ingest --payload '{"venue":"SIM","account":"acct-1","net_quantity":100,"idea_id":"<idea-id>","symbol":"AAPL","average_price":211.5}' --json
+tradedb idea review add <idea-id> --outcome win --score 0.8 --lessons "Catalyst worked" --text "Execution was late" --json
 ```
 
 ## Safe workflow

@@ -282,7 +282,7 @@ If `mplfinance` is unavailable:
 
 ## Useful local context
 
-- `/nautilus_trader/toolbox/tws/README.md`
-- `/nautilus_trader/toolbox/yfinance/README.md`
-- `/nautilus_trader/toolbox/yfinance/macro_dashboard.py`
+- `/Users/ad/work/trading-tools/trading_tools/tws/README.md`
+- `/Users/ad/work/trading-tools/trading_tools/yfinance/README.md`
+- `/Users/ad/work/trading-tools/trading_tools/yfinance/macro_dashboard.py`
 - `/Users/ad/work/ai/nautilus_trader/lab/strategies/regular_session_momentum_scalper.md`

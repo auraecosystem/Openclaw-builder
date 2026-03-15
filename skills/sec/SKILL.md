@@ -2,17 +2,20 @@
 name: sec
 description: >
   SEC / EDGAR filings tooling for near-real-time 8-K and 6-K ingest, repair,
-  export, and latest-feed checks via the mounted NautilusTrader toolbox. Use
-  when asked about: SEC filings, EDGAR, 8-K, 6-K, filing streams, reconcile /
-  backfill, latest filings, or exporting local filing state.
+  export, and latest-feed checks via the standalone trading-tools workspace.
+  Use when asked about: SEC filings, EDGAR, 8-K, 6-K, filing streams,
+  reconcile / backfill, latest filings, or exporting local filing state.
 metadata: { "openclaw": { "emoji": "📄", "requires": { "bins": ["uv"] } } }
 ---
 
 # sec
 
-Use the NautilusTrader SEC / EDGAR CLI from the mounted repo at `/nautilus_trader`.
+Use the standalone `sec` CLI from `/Users/ad/work/trading-tools`.
 
-Primary doc: `/nautilus_trader/toolbox/sec/README.md`
+Primary docs:
+
+- `/Users/ad/work/trading-tools/README.md`
+- `/Users/ad/work/trading-tools/trading_tools/sec/README.md`
 
 ## When to use
 
@@ -26,8 +29,8 @@ Primary doc: `/nautilus_trader/toolbox/sec/README.md`
 
 ## Defaults
 
-- Run from the repo root: `cd /nautilus_trader && ...`
-- Prefer `uv run python -m toolbox.sec ...`
+- Prefer the shim command: `sec ...`
+- Fallback: `uv run --project /Users/ad/work/trading-tools sec ...`
 - For any network call, set a valid SEC identity:
   - `SEC_USER_AGENT="Your Name your_email@example.com"`
 - Prefer `--format json` when the result will be summarized or filtered
@@ -39,34 +42,34 @@ Primary doc: `/nautilus_trader/toolbox/sec/README.md`
 Read-only latest feed:
 
 ```bash
-cd /nautilus_trader && SEC_USER_AGENT="Your Name your_email@example.com" uv run python -m toolbox.sec latest --forms 8-K,6-K --format json
+SEC_USER_AGENT="Your Name your_email@example.com" sec latest --forms 8-K,6-K --format json
 ```
 
 Filtered latest feed:
 
 ```bash
-cd /nautilus_trader && SEC_USER_AGENT="Your Name your_email@example.com" uv run python -m toolbox.sec latest --forms 8-K --company NVIDIA --format json
-cd /nautilus_trader && SEC_USER_AGENT="Your Name your_email@example.com" uv run python -m toolbox.sec latest --forms 8-K --cik 1045810 --format json
+SEC_USER_AGENT="Your Name your_email@example.com" sec latest --forms 8-K --company NVIDIA --format json
+SEC_USER_AGENT="Your Name your_email@example.com" sec latest --forms 8-K --cik 1045810 --format json
 ```
 
 Polling ingest:
 
 ```bash
-cd /nautilus_trader && SEC_USER_AGENT="Your Name your_email@example.com" uv run python -m toolbox.sec stream --once --format json
-cd /nautilus_trader && SEC_USER_AGENT="Your Name your_email@example.com" uv run python -m toolbox.sec stream --poll-interval 60
+SEC_USER_AGENT="Your Name your_email@example.com" sec stream --once --format json
+SEC_USER_AGENT="Your Name your_email@example.com" sec stream --poll-interval 60
 ```
 
 Reconcile / backfill:
 
 ```bash
-cd /nautilus_trader && SEC_USER_AGENT="Your Name your_email@example.com" uv run python -m toolbox.sec reconcile --date 2026-03-11 --format json
-cd /nautilus_trader && SEC_USER_AGENT="Your Name your_email@example.com" uv run python -m toolbox.sec reconcile --start-date 2026-03-01 --end-date 2026-03-12 --format json
+SEC_USER_AGENT="Your Name your_email@example.com" sec reconcile --date 2026-03-11 --format json
+SEC_USER_AGENT="Your Name your_email@example.com" sec reconcile --start-date 2026-03-01 --end-date 2026-03-12 --format json
 ```
 
 Export local state:
 
 ```bash
-cd /nautilus_trader && uv run python -m toolbox.sec export --format json
+sec export --format json
 ```
 
 ## Safe workflow

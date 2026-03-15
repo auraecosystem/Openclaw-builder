@@ -1,22 +1,23 @@
 ---
 name: macro-dashboard
 description: >
-  Global macro dashboard and analytics workflow backed by the NautilusTrader
-  yfinance toolbox. Use when asked about: macro dashboard, oil/gold/VIX/dollar
-  relationships, rates/credit regime checks, global index context, cross-asset
-  correlation, z-scores, volatility snapshots, or sectioned macro summaries from
-  the mounted Nautilus repo.
+  Global macro dashboard and analytics workflow backed by the standalone
+  trading-tools yfinance CLI. Use when asked about: macro dashboard,
+  oil/gold/VIX/dollar relationships, rates/credit regime checks, global index
+  context, cross-asset correlation, z-scores, volatility snapshots, or
+  sectioned macro summaries.
 metadata: { "openclaw": { "emoji": "🌍", "requires": { "bins": ["uv"] } } }
 ---
 
 # macro-dashboard
 
-Use the NautilusTrader yfinance macro dashboard from the mounted repo at `/nautilus_trader`.
+Use the standalone `yfinance macro-dashboard` CLI from `/Users/ad/work/trading-tools`.
 
 Primary docs:
 
-- `/nautilus_trader/toolbox/yfinance/README.md`
-- `/nautilus_trader/toolbox/yfinance/macro_dashboard.py`
+- `/Users/ad/work/trading-tools/README.md`
+- `/Users/ad/work/trading-tools/trading_tools/yfinance/README.md`
+- `/Users/ad/work/trading-tools/trading_tools/yfinance/macro_dashboard.py`
 
 ## When to use
 
@@ -30,9 +31,10 @@ Primary docs:
 
 ## Defaults
 
-- Run from the repo root: `cd /nautilus_trader && ...`
-- Prefer the supported CLI entrypoint:
-  - `uv run --with yfinance python -m toolbox.yfinance macro-dashboard`
+- Prefer the shim command:
+  - `yfinance macro-dashboard`
+- Fallback:
+  - `uv run --project /Users/ad/work/trading-tools yfinance macro-dashboard`
 - Prefer `--json` when the result will be summarized or post-processed
 - Use `--section N` when the user asks for one section or when the full dashboard would be too noisy
 - Treat the output as Yahoo-derived research context, not exchange-grade execution data
@@ -42,19 +44,13 @@ Primary docs:
 Full dashboard:
 
 ```bash
-cd /nautilus_trader && uv run --with yfinance python -m toolbox.yfinance macro-dashboard --json
+yfinance macro-dashboard --json
 ```
 
 Single section:
 
 ```bash
-cd /nautilus_trader && uv run --with yfinance python -m toolbox.yfinance macro-dashboard --section 4 --json
-```
-
-Direct module path if needed:
-
-```bash
-cd /nautilus_trader && uv run --with yfinance python -m toolbox.yfinance.macro_dashboard --json
+yfinance macro-dashboard --section 4 --json
 ```
 
 ## Safe workflow
