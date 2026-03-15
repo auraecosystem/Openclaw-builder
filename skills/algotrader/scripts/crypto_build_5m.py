@@ -10,8 +10,8 @@ Creates data-crypto-5m/ with ohlcv.parquet (5m bars) + cache/ (indicators on 5m)
 The engine treats each 5m bar as a "row" — same VCP, flag, RS, regime logic applies.
 
 Usage:
-    uv run scripts/crypto_build_5m.py --data-dir data-crypto
-    uv run scripts/crypto_build_5m.py --data-dir data-crypto --indicators  # recompute only
+    uv run scripts/crypto_build_5m.py
+    uv run scripts/crypto_build_5m.py --profile crypto_5m --indicators
 """
 
 import argparse
@@ -26,6 +26,7 @@ sys.path.insert(0, str(_script_dir))
 
 from crypto_build import build_wide_parquet, compute_indicators
 from lib import universe as uni
+from trading_config import load_trading_config
 
 
 def _log(msg: str):
@@ -34,12 +35,16 @@ def _log(msg: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Build 5m Qullamaggie data")
-    parser.add_argument("--data-dir", required=True, help="Source data-crypto dir with raw/ CSVs")
+    parser.add_argument("--profile", default="crypto_5m", help="Configured dataset profile")
     parser.add_argument("--indicators", action="store_true", help="Only recompute indicators")
     args = parser.parse_args()
 
-    src_dir = Path(args.data_dir)
-    out_dir = src_dir.parent / "data-crypto-5m"
+    cfg = load_trading_config()
+    profile = cfg.profile(args.profile)
+    src_dir = cfg.datasets[profile.dataset]
+    if profile.ohlcv is None:
+        raise RuntimeError(f"Profile '{profile.name}' is missing an ohlcv path")
+    out_dir = profile.ohlcv.parent
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Copy universe.json (needed by engine for ticker list)

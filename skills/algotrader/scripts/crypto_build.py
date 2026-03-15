@@ -12,9 +12,9 @@ Three phases:
   C) Compute indicators from daily bars and cache them
 
 Usage:
-    uv run scripts/crypto_build.py --data-dir data-crypto
-    uv run scripts/crypto_build.py --data-dir data-crypto --skip-5m      # skip 5m parquet
-    uv run scripts/crypto_build.py --data-dir data-crypto --indicators   # only recompute indicators
+    uv run scripts/crypto_build.py
+    uv run scripts/crypto_build.py --profile crypto_daily --skip-5m
+    uv run scripts/crypto_build.py --profile crypto_daily --indicators
 """
 
 import argparse
@@ -33,6 +33,7 @@ from lib import cache as _cache
 from lib import indicators as ind
 from lib import patterns as pat
 from lib import universe as uni
+from trading_config import load_trading_config
 
 
 def _log(msg: str):
@@ -181,12 +182,14 @@ def compute_indicators(data_dir: Path, ohlcv: dict[str, pd.DataFrame]):
 
 def main():
     parser = argparse.ArgumentParser(description="Build crypto parquets + indicators")
-    parser.add_argument("--data-dir", required=True, help="Path to data-crypto directory")
+    parser.add_argument("--profile", default="crypto_daily", help="Configured dataset profile")
     parser.add_argument("--skip-5m", action="store_true", help="Skip building 5m parquet")
     parser.add_argument("--indicators", action="store_true", help="Only recompute indicators")
     args = parser.parse_args()
 
-    data_dir = Path(args.data_dir)
+    cfg = load_trading_config()
+    profile = cfg.profile(args.profile)
+    data_dir = cfg.datasets[profile.dataset]
     universe = json.loads((data_dir / "universe.json").read_text())
     pairs = universe["pairs"]
     raw_dir = data_dir / "raw"
@@ -207,11 +210,12 @@ def main():
     daily_path = data_dir / "ohlcv_daily.parquet"
     build_wide_parquet(raw_dir, pairs, "1d", daily_path)
 
-    # The cache module looks for ohlcv.parquet — symlink or copy
+    # The cache module looks for ohlcv.parquet. Keep a real file, not a symlink.
     ohlcv_link = data_dir / "ohlcv.parquet"
-    if not ohlcv_link.exists():
-        ohlcv_link.symlink_to("ohlcv_daily.parquet")
-        _log("Symlinked ohlcv.parquet → ohlcv_daily.parquet")
+    if ohlcv_link != daily_path:
+        import shutil
+        shutil.copy2(daily_path, ohlcv_link)
+        _log("Copied ohlcv_daily.parquet → ohlcv.parquet")
 
     # Phase B: 5m parquet
     if not args.skip_5m:

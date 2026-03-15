@@ -6,8 +6,8 @@ Computes walk-forward efficiency (WFE = OOS Sharpe / IS Sharpe).
 Uses hourly bars resampled from 5-minute data by default.
 
 Usage:
-    python -m nautilus.walkforward --data-dir data-crypto
-    python -m nautilus.walkforward --data-dir data-crypto --is-months 12 --oos-months 6
+    python -m nautilus.walkforward
+    python -m nautilus.walkforward --profile crypto_5m --is-months 12 --oos-months 6
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ if _project_root not in sys.path:
 from nautilus.evolve import NautilusTransport, DEFAULT_TICKERS
 from nautilus.validate import run_validation
 from scripts.evolve import evolve
+from trading_config import load_trading_config
 
 
 @dataclass
@@ -241,7 +242,7 @@ def print_summary(results: list[WindowResult]) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Walk-forward analysis (NautilusTrader)")
-    parser.add_argument("--data-dir", type=Path, default=Path("data-crypto"))
+    parser.add_argument("--profile", default="crypto_daily", help="Configured dataset profile")
     parser.add_argument("--tickers", help="Comma-separated tickers")
     parser.add_argument("--is-months", type=int, default=12, help="In-sample window months")
     parser.add_argument("--oos-months", type=int, default=6, help="Out-of-sample window months")
@@ -254,6 +255,8 @@ def main():
     parser.add_argument("--fitness", default="sharpe")
     parser.add_argument("--output", help="Save full results to JSON")
     args = parser.parse_args()
+    cfg = load_trading_config()
+    profile = cfg.profile(args.profile)
 
     # Resolve tickers
     if args.tickers:
@@ -280,7 +283,7 @@ def main():
 
     t0 = time.time()
     results = run_walkforward(
-        data_dir=args.data_dir.resolve(),
+        data_dir=cfg.datasets[profile.dataset],
         tickers=tickers,
         windows=windows,
         generations=args.generations,

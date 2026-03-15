@@ -1,8 +1,8 @@
 """Run Qullamaggie breakout strategy backtest via NautilusTrader.
 
 Usage:
-    python -m nautilus.run_backtest --data-dir ../data-crypto
-    python -m nautilus.run_backtest --data-dir ../data-crypto --tickers BTCUSDT,SOLUSDT
+    python -m nautilus.run_backtest
+    python -m nautilus.run_backtest --profile crypto_5m --tickers BTCUSDT,SOLUSDT
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from nautilus_trader.persistence.wranglers import BarDataWrangler
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scripts.nautilus_backtest import ensure_currency, load_ticker_csv, make_instrument
+from trading_config import load_trading_config
 
 from nautilus.strategy import QullamaggieBreakout, QullamaggieConfig
 
@@ -37,14 +38,15 @@ DEFAULT_TICKERS = [
 
 def main():
     parser = argparse.ArgumentParser(description="Qullamaggie NautilusTrader backtest")
-    parser.add_argument("--data-dir", type=Path, default=Path("../data-crypto"))
-    parser.add_argument("--timeframe", default="1d", choices=["1d", "5m"])
+    parser.add_argument("--profile", default="crypto_daily", help="Configured dataset profile")
     parser.add_argument("--tickers", help="Comma-separated tickers (always includes BTCUSDT)")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
 
-    data_dir = args.data_dir.resolve()
-    universe_path = data_dir / "universe.json"
+    cfg = load_trading_config()
+    profile = cfg.profile(args.profile)
+    data_dir = cfg.datasets[profile.dataset]
+    universe_path = profile.universe or (data_dir / "universe.json")
     if not universe_path.exists():
         print(f"Error: {universe_path} not found", file=sys.stderr)
         sys.exit(1)
@@ -61,7 +63,7 @@ def main():
     if "BTCUSDT" not in symbols:
         symbols.insert(0, "BTCUSDT")
 
-    bar_spec = "1-DAY-LAST" if args.timeframe == "1d" else "5-MINUTE-LAST"
+    bar_spec = "1-DAY-LAST" if profile.timeframe == "1d" else "5-MINUTE-LAST"
 
     engine = BacktestEngine(
         config=BacktestEngineConfig(
@@ -83,7 +85,7 @@ def main():
     t0 = time.time()
 
     for i, symbol in enumerate(symbols):
-        df = load_ticker_csv(data_dir, symbol, args.timeframe)
+        df = load_ticker_csv(data_dir, symbol, profile.timeframe)
         if df is None or df.empty:
             print(f"  [{i+1}/{len(symbols)}] {symbol}: no data, skipping")
             continue

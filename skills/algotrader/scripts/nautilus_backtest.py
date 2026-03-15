@@ -2,9 +2,8 @@
 """Load our Binance kline CSVs into NautilusTrader's BacktestEngine.
 
 Usage:
-    python nautilus_backtest.py --data-dir ../data-crypto --tickers BTCUSDT,ETHUSDT
-    python nautilus_backtest.py --data-dir ../data-crypto --timeframe 5m --tickers BTCUSDT
-    python nautilus_backtest.py --data-dir ../data-crypto  # all 100 tickers, daily
+    python nautilus_backtest.py
+    python nautilus_backtest.py --profile crypto_5m --tickers BTCUSDT,ETHUSDT
 """
 
 from __future__ import annotations
@@ -17,6 +16,10 @@ from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from trading_config import load_trading_config
 
 from nautilus_trader.adapters.binance import BINANCE_VENUE
 from nautilus_trader.backtest.engine import BacktestEngine
@@ -170,14 +173,16 @@ class BarCounterStrategy(Strategy):
 
 def main():
     parser = argparse.ArgumentParser(description="Run NautilusTrader backtest on Binance data")
-    parser.add_argument("--data-dir", type=Path, default=Path("../data-crypto"))
-    parser.add_argument("--timeframe", default="1d", choices=["1d", "5m"])
+    parser.add_argument("--profile", default="crypto_daily", help="Configured dataset profile")
     parser.add_argument("--tickers", help="Comma-separated subset of tickers")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
 
-    data_dir = args.data_dir.resolve()
-    universe_path = data_dir / "universe.json"
+    cfg = load_trading_config()
+    profile = cfg.profile(args.profile)
+    data_dir = cfg.datasets[profile.dataset]
+    timeframe = profile.timeframe
+    universe_path = profile.universe or (data_dir / "universe.json")
     if not universe_path.exists():
         print(f"Error: {universe_path} not found", file=sys.stderr)
         sys.exit(1)
@@ -195,7 +200,7 @@ def main():
         symbols = all_symbols
 
     # Bar spec string for NautilusTrader
-    bar_spec = "1-DAY-LAST" if args.timeframe == "1d" else "5-MINUTE-LAST"
+    bar_spec = "1-DAY-LAST" if timeframe == "1d" else "5-MINUTE-LAST"
 
     # Configure engine
     engine = BacktestEngine(
@@ -219,7 +224,7 @@ def main():
     t0 = time.time()
 
     for i, symbol in enumerate(symbols):
-        df = load_ticker_csv(data_dir, symbol, args.timeframe)
+        df = load_ticker_csv(data_dir, symbol, timeframe)
         if df is None or df.empty:
             print(f"  [{i+1}/{len(symbols)}] {symbol}: no data, skipping")
             continue

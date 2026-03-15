@@ -10,7 +10,9 @@ use clap::Parser;
 
 fn main() -> Result<()> {
     let args = cli::Cli::parse();
-    let data_dir = Path::new(&args.data_dir);
+    let cfg = algotrader_engine::trading_config::load_trading_config()?;
+    algotrader_engine::trading_config::set_trading_config(cfg);
+    let data_dir = algotrader_engine::trading_config::dataset_dir_for_profile(&args.profile)?;
 
     // Build base params early so DataConfig is available for data loading.
     // The --crypto flag and --config file both affect DataConfig.
@@ -18,12 +20,15 @@ fn main() -> Result<()> {
 
     eprintln!("Loading data from {}...", data_dir.display());
     let t0 = Instant::now();
-    let store = algotrader_engine::load_data_store(data_dir, &base_params.data)?;
+    let store = algotrader_engine::load_data_store(&data_dir, &base_params.data)?;
     eprintln!("  Loaded in {:.2}s", t0.elapsed().as_secs_f64());
 
     if let Some(portfolio_dir) = &args.portfolio {
         let t1 = Instant::now();
-        let result = algotrader_engine::portfolio::run_portfolio(&store, Path::new(portfolio_dir))?;
+        let result = algotrader_engine::portfolio::run_portfolio(
+            &store,
+            std::path::Path::new(portfolio_dir),
+        )?;
         eprintln!(
             "  Portfolio complete in {:.2}s ({} strategies)",
             t1.elapsed().as_secs_f64(),

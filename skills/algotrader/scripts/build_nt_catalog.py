@@ -8,9 +8,8 @@
 One-time conversion job. Iterates tickers sequentially — I/O bound, not CPU bound.
 
 Usage:
-    uv run scripts/build_nt_catalog.py --data-dir data/
-    uv run scripts/build_nt_catalog.py --data-dir data/ --output data/nt_catalog/
-    uv run scripts/build_nt_catalog.py --data-dir data/ --venue XNYS --bar-spec 1-DAY-LAST
+    uv run scripts/build_nt_catalog.py
+    uv run scripts/build_nt_catalog.py --profile equities_daily
 """
 
 from __future__ import annotations
@@ -27,6 +26,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from lib.universe import load_ohlcv
+from trading_config import load_trading_config
 
 from nautilus_trader.model.currencies import USD
 from nautilus_trader.model.data import BarType
@@ -140,18 +140,13 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 examples:
-  uv run scripts/build_nt_catalog.py --data-dir data/
-  uv run scripts/build_nt_catalog.py --data-dir data/ --output data/nt_catalog/
-  uv run scripts/build_nt_catalog.py --data-dir data/ --venue XNYS --bar-spec 1-DAY-LAST
+  uv run scripts/build_nt_catalog.py
+  uv run scripts/build_nt_catalog.py --profile equities_daily
 """,
     )
     parser.add_argument(
-        "--data-dir", type=Path, required=True,
-        help="Directory containing ohlcv.parquet",
-    )
-    parser.add_argument(
-        "--output", type=Path, default=Path("data/nt_catalog/"),
-        help="Catalog output directory (default: data/nt_catalog/)",
+        "--profile", default="equities_daily",
+        help="Configured dataset profile",
     )
     parser.add_argument(
         "--venue", default="XNYS",
@@ -166,22 +161,28 @@ examples:
 
 def main() -> None:
     args = parse_args()
+    cfg = load_trading_config()
+    profile = cfg.profile(args.profile)
+    data_dir = cfg.datasets[profile.dataset]
+    output = profile.catalog or (cfg.artifacts["catalog_root"] / profile.name)
+    venue = profile.venue or args.venue
+    bar_spec = profile.bar_spec or args.bar_spec
 
-    if not args.data_dir.exists():
-        print(f"Error: --data-dir {args.data_dir} does not exist", file=sys.stderr)
+    if not data_dir.exists():
+        print(f"Error: configured dataset root {data_dir} does not exist", file=sys.stderr)
         sys.exit(1)
 
-    if not (args.data_dir / "ohlcv.parquet").exists():
-        print(f"Error: {args.data_dir / 'ohlcv.parquet'} not found", file=sys.stderr)
+    if not (data_dir / "ohlcv.parquet").exists():
+        print(f"Error: {data_dir / 'ohlcv.parquet'} not found", file=sys.stderr)
         sys.exit(1)
 
-    args.output.mkdir(parents=True, exist_ok=True)
+    output.mkdir(parents=True, exist_ok=True)
 
     build_catalog(
-        data_dir=args.data_dir,
-        output_dir=args.output,
-        venue_str=args.venue,
-        bar_spec=args.bar_spec,
+        data_dir=data_dir,
+        output_dir=output,
+        venue_str=venue,
+        bar_spec=bar_spec,
     )
 
 

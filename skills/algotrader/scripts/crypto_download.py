@@ -10,9 +10,9 @@ Downloads both daily (1d) and 5-minute (5m) kline CSVs for all pairs
 in universe.json. Idempotent: skips existing files.
 
 Usage:
-    uv run scripts/crypto_download.py --data-dir data-crypto
-    uv run scripts/crypto_download.py --data-dir data-crypto --timeframe 1d  # daily only
-    uv run scripts/crypto_download.py --data-dir data-crypto --timeframe 5m  # 5m only
+    uv run scripts/crypto_download.py
+    uv run scripts/crypto_download.py --profile crypto_daily --timeframe 1d
+    uv run scripts/crypto_download.py --profile crypto_5m --timeframe 5m
 """
 
 import argparse
@@ -25,6 +25,10 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from trading_config import load_trading_config
 
 BASE_URL = "https://data.binance.vision/data/spot/monthly/klines"
 MAX_CONCURRENT = 10
@@ -135,13 +139,16 @@ async def run(data_dir: Path, timeframes: list[str]):
 
 def main():
     parser = argparse.ArgumentParser(description="Download crypto OHLCV from Binance")
-    parser.add_argument("--data-dir", required=True, help="Path to data-crypto directory")
+    parser.add_argument("--profile", default="crypto_daily", help="Configured dataset profile")
     parser.add_argument("--timeframe", default=None, choices=["1d", "5m"],
                         help="Download only this timeframe (default: both)")
     args = parser.parse_args()
 
+    cfg = load_trading_config()
+    profile = cfg.profile(args.profile)
+    data_dir = cfg.datasets[profile.dataset]
     timeframes = [args.timeframe] if args.timeframe else ["1d", "5m"]
-    asyncio.run(run(Path(args.data_dir), timeframes))
+    asyncio.run(run(data_dir, timeframes))
 
 
 if __name__ == "__main__":

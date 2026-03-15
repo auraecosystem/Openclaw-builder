@@ -10,9 +10,9 @@ scripts/evolve.py — only the transport layer is NautilusTrader-specific.
 
 Usage:
     # From skills/algotrader/:
-    python -m nautilus.evolve --data-dir data-crypto
-    python -m nautilus.evolve --data-dir data-crypto --tickers BTCUSDT,SOLUSDT --workers 4
-    python -m nautilus.evolve --data-dir data-crypto --generations 50 --pop-size 100
+    python -m nautilus.evolve
+    python -m nautilus.evolve --profile crypto_5m --tickers BTCUSDT,SOLUSDT --workers 4
+    python -m nautilus.evolve --profile crypto_daily --generations 50 --pop-size 100
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ from nautilus_trader.persistence.wranglers import BarDataWrangler
 from scripts.nautilus_backtest import load_ticker_csv, make_instrument
 from nautilus.strategy import PrecomputedBreakout, PrecomputedConfig
 from scripts.evolve import evolve
+from trading_config import load_trading_config
 
 # ---------------------------------------------------------------------------
 # Indicator pre-computation (vectorized, runs once per worker)
@@ -560,9 +561,8 @@ DEFAULT_TICKERS = [
 
 def main():
     parser = argparse.ArgumentParser(description="Evolutionary optimizer (NautilusTrader)")
-    parser.add_argument("--data-dir", type=Path, default=Path("data-crypto"))
+    parser.add_argument("--profile", default="crypto_daily", help="Configured dataset profile")
     parser.add_argument("--tickers", help="Comma-separated tickers (always includes BTCUSDT)")
-    parser.add_argument("--timeframe", default="1d", choices=["1d", "5m"])
     parser.add_argument("--bar-spec", default=None, help="Override bar spec (e.g. 1-HOUR-LAST)")
     parser.add_argument("--resample", choices=["1h"], help="Resample 5m data to 1h bars")
     parser.add_argument("--start", help="Start date filter (ISO, e.g. 2020-01-01)")
@@ -577,7 +577,10 @@ def main():
     parser.add_argument("--output", default=None, help="Output JSON path")
     args = parser.parse_args()
 
-    data_dir = args.data_dir.resolve()
+    cfg = load_trading_config()
+    profile = cfg.profile(args.profile)
+    data_dir = cfg.datasets[profile.dataset]
+    timeframe = profile.timeframe
 
     if args.tickers:
         tickers = [s.strip().upper() for s in args.tickers.split(",")]
@@ -591,7 +594,7 @@ def main():
     elif args.resample == "1h":
         bar_spec = "1-HOUR-LAST"
     else:
-        bar_spec = "1-DAY-LAST" if args.timeframe == "1d" else "5-MINUTE-LAST"
+        bar_spec = "1-DAY-LAST" if timeframe == "1d" else "5-MINUTE-LAST"
 
     print(f"NautilusTrader evolutionary optimizer", file=sys.stderr)
     print(f"  Data: {data_dir}", file=sys.stderr)
@@ -600,7 +603,7 @@ def main():
     # Compute bars_per_day from the timeframe
     if args.resample == "1h":
         bars_per_day = 24
-    elif args.timeframe == "5m":
+    elif timeframe == "5m":
         bars_per_day = 288
     else:
         bars_per_day = 1

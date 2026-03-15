@@ -27,7 +27,9 @@ docker-compose.override.yml
 docker-compose.extra.yml
 
 # Data files / trading data
+nautilus_trader/
 skills/algotrader/data-ibkr/
+skills/algotrader/config/trading.local.toml
 skills/finance/data/
 **/*.parquet
 

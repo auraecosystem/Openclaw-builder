@@ -8,9 +8,9 @@ use clap::Parser;
     about = "Fast Rust backtest engine for parameter optimization"
 )]
 pub struct Cli {
-    /// Path to the data directory containing ohlcv.parquet, cache/, etf_tickers.txt
-    #[arg(long)]
-    pub data_dir: String,
+    /// Configured dataset profile name
+    #[arg(long, default_value = "equities_daily")]
+    pub profile: String,
 
     /// Strategy setup: breakout, ep, parabolic
     #[arg(long, default_value = "breakout")]

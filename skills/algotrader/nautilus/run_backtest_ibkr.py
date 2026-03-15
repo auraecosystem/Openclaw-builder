@@ -5,8 +5,7 @@ into NautilusTrader's BacktestEngine.
 
 Usage:
     python -m nautilus.run_backtest_ibkr
-    python -m nautilus.run_backtest_ibkr --data data-ibkr/qqq_spy_15y_daily.parquet
-    python -m nautilus.run_backtest_ibkr --data data-ibkr/daily.parquet --tickers SPY,AAPL
+    python -m nautilus.run_backtest_ibkr --profile ibkr_rotation
     python -m nautilus.run_backtest_ibkr --benchmark SPY --cash 100000
 """
 
@@ -30,6 +29,9 @@ from nautilus_trader.model.identifiers import TraderId
 from nautilus_trader.model.instruments import Equity
 from nautilus_trader.model.objects import Money, Price, Quantity
 from nautilus_trader.persistence.wranglers import BarDataWrangler
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from trading_config import load_trading_config
 
 from nautilus.strategy import QullamaggieBreakout, QullamaggieConfig
 
@@ -78,13 +80,12 @@ def main():
         epilog="""\
 examples:
   python -m nautilus.run_backtest_ibkr
-  python -m nautilus.run_backtest_ibkr --data data-ibkr/qqq_spy_15y_daily.parquet
+  python -m nautilus.run_backtest_ibkr --profile ibkr_rotation
   python -m nautilus.run_backtest_ibkr --tickers SPY,AAPL,NVDA --cash 500000
   python -m nautilus.run_backtest_ibkr --benchmark SPY
 """,
     )
-    parser.add_argument("--data", type=Path, default=Path("data-ibkr/daily.parquet"),
-                        help="Parquet file from fetch_bars.py")
+    parser.add_argument("--profile", default="ibkr_rotation", help="Configured dataset profile")
     parser.add_argument("--tickers", help="Comma-separated tickers (default: all in file)")
     parser.add_argument("--benchmark", default="SPY", help="Benchmark symbol for regime filter")
     parser.add_argument("--cash", type=float, default=1_000_000, help="Starting cash in USD")
@@ -92,16 +93,18 @@ examples:
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
 
-    if not args.data.exists():
-        print(f"Error: {args.data} not found. Fetch data first with:", file=sys.stderr)
-        print(f"  uv run scripts/ibkr/fetch_bars.py SPY AAPL -o {args.data}", file=sys.stderr)
+    cfg = load_trading_config()
+    profile = cfg.profile(args.profile)
+    data_path = profile.ohlcv
+    if data_path is None or not data_path.exists():
+        print(f"Error: configured IBKR parquet not found: {data_path}", file=sys.stderr)
         sys.exit(1)
 
     tickers = [t.strip().upper() for t in args.tickers.split(",")] if args.tickers else None
 
     # Load data
     t0 = time.time()
-    symbol_data = load_ibkr_parquet(args.data, tickers)
+    symbol_data = load_ibkr_parquet(data_path, tickers)
     if not symbol_data:
         print("Error: no data loaded", file=sys.stderr)
         sys.exit(1)

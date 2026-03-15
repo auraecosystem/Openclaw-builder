@@ -196,16 +196,14 @@ pub(crate) fn dynamic_strategy_paths(name: &str) -> Vec<PathBuf> {
     let filename = format!("{name}.json");
     let mut paths = Vec::with_capacity(2);
 
-    // Compile-time manifest dir (works in tests and cargo run).
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    paths.push(manifest.join("strategies").join(&filename));
+    if let Some(configured_dir) = crate::trading_config::strategies_dir() {
+        paths.push(configured_dir.join(&filename));
+    }
 
-    // Runtime cwd fallback (works when invoked from the engine root).
-    if let Ok(cwd) = std::env::current_dir() {
-        let cwd_path = cwd.join("strategies").join(&filename);
-        if !paths.contains(&cwd_path) {
-            paths.push(cwd_path);
-        }
+    // Compile-time manifest dir fallback keeps tests and pre-config workflows working.
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("strategies").join(&filename);
+    if !paths.contains(&manifest) {
+        paths.push(manifest);
     }
 
     paths

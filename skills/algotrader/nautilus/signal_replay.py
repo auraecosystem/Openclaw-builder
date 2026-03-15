@@ -11,7 +11,7 @@ Exit rules match signal_breakout.rs (all managed manually, no stop orders):
 
 Usage:
     python -m nautilus.signal_replay \
-      --data-dir data-crypto \
+      --profile crypto_5m \
       --trades /tmp/signal_trades.csv \
       --init-cash 100000
 """
@@ -43,6 +43,7 @@ from nautilus_trader.trading.strategy import Strategy
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scripts.nautilus_backtest import ensure_currency, load_ticker_csv, make_instrument
+from trading_config import load_trading_config
 
 
 # ---------------------------------------------------------------------------
@@ -302,13 +303,15 @@ class SignalReplayStrategy(Strategy):
 
 def main():
     parser = argparse.ArgumentParser(description="Replay Rust engine signals in NautilusTrader")
-    parser.add_argument("--data-dir", type=Path, default=Path("data-crypto"))
+    parser.add_argument("--profile", default="crypto_daily", help="Configured dataset profile")
     parser.add_argument("--trades", type=Path, required=True, help="CSV from --dump-trades")
     parser.add_argument("--init-cash", type=float, default=150)
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
 
-    data_dir = args.data_dir.resolve()
+    cfg = load_trading_config()
+    profile = cfg.profile(args.profile)
+    data_dir = cfg.datasets[profile.dataset]
 
     # Read CSV to determine which tickers to load
     tickers: set[str] = set()

@@ -12,13 +12,13 @@ Two modes:
 
 Usage:
     # Start server (once, keep running):
-    ./engine/target/release/algotrader-engine --data-dir data/ --serve --port 9999
+    ./engine/target/release/algotrader-engine --profile equities_daily --serve --port 9999
 
     # Run optimizer against server:
     python3 scripts/evolve.py --server localhost:9999 --generations 50 --pop-size 100
 
     # Or subprocess mode (no server needed, slower):
-    python3 scripts/evolve.py --data-dir data/ --generations 50 --pop-size 100
+    python3 scripts/evolve.py --profile equities_daily --generations 50 --pop-size 100
 """
 
 import argparse
@@ -29,6 +29,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from trading_config import load_trading_config
 
 
 # Parameter ranges for mutation/crossover
@@ -197,9 +201,9 @@ class ServerTransport:
 class SubprocessTransport:
     """Spawn engine binary per batch (includes 8s load overhead each time)."""
 
-    def __init__(self, binary: Path, data_dir: Path):
+    def __init__(self, binary: Path, profile: str):
         self.binary = binary
-        self.data_dir = data_dir
+        self.profile = profile
 
     def connect(self):
         pass
@@ -211,7 +215,7 @@ class SubprocessTransport:
         params_file = Path("/tmp/algotrader-evolve-params.json")
         params_file.write_text(json.dumps(params_list))
         result = subprocess.run(
-            [str(self.binary), "--data-dir", str(self.data_dir), "--batch", str(params_file)],
+            [str(self.binary), "--profile", self.profile, "--batch", str(params_file)],
             capture_output=True,
             text=True,
             timeout=300,
@@ -357,7 +361,7 @@ def evolve(
 def main():
     parser = argparse.ArgumentParser(description="Evolutionary parameter optimizer")
     parser.add_argument("--server", default=None, help="Connect to running server (host:port, e.g. localhost:9999)")
-    parser.add_argument("--data-dir", default=None, help="Path to data directory (subprocess mode)")
+    parser.add_argument("--profile", default="equities_daily", help="Configured dataset profile")
     parser.add_argument("--binary", default=None, help="Path to algotrader-engine binary")
     parser.add_argument("--generations", type=int, default=50)
     parser.add_argument("--pop-size", type=int, default=100)
@@ -372,23 +376,22 @@ def main():
         host, port = args.server.split(":")
         transport = ServerTransport(host, int(port))
         print(f"Server mode: {args.server}", file=sys.stderr)
-    elif args.data_dir:
+    else:
+        cfg = load_trading_config()
         if args.binary:
             binary = Path(args.binary)
         else:
-            script_dir = Path(__file__).resolve().parent
-            binary = script_dir.parent / "engine" / "target" / "release" / "algotrader-engine"
+            binary = cfg.engine_binary
             if not binary.exists():
-                binary = script_dir.parent / "engine" / "target" / "debug" / "algotrader-engine"
+                debug_binary = cfg.repo_root / "engine" / "target" / "debug" / "algotrader-engine"
+                if debug_binary.exists():
+                    binary = debug_binary
         if not binary.exists():
             print(f"Binary not found: {binary}", file=sys.stderr)
             print("Build with: cd engine && cargo build --release", file=sys.stderr)
             sys.exit(1)
-        transport = SubprocessTransport(binary, Path(args.data_dir))
+        transport = SubprocessTransport(binary, args.profile)
         print(f"Subprocess mode: {binary}", file=sys.stderr)
-    else:
-        print("Either --server or --data-dir is required", file=sys.stderr)
-        sys.exit(1)
 
     if args.crypto:
         print("Crypto mode: min_price=0, min_vol=0, wider filter ranges", file=sys.stderr)

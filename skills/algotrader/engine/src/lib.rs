@@ -13,6 +13,7 @@ pub mod portfolio;
 pub mod python;
 pub mod server;
 pub mod strategy;
+pub mod trading_config;
 pub mod walk_forward;
 
 // Re-export sub-crates so existing `algotrader_engine::types::X`,

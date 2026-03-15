@@ -8,13 +8,13 @@ a different timeframe than the optimizer used.
 
 Usage:
     # Run best params from optimizer output on daily bars:
-    python -m nautilus.validate --params results.json --data-dir data-crypto
+    python -m nautilus.validate --params results.json
 
     # Run on hourly bars (resampled from 5m data):
-    python -m nautilus.validate --params results.json --data-dir data-crypto --resample 1h
+    python -m nautilus.validate --params results.json --profile crypto_5m --resample 1h
 
     # Override specific params:
-    python -m nautilus.validate --data-dir data-crypto --resample 1h \
+    python -m nautilus.validate --profile crypto_5m --resample 1h \
         --set rs_pct=0.50 vol_ratio=2.0 min_prior_move=0.03
 """
 
@@ -44,6 +44,7 @@ from nautilus_trader.persistence.wranglers import BarDataWrangler
 
 from scripts.nautilus_backtest import load_ticker_csv, make_instrument
 from nautilus.strategy import QullamaggieBreakout, QullamaggieConfig
+from trading_config import load_trading_config
 
 
 DEFAULT_TICKERS = [
@@ -243,7 +244,7 @@ def _f(v) -> float:
 
 def main():
     parser = argparse.ArgumentParser(description="Validate params on full dataset")
-    parser.add_argument("--data-dir", type=Path, default=Path("data-crypto"))
+    parser.add_argument("--profile", default="crypto_daily", help="Configured dataset profile")
     parser.add_argument("--params", type=Path, help="JSON file with best_params (from evolve output)")
     parser.add_argument("--tickers", help="Comma-separated tickers")
     parser.add_argument("--resample", choices=["1h"], help="Resample 5m data to 1h bars")
@@ -252,6 +253,8 @@ def main():
     parser.add_argument("--log-level", default="WARNING")
     parser.add_argument("--set", nargs="*", help="Override params: key=value pairs")
     args = parser.parse_args()
+    cfg = load_trading_config()
+    profile = cfg.profile(args.profile)
 
     # Load base params
     if args.params:
@@ -295,7 +298,7 @@ def main():
     print(f"\nLoading data...")
 
     report = run_validation(
-        data_dir=args.data_dir.resolve(),
+        data_dir=cfg.datasets[profile.dataset],
         tickers=tickers,
         params=params,
         resample=args.resample,
