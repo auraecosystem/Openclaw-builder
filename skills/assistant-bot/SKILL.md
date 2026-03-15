@@ -10,15 +10,15 @@ metadata: { "openclaw": { "emoji": "🤖", "requires": { "bins": ["python3"] } }
 
 # assistant-bot
 
-Use the local Discord-native `assistant-bot` from `/nautilus_trader/toolbox/assistant-bot`.
+Use the local Discord-native `assistant-bot` from `/trading-tools/apps/assistant-bot`.
 
 Primary references:
 
-- `/nautilus_trader/toolbox/assistant-bot/README.md`
-- `/nautilus_trader/toolbox/assistant-bot/bot.py`
-- `/nautilus_trader/toolbox/assistant-bot/assistant_bot_runtime/service.py`
-- `/nautilus_trader/toolbox/assistant-bot/assistant_bot_runtime/runtime.py`
-- `/nautilus_trader/toolbox/assistant-bot/assistant_bot_runtime/exchange.py`
+- `/trading-tools/apps/assistant-bot/README.md`
+- `/trading-tools/apps/assistant-bot/src/assistant_bot/app.py`
+- `/trading-tools/apps/assistant-bot/src/assistant_bot_runtime/service.py`
+- `/trading-tools/apps/assistant-bot/src/assistant_bot_runtime/runtime.py`
+- `/trading-tools/apps/assistant-bot/src/assistant_bot_runtime/exchange.py`
 
 When the README and code disagree, trust the code and runtime modules.
 
@@ -63,15 +63,15 @@ Use this skill when the task is about any of these:
 ## Runtime Defaults
 
 - Run from repo root or toolbox dir:
-  - `cd /nautilus_trader/toolbox/assistant-bot`
+  - `cd /trading-tools/apps/assistant-bot`
 - Prefer the local venv:
   - `source .venv/bin/activate`
 - Config lives in:
-  - `/nautilus_trader/toolbox/assistant-bot/.env`
+  - `/trading-tools/apps/assistant-bot/.env`
 - Logs:
-  - human log: `/nautilus_trader/toolbox/assistant-bot/assistant-bot.log`
-  - source-of-truth JSONL: `/nautilus_trader/var/assistant-bot/source_of_truth.jsonl`
-  - persisted alerts: `/nautilus_trader/var/assistant-bot/alerts.json`
+  - human log: `/trading-tools/apps/assistant-bot/assistant-bot.log`
+  - source-of-truth JSONL: `/trading-tools/apps/assistant-bot/var/source_of_truth.jsonl`
+  - persisted alerts: `/trading-tools/apps/assistant-bot/var/alerts.json`
 
 ## Required Discord Behavior
 
@@ -126,6 +126,7 @@ Examples:
 @assistant-bot `system.status`
 @assistant-bot `system.echo text="hello"`
 @assistant-bot `market.snapshot symbol=BTCUSDT timeframe=1m`
+@assistant-bot `hash.permutations format=jsonl` [attach one .txt file]
 @assistant-bot `alert.create symbol=BTCUSDT event_type=hard_stop_hit timeframe=1m priority=P0 barrier_level=84000 auto_actions=protective_exit`
 @assistant-bot `alert.list`
 @assistant-bot `alert.disable alert_id=alert_00001`
@@ -140,6 +141,7 @@ Current supported commands:
 - `system.status`
 - `system.echo`
 - `market.snapshot`
+- `hash.permutations` (requires one attached `.txt` file)
 - `alert.create`
 - `alert.list`
 - `alert.delete`
@@ -172,6 +174,27 @@ Returns:
 - last volume
 - last close time
 - stale seconds
+
+### `hash.permutations`
+
+Required:
+
+- exactly one attached `.txt` file (UTF-8)
+
+Optional args:
+
+- `format=jsonl|json` (default `jsonl`)
+- `summary=true|false` (default `true`)
+- `dedupe=true|false` (default `true`)
+- `include_empty_lines=true|false` (default `false`)
+- `include_empty_results=true|false` (default `false`)
+- `workers=<int>`
+- `transforms=a,b,c`
+
+Returns:
+
+- `RESULT ... ok ...` summary
+- one output file attachment (`.hashes.jsonl` or `.hashes.json`)
 
 ### `alert.create`
 
@@ -335,9 +358,9 @@ Important:
 Two log layers matter:
 
 - rolling human-readable log:
-  - `/nautilus_trader/toolbox/assistant-bot/assistant-bot.log`
+  - `/trading-tools/apps/assistant-bot/assistant-bot.log`
 - structured source-of-truth JSONL:
-  - `/nautilus_trader/var/assistant-bot/source_of_truth.jsonl`
+  - `/trading-tools/apps/assistant-bot/var/source_of_truth.jsonl`
 
 The source-of-truth log is the main incident record. Use it for:
 
