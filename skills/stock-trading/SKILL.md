@@ -32,8 +32,15 @@ Deeper setup / methodology docs:
 
 - `/Users/ad/work/ai/nautilus_trader/lab/research/INDEX.md`
 - `/Users/ad/work/ai/nautilus_trader/lab/strategies/regular_session_momentum_scalper.md`
-- `/Users/ad/work/ai/nautilus_trader/lab/research/markets/qullamaggie-rules.md`
-- `/Users/ad/work/ai/openclaw/skills/algotrader/references/cameron-rules.md`
+- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-rules.md`
+- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-breakout.md`
+- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-episodic-pivot.md`
+- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-parabolic-short.md`
+- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-rules.md`
+- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-gap-and-go.md`
+- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-bull-flag.md`
+- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-flat-top-breakout.md`
+- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-abcd.md`
 - `/Users/ad/work/ai/openclaw/skills/algotrader/references/strategy-comparison.md`
 - `/Users/ad/work/ai/nautilus_trader/lab/research/markets/2026-03-12_macro-dashboard-news-context.md`
 
@@ -199,7 +206,11 @@ cd /nautilus_trader && uv run python -m toolbox.sec export --format json
 2. Use `tws scanner` and `market snapshot` / `market bars` to build a watchlist.
 3. Compare the candidates to the intraday playbook in:
    - `/Users/ad/work/ai/nautilus_trader/lab/strategies/regular_session_momentum_scalper.md`
-   - `/Users/ad/work/ai/openclaw/skills/algotrader/references/cameron-rules.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-rules.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-gap-and-go.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-bull-flag.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-flat-top-breakout.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-abcd.md`
 4. Record the thesis, risk, and trigger in `tradedb`.
 5. Ingest orders / positions if the trade is taken.
 
@@ -208,7 +219,10 @@ cd /nautilus_trader && uv run python -m toolbox.sec export --format json
 1. Use `macro-dashboard` to decide whether the broader regime supports breakout continuation.
 2. Use `tws market bars` or existing catalog/backtest data for the name.
 3. Compare the setup to:
-   - `/Users/ad/work/ai/nautilus_trader/lab/research/markets/qullamaggie-rules.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-rules.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-breakout.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-episodic-pivot.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-parabolic-short.md`
    - `/Users/ad/work/ai/openclaw/skills/algotrader/references/strategy-comparison.md`
 4. Log the idea in `tradedb` before execution.
 5. Review outcome quality later in `tradedb`.

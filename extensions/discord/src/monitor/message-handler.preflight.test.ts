@@ -99,6 +99,9 @@ function createThreadClient(params: { threadId: string; parentId: string }): Dis
       }
       return null;
     },
+    rest: {
+      get: async (_route: string) => ({ roles: ["crabman-role"] }),
+    },
   } as unknown as DiscordClient;
 }
 
@@ -755,6 +758,32 @@ describe("preflightDiscordMessage", () => {
     expect(result?.threadParentId).toBe(parentId);
     expect(result?.channelConfig?.allowed).toBe(true);
     expect(result?.shouldRequireMention).toBe(false);
+  });
+
+  it("allows guild messages that mention one of the bot roles", async () => {
+    const channelId = "channel-role-mentions-on";
+    const guildId = "guild-role-mentions-on";
+    const message = createMessage({
+      id: "m-role-mentions-on",
+      channelId,
+      content: "hi <@&crabman-role>",
+      mentionedRoles: [{ id: "crabman-role" }],
+      author: {
+        id: "user-1",
+        bot: false,
+        username: "Alice",
+      },
+    });
+
+    const result = await runGuildPreflight({
+      channelId,
+      guildId,
+      message,
+      discordConfig: {} as DiscordConfig,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.wasMentioned).toBe(true);
   });
 
   it("drops guild messages that mention another user when ignoreOtherMentions=true", async () => {

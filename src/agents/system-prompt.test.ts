@@ -804,6 +804,20 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("`style` can be `primary`, `success`, or `danger`");
   });
 
+  it("lists current channel message actions and thread-create availability", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["message"],
+      runtimeInfo: {
+        channel: "discord",
+        channelActions: ["send", "thread-create", "thread-reply"],
+      },
+    });
+
+    expect(prompt).toContain("Current discord actions: send, thread-create, thread-reply.");
+    expect(prompt).toContain("`thread-create` is available here via `message`");
+  });
+
   it("includes runtime provider capabilities when present", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",

@@ -196,6 +196,7 @@ function buildMessagingSection(params: {
   messageChannelOptions: string;
   inlineButtonsEnabled: boolean;
   runtimeChannel?: string;
+  channelActions?: string[];
   messageToolHints?: string[];
 }) {
   if (params.isMinimal) {
@@ -215,6 +216,12 @@ function buildMessagingSection(params: {
           "- Use `message` for proactive sends + channel actions (polls, reactions, etc.).",
           "- For `action=send`, include `to` and `message`.",
           `- If multiple channels are configured, pass \`channel\` (${params.messageChannelOptions}).`,
+          params.runtimeChannel && params.channelActions && params.channelActions.length > 0
+            ? `- Current ${params.runtimeChannel} actions: ${params.channelActions.join(", ")}.`
+            : "",
+          params.channelActions?.includes("thread-create")
+            ? "- `thread-create` is available here via `message`; do not claim Discord thread creation is unavailable."
+            : "",
           `- If you use \`message\` (\`action=send\`) to deliver your user-visible reply, respond with ONLY: ${SILENT_REPLY_TOKEN} (avoid duplicate replies).`,
           params.inlineButtonsEnabled
             ? "- Inline buttons supported. Use `action=send` with `buttons=[[{text,callback_data,style?}]]`; `style` can be `primary`, `success`, or `danger`."
@@ -345,6 +352,7 @@ export function buildAgentSystemPrompt(params: {
     shell?: string;
     channel?: string;
     capabilities?: string[];
+    channelActions?: string[];
     repoRoot?: string;
   };
   messageToolHints?: string[];
@@ -656,6 +664,7 @@ export function buildAgentSystemPrompt(params: {
       messageChannelOptions,
       inlineButtonsEnabled,
       runtimeChannel,
+      channelActions: params.runtimeInfo?.channelActions,
       messageToolHints: params.messageToolHints,
     }),
     ...buildVoiceSection({ isMinimal, ttsHint: params.ttsHint }),

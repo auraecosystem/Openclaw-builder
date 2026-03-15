@@ -30,6 +30,7 @@ Production-grade event-driven backtest and live execution engine (Rust+Python hy
 **Location**: `../nautilus_trader/` (sibling repo)
 
 **Backtest pattern** (Python API):
+
 ```python
 from nautilus_trader.backtest.engine import BacktestEngine
 from nautilus_trader.backtest.config import BacktestEngineConfig
@@ -77,6 +78,7 @@ engine.dispose()  # final cleanup
 ```
 
 **Strategy configuration pattern:**
+
 ```python
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.trading.strategy import Strategy
@@ -101,6 +103,7 @@ class BreakoutStrategy(Strategy):
 ```
 
 **Parameter sweeps** (no built-in optimizer — loop over configs):
+
 ```python
 results = []
 for rs_lookback in [7, 14, 21, 30]:
@@ -113,6 +116,7 @@ for rs_lookback in [7, 14, 21, 30]:
 ```
 
 **Data loading:**
+
 ```python
 from nautilus_trader.persistence.wranglers import BarDataWrangler
 from nautilus_trader.persistence.catalog.parquet import ParquetDataCatalog
@@ -122,6 +126,7 @@ from nautilus_trader.persistence.catalog.parquet import ParquetDataCatalog
 ```
 
 **Key capabilities:**
+
 - Event-driven execution with NETTING account semantics
 - Full order lifecycle (market, limit, stop, trailing stop, IOC/FOK)
 - Identical code path for backtest → paper trade → live trade
@@ -171,41 +176,44 @@ Key deps: rustfft 6 (VMD, scattering, STOMP, template, SWT), faer 0.20 (RMT), ki
 
 All parameters are defined as typed fields on the `StrategyConfig` dataclass. Defaults and ranges for the breakout strategy:
 
-| Parameter | Default | Range | Description |
-|-----------|---------|-------|-------------|
-| `rs_pct` | `0.02` | 0.01–0.80 | RS percentile rank threshold (top N%). Crypto uses wider (0.15–0.40) |
-| `vol_ratio` | `1.5` | 1.2–3.0 | Volume spike threshold (x 20d avg) |
-| `max_range_pct` | `0.15` | 0.10–0.30 | Max base range as % of price |
-| `max_dist_52w` | `0.25` | 0.10–0.50 | Max distance from 52-week high |
-| `min_adv` | `150000000` | 5e6–3e8 | Min average dollar volume |
-| `slippage_k` | `0.10` | 0.05–0.20 | Slippage coefficient |
-| `min_prior_move` | `0.30` | 0.00–0.50 | Min 3-month prior return |
-| `max_sma_ext` | `0.10` | 0.05–0.30 | Max SMA extension (overextension filter) |
-| `regime` | `true` | bool | BTC > 200d SMA regime filter (crypto) |
-| `risk_pct` | `0.005` | 0.003–0.030 | Risk per trade (fraction of capital) |
-| `max_pos_pct` | `0.20` | 0.10–0.35 | Max single position size |
-| `split_frac` | `0.50` | 0.00–0.95 | Quick half fraction (0.0 = no partial exit, let runners run) |
-| `min_adr_pct` | `0.03` | 0.02–0.20 | Min ADR% (ATR_14 / close) |
-| `min_consol_days` | `5` | 3–20 | Min days in consolidation range |
-| `min_price` | `5.0` | 0–any | Min price filter (0 for crypto) |
-| `min_vol` | `300000` | 0–any | Min volume SMA filter (0 for crypto) |
-| `rs_lookback` | `21` | 7–60 | RS ranking lookback period in bars |
-| `max_hold_bars` | `0` | 0–30 | Max hold in bars (0 = disabled) |
+| Parameter         | Default     | Range       | Description                                                          |
+| ----------------- | ----------- | ----------- | -------------------------------------------------------------------- |
+| `rs_pct`          | `0.02`      | 0.01–0.80   | RS percentile rank threshold (top N%). Crypto uses wider (0.15–0.40) |
+| `vol_ratio`       | `1.5`       | 1.2–3.0     | Volume spike threshold (x 20d avg)                                   |
+| `max_range_pct`   | `0.15`      | 0.10–0.30   | Max base range as % of price                                         |
+| `max_dist_52w`    | `0.25`      | 0.10–0.50   | Max distance from 52-week high                                       |
+| `min_adv`         | `150000000` | 5e6–3e8     | Min average dollar volume                                            |
+| `slippage_k`      | `0.10`      | 0.05–0.20   | Slippage coefficient                                                 |
+| `min_prior_move`  | `0.30`      | 0.00–0.50   | Min 3-month prior return                                             |
+| `max_sma_ext`     | `0.10`      | 0.05–0.30   | Max SMA extension (overextension filter)                             |
+| `regime`          | `true`      | bool        | BTC > 200d SMA regime filter (crypto)                                |
+| `risk_pct`        | `0.005`     | 0.003–0.030 | Risk per trade (fraction of capital)                                 |
+| `max_pos_pct`     | `0.20`      | 0.10–0.35   | Max single position size                                             |
+| `split_frac`      | `0.50`      | 0.00–0.95   | Quick half fraction (0.0 = no partial exit, let runners run)         |
+| `min_adr_pct`     | `0.03`      | 0.02–0.20   | Min ADR% (ATR_14 / close)                                            |
+| `min_consol_days` | `5`         | 3–20        | Min days in consolidation range                                      |
+| `min_price`       | `5.0`       | 0–any       | Min price filter (0 for crypto)                                      |
+| `min_vol`         | `300000`    | 0–any       | Min volume SMA filter (0 for crypto)                                 |
+| `rs_lookback`     | `21`        | 7–60        | RS ranking lookback period in bars                                   |
+| `max_hold_bars`   | `0`         | 0–30        | Max hold in bars (0 = disabled)                                      |
 
 ---
 
 ## Data
 
 ### Crypto Daily (`data-crypto/`)
+
 - Top 100 USDT pairs from Binance
 - `ohlcv_daily.parquet` (4.7 MB)
 - 25 cached indicator files
 
 ### Crypto 5-Minute (`data-crypto-5m/`)
+
 - Same 100 pairs, 288 bars/day
 - `ohlcv.parquet` (690 MB)
 
 ### Stock Data (`data/`) — Historical Reference
+
 - 11,922 tickers, ~27 years (1997–2024)
 - `ohlcv.parquet` (403 MB, wide format)
 - 27 pre-computed indicator cache files
@@ -216,19 +224,19 @@ All parameters are defined as typed fields on the `StrategyConfig` dataclass. De
 
 ### Crypto (Primary)
 
-| Split | Date Range | Purpose |
-|-------|-----------|---------|
-| **Training** | Start to 2021-12-31 | Development, optimization |
-| **Validation** | 2022-01-01 to 2023-06-30 | One pass only |
-| **Holdout** | 2023-07-01 to present | **SACRED. Touch once. Final verdict.** |
+| Split          | Date Range               | Purpose                                |
+| -------------- | ------------------------ | -------------------------------------- |
+| **Training**   | Start to 2021-12-31      | Development, optimization              |
+| **Validation** | 2022-01-01 to 2023-06-30 | One pass only                          |
+| **Holdout**    | 2023-07-01 to present    | **SACRED. Touch once. Final verdict.** |
 
 ### Stocks (Historical Reference)
 
-| Split | Date Range | Purpose | % |
-|-------|-----------|---------|---|
-| **Training** | 1997-01-01 to 2015-12-31 | Strategy development, optimization | ~70% |
-| **Validation** | 2016-01-01 to 2020-12-31 | Final tuning, one pass only | ~18% |
-| **Holdout** | 2021-01-01 to 2024-12-31 | **SACRED. Touch once. Final verdict.** | ~15% |
+| Split          | Date Range               | Purpose                                | %    |
+| -------------- | ------------------------ | -------------------------------------- | ---- |
+| **Training**   | 1997-01-01 to 2015-12-31 | Strategy development, optimization     | ~70% |
+| **Validation** | 2016-01-01 to 2020-12-31 | Final tuning, one pass only            | ~18% |
+| **Holdout**    | 2021-01-01 to 2024-12-31 | **SACRED. Touch once. Final verdict.** | ~15% |
 
 ### Walk-Forward Windows (on training set)
 
@@ -275,7 +283,10 @@ Read these before beginning research. They contain the scientific foundation:
 - `references/algo-edge-sources-alpha.md` — Where edges come from, 5 categories
 - `references/risk-management-position-sizing.md` — Kelly criterion, volatility targeting
 - `references/portfolio-of-uncorrelated-strategies.md` — Diversification math, correlation management
-- `references/qullamaggie-rules.md` — The original Qullamaggie trading rules
+- `../stock-trading/references/qullamaggie-rules.md` — Qullamaggie overview and shared framework
+- `../stock-trading/references/qullamaggie-breakout.md` — Continuation breakout rules
+- `../stock-trading/references/qullamaggie-episodic-pivot.md` — Episodic pivot rules
+- `../stock-trading/references/qullamaggie-parabolic-short.md` — Parabolic short rules
 - `references/crypto-algo-trading.md` — Crypto-specific alpha, microstructure, costs
 - `references/short-horizon-crypto-momentum.md` — Short-horizon breakout blueprint
 
@@ -299,6 +310,7 @@ When reporting ANY result, always include:
 ## Process Documents
 
 Follow these in order:
+
 1. `research-playbook.md` — Step-by-step research methodology
 2. `experiment-templates.md` — Templates for each experiment type
 3. `lab-notebook-schema.md` — How to record experiments

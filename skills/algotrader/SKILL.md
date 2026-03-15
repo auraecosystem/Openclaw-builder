@@ -5,14 +5,7 @@ description: >
   asked about: swing trading setups, breakout patterns, VCP, episodic pivots,
   parabolic shorts, backtesting results, strategy analysis, or simulated trading.
   Runs vectorbt backtests on 27 years of US equity daily data (11,922 tickers).
-metadata:
-  {
-    "openclaw":
-      {
-        "emoji": "📈",
-        "requires": { "bins": ["uv"] },
-      },
-  }
+metadata: { "openclaw": { "emoji": "📈", "requires": { "bins": ["uv"] } } }
 ---
 
 # Swingtrader
@@ -31,15 +24,16 @@ Qullamaggie-style swing trading backtester. Four setups (breakout, EP, parabolic
 
 ## Setups
 
-Three independent strategies (full rules: `{baseDir}/references/qullamaggie-rules.md`):
+Three independent strategies:
 
-1. **Continuation Breakout** — long. VCP/flag base + RS leader + breakout on volume.
-2. **Episodic Pivot (EP)** — long. Gap ≥ 10% on catalyst + massive volume.
-3. **Parabolic Short** — short. Overextended run + first red day = mean reversion.
+1. **Continuation Breakout** — long. VCP/flag base + RS leader + breakout on volume. Rules: `../stock-trading/references/qullamaggie-breakout.md`
+2. **Episodic Pivot (EP)** — long. Gap ≥ 10% on catalyst + massive volume. Rules: `../stock-trading/references/qullamaggie-episodic-pivot.md`
+3. **Parabolic Short** — short. Overextended run + first red day = mean reversion. Rules: `../stock-trading/references/qullamaggie-parabolic-short.md`
 
 ## Data
 
 Precomputed parquet files in `{baseDir}/data/`:
+
 - `ohlcv.parquet` — all tickers, all dates, wide format (field × ticker MultiIndex)
 - `etf_tickers.txt` — ETF symbols to exclude
 
@@ -48,6 +42,7 @@ Precomputed parquet files in `{baseDir}/data/`:
 ## Running a backtest
 
 All setups, full history:
+
 ```bash
 uv run {baseDir}/scripts/backtest.py \
   --data-dir {baseDir}/data \
@@ -55,6 +50,7 @@ uv run {baseDir}/scripts/backtest.py \
 ```
 
 Single setup with date range:
+
 ```bash
 uv run {baseDir}/scripts/backtest.py \
   --data-dir {baseDir}/data \
@@ -69,6 +65,7 @@ Options: `--setup {all,breakout,ep,parabolic}`, `--start YYYY-MM-DD`, `--end YYY
 ## Reading results
 
 The output JSON contains:
+
 - `total_return`, `cagr`, `max_drawdown`, `sharpe`, `sortino`
 - `win_rate`, `avg_win`, `avg_loss`, `profit_factor`, `avg_hold_days`
 - `per_setup` — breakdown by strategy with trades, win rate, total P&L
@@ -77,6 +74,7 @@ The output JSON contains:
 - `equity_curve` — date + equity pairs for charting
 
 Interpret results:
+
 - Expect win rate ~25–35% (Qullamaggie's historical range)
 - Profit factor > 1.5 is healthy; > 2.0 is excellent
 - Max drawdown > 40% is concerning for a swing strategy
@@ -155,4 +153,9 @@ EOF
 
 ## Rules reference
 
-Detailed entry/exit/risk rules: `{baseDir}/references/qullamaggie-rules.md`
+Overview and shared framework: `../stock-trading/references/qullamaggie-rules.md`
+Detailed setup rules:
+
+- `../stock-trading/references/qullamaggie-breakout.md`
+- `../stock-trading/references/qullamaggie-episodic-pivot.md`
+- `../stock-trading/references/qullamaggie-parabolic-short.md`
