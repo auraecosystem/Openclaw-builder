@@ -1,161 +1,100 @@
 ---
 name: algotrader
 description: >
-  Qullamaggie-style swing trading backtester and paper portfolio game. Use when
-  asked about: swing trading setups, breakout patterns, VCP, episodic pivots,
-  parabolic shorts, backtesting results, strategy analysis, or simulated trading.
-  Runs vectorbt backtests on 27 years of US equity daily data (11,922 tickers).
+  Swing-trading and alpha-research skill for OHLCV-based feature engineering,
+  causal data preparation, evolutionary feature discovery, orthogonality
+  testing, and backtest promotion. Use when asked about: breakout research,
+  feature mining, signal extraction, SQLMesh prep layers, walk-forward
+  validation, or promoting candidate feature libraries into strategy tests.
 metadata: { "openclaw": { "emoji": "📈", "requires": { "bins": ["uv"] } } }
 ---
 
-# Swingtrader
+# algotrader
 
-Qullamaggie-style swing trading backtester. Four setups (breakout, EP, parabolic, signal_breakout), 11k+ tickers, 27 years of history. Rust engine for fast parameter search; NautilusTrader for production backtesting.
+Use this skill for the full research loop, not just for running a backtest.
+
+The canonical workflow is:
+
+1. build a deterministic point-in-time OHLCV substrate
+2. define and version candidate features
+3. screen candidates cheaply for relevance, stability, and redundancy
+4. keep a diverse feature archive instead of one "winner"
+5. assemble feature libraries and only then run expensive backtests
+
+The detailed workflow lives in:
+
+- `./references/feature-research-pipeline.md`
+- `./research-playbook.md`
+- `./experiment-templates.md`
 
 ## When to use
 
-- "backtest" / "swing trade" / "breakout" / "VCP" / "flag pattern"
-- "episodic pivot" / "EP setup" / "gap and go"
-- "parabolic short" / "mean reversion short"
-- "Qullamaggie" / "Kristjan" / "momentum setup"
-- "how would X strategy have performed"
-- "show me winning setups" / "best trades"
-- "portfolio" / "my positions" / "P&L"
+- "feature engineering" / "factor discovery" / "alpha mining"
+- "is this feature redundant?" / "orthogonality testing"
+- "how should we prepare OHLCV in SQLMesh?"
+- "what should be in gold features vs labels vs splits?"
+- "how should we evolve topology and hyperparameters?"
+- "what gets screened before backtests?"
+- "how do we promote a feature into the accepted library?"
+- "how would this breakout / EP / parabolic idea be researched?"
 
-## Setups
+## Core Principle
 
-Three independent strategies:
+Do not optimize for the best single feature.
 
-1. **Continuation Breakout** — long. VCP/flag base + RS leader + breakout on volume. Rules: `../stock-trading/references/qullamaggie-breakout.md`
-2. **Episodic Pivot (EP)** — long. Gap ≥ 10% on catalyst + massive volume. Rules: `../stock-trading/references/qullamaggie-episodic-pivot.md`
-3. **Parabolic Short** — short. Overextended run + first red day = mean reversion. Rules: `../stock-trading/references/qullamaggie-parabolic-short.md`
+Optimize for a maintained library of features whose joint value is:
 
-## Data
+- predictive relevance
+- temporal stability
+- robustness across folds and regimes
+- low redundancy with the current library
+- acceptable complexity
 
-Precomputed parquet files in `{baseDir}/data/`:
+## Preferred Workflow
 
-- `ohlcv.parquet` — all tickers, all dates, wide format (field × ticker MultiIndex)
-- `etf_tickers.txt` — ETF symbols to exclude
+1. Start with causal, normalized, multi-horizon OHLCV core features.
+2. Add cross-sectional and peer-relative features if you have a universe.
+3. Add dynamic relation or lead-lag features when multi-asset structure matters.
+4. Add causal wavelet or other multiscale sidecars only after the base layer is strong.
+5. Use evolutionary search over typed operator graphs, not unrestricted formula soup.
+6. Run cheap screening before any expensive backtest.
+7. Promote only feature libraries that add incremental value over the accepted baseline.
 
-**Data must be prepared before first use.** See "Data Prep" below.
+## Hard Rules
 
-## Running a backtest
+- No full-sample denoising or decomposition before splitting.
+- No centered windows in predictive features.
+- No train/test leakage in normalization, selection, or feature fitting.
+- No giant indicator soup as the default base layer.
+- No promotion based on standalone score alone; admission is library-aware.
 
-All setups, full history:
+## Feature Family Priority
 
-```bash
-uv run {baseDir}/scripts/backtest.py \
-  --data-dir {baseDir}/data \
-  --output /tmp/backtest-results.json
-```
+Build in this order:
 
-Single setup with date range:
+1. causal normalized OHLCV core
+2. cross-sectional / peer-relative features
+3. dynamic graph / lead-lag features
+4. causal wavelet multiscale features
+5. experimental sidecars such as motifs, topology, or visual encodings
 
-```bash
-uv run {baseDir}/scripts/backtest.py \
-  --data-dir {baseDir}/data \
-  --setup breakout \
-  --start 2020-01-01 \
-  --end 2024-12-31 \
-  --output /tmp/backtest-results.json
-```
+The detailed ranking and reasoning are documented in:
 
-Options: `--setup {all,breakout,ep,parabolic}`, `--start YYYY-MM-DD`, `--end YYYY-MM-DD`, `--init-cash 100000`
+- `./references/feature-research-pipeline.md`
+- `./references/cross-disciplinary-signal-analysis.md`
 
-## Reading results
+## Strategy References
 
-The output JSON contains:
+Use these when the task is specifically about the trading playbooks rather than the research pipeline:
 
-- `total_return`, `cagr`, `max_drawdown`, `sharpe`, `sortino`
-- `win_rate`, `avg_win`, `avg_loss`, `profit_factor`, `avg_hold_days`
-- `per_setup` — breakdown by strategy with trades, win rate, total P&L
-- `best_trades` / `worst_trades` — top/bottom 10
-- `monthly_returns` — monthly P&L percentages
-- `equity_curve` — date + equity pairs for charting
-
-Interpret results:
-
-- Expect win rate ~25–35% (Qullamaggie's historical range)
-- Profit factor > 1.5 is healthy; > 2.0 is excellent
-- Max drawdown > 40% is concerning for a swing strategy
-
-## Data Prep (one-time setup)
-
-Before first use, convert Stooq CSVs to parquet:
-
-```bash
-# 1. Unzip Stooq daily data
-mkdir -p /tmp/stooq_daily
-cd /tmp/stooq_daily
-unzip ~/Downloads/d_us_txt.zip
-
-# 2. Run the conversion (one-time, ~5-10 min)
-# Convert all CSV files to a single wide parquet + etf_tickers.txt
-python3 - <<'EOF'
-import pandas as pd
-import numpy as np
-from pathlib import Path
-
-stooq_root = Path("/tmp/stooq_daily/data/daily/us")
-out_dir = Path("{baseDir}/data")
-out_dir.mkdir(exist_ok=True)
-
-stock_dirs = [d for d in stooq_root.iterdir() if "stocks" in d.name]
-etf_dirs = [d for d in stooq_root.iterdir() if "etf" in d.name]
-
-# Collect ETF tickers
-etf_tickers = set()
-for etf_dir in etf_dirs:
-    for f in etf_dir.rglob("*.us.txt"):
-        etf_tickers.add(f.stem.upper().replace(".US", ""))
-(out_dir / "etf_tickers.txt").write_text("\n".join(sorted(etf_tickers)))
-print(f"ETF tickers: {len(etf_tickers)}")
-
-# Load and pivot all stock CSVs
-frames = {}
-cols = ["ticker","per","date","time","open","high","low","close","volume","openint"]
-for stock_dir in stock_dirs:
-    for f in stock_dir.rglob("*.us.txt"):
-        ticker = f.stem.upper().replace(".US", "")
-        try:
-            df = pd.read_csv(f, names=cols, skiprows=1,
-                             dtype={"date": str, "time": str,
-                                    "open": "float32", "high": "float32",
-                                    "low": "float32", "close": "float32",
-                                    "volume": "float32"})
-            df["date"] = pd.to_datetime(df["date"], format="%Y%m%d")
-            df = df.set_index("date").sort_index()
-            frames[ticker] = df[["open","high","low","close","volume"]]
-        except Exception as e:
-            print(f"  skip {ticker}: {e}")
-
-print(f"Loaded {len(frames)} tickers")
-
-# Build unified date index
-all_dates = sorted(set().union(*[set(df.index) for df in frames.values()]))
-date_idx = pd.DatetimeIndex(all_dates)
-
-# Pivot to wide format with MultiIndex columns (field, ticker)
-fields = ["open", "high", "low", "close", "volume"]
-wide = {}
-for field in fields:
-    field_df = pd.DataFrame(
-        {ticker: df[field].reindex(date_idx) for ticker, df in frames.items()},
-        dtype=np.float32
-    )
-    wide[field] = field_df
-
-combined = pd.concat(wide, axis=1)
-combined.to_parquet(out_dir / "ohlcv.parquet", compression="zstd")
-print(f"Saved ohlcv.parquet: {combined.shape}")
-EOF
-```
-
-## Rules reference
-
-Overview and shared framework: `../stock-trading/references/qullamaggie-rules.md`
-Detailed setup rules:
-
+- `../stock-trading/references/qullamaggie-rules.md`
 - `../stock-trading/references/qullamaggie-breakout.md`
 - `../stock-trading/references/qullamaggie-episodic-pivot.md`
 - `../stock-trading/references/qullamaggie-parabolic-short.md`
+
+## Data Assumptions
+
+Assume one row is one completed bar for `(symbol, timeframe, bar_end_ts)`.
+
+Features at time `t` may only use information known at or before `t`.
+Labels, folds, and expensive validation are separate assets, not mixed into the feature rows.

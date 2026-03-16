@@ -448,6 +448,12 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain(
       "- If exactly one skill clearly applies: read its SKILL.md at <location> with `Read`, then follow it.",
     );
+    expect(prompt).toContain(
+      "- Skills may be bundled, managed, or workspace-local; do not assume every skill lives under `/workspace/skills/`.",
+    );
+    expect(prompt).toContain(
+      "- Treat the `<location>` path in `<available_skills>` as the source of truth for where a skill actually lives.",
+    );
     expect(prompt).toContain("OpenClaw docs: /tmp/openclaw/docs");
     expect(prompt).toContain(
       "For OpenClaw behavior, commands, config, or architecture: consult local docs first.",
@@ -602,6 +608,12 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("## Skills");
     expect(prompt).toContain(
       "- If exactly one skill clearly applies: read its SKILL.md at <location> with `read`, then follow it.",
+    );
+    expect(prompt).toContain(
+      "- Skills may be bundled, managed, or workspace-local; do not assume every skill lives under `/workspace/skills/`.",
+    );
+    expect(prompt).toContain(
+      "- Treat the `<location>` path in `<available_skills>` as the source of truth for where a skill actually lives.",
     );
   });
 

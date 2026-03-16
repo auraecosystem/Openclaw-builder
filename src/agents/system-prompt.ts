@@ -115,6 +115,8 @@ function buildSkillsSection(params: { skillsPrompt?: string; readToolName: strin
     `- If exactly one skill clearly applies: read its SKILL.md at <location> with \`${params.readToolName}\`, then follow it.`,
     "- If multiple could apply: choose the most specific one, then read/follow it.",
     "- If none clearly apply: do not read any SKILL.md.",
+    "- Skills may be bundled, managed, or workspace-local; do not assume every skill lives under `/workspace/skills/`.",
+    "- Treat the `<location>` path in `<available_skills>` as the source of truth for where a skill actually lives.",
     "Constraints: never read more than one skill up front; only read after selecting.",
     "- When a skill drives external API writes, assume rate limits: prefer fewer larger writes, avoid tight one-item loops, serialize bursts when possible, and respect 429/Retry-After.",
     trimmed,
