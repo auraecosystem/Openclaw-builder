@@ -1,417 +1,272 @@
 ---
 name: assistant-bot
 description: >
-  Use for the local Discord-native assistant-bot in the standalone
-  trading-tools workspace. Trigger when you need to operate, debug, or reason
-  about assistant-bot command handling, alert registration, crypto runtime
-  behavior, Binance Spot streaming, Discord ACK/RESULT responses,
-  source-of-truth logging, or autonomous protective execution.
+  Use for the current Discord-native assistant-bot in the trading-tools
+  workspace. Trigger when you need to create, inspect, pause, resume, or delete
+  alerts through Discord; send bot relay envelopes to assistant-bot; register
+  or debug OpenClaw relay delivery; inspect edge/daemon/Postgres health; or
+  reason about the current layered alert service. Do not use this for the old
+  execution/protective-stop assistant-bot behavior.
 metadata: { "openclaw": { "emoji": "🤖", "requires": { "bins": ["python3"] } } }
 ---
 
 # assistant-bot
 
-Use the local Discord-native `assistant-bot` from `/Users/ad/work/trading-tools/apps/assistant-bot`.
+Use the current assistant-bot from `/Users/ad/work/trading-tools/apps/assistant-bot`.
 
 Primary references:
 
 - `/Users/ad/work/trading-tools/apps/assistant-bot/README.md`
-- `/Users/ad/work/trading-tools/apps/assistant-bot/src/assistant_bot/app.py`
-- `/Users/ad/work/trading-tools/apps/assistant-bot/src/assistant_bot_runtime/service.py`
-- `/Users/ad/work/trading-tools/apps/assistant-bot/src/assistant_bot_runtime/runtime.py`
-- `/Users/ad/work/trading-tools/apps/assistant-bot/src/assistant_bot_runtime/exchange.py`
+- `/Users/ad/work/trading-tools/docs/architecture/explanation-assistant-bot-discord-architecture.md`
+- `/Users/ad/work/trading-tools/docs/architecture/reference-assistant-bot-local-operations.md`
+- `/Users/ad/work/trading-tools/apps/assistant-bot/src/assistant_bot/edge/app.py`
+- `/Users/ad/work/trading-tools/apps/assistant-bot/src/assistant_bot/daemon/app.py`
+- `/Users/ad/work/trading-tools/apps/assistant-bot/src/assistant_bot/infrastructure/delivery.py`
 
-When the README and code disagree, trust the code and runtime modules.
+When docs and code disagree, trust the current `assistant_bot` package code.
 
 ## What It Is
 
-`assistant-bot` is currently:
+`assistant-bot` is now:
 
-- a mention-only Discord command bot
-- a crypto runtime manager
-- a Binance Spot market-data consumer
-- an alert registry and event engine
-- a protective execution controller
-- a source-of-truth incident logger
+- a layered Discord alert service
+- a two-process system:
+  - `assistant-bot-edge` for slash commands, bot relay intake, and Discord delivery
+  - `assistant-bot-daemon` for polling, evaluation, cooldown/dedupe, and outbox writes
+- a Postgres-backed operational service when `ASSISTANT_BOT_DSN` is configured
+- alerts-and-notifications only
 
-For crypto-first v1, the real free venue is:
+It is not:
 
-- Binance Spot public REST + websocket market data
-
-That means:
-
-- public candles/streaming are free
-- live account/open-order state uses Binance API credentials if configured
-- live execution remains gated by env flags
+- an execution bot
+- a Binance-protection manager
+- a single-user control-channel bot
+- the old `assistant_bot_runtime` architecture
 
 ## When To Use
 
 Use this skill when the task is about any of these:
 
-- sending or listening with `assistant-bot`
-- debugging why it did or did not accept a Discord command
-- checking operator / `@crabman` / allowlisted-bot authorization
-- verifying control-channel gating
-- creating, listing, enabling, disabling, or deleting alerts
-- checking `ACK` / `RESULT` message behavior
-- checking event alerts or system notices
-- debugging source-of-truth log records
-- checking Binance Spot streaming / bootstrap / recovery behavior
-- checking protective-stop sync or flatten behavior
+- creating or managing market alerts through Discord
+- making OpenClaw ask assistant-bot for quotes, bars, or status
+- registering or using a bot relay target such as `bot:openclaw`
+- debugging why assistant-bot did or did not answer in Discord
+- checking edge, daemon, Postgres, outbox, audit, or delivery behavior
+- checking current providers, current alert conditions, or current relay envelope shape
 
-## Runtime Defaults
+## Core Rule
 
-- Run from app root:
-  - `cd /Users/ad/work/trading-tools/apps/assistant-bot`
-- Prefer the local venv:
-  - `source .venv/bin/activate`
-- Config lives in:
-  - `/Users/ad/work/trading-tools/apps/assistant-bot/.env`
-- Logs:
-  - human log: `/Users/ad/work/trading-tools/apps/assistant-bot/assistant-bot.log`
-  - source-of-truth JSONL: `/Users/ad/work/trading-tools/apps/assistant-bot/var/source_of_truth.jsonl`
-  - alerts seed snapshot: `/Users/ad/work/trading-tools/apps/assistant-bot/var/seed/alerts.json`
-  - runtime alerts registry: `/Users/ad/work/trading-tools/apps/assistant-bot/var/alerts.json`
+OpenClaw must use assistant-bot the same way any other Discord client does.
 
-## Required Discord Behavior
+Do not assume:
 
-`assistant-bot` only handles commands when all of these are true:
+- in-process hooks
+- local Python imports into assistant-bot internals
+- privileged execution commands
+- legacy `ACK` then `RESULT` behavior
 
-- the bot is explicitly `@mentioned` at the very start of the message after trimming leading whitespace
-- the command text is parseable as a supported mention-first command
-- the sender is authorized
-- the message is in the configured control channel/thread
+Preferred control path:
 
-Authorization rules:
+1. send a Discord message to assistant-bot using the `discord` skill and the `message` tool
+2. mention assistant-bot at the start of the message
+3. send a JSON relay envelope
+4. wait for the `command.result` envelope reply
 
-- allowed humans:
-  - configured operator user id
-  - configured `@crabman` user id
-- allowed bots:
-  - only bot ids listed in `ALLOW_BOT_SENDERS`
+## Current Transport Model
 
-Rejected cases include:
+Humans use slash commands.
 
-- no explicit bot mention
-- wrong channel
-- unauthorized human sender
-- non-allowlisted bot sender
-- malformed command text
+Bots use mention-scoped JSON relay messages.
 
-## Command Grammar
+OpenClaw should use the bot relay path.
 
-The live grammar is:
+Current local assistant-bot bot user:
+
+- assistant-bot Discord user id: `1482046674519199826`
+
+Current local allowlisted OpenClaw bot user:
+
+- OpenClaw Discord user id: `1475800944619814943`
+
+Current local smoke-test guild:
+
+- guild id: `1475801759485005895`
+
+## Relay Envelope
+
+The relay request format is:
 
 ```text
-@assistant-bot namespace.verb key=value key2=value2
+<@1482046674519199826> {"v":1,"request_id":"req-1","op":"system.status","args":{}}
 ```
 
 Rules:
 
-- the mention must be the first non-whitespace content
-- backticks are optional; ``@assistant-bot `system.status``` still works
-- command verb must be namespaced, like `market.snapshot`
-- arguments must be `key=value`
-- values support:
-  - strings
-  - ints
-  - floats
-  - booleans
-  - `null`
-  - comma-separated lists
-- quoting uses shell-style quoting via `shlex`
+- mention assistant-bot first
+- body must be valid JSON
+- `v` must be `1`
+- `request_id` must be a non-empty unique string
+- `op` must be a supported operation
+- `args` must be an object
 
-Examples:
+Response format:
 
 ```text
-@assistant-bot help
-@assistant-bot help alert.create
-@assistant-bot system.status
-@assistant-bot system.echo text="hello"
-@assistant-bot market.snapshot symbol=BTCUSDT timeframe=1m
-@assistant-bot hash.permutations format=jsonl [attach one .txt file]
-@assistant-bot alert.create symbol=BTCUSDT event_type=hard_stop_hit timeframe=1m priority=P0 barrier_level=84000 auto_actions=protective_exit
-@assistant-bot alert.list
-@assistant-bot alert.disable alert_id=alert_00001
-@assistant-bot execution.sync_protection symbol=BTCUSDT quantity=0.1 side=SELL stop_price=83000
-@assistant-bot execution.flatten symbol=BTCUSDT quantity=0.1 side=SELL reference_price=84000
+<@1475800944619814943> {"v":1,"kind":"command.result","request_id":"req-1","ok":true,"message":"..."}
 ```
 
-## Actual Command Surface
+Alert-delivery relay format:
 
-Current supported commands:
+```text
+<@1475800944619814943> {"v":1,"kind":"alert.fired","event_id":"...","rule_id":"...","instrument":{"asset_class":"crypto","venue":"binance_spot","symbol":"BTCUSDT","timeframe":"1m"},"fact":{"type":"bar_closed","close":83990.0,"open":84020.0,"high":84050.0,"low":83970.0,"volume":1200.0,"cursor":"BTCUSDT:1m:..."},"triggered_at":"2026-03-19T16:01:00Z"}
+```
 
-- `help`
+## Supported Relay Ops
+
+Current supported bot relay operations:
+
+- `alerts.create`
+- `alerts.list`
+- `alerts.show`
+- `alerts.pause`
+- `alerts.resume`
+- `alerts.delete`
+- `alerts.destinations`
+- `alerts.test_delivery`
+- `market.quote`
+- `market.bar`
 - `system.status`
-- `system.echo`
-- `market.snapshot`
-- `hash.permutations` (requires one attached `.txt` file)
-- `alert.create`
-- `alert.list`
-- `alert.delete`
-- `alert.enable`
-- `alert.disable`
-- `execution.flatten`
-- `execution.sync_protection`
-
-### `system.status`
-
-Returns a simple runtime-health style summary.
-
-### `system.echo`
-
-Echoes `text=...`.
-
-### `market.snapshot`
-
-Required:
-
-- `symbol`
-
-Optional:
-
-- `timeframe`
-
-Returns:
-
-- last price
-- last volume
-- last close time
-- stale seconds
-
-### `hash.permutations`
-
-Required:
-
-- exactly one attached `.txt` file (UTF-8)
-
-Optional args:
-
-- `format=jsonl|json` (default `jsonl`)
-- `summary=true|false` (default `true`)
-- `dedupe=true|false` (default `true`)
-- `include_empty_lines=true|false` (default `false`)
-- `include_empty_results=true|false` (default `false`)
-- `workers=<int>`
-- `transforms=a,b,c`
-
-Returns:
-
-- `RESULT ... ok ...` summary
-- one output file attachment (`.hashes.jsonl` or `.hashes.json`)
-
-### `alert.create`
-
-Required:
-
-- `symbol`
-- `event_type`
-
-Optional/common:
-
-- `timeframe`
-- `priority`
-- `cooldown_seconds`
-- `wake_crabman`
-- `auto_actions`
-
-Everything else is treated as event condition config.
-
-Examples:
-
-```text
-@assistant-bot `alert.create symbol=BTCUSDT event_type=hard_stop_near timeframe=1m priority=P0 barrier_level=84000 threshold_pct=0.005`
-@assistant-bot `alert.create symbol=BTCUSDT event_type=hard_stop_hit timeframe=1m priority=P0 barrier_level=84000 auto_actions=protective_exit`
-@assistant-bot `alert.create symbol=BTCUSDT event_type=entry_trigger_confirmed timeframe=1m priority=P1 trigger_level=84500 direction=up`
-```
-
-### `alert.list`
-
-Returns persisted alert registrations.
-
-### `alert.delete`
-
-Required:
-
-- `alert_id`
-
-### `alert.enable` / `alert.disable`
-
-Required:
-
-- `alert_id`
-
-### `execution.flatten`
-
-Required:
-
-- `symbol`
-- `quantity`
-- `reference_price`
-
-Optional:
-
-- `side`
-- `limit_offset_pct`
-- `reason`
-
-### `execution.sync_protection`
-
-Required:
-
-- `symbol`
-- `quantity`
-- `stop_price`
-
-Optional:
-
-- `side`
-- `limit_offset_pct`
-- `reason`
-
-## Discord Response Pattern
-
-For accepted commands, the bot emits:
-
-- immediate untagged `ACK`
-- then a `RESULT`
-
-Format:
-
-```text
-ACK job_00001 market.snapshot
-RESULT job_00001 ok {"symbol":"BTCUSDT",...}
-RESULT job_00001 error unsupported command: ...
-```
-
-Event alerts are different:
-
-- they tag the configured operator and configured `@crabman`
-- they include a compact JSON payload block
-
-System degraded/recovered notices also tag:
-
-- configured operator
-- configured `@crabman`
-
-## Crypto Runtime
-
-The current crypto runtime is:
-
-- crypto-first
-- single-user / single-account
-- Binance Spot-based
-
-Market-data behavior:
-
-- REST bootstrap for recent candles
-- Binance websocket closed-candle streaming as the main feed
-- one configured candle timeframe per symbol
-- symbol set expands from:
-  - active alerts
-  - open exposure
-  - active protective-order symbols
-
-Account-state behavior:
-
-- balances
-- inferred spot exposure by symbol
-- open orders
-- estimated daily PnL baseline
-
-## Current Event Families
-
-The event engine currently supports:
-
-- `hard_stop_near`
-- `hard_stop_hit`
-- `daily_loss_limit_breach`
-- `position_state_mismatch`
-- `data_stale_while_exposed`
-- `entry_trigger_confirmed`
-- `failed_breakout`
-- `failed_reclaim`
-- `fast_fail_post_entry`
-- `fresh_reentry_trigger`
-
-Events are bar/candle-based for a given symbol.
-
-## Execution Behavior
-
-Protective execution manager behavior:
-
-- hard-stop auto action is available via `protective_exit`
-- native protective stops are used when supported and enabled
-- otherwise fallback is a marketable limit exit
-- live execution is gated by env flags
-- stop sync is idempotent and can return:
-  - `created`
-  - `replaced`
-  - `cancel_replace`
-  - `no_op`
-  - `simulated`
-  - `error`
+- `delivery.register_relay`
+- `watchlist.add`
+- `watchlist.remove`
+- `watchlist.list`
+
+## Supported Alert Model
+
+Current providers:
+
+- `crypto/binance_spot`
+- `crypto/coinbase_spot`
+- `equity/yahoo_equities`
+
+Current condition types:
+
+- `price_above`
+- `price_below`
+- `price_cross`
+- `percent_move`
+- `volume_above`
+- `volume_spike`
+- `relative_volume`
+- `data_stale`
 
 Important:
 
-- live execution is not assumed on by default
-- do not claim live trading is active unless the env/config explicitly enables it
+- there are no `execution.flatten` or `execution.sync_protection` commands anymore
+- there is no specialized legacy event catalog anymore
+- assistant-bot now uses generic alert rules only
 
-## Logging And Debugging
+## OpenClaw Usage Pattern
 
-Two log layers matter:
+Use the `discord` skill and the `message` tool.
 
-- rolling human-readable log:
-  - `/Users/ad/work/trading-tools/apps/assistant-bot/assistant-bot.log`
-- structured source-of-truth JSONL:
-  - `/Users/ad/work/trading-tools/apps/assistant-bot/var/source_of_truth.jsonl`
+Minimal status check:
 
-The source-of-truth log is the main incident record. Use it for:
+```json
+{
+  "action": "send",
+  "channel": "discord",
+  "to": "channel:<assistant-bot-channel-id>",
+  "message": "<@1482046674519199826> {\"v\":1,\"request_id\":\"status-1\",\"op\":\"system.status\",\"args\":{}}",
+  "silent": true
+}
+```
 
-- command acceptance/rejection reasons
-- ACK/RESULT send attempts and failures
-- event triggers
-- execution actions
-- degraded/recovered subsystem markers
-- runtime stream failures and recoveries
+Quote request example:
 
-Common structured events to look for:
+```json
+{
+  "action": "send",
+  "channel": "discord",
+  "to": "channel:<assistant-bot-channel-id>",
+  "message": "<@1482046674519199826> {\"v\":1,\"request_id\":\"quote-1\",\"op\":\"market.quote\",\"args\":{\"instrument\":{\"asset_class\":\"equity\",\"venue\":\"yahoo_equities\",\"symbol\":\"NVDA\"}}}",
+  "silent": true
+}
+```
 
-- `command.received`
-- `command.ignored`
-- `command.rejected`
-- `command.parsed`
-- `job.created`
-- `job.started`
-- `job.completed`
-- `alert.triggered`
-- `execution.completed`
-- `execution.failed`
-- `subsystem.degraded`
-- `subsystem.recovered`
-- `runtime.stream.failed`
+Create alert example:
 
-## Safe Workflow
+```json
+{
+  "action": "send",
+  "channel": "discord",
+  "to": "channel:<assistant-bot-channel-id>",
+  "message": "<@1482046674519199826> {\"v\":1,\"request_id\":\"alert-1\",\"op\":\"alerts.create\",\"args\":{\"delivery_target\":\"bot:openclaw\",\"instrument\":{\"asset_class\":\"equity\",\"venue\":\"yahoo_equities\",\"symbol\":\"NVDA\",\"timeframe\":\"1d\"},\"condition\":{\"type\":\"price_above\",\"value\":1000},\"cooldown_seconds\":3600}}",
+  "silent": true
+}
+```
 
-1. Check `.env` for:
-   - `DISCORD_TOKEN`
-   - `CHANNEL_ID`
-   - `OPERATOR_USER_ID`
-   - `CRABMAN_USER_ID`
-   - `ALLOW_BOT_SENDERS`
-2. For live account/execution checks, verify Binance credentials are intentionally configured.
-3. Start with:
-   - `python bot.py --hello`
-   - or `python bot.py --send "..."`
-4. Then move to:
-   - `python bot.py --listen`
-5. For command-path debugging, test an exact inline-code command in Discord.
-6. For runtime/debug issues, inspect the source-of-truth JSONL before guessing.
+Safe smoke-test alert:
+
+- use a value that should not fire accidentally
+- for example `price_below=1` on `BTCUSDT`
+
+## Relay Target Setup
+
+OpenClaw can only receive alert deliveries through assistant-bot after a relay target exists.
+
+Preferred target id:
+
+- `bot:openclaw`
+
+Register it once with either:
+
+- the slash command `/system register_relay_target`
+- or the relay op `delivery.register_relay`
+
+Example relay-target registration:
+
+```text
+<@1482046674519199826> {"v":1,"request_id":"register-openclaw-1","op":"delivery.register_relay","args":{"target_id":"bot:openclaw","bot_user_id":"1475800944619814943","label":"openclaw","shared":true}}
+```
+
+After that, use:
+
+- `delivery_target="bot:openclaw"` in `alerts.create`
+
+## Current Runtime Layout
+
+Runbooks and code assume:
+
+- app root: `/Users/ad/work/trading-tools/apps/assistant-bot`
+- config: `/Users/ad/work/trading-tools/apps/assistant-bot/.env`
+- app log: `/Users/ad/work/trading-tools/apps/assistant-bot/var/assistant-bot.log`
+- local Postgres container: `assistant-bot-postgres`
+
+Operational checks:
+
+- edge process logs into Discord and syncs slash commands
+- daemon process polls providers and writes outbox rows
+- Postgres stores alert rules, runtime state, outbox, audit, idempotency, delivery targets, and watchlists
+
+## Debugging Order
+
+1. check assistant-bot health with `system.status`
+2. check that assistant-bot answered with a `command.result`
+3. check whether the relay target exists with `alerts.destinations`
+4. check the app log at `/Users/ad/work/trading-tools/apps/assistant-bot/var/assistant-bot.log`
+5. if needed, inspect Postgres-backed state using the local operations runbook
+
+If slash commands are missing:
+
+- check `ASSISTANT_BOT_GUILD_ID`
+- restart `assistant-bot-edge`
+- verify the edge log contains `synced 4 application commands to guild 1475801759485005895`
 
 ## Known Constraints
 
-- Discord Message Content Intent is required for `--listen`
-- commands must be inline-code and mention-gated
-- command handling is single-user/single-control-channel for v1
-- `tradedb`, `TWS`, `SEC`, and equity-specific flows are deferred
-- this skill is about the actual implemented bot, not the older `ping`/`alert` toy behavior
+- current bot relay parsing depends on Discord message content being available
+- assistant-bot requires Discord scopes `bot` and `applications.commands`
+- current edge intents are `Guilds`, `Guild Messages`, and `Message Content`
+- the relay path only accepts allowlisted bot senders
+- assistant-bot is a monitoring and notification service, not an execution service

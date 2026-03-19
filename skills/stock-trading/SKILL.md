@@ -5,8 +5,8 @@ description: >
   using the standalone trading-tools workspace plus local playbook references.
   Use when asked to scan stocks, analyze market context, journal ideas, link
   executions, compare intraday vs swing playbooks, combine TWS, tradedb, and
-  macro-dashboard outputs into one trading view, or render and share trading
-  charts.
+  macro-dashboard outputs into one trading view, render and share trading
+  charts, or create and manage persistent stock alerts through assistant-bot.
 metadata: { "openclaw": { "emoji": "📈", "requires": { "bins": ["uv"] } } }
 ---
 
@@ -17,6 +17,7 @@ Use this as the top-level stock trading workflow when the task spans more than o
 - discovery and live market context
 - macro regime context
 - idea journaling and lifecycle tracking
+- persistent alert creation and monitoring
 - execution linkage and review
 - playbook lookup for deeper setup context
 
@@ -29,6 +30,7 @@ Primary tool docs:
 - `/Users/ad/work/trading-tools/packages/trade_yahoo/src/trade_yahoo/macro_dashboard.py`
 - `/Users/ad/work/trading-tools/packages/trade_sec/src/trade_sec/README.md`
 - `/Users/ad/work/ai/openclaw/skills/stock-charting/SKILL.md`
+- `/Users/ad/work/ai/openclaw/skills/assistant-bot/SKILL.md`
 
 Deeper setup / methodology docs:
 
@@ -53,14 +55,16 @@ Deeper setup / methodology docs:
 - "show me candidate longs/shorts and record the thesis"
 - "link this order / position / review to the idea"
 - "plot this and send the chart"
+- "watch this stock and alert me later"
 
 ## Workflow
 
 1. Establish macro and market regime first.
 2. Run discovery / live checks for symbols or sectors.
 3. Decide the trade style: intraday momentum, swing breakout, event-driven, or no trade.
-4. Record the idea in `tradedb` before or alongside execution.
-5. After execution, ingest order / position state and later add a review.
+4. If the trigger should keep running after the current chat, create or update an assistant-bot alert.
+5. Record the idea in `tradedb` before or alongside execution.
+6. After execution, ingest order / position state and later add a review.
 
 ## Tool selection
 
@@ -124,6 +128,22 @@ Important:
 - render locally
 - send the file with the message tool
 - do not rely on `read` as the attachment mechanism
+
+### `assistant-bot` for persistent alerts and background monitoring
+
+Use when you need:
+
+- a price, volume, percent-move, or data-staleness alert that should keep running after the current chat ends
+- OpenClaw to receive alert notifications through Discord
+- the same monitoring surface that human Discord users use
+- live quote, bar, or system status from the running alert service
+
+Important:
+
+- use assistant-bot through Discord, not by importing its code or assuming any in-process hook
+- use the relay envelope path documented in `/Users/ad/work/ai/openclaw/skills/assistant-bot/SKILL.md`
+- for equities, prefer `asset_class=equity` and `venue=yahoo_equities`
+- for crypto, prefer `asset_class=crypto` with `binance_spot` or `coinbase_spot`
 
 ### `tradedb` for idea journaling and execution linkage
 
@@ -210,7 +230,8 @@ sec export --format json
    - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-flat-top-breakout.md`
    - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-abcd.md`
 4. Record the thesis, risk, and trigger in `tradedb`.
-5. Ingest orders / positions if the trade is taken.
+5. If the trigger should be watched after the current session, create an assistant-bot alert for the breakout, reclaim, or stop level.
+6. Ingest orders / positions if the trade is taken.
 
 ### Swing breakout workflow
 
@@ -223,7 +244,8 @@ sec export --format json
    - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-parabolic-short.md`
    - `/Users/ad/work/ai/openclaw/skills/algotrader/references/strategy-comparison.md`
 4. Log the idea in `tradedb` before execution.
-5. Review outcome quality later in `tradedb`.
+5. If the trade depends on a future breakout or invalidation level, register an assistant-bot alert for it.
+6. Review outcome quality later in `tradedb`.
 
 ### Event / catalyst workflow
 
@@ -235,7 +257,8 @@ sec export --format json
    - catalyst
    - invalidation
    - execution linkage
-5. If needed, compare the setup to intraday or swing playbooks before choosing the holding period.
+5. If the setup needs waiting or follow-through monitoring, register assistant-bot alerts for the trigger and invalidation levels.
+6. If needed, compare the setup to intraday or swing playbooks before choosing the holding period.
 
 ## Universal guardrails
 
@@ -307,10 +330,39 @@ Notes:
 - Include title, axis labels, legend, and grid.
 - If requested, overlay an observed live equity series on top of the scenario bands.
 
+## Assistant-Bot Alert Pattern
+
+Use assistant-bot when the user wants ongoing monitoring, not just one-off analysis.
+
+Recommended sequence:
+
+1. analyze the symbol first with `tws`, `macro-dashboard`, `sec`, or charting as needed
+2. identify the exact trigger or invalidation level
+3. if the condition should persist beyond the current chat, create an assistant-bot alert
+4. if the thesis matters, record the same level and rationale in `tradedb`
+
+Examples:
+
+- swing breakout above a defined pivot:
+  - `price_above`
+- failed breakout or stop-loss level:
+  - `price_below`
+- unusual participation:
+  - `volume_above` or `relative_volume`
+- stale market data concern:
+  - `data_stale`
+
+OpenClaw delivery guidance:
+
+- prefer `delivery_target="bot:openclaw"` so assistant-bot can notify OpenClaw through Discord
+- use the `assistant-bot` skill for exact relay envelope syntax
+- do not claim an alert exists until assistant-bot returns a successful `command.result`
+
 ## Defaults
 
 - Prefer `--json` whenever outputs will be summarized or chained into another tool step.
 - Do not place or modify broker orders unless the user explicitly asks.
+- When the task includes "watch this", "alert me", "notify later", or any persistent trigger, prefer assistant-bot over ad hoc reminders.
 - Preserve source event time in `tradedb` observations with `--observed-at` when known.
 - Use `sec` when a thesis depends on a fresh filing rather than only headlines or broker news.
 - For live market data, prefer read-only and delayed-safe queries first.
