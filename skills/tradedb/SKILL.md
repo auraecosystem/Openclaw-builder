@@ -16,7 +16,7 @@ Use the standalone `tradedb` CLI from `/Users/ad/work/trading-tools`.
 Primary docs:
 
 - `/Users/ad/work/trading-tools/README.md`
-- `/Users/ad/work/trading-tools/trading_tools/tradedb/README.md`
+- `/Users/ad/work/trading-tools/packages/trade_journal/src/trade_journal/README.md`
 
 ## When to use
 
@@ -44,7 +44,7 @@ Database and family setup:
 
 ```bash
 tradedb db init --json
-tradedb family register --file /Users/ad/work/trading-tools/trading_tools/tradedb/examples/families/momentum.yaml --json
+tradedb family register --file /Users/ad/work/trading-tools/packages/trade_journal/src/trade_journal/examples/families/momentum.yaml --json
 ```
 
 Create and inspect ideas:

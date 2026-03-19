@@ -282,7 +282,7 @@ If `mplfinance` is unavailable:
 
 ## Useful local context
 
-- `/Users/ad/work/trading-tools/trading_tools/tws/README.md`
-- `/Users/ad/work/trading-tools/trading_tools/yfinance/README.md`
-- `/Users/ad/work/trading-tools/trading_tools/yfinance/macro_dashboard.py`
-- `/Users/ad/work/ai/nautilus_trader/lab/strategies/regular_session_momentum_scalper.md`
+- `/Users/ad/work/trading-tools/packages/trade_tws/src/trade_tws/README.md`
+- `/Users/ad/work/trading-tools/packages/trade_yahoo/src/trade_yahoo/README.md`
+- `/Users/ad/work/trading-tools/packages/trade_yahoo/src/trade_yahoo/macro_dashboard.py`
+- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-rules.md`

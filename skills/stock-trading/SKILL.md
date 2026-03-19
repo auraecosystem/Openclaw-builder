@@ -2,11 +2,11 @@
 name: stock-trading
 description: >
   Umbrella workflow for discretionary and systematic stock-trading support
-  using the standalone trading-tools workspace plus adjacent NautilusTrader
-  research docs. Use when asked to scan stocks, analyze market context,
-  journal ideas, link executions, compare intraday vs swing playbooks, combine
-  TWS, tradedb, and macro-dashboard outputs into one trading view, or render
-  and share trading charts.
+  using the standalone trading-tools workspace plus local playbook references.
+  Use when asked to scan stocks, analyze market context, journal ideas, link
+  executions, compare intraday vs swing playbooks, combine TWS, tradedb, and
+  macro-dashboard outputs into one trading view, or render and share trading
+  charts.
 metadata: { "openclaw": { "emoji": "📈", "requires": { "bins": ["uv"] } } }
 ---
 
@@ -23,28 +23,25 @@ Use this as the top-level stock trading workflow when the task spans more than o
 Primary tool docs:
 
 - `/Users/ad/work/trading-tools/README.md`
-- `/Users/ad/work/trading-tools/trading_tools/tws/README.md`
-- `/Users/ad/work/trading-tools/trading_tools/tradedb/README.md`
-- `/Users/ad/work/trading-tools/trading_tools/yfinance/README.md`
-- `/Users/ad/work/trading-tools/trading_tools/yfinance/macro_dashboard.py`
-- `/Users/ad/work/trading-tools/trading_tools/sec/README.md`
+- `/Users/ad/work/trading-tools/packages/trade_tws/src/trade_tws/README.md`
+- `/Users/ad/work/trading-tools/packages/trade_journal/src/trade_journal/README.md`
+- `/Users/ad/work/trading-tools/packages/trade_yahoo/src/trade_yahoo/README.md`
+- `/Users/ad/work/trading-tools/packages/trade_yahoo/src/trade_yahoo/macro_dashboard.py`
+- `/Users/ad/work/trading-tools/packages/trade_sec/src/trade_sec/README.md`
 - `/Users/ad/work/ai/openclaw/skills/stock-charting/SKILL.md`
 
 Deeper setup / methodology docs:
 
-- `/Users/ad/work/ai/nautilus_trader/lab/research/INDEX.md`
-- `/Users/ad/work/ai/nautilus_trader/lab/strategies/regular_session_momentum_scalper.md`
-- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-rules.md`
-- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-breakout.md`
-- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-episodic-pivot.md`
-- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-parabolic-short.md`
 - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-rules.md`
 - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-gap-and-go.md`
 - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-bull-flag.md`
 - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-flat-top-breakout.md`
 - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-abcd.md`
+- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-rules.md`
+- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-breakout.md`
+- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-episodic-pivot.md`
+- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-parabolic-short.md`
 - `/Users/ad/work/ai/openclaw/skills/algotrader/references/strategy-comparison.md`
-- `/Users/ad/work/ai/nautilus_trader/lab/research/markets/2026-03-12_macro-dashboard-news-context.md`
 
 ## When to use
 
@@ -207,7 +204,6 @@ sec export --format json
 1. Use `macro-dashboard` first to decide whether the tape is supportive, mixed, or hostile for momentum.
 2. Use `tws scanner` and `market snapshot` / `market bars` to build a watchlist.
 3. Compare the candidates to the intraday playbook in:
-   - `/Users/ad/work/ai/nautilus_trader/lab/strategies/regular_session_momentum_scalper.md`
    - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-rules.md`
    - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-gap-and-go.md`
    - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-bull-flag.md`
@@ -296,11 +292,11 @@ tws --format json account overview
 
 2. Render multi-line projection chart with log Y-axis using Python tooling.
 
-Reference script pattern (adapt start value/date/rates as requested):
+Reference implementation pattern:
 
-```bash
-python3 scripts/compound_projection_multi.py   --start-value <latest_net_liq>   --start-date YYYY-MM-DD   --end-date YYYY-MM-DD   --rates 0.00 0.01 0.02 0.03 0.04 0.05   --output compound_projection_multi_0to5pct_logy.png
-```
+- pull the latest net liquidation value from `tws account overview`
+- render the comparison chart locally with the charting workflow in `/Users/ad/work/ai/openclaw/skills/stock-charting/SKILL.md`
+- keep all daily-rate scenarios on one log-scale figure
 
 3. Share the chart back to chat as a real media attachment/path (not plain text).
 

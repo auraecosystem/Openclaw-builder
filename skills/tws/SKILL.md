@@ -16,7 +16,7 @@ Use the standalone `tws` CLI from `/Users/ad/work/trading-tools`.
 Primary docs:
 
 - `/Users/ad/work/trading-tools/README.md`
-- `/Users/ad/work/trading-tools/trading_tools/tws/README.md`
+- `/Users/ad/work/trading-tools/packages/trade_tws/src/trade_tws/README.md`
 
 ## When to use
 

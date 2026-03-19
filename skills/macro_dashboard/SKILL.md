@@ -16,8 +16,8 @@ Use the standalone `yfinance macro-dashboard` CLI from `/Users/ad/work/trading-t
 Primary docs:
 
 - `/Users/ad/work/trading-tools/README.md`
-- `/Users/ad/work/trading-tools/trading_tools/yfinance/README.md`
-- `/Users/ad/work/trading-tools/trading_tools/yfinance/macro_dashboard.py`
+- `/Users/ad/work/trading-tools/packages/trade_yahoo/src/trade_yahoo/README.md`
+- `/Users/ad/work/trading-tools/packages/trade_yahoo/src/trade_yahoo/macro_dashboard.py`
 
 ## When to use
 

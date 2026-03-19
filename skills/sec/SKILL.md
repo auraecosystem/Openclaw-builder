@@ -15,7 +15,7 @@ Use the standalone `sec` CLI from `/Users/ad/work/trading-tools`.
 Primary docs:
 
 - `/Users/ad/work/trading-tools/README.md`
-- `/Users/ad/work/trading-tools/trading_tools/sec/README.md`
+- `/Users/ad/work/trading-tools/packages/trade_sec/src/trade_sec/README.md`
 
 ## When to use
 

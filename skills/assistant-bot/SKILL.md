@@ -1,32 +1,31 @@
 ---
 name: assistant-bot
 description: >
-  Use for the local Discord-native assistant-bot in the mounted NautilusTrader repo.
-  Trigger when you need to operate, debug, or reason about assistant-bot command handling,
-  alert registration, crypto runtime behavior, Binance Spot streaming, Discord ACK/RESULT
-  responses, source-of-truth logging, or autonomous protective execution.
+  Use for the local Discord-native assistant-bot in the standalone
+  trading-tools workspace. Trigger when you need to operate, debug, or reason
+  about assistant-bot command handling, alert registration, crypto runtime
+  behavior, Binance Spot streaming, Discord ACK/RESULT responses,
+  source-of-truth logging, or autonomous protective execution.
 metadata: { "openclaw": { "emoji": "🤖", "requires": { "bins": ["python3"] } } }
 ---
 
 # assistant-bot
 
-Use the local Discord-native `assistant-bot` from `/trading-tools/apps/assistant-bot`.
+Use the local Discord-native `assistant-bot` from `/Users/ad/work/trading-tools/apps/assistant-bot`.
 
 Primary references:
 
-- `/trading-tools/apps/assistant-bot/README.md`
-- `/trading-tools/apps/assistant-bot/src/assistant_bot/app.py`
-- `/trading-tools/apps/assistant-bot/src/assistant_bot_runtime/service.py`
-- `/trading-tools/apps/assistant-bot/src/assistant_bot_runtime/runtime.py`
-- `/trading-tools/apps/assistant-bot/src/assistant_bot_runtime/exchange.py`
+- `/Users/ad/work/trading-tools/apps/assistant-bot/README.md`
+- `/Users/ad/work/trading-tools/apps/assistant-bot/src/assistant_bot/app.py`
+- `/Users/ad/work/trading-tools/apps/assistant-bot/src/assistant_bot_runtime/service.py`
+- `/Users/ad/work/trading-tools/apps/assistant-bot/src/assistant_bot_runtime/runtime.py`
+- `/Users/ad/work/trading-tools/apps/assistant-bot/src/assistant_bot_runtime/exchange.py`
 
 When the README and code disagree, trust the code and runtime modules.
 
 ## What It Is
 
-`assistant-bot` is no longer a tiny `ping`/`alert` Discord toy.
-
-It is now:
+`assistant-bot` is currently:
 
 - a mention-only Discord command bot
 - a crypto runtime manager
@@ -62,23 +61,24 @@ Use this skill when the task is about any of these:
 
 ## Runtime Defaults
 
-- Run from repo root or toolbox dir:
-  - `cd /trading-tools/apps/assistant-bot`
+- Run from app root:
+  - `cd /Users/ad/work/trading-tools/apps/assistant-bot`
 - Prefer the local venv:
   - `source .venv/bin/activate`
 - Config lives in:
-  - `/trading-tools/apps/assistant-bot/.env`
+  - `/Users/ad/work/trading-tools/apps/assistant-bot/.env`
 - Logs:
-  - human log: `/trading-tools/apps/assistant-bot/assistant-bot.log`
-  - source-of-truth JSONL: `/trading-tools/apps/assistant-bot/var/source_of_truth.jsonl`
-  - persisted alerts: `/trading-tools/apps/assistant-bot/var/alerts.json`
+  - human log: `/Users/ad/work/trading-tools/apps/assistant-bot/assistant-bot.log`
+  - source-of-truth JSONL: `/Users/ad/work/trading-tools/apps/assistant-bot/var/source_of_truth.jsonl`
+  - alerts seed snapshot: `/Users/ad/work/trading-tools/apps/assistant-bot/var/seed/alerts.json`
+  - runtime alerts registry: `/Users/ad/work/trading-tools/apps/assistant-bot/var/alerts.json`
 
 ## Required Discord Behavior
 
 `assistant-bot` only handles commands when all of these are true:
 
-- the bot is explicitly mentioned with a real user mention
-- the command is inside one inline code span
+- the bot is explicitly `@mentioned` at the very start of the message after trimming leading whitespace
+- the command text is parseable as a supported mention-first command
 - the sender is authorized
 - the message is in the configured control channel/thread
 
@@ -96,19 +96,20 @@ Rejected cases include:
 - wrong channel
 - unauthorized human sender
 - non-allowlisted bot sender
-- malformed inline command
+- malformed command text
 
 ## Command Grammar
 
 The live grammar is:
 
 ```text
-@assistant-bot `namespace.verb key=value key2=value2`
+@assistant-bot namespace.verb key=value key2=value2
 ```
 
 Rules:
 
-- exactly one inline code span
+- the mention must be the first non-whitespace content
+- backticks are optional; ``@assistant-bot `system.status``` still works
 - command verb must be namespaced, like `market.snapshot`
 - arguments must be `key=value`
 - values support:
@@ -123,21 +124,24 @@ Rules:
 Examples:
 
 ```text
-@assistant-bot `system.status`
-@assistant-bot `system.echo text="hello"`
-@assistant-bot `market.snapshot symbol=BTCUSDT timeframe=1m`
-@assistant-bot `hash.permutations format=jsonl` [attach one .txt file]
-@assistant-bot `alert.create symbol=BTCUSDT event_type=hard_stop_hit timeframe=1m priority=P0 barrier_level=84000 auto_actions=protective_exit`
-@assistant-bot `alert.list`
-@assistant-bot `alert.disable alert_id=alert_00001`
-@assistant-bot `execution.sync_protection symbol=BTCUSDT quantity=0.1 side=SELL stop_price=83000`
-@assistant-bot `execution.flatten symbol=BTCUSDT quantity=0.1 side=SELL reference_price=84000`
+@assistant-bot help
+@assistant-bot help alert.create
+@assistant-bot system.status
+@assistant-bot system.echo text="hello"
+@assistant-bot market.snapshot symbol=BTCUSDT timeframe=1m
+@assistant-bot hash.permutations format=jsonl [attach one .txt file]
+@assistant-bot alert.create symbol=BTCUSDT event_type=hard_stop_hit timeframe=1m priority=P0 barrier_level=84000 auto_actions=protective_exit
+@assistant-bot alert.list
+@assistant-bot alert.disable alert_id=alert_00001
+@assistant-bot execution.sync_protection symbol=BTCUSDT quantity=0.1 side=SELL stop_price=83000
+@assistant-bot execution.flatten symbol=BTCUSDT quantity=0.1 side=SELL reference_price=84000
 ```
 
 ## Actual Command Surface
 
 Current supported commands:
 
+- `help`
 - `system.status`
 - `system.echo`
 - `market.snapshot`
@@ -358,9 +362,9 @@ Important:
 Two log layers matter:
 
 - rolling human-readable log:
-  - `/trading-tools/apps/assistant-bot/assistant-bot.log`
+  - `/Users/ad/work/trading-tools/apps/assistant-bot/assistant-bot.log`
 - structured source-of-truth JSONL:
-  - `/trading-tools/apps/assistant-bot/var/source_of_truth.jsonl`
+  - `/Users/ad/work/trading-tools/apps/assistant-bot/var/source_of_truth.jsonl`
 
 The source-of-truth log is the main incident record. Use it for:
 
