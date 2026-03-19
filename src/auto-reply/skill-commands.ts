@@ -37,6 +37,24 @@ export function listSkillCommandsForWorkspace(params: {
   });
 }
 
+function resolveUniqueCommandName(base: string, used: Set<string>): string {
+  const normalizedBase = base.trim().toLowerCase();
+  if (!normalizedBase) {
+    return base;
+  }
+  if (!used.has(normalizedBase)) {
+    used.add(normalizedBase);
+    return base;
+  }
+  let suffix = 2;
+  while (used.has(`${normalizedBase}_${suffix}`)) {
+    suffix += 1;
+  }
+  const unique = `${base}_${suffix}`;
+  used.add(unique.toLowerCase());
+  return unique;
+}
+
 function dedupeBySkillName(commands: SkillCommandSpec[]): SkillCommandSpec[] {
   const seen = new Set<string>();
   const out: SkillCommandSpec[] = [];
@@ -75,6 +93,8 @@ export function listSkillCommandsForAgents(params: {
 
   const agentIds = params.agentIds ?? listAgentIds(params.cfg);
   const used = listReservedChatSlashCommandNames();
+  const baseReservedNames = listReservedChatSlashCommandNames();
+  const seenSkillNames = new Set<string>();
   const entries: SkillCommandSpec[] = [];
   // Group by canonical workspace to avoid duplicate registration when multiple
   // agents share the same directory (#5717), while still honoring per-agent filters.
@@ -115,14 +135,21 @@ export function listSkillCommandsForAgents(params: {
           }),
         }),
       },
-      reservedNames: used,
+      reservedNames: baseReservedNames,
     });
     for (const command of commands) {
-      used.add(command.name.toLowerCase());
-      entries.push(command);
+      const skillKey = command.skillName.trim().toLowerCase();
+      if (skillKey && seenSkillNames.has(skillKey)) {
+        continue;
+      }
+      if (skillKey) {
+        seenSkillNames.add(skillKey);
+      }
+      const uniqueName = resolveUniqueCommandName(command.name, used);
+      entries.push(uniqueName === command.name ? command : { ...command, name: uniqueName });
     }
   }
-  return dedupeBySkillName(entries);
+  return entries;
 }
 
 export const __testing = {

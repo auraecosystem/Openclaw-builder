@@ -1101,7 +1101,7 @@ describe("dispatchReplyFromConfig", () => {
     expect(dispatcher.sendFinalReply).toHaveBeenCalledWith({ text: "NO_REPLY" });
   });
 
-  it("replaces NO_REPLY with a fallback for explicit Discord mentions", async () => {
+  it("does not synthesize a final reply for explicit Discord mentions that return NO_REPLY", async () => {
     setNoAbort();
     const cfg = emptyConfig;
     const dispatcher = createDispatcher();
@@ -1121,12 +1121,10 @@ describe("dispatchReplyFromConfig", () => {
 
     await dispatchReplyFromConfig({ ctx, cfg, dispatcher, replyResolver });
 
-    expect(dispatcher.sendFinalReply).toHaveBeenCalledWith({
-      text: "I saw your @mention, but my previous reply was suppressed incorrectly. Please ask again.",
-    });
+    expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
   });
 
-  it("synthesizes a fallback when an explicit Discord mention yields no final reply", async () => {
+  it("does not synthesize a final reply when an explicit Discord mention yields no final reply", async () => {
     setNoAbort();
     const cfg = emptyConfig;
     const dispatcher = createDispatcher();
@@ -1146,9 +1144,7 @@ describe("dispatchReplyFromConfig", () => {
 
     await dispatchReplyFromConfig({ ctx, cfg, dispatcher, replyResolver });
 
-    expect(dispatcher.sendFinalReply).toHaveBeenCalledWith({
-      text: "I saw your @mention, but my previous reply was suppressed incorrectly. Please ask again.",
-    });
+    expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
   });
 
   it("sends tool results via dispatcher in DM sessions", async () => {

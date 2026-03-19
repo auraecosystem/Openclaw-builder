@@ -524,6 +524,20 @@ describe("processDiscordMessage ack reactions", () => {
     expect(emojis).toContain(DEFAULT_EMOJIS.thinking);
   });
 
+  it("uses thumbs-up status reaction when a mentioned Discord message completes with no final reply", async () => {
+    const ctx = await createBaseContext({
+      messageText: "<@crabman> do the thing",
+      baseText: "<@crabman> do the thing",
+      effectiveWasMentioned: true,
+    });
+
+    // oxlint-disable-next-line typescript/no-explicit-any
+    await processDiscordMessage(ctx as any);
+
+    expect(deliverDiscordReply).not.toHaveBeenCalled();
+    expect(getReactionEmojis()).toContain(DEFAULT_EMOJIS.done);
+  });
+
   it("clears status reactions when dispatch aborts and removeAckAfterReply is enabled", async () => {
     const abortController = new AbortController();
     dispatchInboundMessage.mockImplementationOnce(async () => {

@@ -42,6 +42,7 @@ import { normalizeTtsAutoMode, resolveConfiguredTtsMode } from "../../tts/tts-co
 import { normalizeMessageChannel } from "../../utils/message-channel.js";
 import type { FinalizedMsgContext } from "../templating.js";
 import { normalizeVerboseLevel } from "../thinking.js";
+import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../tokens.js";
 import {
   getReplyPayloadMetadata,
   type BlockReplyContext,
@@ -99,6 +100,27 @@ const AUDIO_HEADER_RE = /^\[Audio\b/i;
 const normalizeMediaType = (value: string): string =>
   normalizeOptionalString(value.split(";")[0])?.toLowerCase() ?? "";
 
+function shouldSuppressDirectMentionSilentReply(
+  ctx: FinalizedMsgContext,
+  reply: ReplyPayload | undefined,
+): boolean {
+  const channel = String(ctx.Surface ?? ctx.Provider ?? "")
+    .trim()
+    .toLowerCase();
+  if (channel !== "discord" || ctx.WasMentioned !== true) {
+    return false;
+  }
+  if (!reply) {
+    return true;
+  }
+  const hasMedia = Boolean(reply.mediaUrl || (reply.mediaUrls?.length ?? 0) > 0);
+  const hasChannelData = Boolean(reply.channelData && Object.keys(reply.channelData).length > 0);
+  const trimmed = reply.text?.trim() ?? "";
+  if (!trimmed && !hasMedia && !hasChannelData) {
+    return true;
+  }
+  return isSilentReplyText(trimmed, SILENT_REPLY_TOKEN) && !hasMedia && !hasChannelData;
+}
 const isInboundAudioContext = (ctx: FinalizedMsgContext): boolean => {
   const rawTypes = [
     typeof ctx.MediaType === "string" ? ctx.MediaType : undefined,
@@ -960,7 +982,10 @@ export async function dispatchReplyFromConfig(params: {
       }
     }
 
-    const replies = replyResult ? (Array.isArray(replyResult) ? replyResult : [replyResult]) : [];
+    const rawReplies = replyResult ? (Array.isArray(replyResult) ? replyResult : [replyResult]) : [];
+    const replies = rawReplies.filter(
+      (reply) => !shouldSuppressDirectMentionSilentReply(ctx, reply),
+    );
 
     let queuedFinal = false;
     let routedFinalCount = 0;
