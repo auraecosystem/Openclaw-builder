@@ -136,7 +136,7 @@ describe("detectChangedScope", () => {
   });
 
   it("runs Python skill tests when skills change", () => {
-    expect(detectChangedScope(["skills/skill-creator/scripts/test_quick_validate.py"])).toEqual({
+    expect(detectChangedScope(["skills/skill_creator/scripts/test_quick_validate.py"])).toEqual({
       runNode: true,
       runMacos: false,
       runAndroid: false,

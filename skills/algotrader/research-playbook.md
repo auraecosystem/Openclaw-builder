@@ -45,7 +45,7 @@ The `next_steps` field from the most recent experiment is the most valuable sour
 
 Re-read a reference document and extract a testable claim. Examples:
 
-- "VCP patterns with 3+ contractions should outperform 2-contraction VCPs" (from `../stock-trading/references/qullamaggie-breakout.md`)
+- "VCP patterns with 3+ contractions should outperform 2-contraction VCPs" (from `../stock_trading/references/qullamaggie-breakout.md`)
 - "Regime filter should improve profit factor but reduce trade count" (test the `regime` parameter)
 - "Tighter consolidation ranges (<10%) should produce better breakouts" (test `max_range_pct`)
 - "EP setups with prior 6M return < 10% (more neglected) outperform those already up 10-30%" (from behavioral bias theory)

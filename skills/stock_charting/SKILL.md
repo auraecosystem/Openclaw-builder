@@ -285,4 +285,4 @@ If `mplfinance` is unavailable:
 - `/Users/ad/work/trading-tools/packages/trade_tws/src/trade_tws/README.md`
 - `/Users/ad/work/trading-tools/packages/trade_yahoo/src/trade_yahoo/README.md`
 - `/Users/ad/work/trading-tools/packages/trade_yahoo/src/trade_yahoo/macro_dashboard.py`
-- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-rules.md`
+- `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-rules.md`

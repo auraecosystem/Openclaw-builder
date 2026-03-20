@@ -30,21 +30,21 @@ Primary tool docs:
 - `/Users/ad/work/trading-tools/packages/trade_yahoo/src/trade_yahoo/README.md`
 - `/Users/ad/work/trading-tools/packages/trade_yahoo/src/trade_yahoo/macro_dashboard.py`
 - `/Users/ad/work/trading-tools/packages/trade_sec/src/trade_sec/README.md`
-- `/Users/ad/work/ai/openclaw/skills/stock-charting/SKILL.md`
-- `/Users/ad/work/ai/openclaw/skills/assistant-bot/SKILL.md`
-- `/Users/ad/work/ai/openclaw/skills/trade-daemon/SKILL.md`
+- `/Users/ad/work/ai/openclaw/skills/stock_charting/SKILL.md`
+- `/Users/ad/work/ai/openclaw/skills/assistant_bot/SKILL.md`
+- `/Users/ad/work/ai/openclaw/skills/trade_daemon/SKILL.md`
 
 Deeper setup / methodology docs:
 
-- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-rules.md`
-- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-gap-and-go.md`
-- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-bull-flag.md`
-- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-flat-top-breakout.md`
-- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-abcd.md`
-- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-rules.md`
-- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-breakout.md`
-- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-episodic-pivot.md`
-- `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-parabolic-short.md`
+- `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-rules.md`
+- `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-gap-and-go.md`
+- `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-bull-flag.md`
+- `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-flat-top-breakout.md`
+- `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-abcd.md`
+- `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-rules.md`
+- `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-breakout.md`
+- `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-episodic-pivot.md`
+- `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-parabolic-short.md`
 - `/Users/ad/work/ai/openclaw/skills/algotrader/references/strategy-comparison.md`
 
 ## When to use
@@ -223,11 +223,11 @@ sec export --format json
 1. Use `macro-dashboard` first to decide whether the tape is supportive, mixed, or hostile for momentum.
 2. Use `tws scanner` and `market snapshot` / `market bars` to build a watchlist.
 3. Compare the candidates to the intraday playbook in:
-   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-rules.md`
-   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-gap-and-go.md`
-   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-bull-flag.md`
-   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-flat-top-breakout.md`
-   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-abcd.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-rules.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-gap-and-go.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-bull-flag.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-flat-top-breakout.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-abcd.md`
 4. Record the thesis and trigger as a canonical strategy/trigger row combination.
 5. If the trigger should be watched after the current session, upsert the canonical trigger row and make sure the daemon source is running.
 6. Inspect the resulting case and wake flow with `casectl` and `assistant-bot`.
@@ -237,10 +237,10 @@ sec export --format json
 1. Use `macro-dashboard` to decide whether the broader regime supports breakout continuation.
 2. Use `tws market bars` or existing catalog/backtest data for the name.
 3. Compare the setup to:
-   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-rules.md`
-   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-breakout.md`
-   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-episodic-pivot.md`
-   - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-parabolic-short.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-rules.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-breakout.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-episodic-pivot.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-parabolic-short.md`
    - `/Users/ad/work/ai/openclaw/skills/algotrader/references/strategy-comparison.md`
 4. Inspect or seed the relevant canonical trigger rows before execution.
 5. If the trade depends on a future breakout or invalidation level, let `trade-daemon` monitor it and let `assistant-bot` deliver the wake.
@@ -317,7 +317,7 @@ tws --format json account overview
 Reference implementation pattern:
 
 - pull the latest net liquidation value from `tws account overview`
-- render the comparison chart locally with the charting workflow in `/Users/ad/work/ai/openclaw/skills/stock-charting/SKILL.md`
+- render the comparison chart locally with the charting workflow in `/Users/ad/work/ai/openclaw/skills/stock_charting/SKILL.md`
 - keep all daily-rate scenarios on one log-scale figure
 
 3. Share the chart back to chat as a real media attachment/path (not plain text).

@@ -455,7 +455,7 @@ Actions:
 - `end_call` (callId)
 - `get_status` (callId)
 
-This repo ships a matching skill doc at `skills/voice-call/SKILL.md`.
+This repo ships a matching skill doc at `skills/voice_call/SKILL.md`.
 
 ## Gateway RPC
 

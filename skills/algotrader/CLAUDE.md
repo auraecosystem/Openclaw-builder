@@ -201,7 +201,7 @@ Five Rust structs implementing the `Setup` trait directly: `BreakoutQuick`, `Bre
 
 ### `references/` — 16 research files
 
-Core: `../stock-trading/references/qullamaggie-rules.md`, `../stock-trading/references/qullamaggie-breakout.md`, `../stock-trading/references/qullamaggie-episodic-pivot.md`, `../stock-trading/references/qullamaggie-parabolic-short.md`, `short-horizon-crypto-momentum.md`, `crypto-algo-trading.md`
+Core: `../stock_trading/references/qullamaggie-rules.md`, `../stock_trading/references/qullamaggie-breakout.md`, `../stock_trading/references/qullamaggie-episodic-pivot.md`, `../stock_trading/references/qullamaggie-parabolic-short.md`, `short-horizon-crypto-momentum.md`, `crypto-algo-trading.md`
 Methods: `walk-forward-and-validation.md`, `backtesting-sins-and-biases.md`, `signal-processing-timeseries.md`
 Signal processing: `signal-processing-cryptography-overlap.md`, `cross-disciplinary-signal-analysis.md`
 Risk: `risk-management-position-sizing.md`, `transaction-costs-and-slippage.md`
@@ -382,16 +382,16 @@ Markets are a signal extraction problem. Your backtest is a hypothesis — live 
 
 ## References — Key Excerpts
 
-### [`qullamaggie-rules.md`](../stock-trading/references/qullamaggie-rules.md)
+### [`qullamaggie-rules.md`](../stock_trading/references/qullamaggie-rules.md)
 Overview and shared framework for the Qullamaggie playbook. Use it first to understand how the three setups fit together, then jump into the setup-specific files.
 
-### [`qullamaggie-breakout.md`](../stock-trading/references/qullamaggie-breakout.md)
+### [`qullamaggie-breakout.md`](../stock_trading/references/qullamaggie-breakout.md)
 Detailed continuation breakout rules: VCP / flag structure, breakout timing, initial stop, partial profit-taking, trailing logic, and add-on handling.
 
-### [`qullamaggie-episodic-pivot.md`](../stock-trading/references/qullamaggie-episodic-pivot.md)
+### [`qullamaggie-episodic-pivot.md`](../stock_trading/references/qullamaggie-episodic-pivot.md)
 Detailed EP rules: catalyst quality, volume confirmation, open timing, gap-day stop placement, and hold logic.
 
-### [`qullamaggie-parabolic-short.md`](../stock-trading/references/qullamaggie-parabolic-short.md)
+### [`qullamaggie-parabolic-short.md`](../stock_trading/references/qullamaggie-parabolic-short.md)
 Detailed parabolic short rules: day 3-4 timing, OR low / first red candle / VWAP failure entries, day-high stops, and moving-average targets.
 
 ### [`backtesting-sins-and-biases.md`](references/backtesting-sins-and-biases.md)
@@ -452,7 +452,7 @@ Why psychology matters even in systematic trading: abandoning strategies during 
 ### [`infrastructure-and-execution.md`](references/infrastructure-and-execution.md)
 Minimum viable stack (data, backtest, paper trading, live execution, monitoring). Where to put execution logic vs. signal logic. Latency tiers and what matters at each. NautilusTrader's place in this stack.
 
-### [`ross-cameron-rules.md`](../stock-trading/references/ross-cameron-rules.md) / [`strategy-comparison.md`](references/strategy-comparison.md)
+### [`ross-cameron-rules.md`](../stock_trading/references/ross-cameron-rules.md) / [`strategy-comparison.md`](references/strategy-comparison.md)
 Ross Cameron's intraday day-trading overview and setup index (for contrast). Strategy comparison table: different timeframes, different edge sources, different risk profiles.
 
 ---

@@ -11,13 +11,13 @@ metadata: { "openclaw": { "emoji": "⚙️", "requires": { "bins": ["python3"] }
 
 # trade-daemon
 
-Use the daemon from `/Users/ad/work/trading-tools/apps/trade-daemon`.
+Use the daemon from `/Users/ad/work/trading-tools/apps/trade_daemon`.
 
 Primary references:
 
-- `/Users/ad/work/trading-tools/apps/trade-daemon/src/trade_daemon/__main__.py`
-- `/Users/ad/work/trading-tools/apps/trade-daemon/src/trade_daemon/daemon/app.py`
-- `/Users/ad/work/trading-tools/apps/trade-daemon/src/trade_daemon/infrastructure/fixture_loader.py`
+- `/Users/ad/work/trading-tools/apps/trade_daemon/src/trade_daemon/__main__.py`
+- `/Users/ad/work/trading-tools/apps/trade_daemon/src/trade_daemon/daemon/app.py`
+- `/Users/ad/work/trading-tools/apps/trade_daemon/src/trade_daemon/infrastructure/fixture_loader.py`
 - `/Users/ad/work/trading-tools/scripts/smoke/smoke_daemon_workflow.sh`
 - `/Users/ad/work/trading-tools/scripts/smoke/smoke_edge_alert_flow.sh`
 - `/Users/ad/work/trading-tools/scripts/smoke/fixtures/gap_watch_seed.json`
@@ -72,7 +72,7 @@ The current built-in strategies are:
 - `gap_watch`
 - `rth_breakout`
 
-Look in `/Users/ad/work/trading-tools/apps/trade-daemon/src/trade_daemon/__main__.py` first when you need the live registry or source wiring.
+Look in `/Users/ad/work/trading-tools/apps/trade_daemon/src/trade_daemon/__main__.py` first when you need the live registry or source wiring.
 
 ## Source Wiring
 

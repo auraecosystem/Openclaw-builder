@@ -20,7 +20,7 @@ Primary docs:
 
 - `/Users/ad/work/trading-tools/packages/trade_journal/README.md`
 - `/Users/ad/work/trading-tools/packages/trade_triggers/README.md`
-- `/Users/ad/work/trading-tools/apps/trade-daemon/src/trade_daemon/__main__.py`
+- `/Users/ad/work/trading-tools/apps/trade_daemon/src/trade_daemon/__main__.py`
 - `/Users/ad/work/trading-tools/scripts/smoke/smoke_db_bootstrap.sh`
 - `/Users/ad/work/trading-tools/scripts/smoke/smoke_daemon_workflow.sh`
 

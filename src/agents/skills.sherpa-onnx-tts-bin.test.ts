@@ -2,12 +2,12 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-describe("skills/sherpa-onnx-tts bin script", () => {
+describe("skills/sherpa_onnx_tts bin script", () => {
   it("loads as ESM and falls through to usage output when env is missing", () => {
     const scriptPath = path.resolve(
       process.cwd(),
       "skills",
-      "sherpa-onnx-tts",
+      "sherpa_onnx_tts",
       "bin",
       "sherpa-onnx-tts",
     );

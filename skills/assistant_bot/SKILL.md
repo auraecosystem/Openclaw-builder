@@ -11,14 +11,14 @@ metadata: { "openclaw": { "emoji": "🤖", "requires": { "bins": ["python3"] } }
 
 # assistant-bot
 
-Use the current assistant-bot from `/Users/ad/work/trading-tools/apps/assistant-bot`.
+Use the current assistant-bot from `/Users/ad/work/trading-tools/apps/assistant_bot`.
 
 Primary references:
 
-- `/Users/ad/work/trading-tools/apps/assistant-bot/README.md`
-- `/Users/ad/work/trading-tools/apps/assistant-bot/src/assistant_bot/entrypoint.py`
-- `/Users/ad/work/trading-tools/apps/assistant-bot/src/assistant_bot/edge/app.py`
-- `/Users/ad/work/trading-tools/apps/assistant-bot/src/assistant_bot/infrastructure/delivery.py`
+- `/Users/ad/work/trading-tools/apps/assistant_bot/README.md`
+- `/Users/ad/work/trading-tools/apps/assistant_bot/src/assistant_bot/entrypoint.py`
+- `/Users/ad/work/trading-tools/apps/assistant_bot/src/assistant_bot/edge/app.py`
+- `/Users/ad/work/trading-tools/apps/assistant_bot/src/assistant_bot/infrastructure/delivery.py`
 - `/Users/ad/work/trading-tools/var/assistant-bot.log`
 - `/Users/ad/work/trading-tools/scripts/smoke/smoke_edge_alert_flow.sh`
 
@@ -81,7 +81,7 @@ Current OpenClaw pattern:
 
 Runbooks and code assume:
 
-- app root: `/Users/ad/work/trading-tools/apps/assistant-bot`
+- app root: `/Users/ad/work/trading-tools/apps/assistant_bot`
 - live log path is usually controlled by `ASSISTANT_BOT_LOG_PATH`
 - current local smoke log path has often been `/Users/ad/work/trading-tools/var/assistant-bot.log`
 - runtime entrypoint: `python -m assistant_bot`
