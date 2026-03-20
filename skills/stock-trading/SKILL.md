@@ -3,10 +3,11 @@ name: stock-trading
 description: >
   Umbrella workflow for discretionary and systematic stock-trading support
   using the standalone trading-tools workspace plus local playbook references.
-  Use when asked to scan stocks, analyze market context, journal ideas, link
-  executions, compare intraday vs swing playbooks, combine TWS, tradedb, and
-  macro-dashboard outputs into one trading view, render and share trading
-  charts, or create and manage persistent stock alerts through assistant-bot.
+  Use when asked to scan stocks, analyze market context, inspect canonical
+  cases, configure persistent triggers, compare intraday vs swing playbooks,
+  combine TWS, trade_journal, triggerctl, and macro-dashboard outputs into one
+  trading view, render and share trading charts, or reason about the current
+  daemon-plus-assistant-bot alert pipeline.
 metadata: { "openclaw": { "emoji": "📈", "requires": { "bins": ["uv"] } } }
 ---
 
@@ -16,7 +17,7 @@ Use this as the top-level stock trading workflow when the task spans more than o
 
 - discovery and live market context
 - macro regime context
-- idea journaling and lifecycle tracking
+- canonical case tracking and lifecycle inspection
 - persistent alert creation and monitoring
 - execution linkage and review
 - playbook lookup for deeper setup context
@@ -31,6 +32,7 @@ Primary tool docs:
 - `/Users/ad/work/trading-tools/packages/trade_sec/src/trade_sec/README.md`
 - `/Users/ad/work/ai/openclaw/skills/stock-charting/SKILL.md`
 - `/Users/ad/work/ai/openclaw/skills/assistant-bot/SKILL.md`
+- `/Users/ad/work/ai/openclaw/skills/trade-daemon/SKILL.md`
 
 Deeper setup / methodology docs:
 
@@ -49,11 +51,11 @@ Deeper setup / methodology docs:
 
 - "scan for stocks and tell me what matters"
 - "build a trade plan"
-- "log this idea and track it"
+- "track this setup as a canonical case"
 - "how does macro affect this setup?"
 - "compare a Qullamaggie swing versus a Ross Cameron intraday trade"
 - "show me candidate longs/shorts and record the thesis"
-- "link this order / position / review to the idea"
+- "inspect the case, trigger, or review state around this setup"
 - "plot this and send the chart"
 - "watch this stock and alert me later"
 
@@ -62,9 +64,9 @@ Deeper setup / methodology docs:
 1. Establish macro and market regime first.
 2. Run discovery / live checks for symbols or sectors.
 3. Decide the trade style: intraday momentum, swing breakout, event-driven, or no trade.
-4. If the trigger should keep running after the current chat, create or update an assistant-bot alert.
-5. Record the idea in `tradedb` before or alongside execution.
-6. After execution, ingest order / position state and later add a review.
+4. If the trigger should keep running after the current chat, configure or inspect canonical trigger rows with `triggerctl`.
+5. Record and inspect the resulting canonical case state with `casectl`.
+6. After execution or operator review, follow the case through daemon inbox + canonical events.
 
 ## Tool selection
 
@@ -129,68 +131,65 @@ Important:
 - send the file with the message tool
 - do not rely on `read` as the attachment mechanism
 
-### `assistant-bot` for persistent alerts and background monitoring
+### `assistant-bot` for wake delivery and Discord operator intake
 
 Use when you need:
 
-- a price, volume, percent-move, or data-staleness alert that should keep running after the current chat ends
-- OpenClaw to receive alert notifications through Discord
-- the same monitoring surface that human Discord users use
-- live quote, bar, or system status from the running alert service
+- wake alerts delivered into Discord
+- the same notification surface that human Discord users see
+- review / note / command intake through Discord
+- downstream verification that a daemon-created wake actually reached Discord
 
 Important:
 
-- use assistant-bot through Discord, not by importing its code or assuming any in-process hook
-- use the relay envelope path documented in `/Users/ad/work/ai/openclaw/skills/assistant-bot/SKILL.md`
-- for equities, prefer `asset_class=equity` and `venue=yahoo_equities`
-- for crypto, prefer `asset_class=crypto` with `binance_spot` or `coinbase_spot`
+- assistant-bot no longer creates or manages persistent alerts
+- use assistant-bot through Discord, not by importing its code or inventing a relay API
+- use `triggerctl` plus `trade-daemon` to create the condition that will later emit a wake
+- then use the `assistant-bot` skill to inspect delivery or shared-channel behavior
 
-### `tradedb` for idea journaling and execution linkage
+### `trade-journal` skill for canonical case inspection and trigger control
 
 Use when you need:
 
-- idea creation
-- observations and lifecycle evaluation
-- search across prior theses, reviews, and execution payloads
-- order / position linkage
-- outcome review
+- list or inspect live canonical cases
+- inspect canonical event history
+- inspect or mutate persistent trigger rows
+- bootstrap default strategy triggers
+- verify the daemon-created case state behind an alert
 
 Default entrypoint:
 
 ```bash
-tradedb ...
+casectl ...
 ```
 
 Common examples:
 
 ```bash
-tradedb idea list --view active --json
-tradedb idea observe <idea-id> --source bot --observed-at 2026-03-12T14:35:00+00:00 --payload '{"price": 211.2, "approved_for_entry": true}' --json
-tradedb idea evaluate --idea-id <idea-id> --json
-tradedb order ingest --payload '{"external_order_id":"ord-001","venue":"SIM","account":"acct-1","side":"buy","quantity":100,"status":"new","idea_id":"<idea-id>","symbol":"AAPL"}' --json
+casectl list-open
+casectl show-case <case-id>
+casectl show-events <case-id>
+triggerctl list
+triggerctl sample --strategy-key gap_watch
 ```
 
 Daily quick set (concise):
 
 ```bash
-# 1) Active ideas
-tradedb idea list --view active --json
+# 1) Active canonical cases
+casectl list-open
 
-# 2) Add observation
-tradedb idea observe <idea-id> --source bot --observed-at <iso8601> --payload '{"price":123.4,"note":"..."}' --json
+# 2) Inspect one case
+casectl show-case <case-id>
+casectl show-events <case-id>
 
-# 3) Re-evaluate lifecycle state
-tradedb idea evaluate --idea-id <idea-id> --json
+# 3) Preview or validate trigger params
+triggerctl sample --strategy-key gap_watch
+triggerctl validate --strategy-key gap_watch --parameters-json '{"entry_buffer_pct":"0.001","followup_review_minutes":10}'
 
-# 4) Link executions/positions
-tradedb order ingest --payload '{..."idea_id":"<idea-id>"...}' --json
-tradedb position ingest --payload '{..."idea_id":"<idea-id>"...}' --json
-
-# 5) Add review
-tradedb idea review add <idea-id> --outcome win|loss|scratch --score 0.0-1.0 --lessons "..." --text "..." --json
-
-# 6) Search prior setups
-tradedb idea find "keyword catalyst setup" --json
+# 4) Upsert or seed persistent trigger rows
+triggerctl seed-defaults --strategy-key gap_watch --apply
+triggerctl upsert --strategy-key btc_threshold --trigger-key btc-threshold-main --scope-kind symbol --scope-ref BTCUSD --parameters-json '{...}'
 ```
 
 ### `sec` for SEC / EDGAR filing intake and repair
@@ -229,9 +228,9 @@ sec export --format json
    - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-bull-flag.md`
    - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-flat-top-breakout.md`
    - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/ross-cameron-abcd.md`
-4. Record the thesis, risk, and trigger in `tradedb`.
-5. If the trigger should be watched after the current session, create an assistant-bot alert for the breakout, reclaim, or stop level.
-6. Ingest orders / positions if the trade is taken.
+4. Record the thesis and trigger as a canonical strategy/trigger row combination.
+5. If the trigger should be watched after the current session, upsert the canonical trigger row and make sure the daemon source is running.
+6. Inspect the resulting case and wake flow with `casectl` and `assistant-bot`.
 
 ### Swing breakout workflow
 
@@ -243,21 +242,21 @@ sec export --format json
    - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-episodic-pivot.md`
    - `/Users/ad/work/ai/openclaw/skills/stock-trading/references/qullamaggie-parabolic-short.md`
    - `/Users/ad/work/ai/openclaw/skills/algotrader/references/strategy-comparison.md`
-4. Log the idea in `tradedb` before execution.
-5. If the trade depends on a future breakout or invalidation level, register an assistant-bot alert for it.
-6. Review outcome quality later in `tradedb`.
+4. Inspect or seed the relevant canonical trigger rows before execution.
+5. If the trade depends on a future breakout or invalidation level, let `trade-daemon` monitor it and let `assistant-bot` deliver the wake.
+6. Review outcome quality later through canonical case history and inbox-driven review events.
 
 ### Event / catalyst workflow
 
 1. Use `tws news` and scanner output to identify the catalyst name.
 2. Use `sec latest` or `sec reconcile` when the catalyst may be tied to a fresh filing.
 3. Use `macro-dashboard` to determine whether the catalyst is fighting or aligned with the broader tape.
-4. Use `tradedb` to record:
-   - thesis
+4. Use the canonical trigger + case path to record:
+   - strategy
    - catalyst
    - invalidation
-   - execution linkage
-5. If the setup needs waiting or follow-through monitoring, register assistant-bot alerts for the trigger and invalidation levels.
+   - wake/review progression
+5. If the setup needs waiting or follow-through monitoring, upsert the trigger row and verify daemon coverage for the relevant source.
 6. If needed, compare the setup to intraday or swing playbooks before choosing the holding period.
 
 ## Universal guardrails
@@ -280,8 +279,8 @@ Apply these to any strategy or playbook unless the user explicitly overrides the
   Use max daily loss, max consecutive-loss, and post-stop cooldown rules to prevent tilt and size-creep behavior.
 - Check regime and data quality first.
   Reduce size or do not trade when the macro tape, liquidity, spread/volume quality, or catalyst quality is hostile or unreliable.
-- Log thesis, trigger, invalidation, and risk in `tradedb`.
-  Treat journaling as part of trade approval, not post-hoc cleanup.
+- Log thesis, trigger, invalidation, and risk in the canonical case/trigger system.
+  Treat case inspection and trigger review as part of trade approval, not post-hoc cleanup.
 - Separate execution quality from thesis quality.
   A good thesis with bad execution is still a bad trade; record both explicitly in reviews.
 
@@ -330,40 +329,39 @@ Notes:
 - Include title, axis labels, legend, and grid.
 - If requested, overlay an observed live equity series on top of the scenario bands.
 
-## Assistant-Bot Alert Pattern
+## Canonical Alert Pattern
 
-Use assistant-bot when the user wants ongoing monitoring, not just one-off analysis.
+Use the daemon + trigger store when the user wants ongoing monitoring, not just one-off analysis.
 
 Recommended sequence:
 
 1. analyze the symbol first with `tws`, `macro-dashboard`, `sec`, or charting as needed
 2. identify the exact trigger or invalidation level
-3. if the condition should persist beyond the current chat, create an assistant-bot alert
-4. if the thesis matters, record the same level and rationale in `tradedb`
+3. if the condition should persist beyond the current chat, upsert a canonical trigger row with `triggerctl`
+4. make sure `trade-daemon` is running with the relevant source
+5. if the thesis matters, inspect the resulting case state with `casectl`
 
 Examples:
 
 - swing breakout above a defined pivot:
-  - `price_above`
-- failed breakout or stop-loss level:
-  - `price_below`
-- unusual participation:
-  - `volume_above` or `relative_volume`
-- stale market data concern:
-  - `data_stale`
+  - use the strategy-specific trigger params rather than a generic `price_above` envelope
+- BTC threshold on Kraken:
+  - use `btc_threshold` plus `triggerctl upsert`
+- follow-up review handling:
+  - inspect case state with `casectl show-case` and `casectl show-events`
 
 OpenClaw delivery guidance:
 
-- prefer `delivery_target="bot:openclaw"` so assistant-bot can notify OpenClaw through Discord
-- use the `assistant-bot` skill for exact relay envelope syntax
-- do not claim an alert exists until assistant-bot returns a successful `command.result`
+- assistant-bot is downstream only
+- OpenClaw should watch the shared Discord channel for delivered wakes
+- use the `assistant-bot` skill for delivery-side debugging
+- do not claim a persistent alert exists until the trigger row is present and daemon ingestion is running
 
 ## Defaults
 
 - Prefer `--json` whenever outputs will be summarized or chained into another tool step.
 - Do not place or modify broker orders unless the user explicitly asks.
-- When the task includes "watch this", "alert me", "notify later", or any persistent trigger, prefer assistant-bot over ad hoc reminders.
-- Preserve source event time in `tradedb` observations with `--observed-at` when known.
+- When the task includes "watch this", "alert me", "notify later", or any persistent trigger, prefer `triggerctl` + `trade-daemon` over ad hoc reminders.
 - Use `sec` when a thesis depends on a fresh filing rather than only headlines or broker news.
 - For live market data, prefer read-only and delayed-safe queries first.
 - If the task is narrow and only one tool is needed, use that narrower tool directly instead of forcing the whole workflow.
