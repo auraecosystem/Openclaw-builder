@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
+import { parse as parseDotenv } from "dotenv";
 import type { OpenClawPluginService, PluginLogger } from "openclaw/plugin-sdk";
 import type { AssistantBotSidecarConfig, ManagedProcessConfig } from "./config.js";
 
@@ -49,6 +50,62 @@ function pipeChildOutput(
       log(`${processLabel} ${label}: ${line}`);
     }
   });
+}
+
+function loadEnvFiles(
+  envFiles: string[],
+  logger: PluginLogger,
+  processLabel: string,
+): Record<string, string> {
+  const loaded: Record<string, string> = {};
+
+  for (const envFile of envFiles) {
+    if (!fs.existsSync(envFile)) {
+      logger.warn(`assistant-bot-sidecar: env file missing for ${processLabel}: ${envFile}`);
+      continue;
+    }
+
+    try {
+      const parsed = parseDotenv(fs.readFileSync(envFile));
+      Object.assign(loaded, parsed);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(
+        `assistant-bot-sidecar: failed to load env file for ${processLabel}: ${envFile} (${message})`,
+      );
+    }
+  }
+
+  return loaded;
+}
+
+function deriveTradeDbEnv(env: Record<string, string>): Record<string, string> {
+  const derived = { ...env };
+  const timescaleToTradeDb: Array<[string, string]> = [
+    ["TRADING_TOOLS_TIMESCALE_HOST", "TRADE_DB_HOST"],
+    ["TRADING_TOOLS_TIMESCALE_PORT", "TRADE_DB_PORT"],
+    ["TRADING_TOOLS_TIMESCALE_DB", "TRADE_DB_NAME"],
+    ["TRADING_TOOLS_TIMESCALE_USER", "TRADE_DB_USER"],
+    ["TRADING_TOOLS_TIMESCALE_PASSWORD", "TRADE_DB_PASSWORD"],
+    ["TRADING_TOOLS_TIMESCALE_SSLMODE", "TRADE_DB_SSLMODE"],
+  ];
+
+  for (const [sourceKey, targetKey] of timescaleToTradeDb) {
+    if (!derived[targetKey] && derived[sourceKey]) {
+      derived[targetKey] = derived[sourceKey];
+    }
+  }
+
+  return derived;
+}
+
+function buildProcessEnv(state: ManagedProcessState, logger: PluginLogger): Record<string, string> {
+  const fileEnv = deriveTradeDbEnv(loadEnvFiles(state.config.envFiles, logger, state.label));
+  return {
+    ...process.env,
+    ...fileEnv,
+    ...state.config.env,
+  };
 }
 
 export function createAssistantBotSidecarService(
@@ -151,10 +208,7 @@ export function createAssistantBotSidecarService(
 
     const child = spawn(state.config.command, state.config.args, {
       cwd: state.config.cwd,
-      env: {
-        ...process.env,
-        ...state.config.env,
-      },
+      env: buildProcessEnv(state, logger),
       stdio: ["ignore", "pipe", "pipe"],
     });
     state.child = child;

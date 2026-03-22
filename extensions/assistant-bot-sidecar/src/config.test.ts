@@ -20,6 +20,7 @@ describe("resolveAssistantBotSidecarConfig", () => {
       "trade-daemon",
       "run",
     ]);
+    expect(config.daemon.envFiles).toEqual(["/Users/ad/work/trading-tools/.env"]);
     expect(config.daemon.watch.paths).toContain(
       "/Users/ad/work/trading-tools/apps/trade_daemon/src",
     );
@@ -34,6 +35,10 @@ describe("resolveAssistantBotSidecarConfig", () => {
       "--package",
       "assistant-bot",
       "assistant-bot",
+    ]);
+    expect(config.assistantBot.envFiles).toEqual([
+      "/Users/ad/work/trading-tools/.env",
+      "/Users/ad/work/trading-tools/apps/assistant_bot/.env",
     ]);
     expect(config.assistantBot.watch.paths).toContain(
       "/Users/ad/work/trading-tools/apps/assistant_bot/src",
@@ -54,6 +59,7 @@ describe("resolveAssistantBotSidecarConfig", () => {
         cwd: "/tmp/trading-tools",
         command: "python3",
         args: ["-m", "trade_daemon", "run"],
+        envFiles: ["/tmp/trading-tools/.env"],
         env: {
           TRADE_DAEMON_WORKER_ID: "test-worker",
         },
@@ -70,6 +76,7 @@ describe("resolveAssistantBotSidecarConfig", () => {
         cwd: "/tmp/trading-tools",
         command: "python3",
         args: ["-m", "assistant_bot"],
+        envFiles: ["/tmp/trading-tools/.env", "/tmp/trading-tools/apps/assistant_bot/.env"],
         env: {
           ASSISTANT_BOT_LOG_LEVEL: "DEBUG",
         },
@@ -91,6 +98,7 @@ describe("resolveAssistantBotSidecarConfig", () => {
     expect(config.daemon.cwd).toBe("/tmp/trading-tools");
     expect(config.daemon.command).toBe("python3");
     expect(config.daemon.args).toEqual(["-m", "trade_daemon", "run"]);
+    expect(config.daemon.envFiles).toEqual(["/tmp/trading-tools/.env"]);
     expect(config.daemon.env.TRADE_DAEMON_WORKER_ID).toBe("test-worker");
     expect(config.daemon.restartDelayMs).toBe(300);
     expect(config.daemon.shutdownGraceMs).toBe(900);
@@ -102,6 +110,10 @@ describe("resolveAssistantBotSidecarConfig", () => {
     expect(config.assistantBot.cwd).toBe("/tmp/trading-tools");
     expect(config.assistantBot.command).toBe("python3");
     expect(config.assistantBot.args).toEqual(["-m", "assistant_bot"]);
+    expect(config.assistantBot.envFiles).toEqual([
+      "/tmp/trading-tools/.env",
+      "/tmp/trading-tools/apps/assistant_bot/.env",
+    ]);
     expect(config.assistantBot.env.ASSISTANT_BOT_LOG_LEVEL).toBe("DEBUG");
     expect(config.assistantBot.restartDelayMs).toBe(450);
     expect(config.assistantBot.shutdownGraceMs).toBe(950);

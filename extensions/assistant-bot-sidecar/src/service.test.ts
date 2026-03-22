@@ -9,16 +9,30 @@ type MockChild = EventEmitter & {
   killed: boolean;
 };
 
-const { spawnMock, watchCloseMock, watchMock, existsSyncMock, statSyncMock } = vi.hoisted(() => {
-  const watchClose = vi.fn();
-  return {
-    spawnMock: vi.fn(),
-    watchCloseMock: watchClose,
-    watchMock: vi.fn(() => ({ close: watchClose })),
-    existsSyncMock: vi.fn(() => true),
-    statSyncMock: vi.fn(() => ({ isDirectory: () => true })),
-  };
-});
+const { spawnMock, watchCloseMock, watchMock, existsSyncMock, statSyncMock, readFileSyncMock } =
+  vi.hoisted(() => {
+    const watchClose = vi.fn();
+    return {
+      spawnMock: vi.fn(),
+      watchCloseMock: watchClose,
+      watchMock: vi.fn(() => ({ close: watchClose })),
+      existsSyncMock: vi.fn(() => true),
+      statSyncMock: vi.fn(() => ({ isDirectory: () => true })),
+      readFileSyncMock: vi.fn((path: string) => {
+        if (path.endsWith("apps/assistant_bot/.env")) {
+          return 'ASSISTANT_BOT_DSN="postgresql://postgres:postgres@127.0.0.1:15441/trading_tools?sslmode=disable"\n';
+        }
+        return [
+          "TRADING_TOOLS_TIMESCALE_HOST=127.0.0.1",
+          "TRADING_TOOLS_TIMESCALE_PORT=15441",
+          "TRADING_TOOLS_TIMESCALE_DB=trading_tools",
+          "TRADING_TOOLS_TIMESCALE_USER=postgres",
+          "TRADING_TOOLS_TIMESCALE_PASSWORD=postgres",
+          "TRADING_TOOLS_TIMESCALE_SSLMODE=disable",
+        ].join("\n");
+      }),
+    };
+  });
 
 vi.mock("node:child_process", () => ({
   spawn: spawnMock,
@@ -29,6 +43,7 @@ vi.mock("node:fs", () => ({
     watch: watchMock,
     existsSync: existsSyncMock,
     statSync: statSyncMock,
+    readFileSync: readFileSyncMock,
   },
 }));
 
@@ -69,6 +84,7 @@ const baseConfig: AssistantBotSidecarConfig = {
       "trade-daemon",
       "run",
     ],
+    envFiles: ["/tmp/trading-tools/.env"],
     env: {},
     restartDelayMs: 10,
     shutdownGraceMs: 10,
@@ -83,6 +99,7 @@ const baseConfig: AssistantBotSidecarConfig = {
     cwd: "/tmp/trading-tools",
     command: "uv",
     args: ["run", "--project", "/tmp/trading-tools", "--package", "assistant-bot", "assistant-bot"],
+    envFiles: ["/tmp/trading-tools/.env", "/tmp/trading-tools/apps/assistant_bot/.env"],
     env: {},
     restartDelayMs: 10,
     shutdownGraceMs: 10,
@@ -125,6 +142,7 @@ afterEach(() => {
   watchCloseMock.mockClear();
   existsSyncMock.mockClear();
   statSyncMock.mockClear();
+  readFileSyncMock.mockClear();
 });
 
 describe("assistant-bot sidecar service", () => {
@@ -158,13 +176,31 @@ describe("assistant-bot sidecar service", () => {
         "trade-daemon",
         "run",
       ],
-      expect.objectContaining({ cwd: "/tmp/trading-tools" }),
+      expect.objectContaining({
+        cwd: "/tmp/trading-tools",
+        env: expect.objectContaining({
+          TRADE_DB_HOST: "127.0.0.1",
+          TRADE_DB_PORT: "15441",
+          TRADE_DB_NAME: "trading_tools",
+          TRADE_DB_USER: "postgres",
+          TRADE_DB_PASSWORD: "postgres",
+          TRADE_DB_SSLMODE: "disable",
+        }),
+      }),
     );
     expect(spawnMock).toHaveBeenNthCalledWith(
       2,
       "uv",
       ["run", "--project", "/tmp/trading-tools", "--package", "assistant-bot", "assistant-bot"],
-      expect.objectContaining({ cwd: "/tmp/trading-tools" }),
+      expect.objectContaining({
+        cwd: "/tmp/trading-tools",
+        env: expect.objectContaining({
+          ASSISTANT_BOT_DSN:
+            "postgresql://postgres:postgres@127.0.0.1:15441/trading_tools?sslmode=disable",
+          TRADE_DB_HOST: "127.0.0.1",
+          TRADE_DB_PORT: "15441",
+        }),
+      }),
     );
 
     await service.stop({ config: {} as never, logger, stateDir: "", workspaceDir: "" });
@@ -372,6 +408,29 @@ describe("assistant-bot sidecar service", () => {
     );
     expect(logger.warn).toHaveBeenCalledWith(
       "assistant-bot-sidecar: watch path missing: /tmp/trading-tools/packages/trade_core/src",
+    );
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+
+    await service.stop({ config: {} as never, logger, stateDir: "", workspaceDir: "" });
+  });
+
+  it("warns on missing env files and still starts enabled processes", async () => {
+    const daemonChild = createChild();
+    const assistantChild = createChild();
+    existsSyncMock.mockImplementation((input: string) => !input.endsWith(".env"));
+    spawnMock.mockReturnValueOnce(daemonChild).mockReturnValueOnce(assistantChild);
+
+    const logger = createLogger();
+    const { service } = await startService(baseConfig, logger);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "assistant-bot-sidecar: env file missing for trade-daemon: /tmp/trading-tools/.env",
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      "assistant-bot-sidecar: env file missing for assistant-bot: /tmp/trading-tools/.env",
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      "assistant-bot-sidecar: env file missing for assistant-bot: /tmp/trading-tools/apps/assistant_bot/.env",
     );
     expect(spawnMock).toHaveBeenCalledTimes(2);
 

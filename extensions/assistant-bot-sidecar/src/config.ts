@@ -11,6 +11,7 @@ export type ManagedProcessConfig = {
   cwd: string;
   command: string;
   args: string[];
+  envFiles: string[];
   env: Record<string, string>;
   restartDelayMs: number;
   shutdownGraceMs: number;
@@ -45,6 +46,7 @@ type ManagedProcessDefaults = {
   cwd: string;
   command: string;
   args: string[];
+  envFiles: string[];
   watchPaths: string[];
 };
 
@@ -100,6 +102,7 @@ function resolveManagedProcessConfig(
   const command =
     typeof raw.command === "string" && raw.command.trim() ? raw.command.trim() : defaults.command;
   const args = asStringArray(raw.args) ?? defaults.args;
+  const envFiles = resolvePathList(asStringArray(raw.envFiles) ?? defaults.envFiles, resolvePath);
   const watchPaths = resolvePathList(
     asStringArray(watchRaw.paths) ?? defaults.watchPaths,
     resolvePath,
@@ -110,6 +113,7 @@ function resolveManagedProcessConfig(
     cwd: resolvePath ? resolvePath(cwd) : cwd,
     command,
     args,
+    envFiles,
     env: normalizeEnv(raw.env),
     restartDelayMs: asNumber(raw.restartDelayMs, 1_000),
     shutdownGraceMs: asNumber(raw.shutdownGraceMs, 5_000),
@@ -144,6 +148,7 @@ export function resolveAssistantBotSidecarConfig(
           "trade-daemon",
           "run",
         ],
+        envFiles: [path.join(DEFAULT_TRADING_TOOLS_DIR, ".env")],
         watchPaths: DEFAULT_DAEMON_WATCH_PATHS,
       },
       resolvePath,
@@ -160,6 +165,10 @@ export function resolveAssistantBotSidecarConfig(
           "--package",
           "assistant-bot",
           "assistant-bot",
+        ],
+        envFiles: [
+          path.join(DEFAULT_TRADING_TOOLS_DIR, ".env"),
+          path.join(DEFAULT_TRADING_TOOLS_DIR, "apps/assistant_bot/.env"),
         ],
         watchPaths: DEFAULT_ASSISTANT_BOT_WATCH_PATHS,
       },
