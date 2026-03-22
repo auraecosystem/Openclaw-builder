@@ -33,8 +33,11 @@ Primary docs:
 - Fallback: `uv run --project /Users/ad/work/trading-tools tws ...`
 - Prefer delayed quotes unless the user explicitly needs live data:
   - add `--delayed` for snapshot/watch quote commands when appropriate
-- The last verified live TWS setup used port `7496`, while the CLI default is `7497`
-  - if a command unexpectedly fails to connect, retry with `--port 7496`
+- The verified live TWS setup listens on port `7496`, and the CLI default matches that
+- Global options must come before the subcommand:
+  - use `tws --format json scanner run ...`, not `tws scanner run ... --format json`
+- If TWS returns error `326` ("client id is already in use"), retry with a unique client id:
+  - for example `tws --client-id 201 --format json scanner run ...`
 - Favor read-only / observational commands first
 - Do not place or modify orders unless the user explicitly asks
 
@@ -51,8 +54,9 @@ tws market snapshot AAPL --delayed
 Scanner:
 
 ```bash
-tws scanner params
-tws scanner run --scan-code TOP_PERC_GAIN
+tws scanner params --filter ScanCode
+tws --client-id 201 --format json scanner run --scan-code TOP_PERC_GAIN --num-rows 10
+tws --client-id 202 --format json scanner run --scan-code HOT_BY_VOLUME --num-rows 10
 ```
 
 Historical market data:
@@ -93,12 +97,14 @@ tws news history --symbol AAPL --limit 5
 3. For historical data, prefer `market bars` over streaming commands.
 4. For options, always use a fully specified contract: symbol, expiry, strike, right.
 5. For account questions, prefer `account overview`, then drill into `positions`, `pnl`, or `executions`.
+6. For stock scanners, keep the default `--location STK.US.MAJOR` unless you intentionally want broader coverage.
 
 ## Known constraints
 
 - US equity live streaming quotes may be blocked on the current account; delayed quotes are the safe fallback.
 - `reqRealTimeBars` is currently blocked on the verified account.
 - Option and market-data availability depends on the logged-in IBKR account entitlements.
+- On the verified setup, `STK.US` can trigger IBKR error `492` for scanner permissions involving Pink Sheets, while `STK.US.MAJOR` returns results.
 - The CLI also supports legacy flat aliases, but prefer the namespaced commands from the README.
 
 ## Output handling
