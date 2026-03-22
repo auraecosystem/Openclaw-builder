@@ -228,6 +228,41 @@ Defaults:
 - Avoid overlapping text; fewer annotations are better than unreadable annotations.
 - Prefer endpoint labels or sparse callouts over cluttered per-point labels.
 
+## Advanced annotation toolkit (required for trade review charts)
+
+Use these primitives deliberately:
+
+- `ax.annotate()` with `arrowprops` for callouts
+- `ax.axvline()` and `ax.axhline()` for event/level guides
+- `matplotlib.patches` (`Rectangle`, `Ellipse`, `FancyArrowPatch`, `ConnectionPatch`) for zone highlights and structure emphasis
+- `matplotlib.patheffects` (`Stroke` + `Normal`) to keep text readable over candles
+- `axvspan()` for session/regime shading
+
+Coordinate usage:
+
+- Event markers in data coordinates (`xycoords='data'`)
+- Summary boxes in axes coordinates (`transform=ax.transAxes`)
+- Text offsets via `textcoords='offset points'` to reduce overlap
+
+When using `mplfinance`:
+
+- call `mpf.plot(..., returnfig=True)`
+- annotate the returned price axis (`axes[0]`)
+- keep overlays in `mpf.make_addplot()` and event labels as direct matplotlib annotations
+
+When to use PIL post-processing:
+
+- rounded translucent callout boxes, watermarking, pixel-level arrows/circles, or text stroke control after chart render.
+- Use `ImageDraw.Draw(im, "RGBA")` for alpha compositing on RGB images.
+
+Minimum annotation package for setup audits:
+
+1. explicit alert timestamp marker
+2. entry/stop lines
+3. first invalidation or stop-breach marker (if applicable)
+4. MFE and MAE markers with R-multiple labels
+5. compact stats summary box (entry, stop, risk, MFE/MAE, latest R)
+
 ## Python patterns
 
 General matplotlib chart:
@@ -286,3 +321,13 @@ If `mplfinance` is unavailable:
 - `/Users/ad/work/trading-tools/packages/trade_yahoo/src/trade_yahoo/README.md`
 - `/Users/ad/work/trading-tools/packages/trade_yahoo/src/trade_yahoo/macro_dashboard.py`
 - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-rules.md`
+- `/Users/ad/work/ai/openclaw/skills/stock_charting/references/annotation-playbook.md`
+
+## External references (authoritative docs)
+
+- Matplotlib annotate API: <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.annotate.html>
+- Matplotlib patches API: <https://matplotlib.org/stable/api/patches_api.html>
+- Matplotlib path effects guide: <https://matplotlib.org/stable/users/explain/artists/patheffects_guide.html>
+- mplfinance docs/repo: <https://github.com/matplotlib/mplfinance>
+- Pillow ImageDraw reference: <https://pillow.readthedocs.io/en/stable/reference/ImageDraw.html>
+- Pillow ImageFont reference: <https://pillow.readthedocs.io/en/stable/reference/ImageFont.html>
