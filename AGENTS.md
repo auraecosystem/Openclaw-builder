@@ -110,6 +110,14 @@
 - Pipeline: update English control UI strings and locale wiring here → run `pnpm ui:i18n:sync` (or let `Control UI Locale Refresh` do it) → commit the regenerated locale bundles and `.i18n` metadata.
 - If the control UI locale outputs drift, regenerate them; do not manually translate or hand-maintain the generated locale files by default.
 
+## Local Trading Skills Sync
+
+- The trading-related skills in `skills/assistant_bot`, `skills/trade_daemon`, `skills/trade_journal`, `skills/stock_trading`, and `skills/algotrader` mirror the live runtime in the sibling repo `../trading-tools`.
+- The current canonical runtime reference for stock watch-and-wake work is `../trading-tools/docs/architecture/reference_intraday_watch_wake_runtime.md`.
+- Keep these watch families aligned when touching the trading skills: `equity_level_watch`, `equity_vwap_bounce_watch`, `equity_vwap_reclaim_watch`.
+- Treat OpenClaw as downstream for this pipeline: `assistant-bot` delivers the Discord wake, optionally prepending `ASSISTANT_BOT_WAKE_MENTION_TEXT` or per-trigger `discord_mention_text`; detector code, trigger validation, and canonical case state stay in `trading-tools`.
+- Do not claim that chat-created trigger rows register brand-new strategy families. New reducer families still require code and daemon registration in `trading-tools`.
+
 ## exe.dev VM ops (general)
 
 - Access: stable path is `ssh exe.dev` then `ssh vm-name` (assume SSH key already set).

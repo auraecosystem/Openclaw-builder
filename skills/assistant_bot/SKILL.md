@@ -15,6 +15,7 @@ Use the current assistant-bot from `/Users/ad/work/trading-tools/apps/assistant_
 
 Primary references:
 
+- `/Users/ad/work/trading-tools/docs/architecture/reference_intraday_watch_wake_runtime.md`
 - `/Users/ad/work/trading-tools/apps/assistant_bot/README.md`
 - `/Users/ad/work/trading-tools/apps/assistant_bot/src/assistant_bot/entrypoint.py`
 - `/Users/ad/work/trading-tools/apps/assistant_bot/src/assistant_bot/edge/app.py`
@@ -32,6 +33,7 @@ When docs and code disagree, trust the current `assistant_bot` package code.
 - a single process that consumes `wake_dispatch`
 - a reader of canonical wake/case/review views from `trade_journal`
 - a writer of `wake_delivery_receipt`, `wake_delivery_failure`, `review`, `case_note`, and `case_command` inbox rows
+- a wake renderer that can prepend a default mention from `ASSISTANT_BOT_WAKE_MENTION_TEXT` or a per-trigger override from `discord_mention_text`
 
 It is not:
 
@@ -119,6 +121,14 @@ Important:
 - OpenClaw should not claim these exist as text commands in-channel
 - for bot-to-bot or scripted local smoke, use the queue/DB/smoke scripts, not fake Discord relay JSON
 
+Current wake messages can also include:
+
+- `signal_type`
+- `trigger_key`
+- `reference_label`
+- `reference_price`
+- `required_next_decision`
+
 ## Canonical Wake Flow
 
 The supported wake path is:
@@ -130,6 +140,11 @@ The supported wake path is:
 5. `assistant-bot` sends the Discord wake message
 6. `assistant-bot` writes `wake_delivery_receipt` or `wake_delivery_failure` to `cases.daemon_inbox`
 7. `trade-daemon` consumes that inbox row and advances canonical wake state
+
+Operational detail:
+
+- delivery failures are isolated per queue message
+- one bad wake should not abort later messages in the same batch
 
 When debugging, inspect both sides:
 
@@ -144,6 +159,12 @@ If OpenClaw needs to observe live alerts:
 2. look for assistant-bot wake messages
 3. extract the `case_id` or symbol/summary from the wake text
 4. use the `trade-journal` skill to inspect the case in `casectl`
+
+If OpenClaw needs the wake to explicitly ping another Discord actor:
+
+1. check `ASSISTANT_BOT_WAKE_MENTION_TEXT`
+2. check whether the trigger row set `discord_mention_text`
+3. confirm the rendered wake includes the expected mention text before claiming the ping path is active
 
 If OpenClaw needs to help with a follow-up action:
 
@@ -167,3 +188,4 @@ If OpenClaw needs to help with a follow-up action:
 - current OpenClaw integration is best done through a shared Discord channel, not a bot relay registration path
 - the edge requires `ASSISTANT_BOT_DISCORD_TOKEN` plus either `ASSISTANT_BOT_DSN` or shared `TRADE_DB_*`
 - the wake loop is queue-driven; if no wake exists, the bot has nothing to send
+- mention support is delivery metadata only; the detector and trigger logic still live upstream in `trade-daemon`

@@ -25,6 +25,7 @@ Use this as the top-level stock trading workflow when the task spans more than o
 Primary tool docs:
 
 - `/Users/ad/work/trading-tools/README.md`
+- `/Users/ad/work/trading-tools/docs/architecture/reference_intraday_watch_wake_runtime.md`
 - `/Users/ad/work/trading-tools/packages/trade_tws/src/trade_tws/README.md`
 - `/Users/ad/work/trading-tools/packages/trade_journal/src/trade_journal/README.md`
 - `/Users/ad/work/trading-tools/packages/trade_yahoo/src/trade_yahoo/README.md`
@@ -147,6 +148,7 @@ Important:
 - use assistant-bot through Discord, not by importing its code or inventing a relay API
 - use `triggerctl` plus `trade-daemon` to create the condition that will later emit a wake
 - then use the `assistant-bot` skill to inspect delivery or shared-channel behavior
+- if the wake should explicitly ping another Discord actor, use `discord_mention_text` on the trigger row or the daemon-side default mention env
 
 ### `trade-journal` skill for canonical case inspection and trigger control
 
@@ -193,6 +195,8 @@ triggerctl seed-defaults --strategy-key gap_watch --apply
 triggerctl upsert --strategy-key btc_threshold --trigger-key btc-threshold-main --scope-kind symbol --scope-ref BTCUSD --parameters-json '{...}'
 ```
 
+For the stock watch families, skip `seed-defaults` and validate explicit JSON instead.
+
 ## Trigger model
 
 - `strategy_key` names the reducer family such as `gap_watch`, `btc_threshold`, or `crypto_momentum_scalp`
@@ -200,6 +204,18 @@ triggerctl upsert --strategy-key btc_threshold --trigger-key btc-threshold-main 
 - trigger rows are persistent config, not standalone runtime workers
 - `assistant-bot` is delivery-only; it does not create alerts
 - if a setup depends on a specific market feed or scanner, `trade-daemon` still needs the matching source env enabled
+
+Current stock watch families:
+
+- `equity_level_watch`
+- `equity_vwap_bounce_watch`
+- `equity_vwap_reclaim_watch`
+
+Important runtime detail:
+
+- the stock watch families support same-symbol trigger fanout
+- `trigger_id` is the runtime identity for one deployed watch
+- one TWS intraday bar can feed more than one same-symbol watch case
 
 ### `sec` for SEC / EDGAR filing intake and repair
 
@@ -240,6 +256,14 @@ sec export --format json
 4. Record the thesis and trigger as a canonical strategy/trigger row combination.
 5. If the trigger should be watched after the current session, upsert the canonical trigger row and make sure the daemon source is running.
 6. Inspect the resulting case and wake flow with `casectl` and `assistant-bot`.
+
+For "alert at a key level / VWAP behavior so the AI can inspect later", prefer:
+
+- `equity_level_watch`
+- `equity_vwap_bounce_watch`
+- `equity_vwap_reclaim_watch`
+
+Do not default to inventing a full autonomous Ross bull-flag detector when the actual requirement is a reliable wake for later judgment.
 
 ### Swing breakout workflow
 
@@ -359,6 +383,13 @@ Examples:
 - BTC momentum scalp on Kraken:
   - use `crypto_momentum_scalp` plus `triggerctl upsert`
   - ensure `TRADE_DAEMON_KRAKEN_SCANNER_PAIRS` is enabled on the daemon
+- stock key level on TWS:
+  - use `equity_level_watch` plus `triggerctl upsert`
+  - ensure `TRADE_DAEMON_TWS_INTRADAY_SYMBOLS` is enabled on the daemon
+- stock VWAP bounce or reclaim on TWS:
+  - use `equity_vwap_bounce_watch` or `equity_vwap_reclaim_watch`
+  - ensure `TRADE_DAEMON_TWS_INTRADAY_SYMBOLS` is enabled on the daemon
+  - use `discord_mention_text` if the Discord wake should explicitly ping an AI bot or role
 - follow-up review handling:
   - inspect case state with `casectl show-case` and `casectl show-events`
 

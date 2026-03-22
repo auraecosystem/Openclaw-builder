@@ -4,8 +4,8 @@ description: >
   Use for the canonical single-writer trade daemon in the trading-tools
   workspace. Trigger when the task is about observation-source wiring,
   one-shot daemon runs, case seeding/reduction, timer or inbox processing,
-  live Kraken BTC wake generation, or the end-to-end daemon half of the wake
-  pipeline.
+  live Kraken BTC wake generation, stock watch-and-wake setup generation from
+  TWS intraday bars, or the end-to-end daemon half of the wake pipeline.
 metadata: { "openclaw": { "emoji": "⚙️", "requires": { "bins": ["python3"] } } }
 ---
 
@@ -15,6 +15,7 @@ Use the daemon from `/Users/ad/work/trading-tools/apps/trade_daemon`.
 
 Primary references:
 
+- `/Users/ad/work/trading-tools/docs/architecture/reference_intraday_watch_wake_runtime.md`
 - `/Users/ad/work/trading-tools/apps/trade_daemon/src/trade_daemon/__main__.py`
 - `/Users/ad/work/trading-tools/apps/trade_daemon/src/trade_daemon/daemon/app.py`
 - `/Users/ad/work/trading-tools/apps/trade_daemon/src/trade_daemon/infrastructure/fixture_loader.py`
@@ -30,6 +31,7 @@ Primary references:
 
 - source observation ingestion
 - trigger lookup
+- trigger fanout for same-symbol watch families
 - strategy seed/reduce decisions
 - canonical case/event/timer/wake/review writes
 - daemon inbox processing
@@ -70,6 +72,9 @@ The current built-in strategies are:
 
 - `btc_threshold`
 - `crypto_momentum_scalp`
+- `equity_level_watch`
+- `equity_vwap_bounce_watch`
+- `equity_vwap_reclaim_watch`
 - `gap_watch`
 - `rth_breakout`
 
@@ -86,6 +91,7 @@ Current env-driven observation sources:
 - FDA events
 - Finnhub news
 - TWS snapshots
+- TWS intraday 1-minute bars
 
 Useful env examples:
 
@@ -113,6 +119,19 @@ TRADE_DAEMON_YAHOO_SYMBOLS=AAPL,NVDA
 TRADE_DAEMON_SEC_USER_AGENT="Your Name your_email@example.com"
 TRADE_DAEMON_SEC_FORMS=8-K,6-K
 ```
+
+```bash
+TRADE_DAEMON_TWS_INTRADAY_SYMBOLS=AAPL,NVDA
+TRADE_DAEMON_TWS_INTRADAY_MODE=poll
+TRADE_DAEMON_TWS_INTRADAY_POLL_INTERVAL_SECONDS=15
+TRADE_DAEMON_TWS_INTRADAY_FINALIZE_GRACE_SECONDS=15
+```
+
+Important:
+
+- stock watch families currently depend on `market.tws.intraday_bar`
+- the default intraday runtime is `poll`
+- `subscribe` exists, but it should be treated as gated by a market-hours cadence canary
 
 ## One-shot Workflow
 
@@ -223,10 +242,44 @@ Important runtime detail:
 - scanner construction is daemon/env-driven, not created dynamically by `triggerctl`
 - a new trigger row does not by itself create a new observation source or detector instance
 
+## Stock Watch Guidance
+
+If the task is about "watch this stock", "alert at this level", "wake the AI bot on a VWAP bounce", or similar persistent stock monitoring:
+
+1. identify the watch family:
+   `equity_level_watch` for fixed price levels,
+   `equity_vwap_bounce_watch` for touch-and-confirm bounce behavior,
+   `equity_vwap_reclaim_watch` for reclaim-after-loss behavior
+2. make sure the daemon has `TRADE_DAEMON_TWS_INTRADAY_SYMBOLS` enabled for the symbol set
+3. create or inspect the trigger row with `triggerctl`
+4. run a one-shot or full daemon loop
+5. inspect the resulting case and wake via `casectl`
+6. let `assistant-bot` deliver the Discord wake
+
+These watch families are alert-only. They do not auto-execute trades and they do not encode the downstream AI decision.
+
+## Trigger Routing Model
+
+There are now two runtime trigger paths:
+
+- legacy effective-trigger lookup
+  used by families such as `gap_watch`, `rth_breakout`, `btc_threshold`, and `crypto_momentum_scalp`
+
+- symbol-scoped trigger fanout
+  used by `equity_level_watch`, `equity_vwap_bounce_watch`, and `equity_vwap_reclaim_watch`
+
+For the watch families:
+
+- `strategy_key` is the reducer family
+- `trigger_key` is the operator-facing label
+- `trigger_id` is the runtime identity
+- one `market.tws.intraday_bar` observation can seed or reduce multiple same-symbol watch cases
+
 ## Known Constraints
 
 - one-shot mode is the safest default for smoke work
 - source loops are sequential by design right now
 - current case creation is strategy-driven; no generic "create case" CLI exists
 - if no trigger row exists, the daemon may ingest observations without ever producing a wake
-- `get_effective_trigger(...)` resolves by `strategy_key` plus scope, not by `trigger_key` as a runtime selector
+- `get_effective_trigger(...)` still resolves legacy families by `strategy_key` plus scope, not by `trigger_key` as a runtime selector
+- the new stock watch families bypass that legacy selector and instead fan out over every matching symbol-scoped trigger row
