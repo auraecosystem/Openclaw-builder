@@ -1,0 +1,11 @@
+{
+  "name": "@openclaw/assistant-bot-sidecar",
+  "version": "2026.3.11",
+  "description": "Managed assistant-bot sidecar for the OpenClaw gateway",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "id": "assistant-bot-sidecar",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": { "type": "boolean" },
+      "cwd": { "type": "string" },
+      "command": { "type": "string" },
+      "args": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "env": {
+        "type": "object",
+        "additionalProperties": { "type": "string" }
+      },
+      "restartDelayMs": { "type": "number" },
+      "shutdownGraceMs": { "type": "number" },
+      "watch": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "debounceMs": { "type": "number" },
+          "paths": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}
