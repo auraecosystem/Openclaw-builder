@@ -92,6 +92,7 @@ Runbooks and code assume:
 The only stable CLI/module surfaces are:
 
 - `python -m assistant_bot --help`
+- `python -m assistant_bot run`
 - `assistant-bot`
 - `assistant-bot-edge`
 
@@ -149,6 +150,7 @@ If OpenClaw needs to help with a follow-up action:
 - review the case with `casectl show-case`
 - inspect trigger config with `triggerctl show` or `triggerctl list`
 - inspect daemon state with the `trade-daemon` skill
+- use Discord slash commands for review / note / command intake, or use trading-tools inbox workflows
 - do not invent a nonexistent assistant-bot relay API
 
 ## Debugging Order
@@ -163,5 +165,5 @@ If OpenClaw needs to help with a follow-up action:
 
 - current assistant-bot behavior is delivery-focused; it does not own trigger creation
 - current OpenClaw integration is best done through a shared Discord channel, not a bot relay registration path
-- the edge requires `ASSISTANT_BOT_DISCORD_TOKEN` and `ASSISTANT_BOT_DSN`
+- the edge requires `ASSISTANT_BOT_DISCORD_TOKEN` plus either `ASSISTANT_BOT_DSN` or shared `TRADE_DB_*`
 - the wake loop is queue-driven; if no wake exists, the bot has nothing to send

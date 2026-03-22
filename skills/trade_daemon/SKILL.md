@@ -69,6 +69,7 @@ Current subcommands:
 The current built-in strategies are:
 
 - `btc_threshold`
+- `crypto_momentum_scalp`
 - `gap_watch`
 - `rth_breakout`
 
@@ -79,6 +80,7 @@ Look in `/Users/ad/work/trading-tools/apps/trade_daemon/src/trade_daemon/__main_
 Current env-driven observation sources:
 
 - Kraken ticker / OHLC
+- Kraken momentum scanner
 - Yahoo quotes
 - SEC latest filings
 - FDA events
@@ -92,6 +94,15 @@ TRADE_DAEMON_KRAKEN_PAIRS=BTC/USD
 TRADE_DAEMON_KRAKEN_EVENT_TRIGGER=trades
 TRADE_DAEMON_KRAKEN_OHLC_ENABLED=1
 TRADE_DAEMON_KRAKEN_INTERVAL_MINUTES=1
+```
+
+```bash
+TRADE_DAEMON_KRAKEN_SCANNER_PAIRS=BTC/USD
+TRADE_DAEMON_KRAKEN_SCANNER_EVENT_TRIGGER=bbo
+TRADE_DAEMON_KRAKEN_SCANNER_EXECUTION_BAR_SECONDS=300
+TRADE_DAEMON_KRAKEN_SCANNER_MIN_TOTAL_SCORE=54
+TRADE_DAEMON_KRAKEN_SCANNER_MAX_PULLBACK_PCT=0.45
+TRADE_DAEMON_KRAKEN_SCANNER_MAX_PULLBACK_BARS=8
 ```
 
 ```bash
@@ -181,13 +192,16 @@ Install-level package smoke:
 
 If the task is about live BTC alerts:
 
-1. inspect or upsert the `btc_threshold` trigger with `triggerctl`
-2. make sure the daemon has `TRADE_DAEMON_KRAKEN_PAIRS=BTC/USD`
-3. run a one-shot or full daemon loop
-4. inspect the resulting case with `casectl`
-5. let `assistant-bot` deliver the wake into Discord
+1. identify which strategy family owns the setup:
+   `btc_threshold` for simple threshold crossings, `crypto_momentum_scalp` for scanner-driven scalp setups
+2. inspect or upsert the relevant trigger row with `triggerctl`
+3. make sure the daemon has the matching source enabled:
+   `TRADE_DAEMON_KRAKEN_PAIRS` for ticker/OHLC paths, `TRADE_DAEMON_KRAKEN_SCANNER_PAIRS` for scanner paths
+4. run a one-shot or full daemon loop
+5. inspect the resulting case with `casectl`
+6. let `assistant-bot` deliver the wake into Discord
 
-The current live BTC path is:
+The threshold-style BTC path is:
 
 - Kraken ticker observation
 - `btc_threshold` strategy
@@ -195,9 +209,24 @@ The current live BTC path is:
 - `wake_dispatch`
 - `assistant-bot` Discord delivery
 
+The crypto momentum scalp path is:
+
+- Kraken momentum scanner observation source
+- `crypto_momentum_scalp` strategy
+- canonical wake request
+- `wake_dispatch`
+- `assistant-bot` Discord delivery
+
+Important runtime detail:
+
+- trigger rows configure reducer behavior and routing after observations exist
+- scanner construction is daemon/env-driven, not created dynamically by `triggerctl`
+- a new trigger row does not by itself create a new observation source or detector instance
+
 ## Known Constraints
 
 - one-shot mode is the safest default for smoke work
 - source loops are sequential by design right now
 - current case creation is strategy-driven; no generic "create case" CLI exists
 - if no trigger row exists, the daemon may ingest observations without ever producing a wake
+- `get_effective_trigger(...)` resolves by `strategy_key` plus scope, not by `trigger_key` as a runtime selector

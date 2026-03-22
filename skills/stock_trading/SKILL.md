@@ -65,8 +65,9 @@ Deeper setup / methodology docs:
 2. Run discovery / live checks for symbols or sectors.
 3. Decide the trade style: intraday momentum, swing breakout, event-driven, or no trade.
 4. If the trigger should keep running after the current chat, configure or inspect canonical trigger rows with `triggerctl`.
-5. Record and inspect the resulting canonical case state with `casectl`.
-6. After execution or operator review, follow the case through daemon inbox + canonical events.
+5. Make sure `trade-daemon` is running with the source that can actually emit the needed observations.
+6. Record and inspect the resulting canonical case state with `casectl`.
+7. After execution or operator review, follow the case through daemon inbox + canonical events.
 
 ## Tool selection
 
@@ -185,12 +186,20 @@ casectl show-events <case-id>
 
 # 3) Preview or validate trigger params
 triggerctl sample --strategy-key gap_watch
-triggerctl validate --strategy-key gap_watch --parameters-json '{"entry_buffer_pct":"0.001","followup_review_minutes":10}'
+triggerctl validate --strategy-key gap_watch --parameters-json '{"min_gap_pct":0.04,"min_price":2.0,"min_premarket_volume":500000,"or_minutes":5,"expiry_minutes":90}'
 
 # 4) Upsert or seed persistent trigger rows
 triggerctl seed-defaults --strategy-key gap_watch --apply
 triggerctl upsert --strategy-key btc_threshold --trigger-key btc-threshold-main --scope-kind symbol --scope-ref BTCUSD --parameters-json '{...}'
 ```
+
+## Trigger model
+
+- `strategy_key` names the reducer family such as `gap_watch`, `btc_threshold`, or `crypto_momentum_scalp`
+- `trigger_key` names one deployed configuration of that family
+- trigger rows are persistent config, not standalone runtime workers
+- `assistant-bot` is delivery-only; it does not create alerts
+- if a setup depends on a specific market feed or scanner, `trade-daemon` still needs the matching source env enabled
 
 ### `sec` for SEC / EDGAR filing intake and repair
 
@@ -347,6 +356,9 @@ Examples:
   - use the strategy-specific trigger params rather than a generic `price_above` envelope
 - BTC threshold on Kraken:
   - use `btc_threshold` plus `triggerctl upsert`
+- BTC momentum scalp on Kraken:
+  - use `crypto_momentum_scalp` plus `triggerctl upsert`
+  - ensure `TRADE_DAEMON_KRAKEN_SCANNER_PAIRS` is enabled on the daemon
 - follow-up review handling:
   - inspect case state with `casectl show-case` and `casectl show-events`
 

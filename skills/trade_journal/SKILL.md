@@ -85,14 +85,16 @@ Preview strategy defaults:
 triggerctl sample --strategy-key gap_watch
 triggerctl sample --strategy-key rth_breakout
 triggerctl sample --strategy-key btc_threshold
+triggerctl sample --strategy-key crypto_momentum_scalp
 ```
 
 Validate or seed defaults:
 
 ```bash
-triggerctl validate --strategy-key gap_watch --parameters-json '{"entry_buffer_pct":"0.001","followup_review_minutes":10}'
+triggerctl validate --strategy-key gap_watch --parameters-json '{"min_gap_pct":0.04,"min_price":2.0,"min_premarket_volume":500000,"or_minutes":5,"expiry_minutes":90}'
 triggerctl seed-defaults --strategy-key gap_watch --apply
 triggerctl seed-defaults --strategy-key rth_breakout --apply
+triggerctl seed-defaults --strategy-key crypto_momentum_scalp --apply
 triggerctl list
 ```
 
@@ -104,7 +106,18 @@ triggerctl upsert \
   --trigger-key btc-threshold-kraken \
   --scope-kind symbol \
   --scope-ref BTCUSD \
-  --parameters-json '{"pair":"BTC/USD","venue":"KRAKEN","threshold_price":"90000","direction":"above","cooldown_seconds":300,"channel":"ticker"}'
+  --parameters-json '{"pair":"BTC/USD","venue":"KRAKEN","threshold_price":90000,"direction":"above","cooldown_minutes":15}'
+```
+
+Create or update one crypto momentum scalp trigger:
+
+```bash
+triggerctl upsert \
+  --strategy-key crypto_momentum_scalp \
+  --trigger-key btcusd-long \
+  --scope-kind symbol \
+  --scope-ref BTCUSD \
+  --parameters-json '{"venue":"KRAKEN","symbol":"BTCUSD","direction":"long","session_grade_min":"C","min_liquidity_score":18,"min_urgency_score":20,"min_friction_score":12,"min_total_score":54,"min_threshold_bps":8,"cusum_sigma_multiplier":2.5,"max_pullback_pct":0.45,"max_pullback_bars":8,"setup_ttl_seconds":90,"entry_live_ttl_seconds":30,"notify_invalidations":true,"discord_channel_id":"1234567890"}'
 ```
 
 ## How to think about the current system
@@ -113,6 +126,8 @@ triggerctl upsert \
 - triggers live in Postgres and are read by the daemon through `TimescaleTriggerStore`
 - wake/review/timer artifacts are canonical rows, not ad hoc alert-rule records
 - `assistant-bot` only delivers wakes and writes operator intake back to `cases.daemon_inbox`
+- `strategy_key` identifies the reducer family; `trigger_key` is an operator-facing deployment label, not the primary runtime dispatch key
+- trigger rows are configuration, not detector processes; source wiring still lives in `trade-daemon`
 
 If the user wants a new alert or background monitor:
 
@@ -126,7 +141,7 @@ If the user wants a new alert or background monitor:
 1. Start with `casectl list-open` or `casectl show-case` before changing trigger rows.
 2. Use `triggerctl sample` and `triggerctl validate` before `triggerctl upsert`.
 3. Prefer `seed-defaults --apply` for baseline strategy rows instead of hand-writing every parameter.
-4. If the task is operational, run the smoke scripts before assuming the pipeline is broken.
+4. If the task is operational, confirm the relevant daemon source is enabled before assuming a trigger row should fire.
 5. Use the `trade-daemon` skill when the question turns into source ingestion or wake generation rather than simple inspection.
 
 ## Current smoke surfaces
