@@ -1,6 +1,12 @@
 import path from "node:path";
 
-export type AssistantBotSidecarConfig = {
+export type ManagedWatchConfig = {
+  enabled: boolean;
+  debounceMs: number;
+  paths: string[];
+};
+
+export type ManagedProcessConfig = {
   enabled: boolean;
   cwd: string;
   command: string;
@@ -8,20 +14,39 @@ export type AssistantBotSidecarConfig = {
   env: Record<string, string>;
   restartDelayMs: number;
   shutdownGraceMs: number;
-  watch: {
-    enabled: boolean;
-    debounceMs: number;
-    paths: string[];
-  };
+  watch: ManagedWatchConfig;
+};
+
+export type AssistantBotSidecarConfig = {
+  enabled: boolean;
+  startupGraceMs: number;
+  daemon: ManagedProcessConfig;
+  assistantBot: ManagedProcessConfig;
+  sharedWatchPaths: string[];
 };
 
 const DEFAULT_TRADING_TOOLS_DIR = "/Users/ad/work/trading-tools";
-const DEFAULT_WATCH_PATHS = [
+const DEFAULT_STARTUP_GRACE_MS = 1_500;
+const DEFAULT_DAEMON_WATCH_PATHS = [
+  "/Users/ad/work/trading-tools/apps/trade_daemon/src",
+  "/Users/ad/work/trading-tools/apps/trade_daemon/pyproject.toml",
+  "/Users/ad/work/trading-tools/packages/trade_strategies/src",
+];
+const DEFAULT_ASSISTANT_BOT_WATCH_PATHS = [
   "/Users/ad/work/trading-tools/apps/assistant_bot/src",
   "/Users/ad/work/trading-tools/apps/assistant_bot/pyproject.toml",
-  "/Users/ad/work/trading-tools/packages/trade_journal/src",
-  "/Users/ad/work/trading-tools/packages/trade_core/src",
 ];
+const DEFAULT_SHARED_WATCH_PATHS = [
+  "/Users/ad/work/trading-tools/packages/trade_core/src",
+  "/Users/ad/work/trading-tools/packages/trade_journal/src",
+];
+
+type ManagedProcessDefaults = {
+  cwd: string;
+  command: string;
+  args: string[];
+  watchPaths: string[];
+};
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -64,25 +89,19 @@ function resolvePathList(
   });
 }
 
-export function resolveAssistantBotSidecarConfig(
-  pluginConfig: Record<string, unknown> | undefined,
+function resolveManagedProcessConfig(
+  rawValue: unknown,
+  defaults: ManagedProcessDefaults,
   resolvePath?: (input: string) => string,
-): AssistantBotSidecarConfig {
-  const raw = asRecord(pluginConfig);
+): ManagedProcessConfig {
+  const raw = asRecord(rawValue);
   const watchRaw = asRecord(raw.watch);
-  const cwd =
-    typeof raw.cwd === "string" && raw.cwd.trim() ? raw.cwd.trim() : DEFAULT_TRADING_TOOLS_DIR;
-  const command = typeof raw.command === "string" && raw.command.trim() ? raw.command.trim() : "uv";
-  const args = asStringArray(raw.args) ?? [
-    "run",
-    "--project",
-    DEFAULT_TRADING_TOOLS_DIR,
-    "--package",
-    "assistant-bot",
-    "assistant-bot",
-  ];
+  const cwd = typeof raw.cwd === "string" && raw.cwd.trim() ? raw.cwd.trim() : defaults.cwd;
+  const command =
+    typeof raw.command === "string" && raw.command.trim() ? raw.command.trim() : defaults.command;
+  const args = asStringArray(raw.args) ?? defaults.args;
   const watchPaths = resolvePathList(
-    asStringArray(watchRaw.paths) ?? DEFAULT_WATCH_PATHS,
+    asStringArray(watchRaw.paths) ?? defaults.watchPaths,
     resolvePath,
   );
 
@@ -99,5 +118,56 @@ export function resolveAssistantBotSidecarConfig(
       debounceMs: asNumber(watchRaw.debounceMs, 750),
       paths: watchPaths,
     },
+  };
+}
+
+export function resolveAssistantBotSidecarConfig(
+  pluginConfig: Record<string, unknown> | undefined,
+  resolvePath?: (input: string) => string,
+): AssistantBotSidecarConfig {
+  const raw = asRecord(pluginConfig);
+
+  return {
+    enabled: raw.enabled !== false,
+    startupGraceMs: asNumber(raw.startupGraceMs, DEFAULT_STARTUP_GRACE_MS),
+    daemon: resolveManagedProcessConfig(
+      raw.daemon,
+      {
+        cwd: DEFAULT_TRADING_TOOLS_DIR,
+        command: "uv",
+        args: [
+          "run",
+          "--project",
+          DEFAULT_TRADING_TOOLS_DIR,
+          "--package",
+          "trade-daemon",
+          "trade-daemon",
+          "run",
+        ],
+        watchPaths: DEFAULT_DAEMON_WATCH_PATHS,
+      },
+      resolvePath,
+    ),
+    assistantBot: resolveManagedProcessConfig(
+      raw.assistantBot,
+      {
+        cwd: DEFAULT_TRADING_TOOLS_DIR,
+        command: "uv",
+        args: [
+          "run",
+          "--project",
+          DEFAULT_TRADING_TOOLS_DIR,
+          "--package",
+          "assistant-bot",
+          "assistant-bot",
+        ],
+        watchPaths: DEFAULT_ASSISTANT_BOT_WATCH_PATHS,
+      },
+      resolvePath,
+    ),
+    sharedWatchPaths: resolvePathList(
+      asStringArray(raw.sharedWatchPaths) ?? DEFAULT_SHARED_WATCH_PATHS,
+      resolvePath,
+    ),
   };
 }
