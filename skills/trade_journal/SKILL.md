@@ -40,19 +40,19 @@ Primary docs:
 
 Case inspection:
 
-- `casectl list-open`
-- `casectl show-case <case-id>`
-- `casectl show-events <case-id>`
+- `casectl list-open-case-summaries`
+- `casectl show-case-summary <case-id>`
+- `casectl show-case-event-journal <case-id>`
 
 Trigger inspection and mutation:
 
-- `triggerctl sample --strategy-key <strategy-key>`
-- `triggerctl validate --strategy-key <strategy-key> --parameters-json '<json>'`
-- `triggerctl list`
-- `triggerctl show --trigger-id <trigger-id>`
-- `triggerctl upsert ...`
-- `triggerctl disable --trigger-id <trigger-id>`
-- `triggerctl seed-defaults --strategy-key <strategy-key> [--apply]`
+- `triggerctl show-default-trigger-parameters --strategy-key <strategy-key>`
+- `triggerctl validate-trigger-parameters --strategy-key <strategy-key> --parameters-json '<json>'`
+- `triggerctl list-trigger-definitions`
+- `triggerctl show-trigger-definition --trigger-id <trigger-id>`
+- `triggerctl upsert-trigger-definition ...`
+- `triggerctl disable-trigger-definition --trigger-id <trigger-id>`
+- `triggerctl seed-default-trigger-definitions --strategy-key <strategy-key> [--apply]`
 
 ## Defaults
 
@@ -71,44 +71,44 @@ Trigger inspection and mutation:
 List active cases:
 
 ```bash
-casectl list-open
+casectl list-open-case-summaries
 ```
 
 Inspect one canonical case:
 
 ```bash
-casectl show-case <case-id>
-casectl show-events <case-id>
+casectl show-case-summary <case-id>
+casectl show-case-event-journal <case-id>
 ```
 
 Preview strategy defaults:
 
 ```bash
-triggerctl sample --strategy-key gap_watch
-triggerctl sample --strategy-key rth_breakout
-triggerctl sample --strategy-key btc_threshold
-triggerctl sample --strategy-key crypto_momentum_scalp
+triggerctl show-default-trigger-parameters --strategy-key gap_watch
+triggerctl show-default-trigger-parameters --strategy-key rth_breakout
+triggerctl show-default-trigger-parameters --strategy-key btc_threshold
+triggerctl show-default-trigger-parameters --strategy-key crypto_momentum_scalp
 ```
 
 Important:
 
-- `sample` and `seed-defaults` are still most useful for the older phase-1 families above
+- `show-default-trigger-parameters` and `seed-default-trigger-definitions` are still most useful for the older phase-1 families above
 - the newer stock watch families are usually hand-validated and hand-upserted today
 
 Validate or seed defaults:
 
 ```bash
-triggerctl validate --strategy-key gap_watch --parameters-json '{"min_gap_pct":0.04,"min_price":2.0,"min_premarket_volume":500000,"or_minutes":5,"expiry_minutes":90}'
-triggerctl seed-defaults --strategy-key gap_watch --apply
-triggerctl seed-defaults --strategy-key rth_breakout --apply
-triggerctl seed-defaults --strategy-key crypto_momentum_scalp --apply
-triggerctl list
+triggerctl validate-trigger-parameters --strategy-key gap_watch --parameters-json '{"min_gap_pct":0.04,"min_price":2.0,"min_premarket_volume":500000,"or_minutes":5,"expiry_minutes":90}'
+triggerctl seed-default-trigger-definitions --strategy-key gap_watch --apply
+triggerctl seed-default-trigger-definitions --strategy-key rth_breakout --apply
+triggerctl seed-default-trigger-definitions --strategy-key crypto_momentum_scalp --apply
+triggerctl list-trigger-definitions
 ```
 
 Create or update one symbol-scoped trigger:
 
 ```bash
-triggerctl upsert \
+triggerctl upsert-trigger-definition \
   --strategy-key btc_threshold \
   --trigger-key btc-threshold-kraken \
   --scope-kind symbol \
@@ -119,7 +119,7 @@ triggerctl upsert \
 Create or update one crypto momentum scalp trigger:
 
 ```bash
-triggerctl upsert \
+triggerctl upsert-trigger-definition \
   --strategy-key crypto_momentum_scalp \
   --trigger-key btcusd-long \
   --scope-kind symbol \
@@ -130,11 +130,11 @@ triggerctl upsert \
 Create or update one stock level watch trigger:
 
 ```bash
-triggerctl validate \
+triggerctl validate-trigger-parameters \
   --strategy-key equity_level_watch \
   --parameters-json '{"venue":"SMART","symbol":"AAPL","timeframe":"1m","level_price":250,"direction":"above","cooldown_minutes":30,"discord_channel_id":"1234567890","discord_mention_text":"<@1234567890>"}'
 
-triggerctl upsert \
+triggerctl upsert-trigger-definition \
   --strategy-key equity_level_watch \
   --trigger-key aapl-250-break \
   --scope-kind symbol \
@@ -145,11 +145,11 @@ triggerctl upsert \
 Create or update one stock VWAP bounce trigger:
 
 ```bash
-triggerctl validate \
+triggerctl validate-trigger-parameters \
   --strategy-key equity_vwap_bounce_watch \
   --parameters-json '{"venue":"SMART","symbol":"AAPL","timeframe":"1m","reference_sigma":0,"touch_tolerance_bps":5,"max_overshoot_bps":20,"alert_ttl_minutes":20,"notify_invalidations":true,"discord_channel_id":"1234567890"}'
 
-triggerctl upsert \
+triggerctl upsert-trigger-definition \
   --strategy-key equity_vwap_bounce_watch \
   --trigger-key aapl-vwap-bounce \
   --scope-kind symbol \
@@ -169,8 +169,8 @@ triggerctl upsert \
 
 If the user wants a new alert or background monitor:
 
-1. inspect current triggers with `triggerctl list`
-2. create or update the right trigger row with `triggerctl upsert`
+1. inspect current triggers with `triggerctl list-trigger-definitions`
+2. create or update the right trigger row with `triggerctl upsert-trigger-definition`
 3. make sure `trade-daemon` is running with the needed observation source
 4. inspect the resulting case with `casectl`
 
@@ -183,16 +183,16 @@ For stock watch alerts specifically:
 
 ## Safe workflow
 
-1. Start with `casectl list-open` or `casectl show-case` before changing trigger rows.
-2. Use `triggerctl sample` and `triggerctl validate` before `triggerctl upsert`.
-3. Prefer `seed-defaults --apply` for baseline strategy rows instead of hand-writing every parameter.
+1. Start with `casectl list-open-case-summaries` or `casectl show-case-summary` before changing trigger rows.
+2. Use `triggerctl show-default-trigger-parameters` and `triggerctl validate-trigger-parameters` before `triggerctl upsert-trigger-definition`.
+3. Prefer `seed-default-trigger-definitions --apply` for baseline strategy rows instead of hand-writing every parameter.
 4. If the task is operational, confirm the relevant daemon source is enabled before assuming a trigger row should fire.
 5. Use the `trade-daemon` skill when the question turns into source ingestion or wake generation rather than simple inspection.
 
 Adjustment for stock watch families:
 
-- use `triggerctl validate` plus explicit JSON payloads
-- do not assume `seed-defaults --apply` is the right path for those watch families
+- use `triggerctl validate-trigger-parameters` plus explicit JSON payloads
+- do not assume `seed-default-trigger-definitions --apply` is the right path for those watch families
 
 ## Current smoke surfaces
 
@@ -218,6 +218,6 @@ Edge wake-delivery smoke:
 
 - the old SQLite tradedb runtime is gone
 - there is no `idea create`, `idea observe`, `idea evaluate`, or `idea review add` surface anymore
-- `casectl` is intentionally small: list open cases, show one case, show events
+- `casectl` is intentionally small: list open case summaries, show one case summary, show one case event journal
 - cases are append-only from daemon transitions; operator changes usually flow through `cases.daemon_inbox`
 - trigger rows are not detector instances; if the daemon source is off, nothing will fire

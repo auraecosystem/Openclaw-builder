@@ -149,7 +149,7 @@ Operational detail:
 When debugging, inspect both sides:
 
 - `assistant-bot` log + Discord delivery
-- canonical rows via `casectl show-case <case_id>` and `casectl show-events <case_id>`
+- canonical rows via `casectl show-case-summary <case_id>` and `casectl show-case-event-journal <case_id>`
 
 ## OpenClaw Usage Pattern
 
@@ -168,8 +168,8 @@ If OpenClaw needs the wake to explicitly ping another Discord actor:
 
 If OpenClaw needs to help with a follow-up action:
 
-- review the case with `casectl show-case`
-- inspect trigger config with `triggerctl show` or `triggerctl list`
+- review the case with `casectl show-case-summary`
+- inspect trigger config with `triggerctl show-trigger-definition` or `triggerctl list-trigger-definitions`
 - inspect daemon state with the `trade-daemon` skill
 - use Discord slash commands for review / note / command intake, or use trading-tools inbox workflows
 - do not invent a nonexistent assistant-bot relay API
@@ -178,7 +178,7 @@ If OpenClaw needs to help with a follow-up action:
 
 1. confirm `assistant-bot` is actually running
 2. inspect the log at `/Users/ad/work/trading-tools/var/assistant-bot.log` or the path from `ASSISTANT_BOT_LOG_PATH`
-3. confirm wake rows exist with `casectl show-case <case_id>` and `casectl show-events <case_id>`
+3. confirm wake rows exist with `casectl show-case-summary <case_id>` and `casectl show-case-event-journal <case_id>`
 4. confirm a queue message was emitted in the daemon-side smoke or DB
 5. if needed, rerun `/Users/ad/work/trading-tools/scripts/smoke/smoke_edge_alert_flow.sh`
 

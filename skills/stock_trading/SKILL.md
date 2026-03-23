@@ -169,33 +169,33 @@ casectl ...
 Common examples:
 
 ```bash
-casectl list-open
-casectl show-case <case-id>
-casectl show-events <case-id>
-triggerctl list
-triggerctl sample --strategy-key gap_watch
+casectl list-open-case-summaries
+casectl show-case-summary <case-id>
+casectl show-case-event-journal <case-id>
+triggerctl list-trigger-definitions
+triggerctl show-default-trigger-parameters --strategy-key gap_watch
 ```
 
 Daily quick set (concise):
 
 ```bash
 # 1) Active canonical cases
-casectl list-open
+casectl list-open-case-summaries
 
 # 2) Inspect one case
-casectl show-case <case-id>
-casectl show-events <case-id>
+casectl show-case-summary <case-id>
+casectl show-case-event-journal <case-id>
 
 # 3) Preview or validate trigger params
-triggerctl sample --strategy-key gap_watch
-triggerctl validate --strategy-key gap_watch --parameters-json '{"min_gap_pct":0.04,"min_price":2.0,"min_premarket_volume":500000,"or_minutes":5,"expiry_minutes":90}'
+triggerctl show-default-trigger-parameters --strategy-key gap_watch
+triggerctl validate-trigger-parameters --strategy-key gap_watch --parameters-json '{"min_gap_pct":0.04,"min_price":2.0,"min_premarket_volume":500000,"or_minutes":5,"expiry_minutes":90}'
 
 # 4) Upsert or seed persistent trigger rows
-triggerctl seed-defaults --strategy-key gap_watch --apply
-triggerctl upsert --strategy-key btc_threshold --trigger-key btc-threshold-main --scope-kind symbol --scope-ref BTCUSD --parameters-json '{...}'
+triggerctl seed-default-trigger-definitions --strategy-key gap_watch --apply
+triggerctl upsert-trigger-definition --strategy-key btc_threshold --trigger-key btc-threshold-main --scope-kind symbol --scope-ref BTCUSD --parameters-json '{...}'
 ```
 
-For the stock watch families, skip `seed-defaults` and validate explicit JSON instead.
+For the stock watch families, skip `seed-default-trigger-definitions` and validate explicit JSON instead.
 
 ## Trigger model
 
@@ -379,19 +379,19 @@ Examples:
 - swing breakout above a defined pivot:
   - use the strategy-specific trigger params rather than a generic `price_above` envelope
 - BTC threshold on Kraken:
-  - use `btc_threshold` plus `triggerctl upsert`
+- use `btc_threshold` plus `triggerctl upsert-trigger-definition`
 - BTC momentum scalp on Kraken:
-  - use `crypto_momentum_scalp` plus `triggerctl upsert`
+  - use `crypto_momentum_scalp` plus `triggerctl upsert-trigger-definition`
   - ensure `TRADE_DAEMON_KRAKEN_SCANNER_PAIRS` is enabled on the daemon
 - stock key level on TWS:
-  - use `equity_level_watch` plus `triggerctl upsert`
+  - use `equity_level_watch` plus `triggerctl upsert-trigger-definition`
   - ensure `TRADE_DAEMON_TWS_INTRADAY_SYMBOLS` is enabled on the daemon
 - stock VWAP bounce or reclaim on TWS:
   - use `equity_vwap_bounce_watch` or `equity_vwap_reclaim_watch`
   - ensure `TRADE_DAEMON_TWS_INTRADAY_SYMBOLS` is enabled on the daemon
   - use `discord_mention_text` if the Discord wake should explicitly ping an AI bot or role
 - follow-up review handling:
-  - inspect case state with `casectl show-case` and `casectl show-events`
+  - inspect case state with `casectl show-case-summary` and `casectl show-case-event-journal`
 
 OpenClaw delivery guidance:
 

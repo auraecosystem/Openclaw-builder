@@ -176,9 +176,9 @@ Use `casectl` and SQL to verify:
 Typical operator checks:
 
 ```bash
-casectl list-open
-casectl show-case <case-id>
-casectl show-events <case-id>
+casectl list-open-case-summaries
+casectl show-case-summary <case-id>
+casectl show-case-event-journal <case-id>
 ```
 
 ## Smoke Scripts
@@ -213,7 +213,7 @@ If the task is about live BTC alerts:
 
 1. identify which strategy family owns the setup:
    `btc_threshold` for simple threshold crossings, `crypto_momentum_scalp` for scanner-driven scalp setups
-2. inspect or upsert the relevant trigger row with `triggerctl`
+2. inspect or upsert the relevant trigger row with `triggerctl list-trigger-definitions`, `triggerctl show-trigger-definition`, or `triggerctl upsert-trigger-definition`
 3. make sure the daemon has the matching source enabled:
    `TRADE_DAEMON_KRAKEN_PAIRS` for ticker/OHLC paths, `TRADE_DAEMON_KRAKEN_SCANNER_PAIRS` for scanner paths
 4. run a one-shot or full daemon loop
@@ -239,7 +239,7 @@ The crypto momentum scalp path is:
 Important runtime detail:
 
 - trigger rows configure reducer behavior and routing after observations exist
-- scanner construction is daemon/env-driven, not created dynamically by `triggerctl`
+- scanner construction is daemon/env-driven, not created dynamically by `triggerctl upsert-trigger-definition`
 - a new trigger row does not by itself create a new observation source or detector instance
 
 ## Stock Watch Guidance
@@ -251,7 +251,7 @@ If the task is about "watch this stock", "alert at this level", "wake the AI bot
    `equity_vwap_bounce_watch` for touch-and-confirm bounce behavior,
    `equity_vwap_reclaim_watch` for reclaim-after-loss behavior
 2. make sure the daemon has `TRADE_DAEMON_TWS_INTRADAY_SYMBOLS` enabled for the symbol set
-3. create or inspect the trigger row with `triggerctl`
+3. create or inspect the trigger row with `triggerctl validate-trigger-parameters`, `triggerctl list-trigger-definitions`, or `triggerctl upsert-trigger-definition`
 4. run a one-shot or full daemon loop
 5. inspect the resulting case and wake via `casectl`
 6. let `assistant-bot` deliver the Discord wake
