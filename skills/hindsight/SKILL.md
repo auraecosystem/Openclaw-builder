@@ -12,6 +12,7 @@ Use this skill when the task is about Hindsight usage, not generic vector search
 ## References
 
 - `references/global-docs.md` for the canonical local docs map
+- `/Users/ad/dotfiles/docs/tools/hindsight/hindsight-retained-item-template.md` for the manual retained-item template
 
 ## Workflow
 
@@ -30,6 +31,7 @@ Use this skill when the task is about Hindsight usage, not generic vector search
    - use real timestamps or `"unset"` for timeless reference docs
    - use tags for scope
    - skip low-signal hubs, nav dumps, and duplicate canonicals
+   - use the retained-item template when preparing a manual atomic ingest
 6. Use `recall` for grounding and `reflect` only when synthesis is actually needed.
 
 ## Local deployment facts
