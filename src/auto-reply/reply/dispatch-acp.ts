@@ -212,6 +212,7 @@ async function finalizeAcpTurnOutput(params: {
     params.delivery.hasDeliveredVisibleText() && !params.delivery.hasFailedVisibleTextDelivery();
   const ttsMode = resolveConfiguredTtsMode(params.cfg);
   const accumulatedBlockText = params.delivery.getAccumulatedBlockText();
+  const deliveredBlockCount = params.delivery.getBlockCount();
   const hasAccumulatedBlockText = accumulatedBlockText.trim().length > 0;
   const ttsStatus = resolveStatusTtsSnapshot({
     cfg: params.cfg,
@@ -245,11 +246,13 @@ async function finalizeAcpTurnOutput(params: {
     }
   }
 
-  // Some ACP parent surfaces only expose terminal replies, so block routing alone is not enough
-  // to prove the final result was visible to the user.
+  // Only synthesize a terminal text fallback when ACP produced text but no
+  // visible block reply was actually delivered. If blocks already streamed to
+  // the user, sending the same text again would duplicate the answer.
   const shouldDeliverTextFallback =
     ttsMode !== "all" &&
     hasAccumulatedBlockText &&
+    deliveredBlockCount === 0 &&
     !finalMediaDelivered &&
     !params.delivery.hasDeliveredFinalReply() &&
     (!params.delivery.hasDeliveredVisibleText() || params.delivery.hasFailedVisibleTextDelivery());

@@ -26,6 +26,7 @@ import {
   logMessageQueued,
   logSessionStateChange,
 } from "../../logging/diagnostic.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
   buildPluginBindingDeclinedText,
   buildPluginBindingErrorText,
@@ -99,6 +100,7 @@ const AUDIO_PLACEHOLDER_RE = /^<media:audio>(\s*\([^)]*\))?$/i;
 const AUDIO_HEADER_RE = /^\[Audio\b/i;
 const normalizeMediaType = (value: string): string =>
   normalizeOptionalString(value.split(";")[0])?.toLowerCase() ?? "";
+const log = createSubsystemLogger("reply-dispatch");
 
 function shouldSuppressDirectMentionSilentReply(
   ctx: FinalizedMsgContext,
@@ -120,6 +122,20 @@ function shouldSuppressDirectMentionSilentReply(
     return true;
   }
   return isSilentReplyText(trimmed, SILENT_REPLY_TOKEN) && !hasMedia && !hasChannelData;
+}
+
+function applyDirectMentionSilentGuard(params: {
+  ctx: FinalizedMsgContext;
+  reply: ReplyPayload | undefined;
+}): ReplyPayload | undefined {
+  if (!shouldSuppressDirectMentionSilentReply(params.ctx, params.reply)) {
+    return params.reply;
+  }
+  log.warn("reply-dispatch: suppressing empty or silent reply for explicit Discord mention", {
+    sessionKey: params.ctx.SessionKey,
+    messageId: params.ctx.MessageSid ?? params.ctx.MessageSidFirst ?? params.ctx.MessageSidLast,
+  });
+  return undefined;
 }
 const isInboundAudioContext = (ctx: FinalizedMsgContext): boolean => {
   const rawTypes = [
@@ -982,10 +998,15 @@ export async function dispatchReplyFromConfig(params: {
       }
     }
 
-    const rawReplies = replyResult ? (Array.isArray(replyResult) ? replyResult : [replyResult]) : [];
-    const replies = rawReplies.filter(
-      (reply) => !shouldSuppressDirectMentionSilentReply(ctx, reply),
-    );
+    const rawReplies = replyResult
+      ? Array.isArray(replyResult)
+        ? replyResult
+        : [replyResult]
+      : [];
+    const guardedReplies = rawReplies
+      .map((reply) => applyDirectMentionSilentGuard({ ctx, reply }))
+      .filter((reply): reply is ReplyPayload => Boolean(reply));
+    const replies = guardedReplies;
 
     let queuedFinal = false;
     let routedFinalCount = 0;
