@@ -1099,7 +1099,7 @@ Requirements and constraints:
 Example:
 
 ```bash
-message(action="send", channel="discord", target="channel:123", path="/path/to/audio.mp3", asVoice=true)
+message(action="sendAttachment", channel="discord", target="channel:123", path="/path/to/audio.mp3", asVoice=true)
 ```
 
 ## Troubleshooting

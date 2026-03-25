@@ -21,6 +21,7 @@ Use the `message` tool. No provider-specific `discord` tool exposed to the agent
 - Avoid Markdown tables in outbound Discord messages.
 - Mention users as `<@USER_ID>`.
 - Prefer Discord components v2 (`components`) for rich UI; use legacy `embeds` only when you must.
+- For file/media/voice uploads, use `action: "sendAttachment"`. Do not put `buffer` on plain `action: "send"`.
 
 ## Targets
 
@@ -45,7 +46,7 @@ Send with media:
 
 ```json
 {
-  "action": "send",
+  "action": "sendAttachment",
   "channel": "discord",
   "to": "channel:123",
   "message": "see attachment",

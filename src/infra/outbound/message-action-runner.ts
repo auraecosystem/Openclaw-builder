@@ -303,6 +303,26 @@ type ResolvedActionContext = {
   resolvedTarget?: ResolvedMessagingTarget;
   abortSignal?: AbortSignal;
 };
+
+function hasNonEmptyParamValue(value: unknown): boolean {
+  if (value == null) {
+    return false;
+  }
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+  return true;
+}
+
+function assertSendDoesNotUseInlineAttachmentBuffer(params: Record<string, unknown>): void {
+  if (!hasNonEmptyParamValue(params.buffer)) {
+    return;
+  }
+  throw new Error(
+    'action="send" does not accept inline attachment uploads via "buffer". Use action="sendAttachment" with "to", "buffer", "filename", and optional "contentType".',
+  );
+}
+
 function resolveGateway(input: RunMessageActionParams): MessageActionRunnerGateway | undefined {
   if (!input.gateway) {
     return undefined;
@@ -412,6 +432,7 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
   } = ctx;
   throwIfAborted(abortSignal);
   const action: ChannelMessageActionName = "send";
+  assertSendDoesNotUseInlineAttachmentBuffer(params);
   const to = readStringParam(params, "to", { required: true });
   // Support media, path, and filePath parameters for attachments
   const mediaHint =

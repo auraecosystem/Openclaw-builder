@@ -97,17 +97,31 @@ function buildSendSchema(options: { includeInteractive: boolean }) {
     ),
     media: Type.Optional(
       Type.String({
-        description: "Media URL or local path. data: URLs are not supported here, use buffer.",
+        description:
+          "Media URL or local path. For inline base64 uploads, use action=sendAttachment with buffer + filename. data: URLs are not supported here.",
       }),
     ),
-    filename: Type.Optional(Type.String()),
+    filename: Type.Optional(
+      Type.String({
+        description: "Upload filename. Required with action=sendAttachment when using buffer.",
+      }),
+    ),
     buffer: Type.Optional(
       Type.String({
-        description: "Base64 payload for attachments (optionally a data: URL).",
+        description:
+          "Base64 payload for attachments. Use with action=sendAttachment (or setGroupIcon); plain send rejects buffer uploads.",
       }),
     ),
-    contentType: Type.Optional(Type.String()),
-    mimeType: Type.Optional(Type.String()),
+    contentType: Type.Optional(
+      Type.String({
+        description: "Upload MIME type. Optional for action=sendAttachment.",
+      }),
+    ),
+    mimeType: Type.Optional(
+      Type.String({
+        description: "Alias for contentType. Optional for action=sendAttachment.",
+      }),
+    ),
     caption: Type.Optional(Type.String()),
     path: Type.Optional(Type.String()),
     filePath: Type.Optional(Type.String()),
@@ -566,7 +580,8 @@ function buildMessageToolDescription(options?: {
   agentId?: string;
   requesterSenderId?: string;
 }): string {
-  const baseDescription = "Send, delete, and manage messages via channel plugins.";
+  const baseDescription =
+    "Send, delete, and manage messages via channel plugins. Use sendAttachment for file/media uploads.";
   const resolvedOptions = options ?? {};
   const currentChannel = normalizeMessageChannel(resolvedOptions.currentChannel);
 

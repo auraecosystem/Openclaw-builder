@@ -217,6 +217,9 @@ function buildMessagingSection(params: {
           "### message tool",
           "- Use `message` for proactive sends + channel actions (polls, reactions, etc.).",
           "- For `action=send`, include `to` and `message`.",
+          "- For file/media uploads, use `action=sendAttachment` instead of `action=send`.",
+          "- For `action=sendAttachment`, include `to` plus either a local `path`/`filePath`/`media` or a base64 `buffer` with `filename` (and `contentType` when known).",
+          "- If `action=send` fails because you supplied upload fields like `buffer`, retry with `action=sendAttachment`.",
           `- If multiple channels are configured, pass \`channel\` (${params.messageChannelOptions}).`,
           params.runtimeChannel && params.channelActions && params.channelActions.length > 0
             ? `- Current ${params.runtimeChannel} actions: ${params.channelActions.join(", ")}.`

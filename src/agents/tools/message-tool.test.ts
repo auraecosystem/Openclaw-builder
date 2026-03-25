@@ -802,6 +802,14 @@ describe("message tool description", () => {
     setActivePluginRegistry(createTestRegistry([]));
   });
 
+  it("includes sendAttachment guidance for uploads", () => {
+    const tool = createMessageTool({
+      config: {} as never,
+    });
+
+    expect(tool.description).toContain("Use sendAttachment for file/media uploads.");
+  });
+
   const bluebubblesPlugin = createChannelPlugin({
     id: "bluebubbles",
     label: "BlueBubbles",

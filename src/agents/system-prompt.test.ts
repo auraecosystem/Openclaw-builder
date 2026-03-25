@@ -799,6 +799,15 @@ describe("buildAgentSystemPrompt", () => {
 
     expect(prompt).toContain("### message tool");
     expect(prompt).toContain("Use `message` for proactive sends + channel actions");
+    expect(prompt).toContain(
+      "For file/media uploads, use `action=sendAttachment` instead of `action=send`.",
+    );
+    expect(prompt).toContain(
+      "For `action=sendAttachment`, include `to` plus either a local `path`/`filePath`/`media` or a base64 `buffer` with `filename`",
+    );
+    expect(prompt).toContain(
+      "If `action=send` fails because you supplied upload fields like `buffer`, retry with `action=sendAttachment`.",
+    );
     expect(prompt).toContain(`respond with ONLY: ${SILENT_REPLY_TOKEN}`);
   });
 

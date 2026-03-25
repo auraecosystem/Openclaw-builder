@@ -621,6 +621,22 @@ describe("runMessageAction media behavior", () => {
       setActivePluginRegistry(createTestRegistry([]));
     });
 
+    it("rejects inline buffer uploads on send with recovery guidance", async () => {
+      await expect(
+        runDrySend({
+          cfg: slackConfig,
+          actionParams: {
+            channel: "slack",
+            target: "#C12345678",
+            message: "see attachment",
+            buffer: Buffer.from("hello").toString("base64"),
+            filename: "report.md",
+            contentType: "text/markdown",
+          },
+        }),
+      ).rejects.toThrow(/sendAttachment/);
+    });
+
     it.each([
       {
         name: "media absolute path",
