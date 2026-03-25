@@ -42,9 +42,9 @@ Deeper setup / methodology docs:
 - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-bull-flag.md`
 - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-flat-top-breakout.md`
 - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-abcd.md`
-- `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-rules.md`
-- `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-breakout.md`
-- `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-episodic-pivot.md`
+- `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Strategies/Qullamaggie.md`
+- `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Continuation Breakout.md`
+- `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Episodic Pivot.md`
 - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-parabolic-short.md`
 - `/Users/ad/work/ai/openclaw/skills/algotrader/references/strategy-comparison.md`
 
@@ -270,9 +270,9 @@ Do not default to inventing a full autonomous Ross bull-flag detector when the a
 1. Use `macro-dashboard` to decide whether the broader regime supports breakout continuation.
 2. Use `tws market bars` or existing catalog/backtest data for the name.
 3. Compare the setup to:
-   - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-rules.md`
-   - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-breakout.md`
-   - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-episodic-pivot.md`
+   - `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Strategies/Qullamaggie.md`
+   - `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Continuation Breakout.md`
+   - `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Episodic Pivot.md`
    - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-parabolic-short.md`
    - `/Users/ad/work/ai/openclaw/skills/algotrader/references/strategy-comparison.md`
 4. Inspect or seed the relevant canonical trigger rows before execution.

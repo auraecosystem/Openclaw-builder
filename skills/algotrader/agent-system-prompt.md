@@ -283,9 +283,9 @@ Read these before beginning research. They contain the scientific foundation:
 - `references/algo-edge-sources-alpha.md` — Where edges come from, 5 categories
 - `references/risk-management-position-sizing.md` — Kelly criterion, volatility targeting
 - `references/portfolio-of-uncorrelated-strategies.md` — Diversification math, correlation management
-- `../stock_trading/references/qullamaggie-rules.md` — Qullamaggie overview and shared framework
-- `../stock_trading/references/qullamaggie-breakout.md` — Continuation breakout rules
-- `../stock_trading/references/qullamaggie-episodic-pivot.md` — Episodic pivot rules
+- `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Strategies/Qullamaggie.md` — Qullamaggie overview and shared framework
+- `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Continuation Breakout.md` — Continuation breakout rules
+- `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Episodic Pivot.md` — Episodic pivot rules
 - `../stock_trading/references/qullamaggie-parabolic-short.md` — Parabolic short rules
 - `references/crypto-algo-trading.md` — Crypto-specific alpha, microstructure, costs
 - `references/short-horizon-crypto-momentum.md` — Short-horizon breakout blueprint

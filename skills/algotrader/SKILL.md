@@ -87,9 +87,9 @@ The detailed ranking and reasoning are documented in:
 
 Use these when the task is specifically about the trading playbooks rather than the research pipeline:
 
-- `../stock_trading/references/qullamaggie-rules.md`
-- `../stock_trading/references/qullamaggie-breakout.md`
-- `../stock_trading/references/qullamaggie-episodic-pivot.md`
+- `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Strategies/Qullamaggie.md`
+- `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Continuation Breakout.md`
+- `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Episodic Pivot.md`
 - `../stock_trading/references/qullamaggie-parabolic-short.md`
 
 ## Data Assumptions

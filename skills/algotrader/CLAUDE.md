@@ -201,7 +201,7 @@ Five Rust structs implementing the `Setup` trait directly: `BreakoutQuick`, `Bre
 
 ### `references/` — 16 research files
 
-Core: `../stock_trading/references/qullamaggie-rules.md`, `../stock_trading/references/qullamaggie-breakout.md`, `../stock_trading/references/qullamaggie-episodic-pivot.md`, `../stock_trading/references/qullamaggie-parabolic-short.md`, `short-horizon-crypto-momentum.md`, `crypto-algo-trading.md`
+Core: `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Strategies/Qullamaggie.md`, `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Continuation Breakout.md`, `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Episodic Pivot.md`, `../stock_trading/references/qullamaggie-parabolic-short.md`, `short-horizon-crypto-momentum.md`, `crypto-algo-trading.md`
 Methods: `walk-forward-and-validation.md`, `backtesting-sins-and-biases.md`, `signal-processing-timeseries.md`
 Signal processing: `signal-processing-cryptography-overlap.md`, `cross-disciplinary-signal-analysis.md`
 Risk: `risk-management-position-sizing.md`, `transaction-costs-and-slippage.md`
@@ -382,13 +382,13 @@ Markets are a signal extraction problem. Your backtest is a hypothesis — live 
 
 ## References — Key Excerpts
 
-### [`qullamaggie-rules.md`](../stock_trading/references/qullamaggie-rules.md)
+### [`Qullamaggie.md`](/Users/ad/work/trading-tools/knowledge_base/10-Entities/Strategies/Qullamaggie.md)
 Overview and shared framework for the Qullamaggie playbook. Use it first to understand how the three setups fit together, then jump into the setup-specific files.
 
-### [`qullamaggie-breakout.md`](../stock_trading/references/qullamaggie-breakout.md)
+### [`Qullamaggie Continuation Breakout.md`](/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie%20Continuation%20Breakout.md)
 Detailed continuation breakout rules: VCP / flag structure, breakout timing, initial stop, partial profit-taking, trailing logic, and add-on handling.
 
-### [`qullamaggie-episodic-pivot.md`](../stock_trading/references/qullamaggie-episodic-pivot.md)
+### [`Qullamaggie Episodic Pivot.md`](/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie%20Episodic%20Pivot.md)
 Detailed EP rules: catalyst quality, volume confirmation, open timing, gap-day stop placement, and hold logic.
 
 ### [`qullamaggie-parabolic-short.md`](../stock_trading/references/qullamaggie-parabolic-short.md)
