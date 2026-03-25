@@ -45,6 +45,19 @@ configured. Use `agents.defaults.skills` for a shared baseline and
 
 The Gateway can host **one agent** (default) or **many agents** side-by-side.
 
+## Two canonical patterns
+
+OpenClaw uses two different mechanisms, and it is important not to blur them:
+
+- **Deterministic inbound routing**: use `bindings[]` when a Discord/WhatsApp/Slack/Telegram message should go straight to a specific agent because the channel, thread, role, account, or peer already identifies the owner.
+- **Main-agent delegation**: use `sessions_spawn` when the main agent should receive the message, classify the work, and then spawn a specialist sub-agent after reading the content.
+
+If you want "the main agent figures it out", keep inbound routing pointed at `main` and let `main` decide which specialist to spawn. If you want the channel layer to decide, use bindings instead.
+
+For stable topic experts, define each specialist as a first-class `agents.list[]` entry with its own workspace, `agentDir`, and prompt files, then restrict the router with `agents.list[].subagents.allowAgents`.
+
+For Discord, thread-bound subagent sessions (`sessions_spawn({ thread: true, mode: "session" })`) preserve a specialist conversation inside the originating thread when `channels.discord.threadBindings.spawnSubagentSessions` is enabled.
+
 **Workspace note:** each agent’s workspace is the **default cwd**, not a hard
 sandbox. Relative paths resolve inside the workspace, but absolute paths can
 reach other host locations unless sandboxing is enabled. See

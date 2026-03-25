@@ -71,6 +71,20 @@ Primary goals:
 - Keep the tool surface hard to misuse: sub-agents do **not** get session tools by default.
 - Support configurable nesting depth for orchestrator patterns.
 
+## Canonical specialist pattern
+
+When you want a stable topic expert or task expert, define it as a normal OpenClaw agent first, then let a router agent spawn it:
+
+- Put the specialist in `agents.list[]` with its own workspace, `agentDir`, and workspace prompt files.
+- Keep `main` as the front door for Discord or other inbound channels.
+- Restrict `main.subagents.allowAgents` to the allowed specialist agent ids.
+- Put the topic-to-specialist mapping in `main`'s prompt or workspace instructions.
+- Use `sessions_spawn.agentId` for the actual handoff.
+- Use `sessions_spawn.thread: true` and `mode: "session"` when the specialist should stay bound to a Discord thread.
+- Use `sessions_yield` after spawning if the router should stop work and wait for child completion instead of continuing inline.
+
+This is the conventional model for roles like "finance expert", "code expert", and "research expert". It is not a built-in semantic router; the classification lives in the router agent's instructions.
+
 Cost note: each sub-agent has its **own** context and token usage. For heavy or repetitive
 tasks, set a cheaper model for sub-agents and keep your main agent on a higher-quality model.
 You can configure this via `agents.defaults.subagents.model` or per-agent overrides.

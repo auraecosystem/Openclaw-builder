@@ -470,6 +470,8 @@ Example:
 
 Use `bindings[].match.roles` to route Discord guild members to different agents by role ID. Role-based bindings accept role IDs only and are evaluated after peer or parent-peer bindings and before guild-only bindings. If a binding also sets other match fields (for example `peer` + `guildId` + `roles`), all configured fields must match.
 
+Use this when the Discord identity or channel already tells you which agent owns the conversation. If you want one public `main` agent to inspect the message content and then spawn a topic specialist, keep the inbound binding on `main` and let `main` delegate with `sessions_spawn` instead of trying to classify by route alone.
+
 ```json5
 {
   bindings: [
