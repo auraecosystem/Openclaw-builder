@@ -224,6 +224,8 @@ describe("initSessionState thread forking", () => {
     const root = await makeCaseDir("openclaw-thread-session-");
     const sessionsDir = path.join(root, "sessions");
     await fs.mkdir(sessionsDir);
+    const workspaceDir = path.join(root, "workspace");
+    await fs.mkdir(workspaceDir);
 
     const parentSessionId = "parent-session";
     const parentSessionFile = path.join(sessionsDir, "parent.jsonl");
@@ -232,7 +234,7 @@ describe("initSessionState thread forking", () => {
       version: 3,
       id: parentSessionId,
       timestamp: new Date().toISOString(),
-      cwd: process.cwd(),
+      cwd: workspaceDir,
     };
     const message = {
       type: "message",
@@ -265,6 +267,11 @@ describe("initSessionState thread forking", () => {
     });
 
     const cfg = {
+      agents: {
+        defaults: {
+          workspace: workspaceDir,
+        },
+      },
       session: { store: storePath },
     } as OpenClawConfig;
 
@@ -295,20 +302,24 @@ describe("initSessionState thread forking", () => {
       .filter((line) => line.trim().length > 0);
     const parsedHeader = JSON.parse(headerLine) as {
       parentSession?: string;
+      cwd?: string;
     };
     const expectedParentSession = await fs.realpath(parentSessionFile);
     const actualParentSession = parsedHeader.parentSession
       ? await fs.realpath(parsedHeader.parentSession)
       : undefined;
     expect(actualParentSession).toBe(expectedParentSession);
+    expect(parsedHeader.cwd).toBe(workspaceDir);
     warn.mockRestore();
   });
 
-  it("forks from parent when thread session key already exists but was not forked yet", async () => {
+  it("skips fork and creates a fresh thread session when parent cwd differs from current workspace", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const root = await makeCaseDir("openclaw-thread-session-existing-");
+    const root = await makeCaseDir("openclaw-thread-session-cwd-mismatch-");
     const sessionsDir = path.join(root, "sessions");
     await fs.mkdir(sessionsDir);
+    const workspaceDir = path.join(root, "workspace");
+    await fs.mkdir(workspaceDir);
 
     const parentSessionId = "parent-session";
     const parentSessionFile = path.join(sessionsDir, "parent.jsonl");
@@ -317,7 +328,74 @@ describe("initSessionState thread forking", () => {
       version: 3,
       id: parentSessionId,
       timestamp: new Date().toISOString(),
-      cwd: process.cwd(),
+      cwd: path.join(root, "old-sandbox"),
+    };
+    const message = {
+      type: "message",
+      id: "m1",
+      parentId: null,
+      timestamp: new Date().toISOString(),
+      message: { role: "user", content: "Parent prompt" },
+    };
+    await fs.writeFile(
+      parentSessionFile,
+      `${JSON.stringify(header)}\n${JSON.stringify(message)}\n`,
+      "utf-8",
+    );
+
+    const storePath = path.join(root, "sessions.json");
+    const parentSessionKey = "agent:main:slack:channel:c1";
+    await writeSessionStoreFast(storePath, {
+      [parentSessionKey]: {
+        sessionId: parentSessionId,
+        sessionFile: parentSessionFile,
+        updatedAt: Date.now(),
+      },
+    });
+
+    const cfg = {
+      agents: {
+        defaults: {
+          workspace: workspaceDir,
+        },
+      },
+      session: { store: storePath },
+    } as OpenClawConfig;
+
+    const threadSessionKey = "agent:main:slack:channel:c1:thread:999";
+    const result = await initSessionState({
+      ctx: {
+        Body: "Thread reply",
+        SessionKey: threadSessionKey,
+        ParentSessionKey: parentSessionKey,
+      },
+      cfg,
+      commandAuthorized: true,
+    });
+
+    expect(result.sessionEntry.forkedFromParent).toBe(true);
+    expect(result.sessionEntry.sessionId).not.toBe(parentSessionId);
+    expect(result.sessionEntry.sessionFile).toBeTruthy();
+    expect(result.sessionEntry.sessionFile).not.toBe(parentSessionFile);
+    warn.mockRestore();
+  });
+
+  it("forks from parent when thread session key already exists but was not forked yet", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const root = await makeCaseDir("openclaw-thread-session-existing-");
+    const sessionsDir = path.join(root, "sessions");
+    await fs.mkdir(sessionsDir);
+    const workspaceDir = path.join(root, "workspace");
+    await fs.mkdir(workspaceDir);
+
+    const parentSessionId = "parent-session";
+    const parentSessionFile = path.join(sessionsDir, "parent.jsonl");
+    const header = {
+      type: "session",
+      version: 3,
+      id: parentSessionId,
+      timestamp: new Date().toISOString(),
+      cwd: workspaceDir,
     };
     const message = {
       type: "message",
@@ -355,6 +433,11 @@ describe("initSessionState thread forking", () => {
     });
 
     const cfg = {
+      agents: {
+        defaults: {
+          workspace: workspaceDir,
+        },
+      },
       session: { store: storePath },
     } as OpenClawConfig;
 
@@ -459,6 +542,8 @@ describe("initSessionState thread forking", () => {
     const root = await makeCaseDir("openclaw-thread-session-overflow-override-");
     const sessionsDir = path.join(root, "sessions");
     await fs.mkdir(sessionsDir);
+    const workspaceDir = path.join(root, "workspace");
+    await fs.mkdir(workspaceDir);
 
     const parentSessionId = "parent-override";
     const parentSessionFile = path.join(sessionsDir, "parent.jsonl");
@@ -467,7 +552,7 @@ describe("initSessionState thread forking", () => {
       version: 3,
       id: parentSessionId,
       timestamp: new Date().toISOString(),
-      cwd: process.cwd(),
+      cwd: workspaceDir,
     };
     const message = {
       type: "message",
@@ -501,6 +586,11 @@ describe("initSessionState thread forking", () => {
     });
 
     const cfg = {
+      agents: {
+        defaults: {
+          workspace: workspaceDir,
+        },
+      },
       session: {
         store: storePath,
         parentForkMaxTokens: 200_000,

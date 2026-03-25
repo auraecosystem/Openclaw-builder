@@ -5,11 +5,38 @@ import { CURRENT_SESSION_VERSION, SessionManager } from "@mariozechner/pi-coding
 import { resolveSessionFilePath } from "../../config/sessions/paths.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 
+function normalizeComparablePath(value?: string): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? path.resolve(trimmed) : undefined;
+}
+
+function rewriteSessionHeaderCwd(sessionFile: string, cwd: string): void {
+  const raw = fs.readFileSync(sessionFile, "utf-8");
+  const newline = raw.includes("\r\n") ? "\r\n" : "\n";
+  const lines = raw.split(/\r?\n/);
+  if (lines.length === 0 || lines[0]?.trim().length === 0) {
+    return;
+  }
+  const header = JSON.parse(lines[0]) as Record<string, unknown>;
+  lines[0] = JSON.stringify({ ...header, cwd });
+  fs.writeFileSync(sessionFile, lines.join(newline), {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
+}
+
 export function forkSessionFromParentRuntime(params: {
   parentEntry: SessionEntry;
   agentId: string;
   sessionsDir: string;
-}): { sessionId: string; sessionFile: string } | null {
+  targetCwd?: string;
+}):
+  | { status: "forked"; sessionId: string; sessionFile: string }
+  | { status: "skipped"; reason: "cwd_mismatch"; parentCwd?: string; targetCwd?: string }
+  | null {
   const parentSessionFile = resolveSessionFilePath(
     params.parentEntry.sessionId,
     params.parentEntry,
@@ -20,12 +47,27 @@ export function forkSessionFromParentRuntime(params: {
   }
   try {
     const manager = SessionManager.open(parentSessionFile);
+    const targetCwd = normalizeComparablePath(params.targetCwd);
+    const parentCwd = normalizeComparablePath(
+      (manager.getHeader() as { cwd?: unknown } | undefined)?.cwd as string | undefined,
+    );
+    if (targetCwd && parentCwd && parentCwd !== targetCwd) {
+      return {
+        status: "skipped",
+        reason: "cwd_mismatch",
+        parentCwd,
+        targetCwd,
+      };
+    }
     const leafId = manager.getLeafId();
     if (leafId) {
       const sessionFile = manager.createBranchedSession(leafId) ?? manager.getSessionFile();
       const sessionId = manager.getSessionId();
       if (sessionFile && sessionId) {
-        return { sessionId, sessionFile };
+        if (targetCwd) {
+          rewriteSessionHeaderCwd(sessionFile, targetCwd);
+        }
+        return { status: "forked", sessionId, sessionFile };
       }
     }
     const sessionId = crypto.randomUUID();
@@ -37,7 +79,7 @@ export function forkSessionFromParentRuntime(params: {
       version: CURRENT_SESSION_VERSION,
       id: sessionId,
       timestamp,
-      cwd: manager.getCwd(),
+      cwd: targetCwd ?? manager.getCwd(),
       parentSession: parentSessionFile,
     };
     fs.writeFileSync(sessionFile, `${JSON.stringify(header)}\n`, {
@@ -45,7 +87,7 @@ export function forkSessionFromParentRuntime(params: {
       mode: 0o600,
       flag: "wx",
     });
-    return { sessionId, sessionFile };
+    return { status: "forked", sessionId, sessionFile };
   } catch {
     return null;
   }

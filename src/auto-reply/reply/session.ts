@@ -1,6 +1,11 @@
 import crypto from "node:crypto";
 import path from "node:path";
-import { resolveSessionAgentId } from "../../agents/agent-scope.js";
+import {
+  buildTelegramTopicConversationId,
+  normalizeConversationText,
+  parseTelegramChatIdFromTarget,
+} from "../../acp/conversation-id.js";
+import { resolveSessionAgentId, resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
 import { clearBootstrapSnapshotOnSessionRollover } from "../../agents/bootstrap-cache.js";
 import { disposeSessionMcpRuntime } from "../../agents/pi-bundle-mcp-tools.js";
 import { normalizeChatType } from "../../channels/chat-type.js";
@@ -595,13 +600,20 @@ export async function initSessionState(params: {
         parentEntry: sessionStore[parentSessionKey],
         agentId,
         sessionsDir: path.dirname(storePath),
+        targetCwd: resolveAgentWorkspaceDir(cfg, agentId),
       });
-      if (forked) {
+      if (forked?.status === "forked") {
         sessionId = forked.sessionId;
         sessionEntry.sessionId = forked.sessionId;
         sessionEntry.sessionFile = forked.sessionFile;
         sessionEntry.forkedFromParent = true;
         log.warn(`forked session created: file=${forked.sessionFile}`);
+      } else if (forked?.status === "skipped" && forked.reason === "cwd_mismatch") {
+        log.warn(
+          `skipping parent fork (cwd mismatch): parentKey=${parentSessionKey} → sessionKey=${sessionKey} ` +
+            `parentCwd=${forked.parentCwd ?? "unknown"} targetCwd=${forked.targetCwd ?? "unknown"}`,
+        );
+        sessionEntry.forkedFromParent = true;
       }
     }
   }

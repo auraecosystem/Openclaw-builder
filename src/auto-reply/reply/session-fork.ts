@@ -20,7 +20,12 @@ export async function forkSessionFromParent(params: {
   parentEntry: SessionEntry;
   agentId: string;
   sessionsDir: string;
-}): Promise<{ sessionId: string; sessionFile: string } | null> {
+  targetCwd?: string;
+}): Promise<
+  | { status: "forked"; sessionId: string; sessionFile: string }
+  | { status: "skipped"; reason: "cwd_mismatch"; parentCwd?: string; targetCwd?: string }
+  | null
+> {
   const runtime = await import("./session-fork.runtime.js");
   return runtime.forkSessionFromParentRuntime(params);
 }
