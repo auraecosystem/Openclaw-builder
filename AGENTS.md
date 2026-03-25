@@ -257,6 +257,8 @@
 
 - If `git branch -d/-D <branch>` is policy-blocked, delete the local ref directly: `git update-ref -d refs/heads/<branch>`.
 - Agents MUST NOT create or push merge commits on `main`. If `main` has advanced, rebase local commits onto the latest `origin/main` before pushing.
+- `git rerere` is enabled globally and will reuse repeated conflict resolutions automatically.
+- Recurring rebase conflict classes here have been `pnpm-lock.yaml`, `AGENTS.md`, plugin/docs content merges, Discord path refactors, and the underscore skill-path rename.
 - Bulk PR close/reopen safety: if a close action would affect more than 5 PRs, first ask for explicit user confirmation with the exact PR count and target scope/query.
 
 ## GitHub Search (`gh`)
