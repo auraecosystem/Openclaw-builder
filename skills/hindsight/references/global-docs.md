@@ -5,6 +5,8 @@ Use these canonical docs first. They are the durable local source of truth.
 ## Tool docs
 
 - [/Users/ad/dotfiles/docs/tools/hindsight/hindsight-cli.md](/Users/ad/dotfiles/docs/tools/hindsight/hindsight-cli.md)
+- [/Users/ad/dotfiles/docs/tools/hindsight/hindsight-api-wrapper.md](/Users/ad/dotfiles/docs/tools/hindsight/hindsight-api-wrapper.md)
+- [/Users/ad/dotfiles/docs/tools/hindsight/hindsight-retained-item-template.md](/Users/ad/dotfiles/docs/tools/hindsight/hindsight-retained-item-template.md)
 
 ## System docs
 
@@ -20,6 +22,12 @@ Use these canonical docs first. They are the durable local source of truth.
 
 - CLI usage, auth, and local smoke tests:
   - [/Users/ad/dotfiles/docs/tools/hindsight/hindsight-cli.md](/Users/ad/dotfiles/docs/tools/hindsight/hindsight-cli.md)
+- JSON-first manual retain workflow:
+  - [/Users/ad/dotfiles/docs/tools/hindsight/hindsight-api-wrapper.md](/Users/ad/dotfiles/docs/tools/hindsight/hindsight-api-wrapper.md)
+- Manual retained-item preparation:
+  - [/Users/ad/dotfiles/docs/tools/hindsight/hindsight-retained-item-template.md](/Users/ad/dotfiles/docs/tools/hindsight/hindsight-retained-item-template.md)
+- Reliable direct bank-content checks:
+  - [/Users/ad/dotfiles/docs/tools/hindsight/hindsight-api-wrapper.md](/Users/ad/dotfiles/docs/tools/hindsight/hindsight-api-wrapper.md)
 - How retain/recall/reflect fit together:
   - [/Users/ad/dotfiles/docs/systems/hindsight/architecture/retain-recall-reflect-and-storage.md](/Users/ad/dotfiles/docs/systems/hindsight/architecture/retain-recall-reflect-and-storage.md)
 - Production configuration and security posture:
