@@ -35,7 +35,14 @@ Primary tool docs:
 - `/Users/ad/work/ai/openclaw/skills/assistant_bot/SKILL.md`
 - `/Users/ad/work/ai/openclaw/skills/trade_daemon/SKILL.md`
 
-Deeper setup / methodology docs:
+End-to-end autonomous lifecycle playbooks:
+
+- `/Users/ad/dotfiles/docs/domains/trading/strategies/qullamaggie-ep-autonomous-lifecycle.md`
+- `/Users/ad/dotfiles/docs/domains/trading/strategies/qullamaggie-continuation-breakout-autonomous-lifecycle.md`
+- `/Users/ad/dotfiles/docs/domains/trading/strategies/ross-cameron-gap-and-go-autonomous-lifecycle.md`
+- `/Users/ad/dotfiles/docs/domains/trading/strategies/ross-cameron-bull-flag-breakout-autonomous-lifecycle.md`
+
+Source rules / supporting methodology docs:
 
 - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-rules.md`
 - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-gap-and-go.md`
@@ -46,7 +53,7 @@ Deeper setup / methodology docs:
 - `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Continuation Breakout.md`
 - `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Episodic Pivot.md`
 - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-parabolic-short.md`
-- `/Users/ad/work/ai/openclaw/skills/algotrader/references/strategy-comparison.md`
+- `/Users/ad/dotfiles/docs/domains/trading/strategies/strategy-comparison.md`
 
 ## When to use
 
@@ -248,6 +255,8 @@ sec export --format json
 1. Use `macro-dashboard` first to decide whether the tape is supportive, mixed, or hostile for momentum.
 2. Use `tws scanner` and `market snapshot` / `market bars` to build a watchlist.
 3. Compare the candidates to the intraday playbook in:
+   - `/Users/ad/dotfiles/docs/domains/trading/strategies/ross-cameron-gap-and-go-autonomous-lifecycle.md`
+   - `/Users/ad/dotfiles/docs/domains/trading/strategies/ross-cameron-bull-flag-breakout-autonomous-lifecycle.md`
    - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-rules.md`
    - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-gap-and-go.md`
    - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-bull-flag.md`
@@ -270,11 +279,13 @@ Do not default to inventing a full autonomous Ross bull-flag detector when the a
 1. Use `macro-dashboard` to decide whether the broader regime supports breakout continuation.
 2. Use `tws market bars` or existing catalog/backtest data for the name.
 3. Compare the setup to:
+   - `/Users/ad/dotfiles/docs/domains/trading/strategies/qullamaggie-continuation-breakout-autonomous-lifecycle.md`
+   - `/Users/ad/dotfiles/docs/domains/trading/strategies/qullamaggie-ep-autonomous-lifecycle.md`
    - `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Strategies/Qullamaggie.md`
    - `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Continuation Breakout.md`
    - `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Episodic Pivot.md`
    - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-parabolic-short.md`
-   - `/Users/ad/work/ai/openclaw/skills/algotrader/references/strategy-comparison.md`
+   - `/Users/ad/dotfiles/docs/domains/trading/strategies/strategy-comparison.md`
 4. Inspect or seed the relevant canonical trigger rows before execution.
 5. If the trade depends on a future breakout or invalidation level, let `trade-daemon` monitor it and let `assistant-bot` deliver the wake.
 6. Review outcome quality later through canonical case history and inbox-driven review events.
