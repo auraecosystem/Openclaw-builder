@@ -3539,6 +3539,7 @@ export async function runEmbeddedAttempt(
               config: params.config ?? getRuntimeConfig(),
               prompt: params.prompt,
               messages: promptBuildMessages,
+              rawBody: params.rawBody,
               hookCtx,
               hookRunner,
               legacyBeforeAgentStartResult: params.legacyBeforeAgentStartResult,
@@ -4506,6 +4507,7 @@ export async function runEmbeddedAttempt(
                 success: !aborted && !promptError,
                 error: promptError ? formatErrorMessage(promptError) : undefined,
                 durationMs: Date.now() - promptStartedAt,
+                rawBody: params.rawBody,
               },
               {
                 runId: params.runId,

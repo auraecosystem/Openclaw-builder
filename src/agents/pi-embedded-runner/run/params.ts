@@ -108,6 +108,11 @@ export type RunEmbeddedPiAgentParams = {
   transcriptPrompt?: string;
   currentInboundEventKind?: InboundEventKind;
   currentInboundContext?: CurrentInboundPromptContext;
+  /**
+   * The user's original input text before channel structural context,
+   * inbound metadata prefix, and hook injections. Threaded to plugin hooks.
+   */
+  rawBody?: string;
   images?: ImageContent[];
   imageOrder?: PromptImageOrderEntry[];
   /** Optional client-provided tools (OpenResponses hosted tools). */

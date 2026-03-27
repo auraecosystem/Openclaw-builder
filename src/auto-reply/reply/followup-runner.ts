@@ -713,6 +713,7 @@ export function createFollowupRunner(params: {
                 transcriptPrompt: queued.transcriptPrompt,
                 currentInboundEventKind: queued.currentInboundEventKind,
                 currentInboundContext: queued.currentInboundContext,
+                rawBody: queued.rawBody,
                 extraSystemPrompt: run.extraSystemPrompt,
                 silentReplyPromptMode: run.silentReplyPromptMode,
                 sourceReplyDeliveryMode: run.sourceReplyDeliveryMode,
