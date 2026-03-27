@@ -4,6 +4,7 @@ Use these canonical docs first. They are the durable local source of truth.
 
 ## Tool docs
 
+- [/Users/ad/dotfiles/docs/tools/hindsight/hindsight-usage-guide.md](/Users/ad/dotfiles/docs/tools/hindsight/hindsight-usage-guide.md)
 - [/Users/ad/dotfiles/docs/tools/hindsight/hindsight-cli.md](/Users/ad/dotfiles/docs/tools/hindsight/hindsight-cli.md)
 - [/Users/ad/dotfiles/docs/tools/hindsight/hindsight-api-wrapper.md](/Users/ad/dotfiles/docs/tools/hindsight/hindsight-api-wrapper.md)
 - [/Users/ad/dotfiles/docs/tools/hindsight/hindsight-retained-item-template.md](/Users/ad/dotfiles/docs/tools/hindsight/hindsight-retained-item-template.md)
@@ -20,6 +21,8 @@ Use these canonical docs first. They are the durable local source of truth.
 
 ## Which doc to open first
 
+- General local Hindsight workflow:
+  - [/Users/ad/dotfiles/docs/tools/hindsight/hindsight-usage-guide.md](/Users/ad/dotfiles/docs/tools/hindsight/hindsight-usage-guide.md)
 - CLI usage, auth, and local smoke tests:
   - [/Users/ad/dotfiles/docs/tools/hindsight/hindsight-cli.md](/Users/ad/dotfiles/docs/tools/hindsight/hindsight-cli.md)
 - JSON-first manual retain workflow:

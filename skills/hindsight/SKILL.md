@@ -11,6 +11,7 @@ Use this skill when the task is about Hindsight usage, not generic vector search
 
 ## References
 
+- `/Users/ad/dotfiles/docs/tools/hindsight/hindsight-usage-guide.md` for the primary local workflow guide
 - `references/global-docs.md` for the canonical local docs map
 - `/Users/ad/dotfiles/docs/tools/hindsight/hindsight-retained-item-template.md` for the manual retained-item template
 - `/Users/ad/dotfiles/docs/tools/hindsight/hindsight-api-wrapper.md` for the JSON-first local retain wrapper
@@ -23,7 +24,7 @@ Use this skill when the task is about Hindsight usage, not generic vector search
    - ingestion planning
    - retain/recall query usage
    - deployment/configuration troubleshooting
-2. Start with the relevant canonical doc from `references/global-docs.md`.
+2. Start with `/Users/ad/dotfiles/docs/tools/hindsight/hindsight-usage-guide.md` unless the task is already clearly narrow and one of the specialized docs is the better entry point.
 3. Prefer the official `hindsight` CLI for smoke tests, bank management, recall, reflect, and small operator actions.
 4. Prefer `/Users/ad/bin/hindsight-api` for direct API gaps:
    - `retain` for manual atomic retains that need JSON input, tags, metadata, timestamps, or observation scope
@@ -39,6 +40,71 @@ Use this skill when the task is about Hindsight usage, not generic vector search
    - dry-run the JSON request before sending it
    - verify retained content with `hindsight-api list <bank>`
 7. Use `recall` for grounding and `reflect` only when synthesis is actually needed.
+8. When a task is "how should this be ingested?", route through the retained-item template and the usage guide before writing any JSON.
+
+## When to log to Hindsight
+
+Do not log by reflex. Log only when the information is likely to save real work later.
+
+Log it when all or almost all of these are true:
+
+- it will still matter beyond the current turn or session
+- it is verified, source-backed, or clearly framed as a current operator caveat
+- it can be stated as one atomic fact, rule, workaround, or reference note
+- it fits a specific bank mission
+- a future agent could plausibly search for it directly
+- it contains no secrets, credentials, or protected personal data
+
+High-value logging candidates:
+
+- durable CLI or API usage rules
+- endpoint shape requirements and auth-key distinctions
+- verified operator caveats, cleanup paths, timeout behavior, and deployment constraints
+- durable tool-selection rules such as when to use `hindsight` versus `hindsight-api`
+- stable workarounds for real bugs or platform quirks
+- distilled lessons from live troubleshooting after the issue is understood
+
+## When not to log to Hindsight
+
+Do not log:
+
+- turn-local planning or scratch thinking
+- raw command transcripts, stack traces, or console spam without distillation
+- unverified guesses, vague suspicions, or half-understood behavior
+- duplicates of facts already in the bank
+- giant mixed-topic summaries when one atomic note would do
+- secrets, API keys, bearer tokens, cookies, private keys, or sensitive user data
+- repo-local implementation details that belong in a `repo-*` bank or in source docs instead of a tool bank
+- exact code-search material that should stay in grep, AST tools, or repo docs
+
+If the item is not clearly durable, atomic, and retrieval-worthy, do not log it yet.
+
+## Logging heuristics
+
+Use this decision order:
+
+1. Does this belong in memory at all, or only in the current conversation?
+2. Is it durable enough to matter later?
+3. Is it one coherent fact or rule?
+4. Is it verified enough to trust?
+5. Which bank actually owns it?
+6. Can it be written cleanly without noise or secrets?
+
+If any answer is weak, stop and either skip logging or tighten the retained item first.
+
+Good logging shape:
+
+- one retained item per lesson
+- factual, tool-facing wording
+- minimal metadata
+- tags that match the real retrieval boundary
+
+Bad logging shape:
+
+- whole transcripts
+- worklogs
+- unresolved debugging dumps
+- broad “here is everything we touched” summaries
 
 ## Local deployment facts
 
