@@ -263,6 +263,49 @@ Minimum annotation package for setup audits:
 4. MFE and MAE markers with R-multiple labels
 5. compact stats summary box (entry, stop, risk, MFE/MAE, latest R)
 
+## Preferred format for annotated trade-review charts
+
+When a user wants a post-mortem or "show me how this actually played out" chart, prefer this layout by default unless they ask for something else:
+
+- **Canvas:** `~1600x1000` landscape PNG
+- **Top-left panel:** main intraday candlestick chart focused on the alert/setup day
+- **Bottom-left panel:** volume for the same window
+- **Top-right panel:** compressed follow-through view (for example next day or 2-day 5m chart)
+- **Bottom-right panel:** text summary box with setup, given grade, outcome grade, execution notes, and key stats
+
+Preferred review overlays:
+
+- alert timestamp vertical line
+- entry / actionable area horizontal line
+- stop or fail-line proxy
+- same-day MFE marker
+- same-day close marker when relevant
+- next-day high / close markers when follow-through matters
+
+Preferred text summary contents:
+
+- setup name / playbook
+- given grade and retrospective outcome grade
+- one-sentence explanation of the executable trigger
+- "if played properly" notes
+- entry area, stop proxy, MFE, MAE, same-day close, next-day close
+- R-multiple estimate when a reasonable stop proxy exists
+- short verdict in plain language
+
+Styling preferences from recent successful use:
+
+- use sparse but explicit markup; avoid indicator clutter unless it is essential
+- favor candlesticks + horizontal/vertical guides over many oscillators
+- use path effects or boxed annotations so labels stay readable over candles
+- make the chart understandable without reading the whole thread first
+- optimize for Discord viewing size: high contrast, larger labels, minimal legend noise
+
+For multi-name audit batches:
+
+- render one PNG per symbol rather than one giant collage
+- keep the structure consistent across symbols so comparisons are easy
+- use deterministic output paths like `./out/<symbol>_grade_review.png`
+
 ## Python patterns
 
 General matplotlib chart:
