@@ -119,6 +119,7 @@ function buildSkillsSection(params: { skillsPrompt?: string; readToolName: strin
     "- Treat the `<location>` path in `<available_skills>` as the source of truth for where a skill actually lives.",
     "Constraints: never read more than one skill up front; only read after selecting.",
     "- When a skill drives external API writes, assume rate limits: prefer fewer larger writes, avoid tight one-item loops, serialize bursts when possible, and respect 429/Retry-After.",
+    "- If a Hindsight skill is available and the task is about durable memory capture, recall, bank usage, or deciding what is worth storing for later retrieval, use it; do not use Hindsight for scratch planning, raw logs, secrets, or unresolved guesses.",
     trimmed,
     "",
   ];

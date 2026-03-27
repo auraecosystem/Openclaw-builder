@@ -157,6 +157,9 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain(
       "When a skill drives external API writes, assume rate limits: prefer fewer larger writes, avoid tight one-item loops, serialize bursts when possible, and respect 429/Retry-After.",
     );
+    expect(prompt).toContain(
+      "If a Hindsight skill is available and the task is about durable memory capture, recall, bank usage, or deciding what is worth storing for later retrieval, use it; do not use Hindsight for scratch planning, raw logs, secrets, or unresolved guesses.",
+    );
   });
 
   it("tells the agent not to execute /approve through exec", () => {
@@ -469,6 +472,9 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain(
       "- Treat the `<location>` path in `<available_skills>` as the source of truth for where a skill actually lives.",
     );
+    expect(prompt).toContain(
+      "- If a Hindsight skill is available and the task is about durable memory capture, recall, bank usage, or deciding what is worth storing for later retrieval, use it; do not use Hindsight for scratch planning, raw logs, secrets, or unresolved guesses.",
+    );
     expect(prompt).toContain("OpenClaw docs: /tmp/openclaw/docs");
     expect(prompt).toContain(
       "For OpenClaw behavior, commands, config, or architecture: consult local docs first.",
@@ -629,6 +635,9 @@ describe("buildAgentSystemPrompt", () => {
     );
     expect(prompt).toContain(
       "- Treat the `<location>` path in `<available_skills>` as the source of truth for where a skill actually lives.",
+    );
+    expect(prompt).toContain(
+      "- If a Hindsight skill is available and the task is about durable memory capture, recall, bank usage, or deciding what is worth storing for later retrieval, use it; do not use Hindsight for scratch planning, raw logs, secrets, or unresolved guesses.",
     );
   });
 
