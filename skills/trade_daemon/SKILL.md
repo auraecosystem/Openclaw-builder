@@ -70,11 +70,11 @@ Current subcommands:
 
 The current built-in strategies are:
 
-- `btc_threshold`
+- `threshold_watch`
 - `crypto_momentum_scalp`
-- `equity_level_watch`
-- `equity_vwap_bounce_watch`
-- `equity_vwap_reclaim_watch`
+- `level_watch`
+- `vwap_bounce_watch`
+- `vwap_reclaim_watch`
 - `gap_watch`
 - `rth_breakout`
 
@@ -129,9 +129,10 @@ TRADE_DAEMON_TWS_INTRADAY_FINALIZE_GRACE_SECONDS=15
 
 Important:
 
-- stock watch families currently depend on `market.tws.intraday_bar`
+- the canonical watch families consume `market.bar`
 - the default intraday runtime is `poll`
 - `subscribe` exists, but it should be treated as gated by a market-hours cadence canary
+- the daemon’s canonical watch planning is instrument-aware; use explicit crypto contract metadata when the instrument is not a default stock contract
 
 ## One-shot Workflow
 
@@ -212,18 +213,18 @@ Install-level package smoke:
 If the task is about live BTC alerts:
 
 1. identify which strategy family owns the setup:
-   `btc_threshold` for simple threshold crossings, `crypto_momentum_scalp` for scanner-driven scalp setups
+   `threshold_watch` for simple threshold crossings, `crypto_momentum_scalp` for scanner-driven scalp setups
 2. inspect or upsert the relevant trigger row with `triggerctl list-trigger-definitions`, `triggerctl show-trigger-definition`, or `triggerctl upsert-trigger-definition`
 3. make sure the daemon has the matching source enabled:
-   `TRADE_DAEMON_KRAKEN_PAIRS` for ticker/OHLC paths, `TRADE_DAEMON_KRAKEN_SCANNER_PAIRS` for scanner paths
+   `TRADE_DAEMON_KRAKEN_PAIRS` for quote/OHLC paths, `TRADE_DAEMON_KRAKEN_SCANNER_PAIRS` for scanner paths
 4. run a one-shot or full daemon loop
 5. inspect the resulting case with `casectl`
 6. let `assistant-bot` deliver the wake into Discord
 
 The threshold-style BTC path is:
 
-- Kraken ticker observation
-- `btc_threshold` strategy
+- canonical `market.quote` observation
+- `threshold_watch` strategy
 - canonical wake request
 - `wake_dispatch`
 - `assistant-bot` Discord delivery
@@ -242,16 +243,16 @@ Important runtime detail:
 - scanner construction is daemon/env-driven, not created dynamically by `triggerctl upsert-trigger-definition`
 - a new trigger row does not by itself create a new observation source or detector instance
 
-## Stock Watch Guidance
+## Stock / TWS Watch Guidance
 
-If the task is about "watch this stock", "alert at this level", "wake the AI bot on a VWAP bounce", or similar persistent stock monitoring:
+If the task is about "watch this stock", "alert at this level", "wake the AI bot on a VWAP bounce", or similar persistent monitoring:
 
 1. identify the watch family:
-   `equity_level_watch` for fixed price levels,
-   `equity_vwap_bounce_watch` for touch-and-confirm bounce behavior,
-   `equity_vwap_reclaim_watch` for reclaim-after-loss behavior
-2. make sure the daemon has `TRADE_DAEMON_TWS_INTRADAY_SYMBOLS` enabled for the symbol set
-3. create or inspect the trigger row with `triggerctl validate-trigger-parameters`, `triggerctl list-trigger-definitions`, or `triggerctl upsert-trigger-definition`
+   `level_watch` for fixed price levels,
+   `vwap_bounce_watch` for touch-and-confirm bounce behavior,
+   `vwap_reclaim_watch` for reclaim-after-loss behavior
+2. create or inspect the trigger row with `triggerctl validate-trigger-parameters`, `triggerctl list-trigger-definitions`, or `triggerctl upsert-trigger-definition`
+3. make sure the trigger payload clearly identifies the instrument; for non-default contracts such as IBKR crypto, include explicit instrument metadata (`sec_type`, `exchange`, `currency`, etc.)
 4. run a one-shot or full daemon loop
 5. inspect the resulting case and wake via `casectl`
 6. let `assistant-bot` deliver the Discord wake
@@ -260,20 +261,20 @@ These watch families are alert-only. They do not auto-execute trades and they do
 
 ## Trigger Routing Model
 
-There are now two runtime trigger paths:
+There are two main runtime trigger paths:
 
-- legacy effective-trigger lookup
-  used by families such as `gap_watch`, `rth_breakout`, `btc_threshold`, and `crypto_momentum_scalp`
+- effective-trigger lookup
+  used by phase-1 / scanner-driven families such as `gap_watch`, `rth_breakout`, `threshold_watch`, and `crypto_momentum_scalp`
 
-- symbol-scoped trigger fanout
-  used by `equity_level_watch`, `equity_vwap_bounce_watch`, and `equity_vwap_reclaim_watch`
+- same-symbol watch fanout
+  used by `level_watch`, `vwap_bounce_watch`, and `vwap_reclaim_watch`
 
 For the watch families:
 
 - `strategy_key` is the reducer family
 - `trigger_key` is the operator-facing label
 - `trigger_id` is the runtime identity
-- one `market.tws.intraday_bar` observation can seed or reduce multiple same-symbol watch cases
+- one canonical `market.bar` observation can seed or reduce multiple same-symbol watch cases
 
 ## Known Constraints
 
@@ -281,5 +282,5 @@ For the watch families:
 - source loops are sequential by design right now
 - current case creation is strategy-driven; no generic "create case" CLI exists
 - if no trigger row exists, the daemon may ingest observations without ever producing a wake
-- `get_effective_trigger(...)` still resolves legacy families by `strategy_key` plus scope, not by `trigger_key` as a runtime selector
-- the new stock watch families bypass that legacy selector and instead fan out over every matching symbol-scoped trigger row
+- phase-1/scanner families still use effective-trigger lookup by `strategy_key` plus scope rather than `trigger_key` as a runtime selector
+- the watch families fan out over every matching same-symbol trigger row from the canonical watch set

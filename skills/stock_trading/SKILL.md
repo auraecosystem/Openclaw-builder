@@ -199,24 +199,24 @@ triggerctl validate-trigger-parameters --strategy-key gap_watch --parameters-jso
 
 # 4) Upsert or seed persistent trigger rows
 triggerctl seed-default-trigger-definitions --strategy-key gap_watch --apply
-triggerctl upsert-trigger-definition --strategy-key btc_threshold --trigger-key btc-threshold-main --scope-kind symbol --scope-ref BTCUSD --parameters-json '{...}'
+triggerctl upsert-trigger-definition --strategy-key threshold_watch --trigger-key btc-threshold-main --scope-kind symbol --scope-ref BTCUSD --parameters-json '{...}'
 ```
 
 For the stock watch families, skip `seed-default-trigger-definitions` and validate explicit JSON instead.
 
 ## Trigger model
 
-- `strategy_key` names the reducer family such as `gap_watch`, `btc_threshold`, or `crypto_momentum_scalp`
+- `strategy_key` names the reducer family such as `gap_watch`, `threshold_watch`, or `crypto_momentum_scalp`
 - `trigger_key` names one deployed configuration of that family
 - trigger rows are persistent config, not standalone runtime workers
 - `assistant-bot` is delivery-only; it does not create alerts
 - if a setup depends on a specific market feed or scanner, `trade-daemon` still needs the matching source env enabled
 
-Current stock watch families:
+Current generic watch families:
 
-- `equity_level_watch`
-- `equity_vwap_bounce_watch`
-- `equity_vwap_reclaim_watch`
+- `level_watch`
+- `vwap_bounce_watch`
+- `vwap_reclaim_watch`
 
 Important runtime detail:
 
@@ -268,9 +268,9 @@ sec export --format json
 
 For "alert at a key level / VWAP behavior so the AI can inspect later", prefer:
 
-- `equity_level_watch`
-- `equity_vwap_bounce_watch`
-- `equity_vwap_reclaim_watch`
+- `level_watch`
+- `vwap_bounce_watch`
+- `vwap_reclaim_watch`
 
 Do not default to inventing a full autonomous Ross bull-flag detector when the actual requirement is a reliable wake for later judgment.
 
@@ -390,16 +390,16 @@ Examples:
 - swing breakout above a defined pivot:
   - use the strategy-specific trigger params rather than a generic `price_above` envelope
 - BTC threshold on Kraken:
-- use `btc_threshold` plus `triggerctl upsert-trigger-definition`
+  - use `threshold_watch` plus `triggerctl upsert-trigger-definition`
 - BTC momentum scalp on Kraken:
   - use `crypto_momentum_scalp` plus `triggerctl upsert-trigger-definition`
   - ensure `TRADE_DAEMON_KRAKEN_SCANNER_PAIRS` is enabled on the daemon
-- stock key level on TWS:
-  - use `equity_level_watch` plus `triggerctl upsert-trigger-definition`
-  - ensure `TRADE_DAEMON_TWS_INTRADAY_SYMBOLS` is enabled on the daemon
-- stock VWAP bounce or reclaim on TWS:
-  - use `equity_vwap_bounce_watch` or `equity_vwap_reclaim_watch`
-  - ensure `TRADE_DAEMON_TWS_INTRADAY_SYMBOLS` is enabled on the daemon
+- stock or crypto key level on TWS:
+  - use `level_watch` plus `triggerctl upsert-trigger-definition`
+  - make the trigger payload identify the instrument clearly; include explicit TWS contract metadata for crypto (`sec_type`, `exchange`, `currency`) when needed
+- stock or crypto VWAP bounce or reclaim on TWS:
+  - use `vwap_bounce_watch` or `vwap_reclaim_watch`
+  - make the trigger payload identify the instrument clearly; include explicit TWS contract metadata for crypto when needed
   - use `discord_mention_text` if the Discord wake should explicitly ping an AI bot or role
 - follow-up review handling:
   - inspect case state with `casectl show-case-summary` and `casectl show-case-event-journal`

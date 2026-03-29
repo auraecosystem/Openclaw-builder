@@ -86,7 +86,7 @@ Preview strategy defaults:
 ```bash
 triggerctl show-default-trigger-parameters --strategy-key gap_watch
 triggerctl show-default-trigger-parameters --strategy-key rth_breakout
-triggerctl show-default-trigger-parameters --strategy-key btc_threshold
+triggerctl show-default-trigger-parameters --strategy-key threshold_watch
 triggerctl show-default-trigger-parameters --strategy-key crypto_momentum_scalp
 ```
 
@@ -109,11 +109,11 @@ Create or update one symbol-scoped trigger:
 
 ```bash
 triggerctl upsert-trigger-definition \
-  --strategy-key btc_threshold \
+  --strategy-key threshold_watch \
   --trigger-key btc-threshold-kraken \
   --scope-kind symbol \
   --scope-ref BTCUSD \
-  --parameters-json '{"pair":"BTC/USD","venue":"KRAKEN","threshold_price":90000,"direction":"above","cooldown_minutes":15}'
+  --parameters-json '{"pair":"BTC/USD","provider":"kraken","threshold_price":90000,"direction":"above","cooldown_minutes":15}'
 ```
 
 Create or update one crypto momentum scalp trigger:
@@ -127,34 +127,34 @@ triggerctl upsert-trigger-definition \
   --parameters-json '{"venue":"KRAKEN","symbol":"BTCUSD","direction":"long","session_grade_min":"C","min_liquidity_score":18,"min_urgency_score":20,"min_friction_score":12,"min_total_score":54,"min_threshold_bps":8,"cusum_sigma_multiplier":2.5,"max_pullback_pct":0.45,"max_pullback_bars":8,"setup_ttl_seconds":90,"entry_live_ttl_seconds":30,"notify_invalidations":true,"discord_channel_id":"1234567890"}'
 ```
 
-Create or update one stock level watch trigger:
+Create or update one stock or crypto level watch trigger:
 
 ```bash
 triggerctl validate-trigger-parameters \
-  --strategy-key equity_level_watch \
-  --parameters-json '{"venue":"SMART","symbol":"AAPL","timeframe":"1m","level_price":250,"direction":"above","cooldown_minutes":30,"discord_channel_id":"1234567890","discord_mention_text":"<@1234567890>"}'
+  --strategy-key level_watch \
+  --parameters-json '{"instrument":{"symbol":"AAPL","exchange":"SMART","provider":"tws","sec_type":"STK","currency":"USD"},"timeframe":"1m","level_price":250,"direction":"above","cooldown_minutes":30,"discord_channel_id":"1234567890","discord_mention_text":"<@1234567890>"}'
 
 triggerctl upsert-trigger-definition \
-  --strategy-key equity_level_watch \
+  --strategy-key level_watch \
   --trigger-key aapl-250-break \
   --scope-kind symbol \
   --scope-ref AAPL \
-  --parameters-json '{"venue":"SMART","symbol":"AAPL","timeframe":"1m","level_price":250,"direction":"above","cooldown_minutes":30,"discord_channel_id":"1234567890","discord_mention_text":"<@1234567890>"}'
+  --parameters-json '{"instrument":{"symbol":"AAPL","exchange":"SMART","provider":"tws","sec_type":"STK","currency":"USD"},"timeframe":"1m","level_price":250,"direction":"above","cooldown_minutes":30,"discord_channel_id":"1234567890","discord_mention_text":"<@1234567890>"}'
 ```
 
-Create or update one stock VWAP bounce trigger:
+Create or update one stock or crypto VWAP bounce trigger:
 
 ```bash
 triggerctl validate-trigger-parameters \
-  --strategy-key equity_vwap_bounce_watch \
-  --parameters-json '{"venue":"SMART","symbol":"AAPL","timeframe":"1m","reference_sigma":0,"touch_tolerance_bps":5,"max_overshoot_bps":20,"alert_ttl_minutes":20,"notify_invalidations":true,"discord_channel_id":"1234567890"}'
+  --strategy-key vwap_bounce_watch \
+  --parameters-json '{"instrument":{"symbol":"AAPL","exchange":"SMART","provider":"tws","sec_type":"STK","currency":"USD"},"timeframe":"1m","reference_sigma":0,"touch_tolerance_bps":5,"max_overshoot_bps":20,"alert_ttl_minutes":20,"notify_invalidations":true,"discord_channel_id":"1234567890"}'
 
 triggerctl upsert-trigger-definition \
-  --strategy-key equity_vwap_bounce_watch \
+  --strategy-key vwap_bounce_watch \
   --trigger-key aapl-vwap-bounce \
   --scope-kind symbol \
   --scope-ref AAPL \
-  --parameters-json '{"venue":"SMART","symbol":"AAPL","timeframe":"1m","reference_sigma":0,"touch_tolerance_bps":5,"max_overshoot_bps":20,"alert_ttl_minutes":20,"notify_invalidations":true,"discord_channel_id":"1234567890"}'
+  --parameters-json '{"instrument":{"symbol":"AAPL","exchange":"SMART","provider":"tws","sec_type":"STK","currency":"USD"},"timeframe":"1m","reference_sigma":0,"touch_tolerance_bps":5,"max_overshoot_bps":20,"alert_ttl_minutes":20,"notify_invalidations":true,"discord_channel_id":"1234567890"}'
 ```
 
 ## How to think about the current system
@@ -174,12 +174,12 @@ If the user wants a new alert or background monitor:
 3. make sure `trade-daemon` is running with the needed observation source
 4. inspect the resulting case with `casectl`
 
-For stock watch alerts specifically:
+For canonical watch alerts specifically:
 
-- use `equity_level_watch` for fixed levels
-- use `equity_vwap_bounce_watch` for touch-and-confirm bounces
-- use `equity_vwap_reclaim_watch` for reclaim-after-loss behavior
-- make sure `trade-daemon` is running with `TRADE_DAEMON_TWS_INTRADAY_SYMBOLS`
+- use `level_watch` for fixed levels
+- use `vwap_bounce_watch` for touch-and-confirm bounces
+- use `vwap_reclaim_watch` for reclaim-after-loss behavior
+- make sure `trade-daemon` is running with the relevant TWS source and that the trigger payload clearly identifies the instrument
 
 ## Safe workflow
 
