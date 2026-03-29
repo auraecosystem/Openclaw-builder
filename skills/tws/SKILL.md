@@ -35,9 +35,8 @@ Primary docs:
 
 - Prefer the shim command: `tws ...`
 - Fallback: `uv run --project /Users/ad/work/trading-tools tws ...`
-- On this Mac, `/Users/ad/bin/tws` currently exports `TWS_PORT=7497` when unset, so bare `tws ...` targets the paper TWS session by default
-  - order-entry commands (`buy`, `sell`, `orders open`, `orders completed`, `orders cancel`) intentionally ignore that shim default and use `7496` unless you pass `--port`
-  - use `tws --port 7496 ...` for the live TWS session on read-only commands
+- On this Mac, `/Users/ad/bin/tws` now defaults `TWS_PORT=7496` when unset, so bare `tws ...` targets the live TWS session by default
+  - use `--port 7497` explicitly when you want the paper TWS session
 - Prefer delayed quotes unless the user explicitly needs live data:
   - add `--delayed` for snapshot/watch quote commands when appropriate
 - Global options must come before the subcommand:
@@ -73,7 +72,13 @@ Historical market data:
 tws market bars AAPL MSFT --duration "30 D" --bar-size "1 day" --what-to-show TRADES
 tws market ticks trades AAPL --end "20260312 13:26:50 US/Eastern" --num-ticks 10
 # IBKR crypto needs explicit contract fields + AGGTRADES
-tws --port 7496 market bars ETH --sec-type CRYPTO --exchange PAXOS --currency USD --duration "2 D" --bar-size "1 hour" --what-to-show AGGTRADES --include-eth
+tws market bars ETH --sec-type CRYPTO --exchange PAXOS --currency USD --duration "2 D" --bar-size "1 hour" --what-to-show AGGTRADES --include-eth
+```
+
+Live ETH / PAXOS quote watch:
+
+```bash
+tws --client-id 320 market watch quotes ETH --sec-type CRYPTO --exchange PAXOS --currency USD
 ```
 
 Account / executions:
@@ -129,7 +134,7 @@ tws indicators AAPL --duration "1 M"
 Working one-shot commands:
 
 - `scanner params`, `scanner run`, `session-movers`
-- `market bars`, `history`, `market ticks trades`
+- `market bars`, `market ticks trades`
 - `account summary`, `account positions`, `account pnl`, `account overview`, `orders open`, `executions list`
 - `contracts search`, `contracts resolve`, `contracts market-rule`
 - `options chain`, `options resolve`, `options quote`, `options greeks`, `options bars`, `options quote-history`, `options quote-ticks`
@@ -137,13 +142,12 @@ Working one-shot commands:
 
 Implemented but not clean one-shot surfaces:
 
-- `market snapshot` and legacy `snapshot` emitted delayed quote payloads on port `7497` but did not terminate cleanly in the short probe window
+- `market snapshot` emitted delayed quote payloads on port `7497` but did not terminate cleanly in the short probe window
 - `market watch quotes` and `momentum` are long-running commands; use them intentionally and be ready to interrupt
 
 Blocked or entitlement-limited on the paper session:
 
 - `observe` failed with IBKR error `10168` for delayed market-data entitlement
-- legacy `watch --mode bars` failed with IBKR error `420` for real-time market-data permissions
 
 ## Safe workflow
 
@@ -163,8 +167,8 @@ Blocked or entitlement-limited on the paper session:
 - On the local paper-session probe, `news history` without explicit `--provider-codes` failed with IBKR error `321`.
 - **IBKR crypto requires explicit contract fields**: use `--sec-type CRYPTO --exchange PAXOS --currency USD` instead of stock defaults.
 - **IBKR crypto historical bars require `AGGTRADES`**, not `TRADES`; otherwise IBKR returns error `10299`.
-- **IBKR crypto on PAXOS can behave inconsistently across surfaces**. Historical bars and snapshots may look session-bound or stall, while `market watch quotes` has produced live ETH quotes on Saturday night in this setup; probe the exact surface you plan to rely on instead of assuming every crypto endpoint behaves 24/7.
-- The CLI also supports legacy flat aliases, but prefer the namespaced commands from the README.
+- **IBKR crypto on PAXOS can behave inconsistently across surfaces**. Historical bars and snapshots may look session-bound or stall, while `market watch quotes ETH --sec-type CRYPTO --exchange PAXOS --currency USD` has produced live ETH quotes on Saturday night in this setup; probe the exact surface you plan to rely on instead of assuming every crypto endpoint behaves 24/7.
+- The CLI is namespaced-only now; use commands like `scanner run`, `market bars`, `market snapshot`, and `market watch quotes`.
 
 ## Client ID and order lifecycle
 
