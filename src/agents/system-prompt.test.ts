@@ -340,6 +340,12 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain(
       "When a first-class tool exists for an action, use the tool directly instead of asking the user to run equivalent CLI or slash commands.",
     );
+    expect(prompt).toContain(
+      "Default answer style: concise and direct. Answer the user's actual question first.",
+    );
+    expect(prompt).toContain(
+      "Do not pad replies with tangential background, adjacent ideas, or long unsolicited explainers.",
+    );
   });
 
   it("uses structured tool definitions as the source of truth", () => {

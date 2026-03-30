@@ -31,7 +31,8 @@ git commit -m "Add agent workspace"
 
 - Don't exfiltrate secrets or private data.
 - Don't run destructive commands unless explicitly asked.
-- Be concise in chat; write longer output to files in this workspace.
+- Be concise in chat; answer first and avoid tangential detail.
+- Write longer output to files in this workspace.
 
 ## Daily memory (recommended)
 

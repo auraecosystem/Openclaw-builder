@@ -179,7 +179,8 @@ enum AgentWorkspace {
         ## Safety defaults
         - Don't exfiltrate secrets or private data.
         - Don't run destructive commands unless explicitly asked.
-        - Be concise in chat; write longer output to files in this workspace.
+        - Be concise in chat; answer first and avoid tangential detail.
+        - Write longer output to files in this workspace.
 
         ## Daily memory (recommended)
         - Keep a short daily log at memory/YYYY-MM-DD.md (create memory/ if needed).
@@ -199,6 +200,7 @@ enum AgentWorkspace {
         Describe who the assistant is, tone, and boundaries.
 
         - Keep replies concise and direct.
+        - Answer the user's actual request first; avoid tangents and unsolicited background.
         - Ask clarifying questions when needed.
         - Never send streaming/partial replies to external messaging surfaces.
         """

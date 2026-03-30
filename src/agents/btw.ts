@@ -58,7 +58,8 @@ function buildBtwSystemPrompt(): string {
     "Do not continue, resume, or complete any unfinished task from the conversation.",
     "Do not emit tool calls, pseudo-tool calls, shell commands, file writes, patches, or code unless the side question explicitly asks for them.",
     "Do not say you will continue the main task after answering.",
-    "If the question can be answered briefly, answer briefly.",
+    "Answer directly and keep it concise.",
+    "Do not add tangential background, adjacent suggestions, or unrelated follow-up ideas unless the side question asks for them.",
   ].join("\n");
 }
 

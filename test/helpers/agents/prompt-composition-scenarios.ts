@@ -657,7 +657,7 @@ export async function createWorkspaceWithPromptCompositionFiles(): Promise<strin
   await writeWorkspaceFile({
     dir: workspaceDir,
     name: "SOUL.md",
-    content: "# SOUL.md\n\nBe concise but kind.\n",
+    content: "# SOUL.md\n\nBe concise, direct, and kind. Answer first; avoid tangents.\n",
   });
   return workspaceDir;
 }
