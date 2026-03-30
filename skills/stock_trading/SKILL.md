@@ -210,7 +210,7 @@ For the stock watch families, skip `seed-default-trigger-definitions` and valida
 - `trigger_key` names one deployed configuration of that family
 - trigger rows are persistent config, not standalone runtime workers
 - `assistant-bot` is delivery-only; it does not create alerts
-- if a setup depends on a specific market feed or scanner, `trade-daemon` still needs the matching source env enabled
+- if a setup depends on a specific market feed or scanner, `trade-daemon` still needs the matching source/planning path active; for crypto momentum this is trigger-driven when a trigger store is present, with env values retained as bootstrap/fallback inputs
 
 Current generic watch families:
 
@@ -220,9 +220,12 @@ Current generic watch families:
 
 Important runtime detail:
 
-- the stock watch families support same-symbol trigger fanout
+- the watch families support same-symbol trigger fanout
 - `trigger_id` is the runtime identity for one deployed watch
-- one TWS intraday bar can feed more than one same-symbol watch case
+- one canonical completed bar can feed more than one same-symbol watch case
+- provider capability comes after canonical completed-bar intent resolution:
+  - TWS is the default stock / explicit contract path
+  - Kraken is supported for explicit crypto pair metadata
 
 ### `sec` for SEC / EDGAR filing intake and repair
 
@@ -393,13 +396,15 @@ Examples:
   - use `threshold_watch` plus `triggerctl upsert-trigger-definition`
 - BTC momentum scalp on Kraken:
   - use `crypto_momentum_scalp` plus `triggerctl upsert-trigger-definition`
-  - ensure `TRADE_DAEMON_KRAKEN_SCANNER_PAIRS` is enabled on the daemon
-- stock or crypto key level on TWS:
+  - prefer explicit instrument/pair metadata in the trigger; when a trigger store is present, the scanner path is planned from triggers and `TRADE_DAEMON_KRAKEN_SCANNER_PAIRS` is just a bootstrap/fallback bridge
+- stock or crypto key level:
   - use `level_watch` plus `triggerctl upsert-trigger-definition`
-  - make the trigger payload identify the instrument clearly; include explicit TWS contract metadata for crypto (`sec_type`, `exchange`, `currency`) when needed
-- stock or crypto VWAP bounce or reclaim on TWS:
+  - for TWS/instrument-contract paths, include explicit contract metadata for crypto (`sec_type`, `exchange`, `currency`) when needed
+  - for Kraken watch bars, include explicit pair metadata; there is no silent symbol-to-pair guessing
+- stock or crypto VWAP bounce or reclaim:
   - use `vwap_bounce_watch` or `vwap_reclaim_watch`
-  - make the trigger payload identify the instrument clearly; include explicit TWS contract metadata for crypto when needed
+  - for TWS/instrument-contract paths, include explicit contract metadata when needed
+  - for Kraken watch bars, include explicit pair metadata when needed
   - use `discord_mention_text` if the Discord wake should explicitly ping an AI bot or role
 - follow-up review handling:
   - inspect case state with `casectl show-case-summary` and `casectl show-case-event-journal`

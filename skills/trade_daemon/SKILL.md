@@ -4,8 +4,9 @@ description: >
   Use for the canonical single-writer trade daemon in the trading-tools
   workspace. Trigger when the task is about observation-source wiring,
   one-shot daemon runs, case seeding/reduction, timer or inbox processing,
-  live Kraken BTC wake generation, stock watch-and-wake setup generation from
-  TWS intraday bars, or the end-to-end daemon half of the wake pipeline.
+  live Kraken BTC wake generation, provider-neutral watch-and-wake setup
+  generation from shared completed-bar planning (TWS by default, Kraken for
+  explicit crypto pairs), or the end-to-end daemon half of the wake pipeline.
 metadata: { "openclaw": { "emoji": "⚙️", "requires": { "bins": ["python3"] } } }
 ---
 
@@ -82,16 +83,18 @@ Look in `/Users/ad/work/trading-tools/apps/trade_daemon/src/trade_daemon/__main_
 
 ## Source Wiring
 
-Current env-driven observation sources:
+Current source families combine static env inputs with trigger-driven planning:
 
 - Kraken ticker / OHLC
-- Kraken momentum scanner
+- Kraken momentum scanner (trigger-driven for `crypto_momentum_scalp` when a trigger store is present; env pairs remain bootstrap/fallback inputs)
 - Yahoo quotes
 - SEC latest filings
 - FDA events
 - Finnhub news
 - TWS snapshots
-- TWS intraday 1-minute bars
+- shared completed-bar planning for watch families:
+  - TWS is the default stock / explicit contract path
+  - Kraken is supported for explicit crypto pair triggers
 
 Useful env examples:
 
@@ -121,7 +124,6 @@ TRADE_DAEMON_SEC_FORMS=8-K,6-K
 ```
 
 ```bash
-TRADE_DAEMON_TWS_INTRADAY_SYMBOLS=AAPL,NVDA
 TRADE_DAEMON_TWS_INTRADAY_MODE=poll
 TRADE_DAEMON_TWS_INTRADAY_POLL_INTERVAL_SECONDS=15
 TRADE_DAEMON_TWS_INTRADAY_FINALIZE_GRACE_SECONDS=15
@@ -130,9 +132,11 @@ TRADE_DAEMON_TWS_INTRADAY_FINALIZE_GRACE_SECONDS=15
 Important:
 
 - the canonical watch families consume `market.bar`
+- completed-bar planning is shared/provider-neutral first; provider capability comes second
 - the default intraday runtime is `poll`
 - `subscribe` exists, but it should be treated as gated by a market-hours cadence canary
-- the daemon’s canonical watch planning is instrument-aware; use explicit crypto contract metadata when the instrument is not a default stock contract
+- use explicit crypto pair metadata for Kraken watch triggers; there is no silent symbol-to-pair guessing
+- use explicit contract metadata (`sec_type`, `exchange`, `currency`, etc.) when the instrument is not a default stock contract
 
 ## One-shot Workflow
 
@@ -215,8 +219,8 @@ If the task is about live BTC alerts:
 1. identify which strategy family owns the setup:
    `threshold_watch` for simple threshold crossings, `crypto_momentum_scalp` for scanner-driven scalp setups
 2. inspect or upsert the relevant trigger row with `triggerctl list-trigger-definitions`, `triggerctl show-trigger-definition`, or `triggerctl upsert-trigger-definition`
-3. make sure the daemon has the matching source enabled:
-   `TRADE_DAEMON_KRAKEN_PAIRS` for quote/OHLC paths, `TRADE_DAEMON_KRAKEN_SCANNER_PAIRS` for scanner paths
+3. make sure the daemon has the matching source/planning path available:
+   `TRADE_DAEMON_KRAKEN_PAIRS` for static quote/OHLC bootstrap, and enabled `crypto_momentum_scalp` triggers for scanner planning when a trigger store is present (`TRADE_DAEMON_KRAKEN_SCANNER_PAIRS` remains the bootstrap/fallback pair list)
 4. run a one-shot or full daemon loop
 5. inspect the resulting case with `casectl`
 6. let `assistant-bot` deliver the wake into Discord
@@ -240,19 +244,22 @@ The crypto momentum scalp path is:
 Important runtime detail:
 
 - trigger rows configure reducer behavior and routing after observations exist
-- scanner construction is daemon/env-driven, not created dynamically by `triggerctl upsert-trigger-definition`
-- a new trigger row does not by itself create a new observation source or detector instance
+- when a trigger store is present, crypto momentum scanner planning is trigger-driven rather than env-only
+- `TRADE_DAEMON_KRAKEN_SCANNER_PAIRS` is still a bootstrap/fallback pair list and env bridge, not the canonical control surface for trigger-backed planning
+- a new trigger row still depends on the daemon runtime being up and loading the trigger-backed source planner; it does not create an out-of-process detector worker on its own
 
-## Stock / TWS Watch Guidance
+## Watch Guidance
 
-If the task is about "watch this stock", "alert at this level", "wake the AI bot on a VWAP bounce", or similar persistent monitoring:
+If the task is about "watch this stock", "watch this crypto pair", "alert at this level", "wake the AI bot on a VWAP bounce", or similar persistent monitoring:
 
 1. identify the watch family:
    `level_watch` for fixed price levels,
    `vwap_bounce_watch` for touch-and-confirm bounce behavior,
    `vwap_reclaim_watch` for reclaim-after-loss behavior
 2. create or inspect the trigger row with `triggerctl validate-trigger-parameters`, `triggerctl list-trigger-definitions`, or `triggerctl upsert-trigger-definition`
-3. make sure the trigger payload clearly identifies the instrument; for non-default contracts such as IBKR crypto, include explicit instrument metadata (`sec_type`, `exchange`, `currency`, etc.)
+3. make sure the trigger payload clearly identifies the instrument:
+   - for TWS/instrument-contract paths, include explicit instrument metadata (`sec_type`, `exchange`, `currency`, etc.)
+   - for Kraken watch bars, include explicit pair metadata (`pair`, `provider_symbol`, or instrument metadata with pair); there is no silent symbol-to-pair guessing
 4. run a one-shot or full daemon loop
 5. inspect the resulting case and wake via `casectl`
 6. let `assistant-bot` deliver the Discord wake
@@ -275,6 +282,7 @@ For the watch families:
 - `trigger_key` is the operator-facing label
 - `trigger_id` is the runtime identity
 - one canonical `market.bar` observation can seed or reduce multiple same-symbol watch cases
+- the completed-bar planner is shared/provider-neutral; provider capability is chosen after canonical intent resolution
 
 ## Known Constraints
 

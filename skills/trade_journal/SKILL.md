@@ -124,7 +124,7 @@ triggerctl upsert-trigger-definition \
   --trigger-key btcusd-long \
   --scope-kind symbol \
   --scope-ref BTCUSD \
-  --parameters-json '{"venue":"KRAKEN","symbol":"BTCUSD","direction":"long","session_grade_min":"C","min_liquidity_score":18,"min_urgency_score":20,"min_friction_score":12,"min_total_score":54,"min_threshold_bps":8,"cusum_sigma_multiplier":2.5,"max_pullback_pct":0.45,"max_pullback_bars":8,"setup_ttl_seconds":90,"entry_live_ttl_seconds":30,"notify_invalidations":true,"discord_channel_id":"1234567890"}'
+  --parameters-json '{"instrument":{"symbol":"BTCUSD","provider":"kraken","exchange":"KRAKEN","metadata_json":{"pair":"BTC/USD"}},"direction":"long","session_grade_min":"C","min_liquidity_score":18,"min_urgency_score":20,"min_friction_score":12,"min_total_score":54,"min_threshold_bps":8,"cusum_sigma_multiplier":2.5,"max_pullback_pct":0.45,"max_pullback_bars":8,"setup_ttl_seconds":90,"entry_live_ttl_seconds":30,"notify_invalidations":true,"discord_channel_id":"1234567890"}'
 ```
 
 Create or update one stock or crypto level watch trigger:
@@ -171,7 +171,7 @@ If the user wants a new alert or background monitor:
 
 1. inspect current triggers with `triggerctl list-trigger-definitions`
 2. create or update the right trigger row with `triggerctl upsert-trigger-definition`
-3. make sure `trade-daemon` is running with the needed observation source
+3. make sure `trade-daemon` is running with the needed observation source or trigger-driven planning path
 4. inspect the resulting case with `casectl`
 
 For canonical watch alerts specifically:
@@ -179,7 +179,7 @@ For canonical watch alerts specifically:
 - use `level_watch` for fixed levels
 - use `vwap_bounce_watch` for touch-and-confirm bounces
 - use `vwap_reclaim_watch` for reclaim-after-loss behavior
-- make sure `trade-daemon` is running with the relevant TWS source and that the trigger payload clearly identifies the instrument
+- make sure `trade-daemon` is running with the relevant completed-bar source/planner path and that the trigger payload clearly identifies the instrument or explicit Kraken pair metadata
 
 ## Safe workflow
 
