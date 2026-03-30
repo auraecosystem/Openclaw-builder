@@ -214,6 +214,7 @@ For the stock watch families, skip `seed-default-trigger-definitions` and valida
 
 Current generic watch families:
 
+- `threshold_watch`
 - `level_watch`
 - `vwap_bounce_watch`
 - `vwap_reclaim_watch`
@@ -269,9 +270,10 @@ sec export --format json
 5. If the trigger should be watched after the current session, upsert the canonical trigger row and make sure the daemon source is running.
 6. Inspect the resulting case and wake flow with `casectl` and `assistant-bot`.
 
-For "alert at a key level / VWAP behavior so the AI can inspect later", prefer:
+For persistent alerts that should wake the AI later, prefer the canonical watch families:
 
-- `level_watch`
+- `threshold_watch` for quote-driven threshold alerts
+- `level_watch` for completed-bar fixed levels
 - `vwap_bounce_watch`
 - `vwap_reclaim_watch`
 

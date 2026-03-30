@@ -92,8 +92,8 @@ triggerctl show-default-trigger-parameters --strategy-key crypto_momentum_scalp
 
 Important:
 
-- `show-default-trigger-parameters` and `seed-default-trigger-definitions` are still most useful for the older phase-1 families above
-- the newer stock watch families are usually hand-validated and hand-upserted today
+- `show-default-trigger-parameters` and `seed-default-trigger-definitions` are still most useful for the phase-1 / scanner-style families above
+- the canonical watch families are usually hand-validated and hand-upserted today
 
 Validate or seed defaults:
 
@@ -105,7 +105,7 @@ triggerctl seed-default-trigger-definitions --strategy-key crypto_momentum_scalp
 triggerctl list-trigger-definitions
 ```
 
-Create or update one symbol-scoped trigger:
+Create or update one symbol-scoped threshold trigger:
 
 ```bash
 triggerctl upsert-trigger-definition \
@@ -113,7 +113,7 @@ triggerctl upsert-trigger-definition \
   --trigger-key btc-threshold-kraken \
   --scope-kind symbol \
   --scope-ref BTCUSD \
-  --parameters-json '{"pair":"BTC/USD","provider":"kraken","threshold_price":90000,"direction":"above","cooldown_minutes":15}'
+  --parameters-json '{"instrument":{"symbol":"BTCUSD","provider":"kraken","exchange":"KRAKEN","provider_symbol":"BTC/USD"},"threshold_price":90000,"direction":"above","cooldown_minutes":15}'
 ```
 
 Create or update one crypto momentum scalp trigger:
@@ -165,7 +165,7 @@ triggerctl upsert-trigger-definition \
 - `assistant-bot` only delivers wakes and writes operator intake back to `cases.daemon_inbox`
 - `strategy_key` identifies the reducer family; `trigger_key` is an operator-facing deployment label, not the primary runtime dispatch key
 - trigger rows are configuration, not detector processes; source wiring still lives in `trade-daemon`
-- the stock watch families support same-symbol multi-watch fanout; `trigger_id` is the runtime identity for one deployed watch
+- the canonical watch families support trigger fanout; `trigger_id` is the runtime identity for one deployed watch
 
 If the user wants a new alert or background monitor:
 
@@ -176,10 +176,11 @@ If the user wants a new alert or background monitor:
 
 For canonical watch alerts specifically:
 
-- use `level_watch` for fixed levels
+- use `threshold_watch` for quote-driven threshold alerts
+- use `level_watch` for fixed completed-bar levels
 - use `vwap_bounce_watch` for touch-and-confirm bounces
 - use `vwap_reclaim_watch` for reclaim-after-loss behavior
-- make sure `trade-daemon` is running with the relevant completed-bar source/planner path and that the trigger payload clearly identifies the instrument or explicit Kraken pair metadata
+- make sure `trade-daemon` is running with the relevant quote/bar source-planner path and that the trigger payload clearly identifies the canonical instrument or explicit Kraken pair metadata
 
 ## Safe workflow
 

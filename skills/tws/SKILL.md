@@ -167,7 +167,7 @@ Blocked or entitlement-limited on the paper session:
 - On the local paper-session probe, `news history` without explicit `--provider-codes` failed with IBKR error `321`.
 - **IBKR crypto requires explicit contract fields**: use `--sec-type CRYPTO --exchange PAXOS --currency USD` instead of stock defaults.
 - **IBKR crypto historical bars require `AGGTRADES`**, not `TRADES`; otherwise IBKR returns error `10299`.
-- **IBKR crypto on PAXOS can behave inconsistently across surfaces**. Historical bars and snapshots may look session-bound or stall, while `market watch quotes ETH --sec-type CRYPTO --exchange PAXOS --currency USD` has produced live ETH quotes on Saturday night in this setup; probe the exact surface you plan to rely on instead of assuming every crypto endpoint behaves 24/7.
+- **IBKR crypto on PAXOS can behave inconsistently across surfaces**. Historical bars may work while snapshots time out, and `market watch quotes ETH --sec-type CRYPTO --exchange PAXOS --currency USD` has been intermittent in this setup (sometimes producing live quotes, sometimes emitting nothing or surfacing backend/API errors like `10159`). Probe the exact surface you plan to rely on instead of assuming every crypto endpoint behaves 24/7.
 - The CLI is namespaced-only now; use commands like `scanner run`, `market bars`, `market snapshot`, and `market watch quotes`.
 
 ## Client ID and order lifecycle

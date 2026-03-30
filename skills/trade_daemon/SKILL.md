@@ -253,13 +253,14 @@ Important runtime detail:
 If the task is about "watch this stock", "watch this crypto pair", "alert at this level", "wake the AI bot on a VWAP bounce", or similar persistent monitoring:
 
 1. identify the watch family:
-   `level_watch` for fixed price levels,
+   `threshold_watch` for quote-driven threshold alerts,
+   `level_watch` for completed-bar fixed price levels,
    `vwap_bounce_watch` for touch-and-confirm bounce behavior,
    `vwap_reclaim_watch` for reclaim-after-loss behavior
 2. create or inspect the trigger row with `triggerctl validate-trigger-parameters`, `triggerctl list-trigger-definitions`, or `triggerctl upsert-trigger-definition`
 3. make sure the trigger payload clearly identifies the instrument:
-   - for TWS/instrument-contract paths, include explicit instrument metadata (`sec_type`, `exchange`, `currency`, etc.)
-   - for Kraken watch bars, include explicit pair metadata (`pair`, `provider_symbol`, or instrument metadata with pair); there is no silent symbol-to-pair guessing
+   - for TWS/instrument-contract paths, include explicit instrument metadata (`provider`, `sec_type`, `exchange`, `currency`, etc.)
+   - for Kraken pair paths, include explicit pair metadata inside the canonical instrument payload (`provider_symbol`, exchange/provider labels, etc.); there is no silent symbol-to-pair guessing
 4. run a one-shot or full daemon loop
 5. inspect the resulting case and wake via `casectl`
 6. let `assistant-bot` deliver the Discord wake
@@ -271,24 +272,26 @@ These watch families are alert-only. They do not auto-execute trades and they do
 There are two main runtime trigger paths:
 
 - effective-trigger lookup
-  used by phase-1 / scanner-driven families such as `gap_watch`, `rth_breakout`, `threshold_watch`, and `crypto_momentum_scalp`
+  used by phase-1 / scanner-driven families such as `gap_watch`, `rth_breakout`, and `crypto_momentum_scalp`
 
-- same-symbol watch fanout
-  used by `level_watch`, `vwap_bounce_watch`, and `vwap_reclaim_watch`
+- trigger fanout
+  used by `threshold_watch`, `level_watch`, `vwap_bounce_watch`, and `vwap_reclaim_watch`
 
-For the watch families:
+For the canonical watch families:
 
 - `strategy_key` is the reducer family
 - `trigger_key` is the operator-facing label
 - `trigger_id` is the runtime identity
-- one canonical `market.bar` observation can seed or reduce multiple same-symbol watch cases
-- the completed-bar planner is shared/provider-neutral; provider capability is chosen after canonical intent resolution
+- one routed observation can seed or reduce one trigger-scoped case lineage
+- `threshold_watch` fans out over canonical `market.quote` observations
+- `level_watch`, `vwap_bounce_watch`, and `vwap_reclaim_watch` fan out over canonical `market.bar` observations
+- provider capability is chosen after canonical intent resolution
 
 ## Known Constraints
 
 - one-shot mode is the safest default for smoke work
-- source loops are sequential by design right now
+- source polling is now bounded-concurrent rather than strictly sequential, but observation application still preserves deterministic source ordering as much as practical
 - current case creation is strategy-driven; no generic "create case" CLI exists
 - if no trigger row exists, the daemon may ingest observations without ever producing a wake
 - phase-1/scanner families still use effective-trigger lookup by `strategy_key` plus scope rather than `trigger_key` as a runtime selector
-- the watch families fan out over every matching same-symbol trigger row from the canonical watch set
+- the canonical watch families fan out over every matching trigger row in the deployed watch set
