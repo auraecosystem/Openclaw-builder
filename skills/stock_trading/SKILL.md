@@ -49,10 +49,22 @@ Source rules / supporting methodology docs:
 - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-bull-flag.md`
 - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-flat-top-breakout.md`
 - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/ross-cameron-abcd.md`
+- `/Users/ad/dotfiles/docs/domains/trading/strategies/qullamaggie-continuation-breakout-scored-checklist.md`
+  Canonical weighted continuation-breakout checklist. Use this first when scanning candidates, use it again when reviewing charts, and cite it when grading setups or planning trades.
+- `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-rules.md`
+  OpenClaw root rules reference for the Qullamaggie family, including the full continuation-breakout checklist, hard fails, ADR overlay, and inferred scan overlays.
+- `/Users/ad/dotfiles/docs/domains/trading/strategies/qullamaggie-breakout.md`
+  Execution and scan heuristics for Qullamaggie breakout work. Use alongside the scored checklist for trigger timing, freshness, and anti-chase rules.
+- `/Users/ad/dotfiles/docs/domains/trading/strategies/qullamaggie-rules.md`
+  Long-form dotfiles rules mirror. Use this when you need the fuller methodology and provenance behind the checklist and overlays.
 - `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Strategies/Qullamaggie.md`
+  Strategy-level summary for the broader Qullamaggie approach.
 - `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Continuation Breakout.md`
+  Setup-level continuation-breakout note. Use after the scored checklist to confirm setup identity, workflow fit, and trade-planning language.
 - `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Episodic Pivot.md`
+  Companion setup note for episodic pivots when a candidate is not actually a continuation breakout.
 - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-parabolic-short.md`
+  Complementary short-side reference for parabolic exhaustion cases that are the opposite of long continuation breakouts.
 - `/Users/ad/dotfiles/docs/domains/trading/strategies/strategy-comparison.md`
 
 ## When to use
@@ -283,17 +295,26 @@ Do not default to inventing a full autonomous Ross bull-flag detector when the a
 
 1. Use `macro-dashboard` to decide whether the broader regime supports breakout continuation.
 2. Use `tws market bars` or existing catalog/backtest data for the name.
-3. Compare the setup to:
+3. Start with the scored continuation-breakout checklist, then compare the setup to:
+   - `/Users/ad/dotfiles/docs/domains/trading/strategies/qullamaggie-continuation-breakout-scored-checklist.md`
    - `/Users/ad/dotfiles/docs/domains/trading/strategies/qullamaggie-continuation-breakout-autonomous-lifecycle.md`
+   - `/Users/ad/dotfiles/docs/domains/trading/strategies/qullamaggie-breakout.md`
    - `/Users/ad/dotfiles/docs/domains/trading/strategies/qullamaggie-ep-autonomous-lifecycle.md`
+   - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-rules.md`
+   - `/Users/ad/dotfiles/docs/domains/trading/strategies/qullamaggie-rules.md`
    - `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Strategies/Qullamaggie.md`
    - `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Continuation Breakout.md`
    - `/Users/ad/work/trading-tools/knowledge_base/10-Entities/Setups/Qullamaggie Episodic Pivot.md`
    - `/Users/ad/work/ai/openclaw/skills/stock_trading/references/qullamaggie-parabolic-short.md`
    - `/Users/ad/dotfiles/docs/domains/trading/strategies/strategy-comparison.md`
+     Treat the checklist as mandatory in three phases:
+   - scanning: reject names that fail the hard-fail items or clearly miss the weighted threshold
+   - setup review: score every serious candidate criterion by criterion, including unchecked items
+   - trade planning: use the checklist result to justify buy zone, invalidation, extension risk, and whether the name is actionable now or needs a reset
 4. Inspect or seed the relevant canonical trigger rows before execution.
 5. If the trade depends on a future breakout or invalidation level, let `trade-daemon` monitor it and let `assistant-bot` deliver the wake.
 6. Review outcome quality later through canonical case history and inbox-driven review events.
+   Re-open the scored checklist during review so setup quality, execution quality, and freshness can be judged separately.
 
 ### Event / catalyst workflow
 
