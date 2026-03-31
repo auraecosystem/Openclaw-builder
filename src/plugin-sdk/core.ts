@@ -81,7 +81,6 @@ export type {
   PluginToolMetadataRegistration,
   PluginTrustedToolPolicyRegistration,
   PluginLogger,
-  PluginResetSessionResult,
   ProviderAuthContext,
   ProviderAuthDoctorHintContext,
   ProviderAuthMethod,
@@ -139,6 +138,7 @@ export type {
   OpenClawPluginActiveModelContext,
   OpenClawPluginToolContext,
   OpenClawPluginToolFactory,
+  PluginResetSessionResult,
 } from "../plugins/types.js";
 export type {
   MemoryPluginCapability,
@@ -149,7 +149,7 @@ export type {
   PluginHookReplyDispatchContext,
   PluginHookReplyDispatchEvent,
   PluginHookReplyDispatchResult,
-} from "../plugins/types.js";
+} from "../plugins/hook-reply-dispatch.js";
 export type { OpenClawConfig } from "../config/config.js";
 export type { OutboundIdentity } from "../infra/outbound/identity.js";
 export type { HistoryEntry } from "../auto-reply/reply/history.types.js";
