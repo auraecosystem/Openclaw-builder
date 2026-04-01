@@ -1964,6 +1964,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       reason: "patch",
     });
   },
+<<<<<<< HEAD
   "sessions.pluginPatch": async ({ params, respond, context, client, isWebchatConnect }) => {
     if (
       !assertValidParams(params, validateSessionsPluginPatchParams, "sessions.pluginPatch", respond)
@@ -2039,7 +2040,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       reason: "plugin-patch",
     });
   },
-  "sessions.reset": async ({ params, respond, context }) => {
+  "sessions.reset": async ({ params, respond }) => {
     if (!assertValidParams(params, validateSessionsResetParams, "sessions.reset", respond)) {
       return;
     }
