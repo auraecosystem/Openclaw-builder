@@ -364,6 +364,11 @@ async function runReleaseConfiguredPluginInstallsHealth(
   };
 }
 
+async function runDiskSpaceHealth(ctx: DoctorHealthFlowContext): Promise<void> {
+  const { noteDiskSpace } = await import("../commands/doctor-disk-space.js");
+  await noteDiskSpace(ctx.cfg);
+}
+
 async function runStateIntegrityHealth(ctx: DoctorHealthFlowContext): Promise<void> {
   const { noteStateIntegrity } = await import("../commands/doctor-state-integrity.js");
   await noteStateIntegrity(ctx.cfg, ctx.prompter, ctx.configPath);
@@ -790,6 +795,11 @@ export function resolveDoctorHealthContributions(): DoctorHealthContribution[] {
       id: "doctor:plugin-registry",
       label: "Plugin registry",
       run: runPluginRegistryHealth,
+    }),
+    createDoctorHealthContribution({
+      id: "doctor:disk-space",
+      label: "Disk space",
+      run: runDiskSpaceHealth,
     }),
     createDoctorHealthContribution({
       id: "doctor:state-integrity",
