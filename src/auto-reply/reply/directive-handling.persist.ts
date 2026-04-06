@@ -9,6 +9,7 @@ import type { ModelAliasIndex } from "../../agents/model-selection.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { updateSessionStore } from "../../config/sessions/store.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
+import { logVerbose } from "../../globals.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { applyVerboseOverride } from "../../sessions/level-overrides.js";
 import { applyModelOverrideToSessionEntry } from "../../sessions/model-overrides.js";
@@ -171,11 +172,18 @@ export async function persistInlineDirectives(params: {
         provider,
       });
       if (modelResolution.modelSelection) {
+        const requestedModelRef = `${modelResolution.modelSelection.provider}/${modelResolution.modelSelection.model}`;
+        logVerbose(
+          `persistInlineDirectives: applying model override ${requestedModelRef} to session ${sessionKey}`,
+        );
         const { updated: modelUpdated } = applyModelOverrideToSessionEntry({
           entry: sessionEntry,
           selection: modelResolution.modelSelection,
           profileOverride: modelResolution.profileOverride,
         });
+        logVerbose(
+          `persistInlineDirectives: model override ${requestedModelRef} updated=${modelUpdated} session=${sessionKey}`,
+        );
         provider = modelResolution.modelSelection.provider;
         model = modelResolution.modelSelection.model;
         const nextLabel = `${provider}/${model}`;
@@ -203,9 +211,15 @@ export async function persistInlineDirectives(params: {
       sessionEntry.updatedAt = Date.now();
       sessionStore[sessionKey] = sessionEntry;
       if (storePath) {
+        logVerbose(
+          `persistInlineDirectives: writing session store for session=${sessionKey} path=${storePath}`,
+        );
         await updateSessionStore(storePath, (store) => {
           store[sessionKey] = sessionEntry;
         });
+        logVerbose(
+          `persistInlineDirectives: wrote session store for session=${sessionKey} path=${storePath}`,
+        );
       }
       enqueueModeSwitchEvents({
         enqueueSystemEvent,

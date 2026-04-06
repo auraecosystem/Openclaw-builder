@@ -114,6 +114,8 @@ export type RunEmbeddedPiAgentParams = {
   shouldEmitToolResult?: () => boolean;
   shouldEmitToolOutput?: () => boolean;
   onPartialReply?: (payload: { text?: string; mediaUrls?: string[] }) => void | Promise<void>;
+  /** When true, assistant commentary-phase messages are surfaced only through onPartialReply. */
+  routeCommentaryToPartial?: boolean;
   onAssistantMessageStart?: () => void | Promise<void>;
   onBlockReply?: (payload: BlockReplyPayload) => void | Promise<void>;
   onBlockReplyFlush?: () => void | Promise<void>;

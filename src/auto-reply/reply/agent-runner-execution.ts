@@ -880,6 +880,10 @@ export async function runAgentTurnWithFallback(params: {
                     mediaUrls: payload.mediaUrls,
                   });
                 },
+                routeCommentaryToPartial:
+                  params.opts?.onPartialReply != null &&
+                  resolveMessageChannel(params.sessionCtx.Surface, params.sessionCtx.Provider) ===
+                    "discord",
                 onAssistantMessageStart: async () => {
                   await params.typingSignals.signalMessageStart();
                   await params.opts?.onAssistantMessageStart?.();

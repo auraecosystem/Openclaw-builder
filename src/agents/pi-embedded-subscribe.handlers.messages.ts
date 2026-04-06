@@ -439,7 +439,6 @@ export function handleMessageEnd(
   }
 
   const assistantMessage = msg;
-  const suppressVisibleAssistantOutput = shouldSuppressAssistantVisibleOutput(assistantMessage);
   ctx.noteLastAssistant(assistantMessage);
   ctx.recordAssistantUsage((assistantMessage as { usage?: unknown }).usage);
   if (ctx.state.deterministicApprovalPromptSent) {
@@ -471,6 +470,23 @@ export function handleMessageEnd(
   const parsedText = trimmedText ? parseReplyDirectives(stripTrailingDirective(trimmedText)) : null;
   let cleanedText = parsedText?.text ?? "";
   let { mediaUrls, hasMedia } = resolveSendableOutboundReplyParts(parsedText ?? {});
+  const assistantPhase =
+    (assistantMessage as { phase?: unknown }).phase === "commentary" ||
+    (assistantMessage as { phase?: unknown }).phase === "final_answer"
+      ? ((assistantMessage as { phase?: "commentary" | "final_answer" }).phase ?? undefined)
+      : undefined;
+  const commentaryPartialOnly =
+    ctx.params.routeCommentaryToPartial === true && assistantPhase === "commentary";
+  if (commentaryPartialOnly && !cleanedText && !hasMedia) {
+    const rawCommentaryText = rawText.trim();
+    if (rawCommentaryText) {
+      const commentaryParsed = parseReplyDirectives(stripTrailingDirective(rawCommentaryText));
+      cleanedText = commentaryParsed.text ?? "";
+      ({ mediaUrls, hasMedia } = resolveSendableOutboundReplyParts(commentaryParsed));
+    }
+  }
+  const suppressVisibleAssistantOutput =
+    shouldSuppressAssistantVisibleOutput(assistantMessage) && !commentaryPartialOnly;
 
   const finalizeMessageEnd = () => {
     ctx.state.deltaBuffer = "";
@@ -526,6 +542,15 @@ export function handleMessageEnd(
     });
     ctx.state.emittedAssistantUpdate = true;
     ctx.state.lastStreamedAssistantCleaned = cleanedText;
+    if (commentaryPartialOnly && ctx.params.onPartialReply && ctx.state.shouldEmitPartialReplies) {
+      void ctx.params.onPartialReply(data);
+    }
+  }
+
+  if (commentaryPartialOnly) {
+    ctx.state.assistantTextBaseline = ctx.state.assistantTexts.length;
+    finalizeMessageEnd();
+    return;
   }
 
   const silentExpectedWithoutSentinel =

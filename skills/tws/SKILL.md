@@ -90,6 +90,17 @@ tws account pnl
 tws executions list --limit 20
 ```
 
+Commission data:
+
+- Do not assume `tws executions list` or `tws orders completed` includes commissions today.
+- In the IBKR API, per-fill commission data comes from the executions path:
+  - request fills with `reqExecutions`
+  - consume `execDetails`
+  - consume `commissionReport` in the legacy TWS API docs, or `commissionAndFeesReport` in newer IBKR Campus docs
+  - join commission rows back to executions by `execId`
+- `orders completed` comes from `reqCompletedOrders` and is not the authoritative source for per-fill commissions.
+- If an agent needs commissions surfaced in the CLI, the correct implementation path is to extend the executions flow, not the completed-orders summary output.
+
 Trading:
 
 ```bash
@@ -107,6 +118,7 @@ tws orders cancel 12345678
 - `orders open`: account-wide open-order view.
 - `orders completed`: completed-order history from IBKR's completed-order API.
 - `executions list`: fills history; keep it separate from completed-order history.
+- For commission-aware execution history, IBKR expects a merged executions-plus-commission-report view keyed by `execId`.
 
 Options:
 

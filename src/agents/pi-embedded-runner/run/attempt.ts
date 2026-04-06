@@ -1401,6 +1401,7 @@ export async function runEmbeddedAttempt(
           blockReplyBreak: params.blockReplyBreak,
           blockReplyChunking: params.blockReplyChunking,
           onPartialReply: params.onPartialReply,
+          routeCommentaryToPartial: params.routeCommentaryToPartial,
           onAssistantMessageStart: params.onAssistantMessageStart,
           onAgentEvent: params.onAgentEvent,
           enforceFinalTag: params.enforceFinalTag,

@@ -54,4 +54,34 @@ describe("subscribeEmbeddedPiSession", () => {
     expect(onPartialReply).not.toHaveBeenCalled();
     expect(subscription.assistantTexts).toEqual(["Final answer"]);
   });
+
+  it("routes commentary-phase assistant messages to partial replies only", async () => {
+    const { session, emit } = createStubSessionHarness();
+    const onPartialReply = vi.fn();
+
+    const subscription = subscribeEmbeddedPiSession({
+      session,
+      runId: "run",
+      onPartialReply,
+      routeCommentaryToPartial: true,
+    });
+
+    const commentaryMessage = {
+      role: "assistant",
+      phase: "commentary",
+      content: [{ type: "text", text: "Working on it." }],
+    } as const;
+
+    emit({ type: "message_start", message: commentaryMessage });
+    emit({ type: "message_end", message: commentaryMessage });
+
+    await vi.waitFor(() => {
+      expect(onPartialReply).toHaveBeenCalledTimes(1);
+    });
+    expect(onPartialReply.mock.calls[0]?.[0]).toEqual({
+      text: "Working on it.",
+      delta: "Working on it.",
+    });
+    expect(subscription.assistantTexts).toEqual([]);
+  });
 });
