@@ -1117,6 +1117,7 @@ export const pt_BR: TranslationMap = {
     uk: "Українська (ucraniano)",
     id: "Bahasa Indonesia (Indonésio)",
     pl: "Polski (Polonês)",
+    sv: "Sueco (Svenska)",
     th: "ไทย (tailandês)",
     vi: "Tiếng Việt (Vietnamita)",
     nl: "Nederlands (Holandês)",
