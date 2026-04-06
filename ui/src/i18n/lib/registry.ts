@@ -158,6 +158,9 @@ export function resolveNavigatorLocale(navLang: string): Locale {
   if (navLang.startsWith("id")) {
     return "id";
   }
+  if (navLang.startsWith("sv")) {
+    return "sv";
+  }
   if (navLang.startsWith("pl")) {
     return "pl";
   }
