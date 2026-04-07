@@ -62,6 +62,7 @@ export function createDiscordMessage(params: {
     username?: string;
   };
   mentionedUsers?: Array<{ id: string }>;
+  mentionedRoles?: Array<{ id: string }>;
   mentionedEveryone?: boolean;
   attachments?: Array<Record<string, unknown>>;
 }): import("@buape/carbon").Message {
@@ -72,7 +73,7 @@ export function createDiscordMessage(params: {
     channelId: params.channelId,
     attachments: params.attachments ?? [],
     mentionedUsers: params.mentionedUsers ?? [],
-    mentionedRoles: [],
+    mentionedRoles: params.mentionedRoles ?? [],
     mentionedEveryone: params.mentionedEveryone ?? false,
     author: params.author,
   } as unknown as import("@buape/carbon").Message;

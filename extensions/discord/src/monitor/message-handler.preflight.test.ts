@@ -763,7 +763,7 @@ describe("preflightDiscordMessage", () => {
   it("allows guild messages that mention one of the bot roles", async () => {
     const channelId = "channel-role-mentions-on";
     const guildId = "guild-role-mentions-on";
-    const message = createMessage({
+    const message = createDiscordMessage({
       id: "m-role-mentions-on",
       channelId,
       content: "hi <@&crabman-role>",

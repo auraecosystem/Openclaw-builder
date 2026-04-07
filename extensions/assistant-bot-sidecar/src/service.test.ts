@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import type * as fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssistantBotSidecarConfig } from "./config.js";
 
@@ -8,31 +9,52 @@ type MockChild = EventEmitter & {
   kill: ReturnType<typeof vi.fn>;
   killed: boolean;
 };
+type WatchCallback = () => void;
 
-const { spawnMock, watchCloseMock, watchMock, existsSyncMock, statSyncMock, readFileSyncMock } =
-  vi.hoisted(() => {
-    const watchClose = vi.fn();
-    return {
-      spawnMock: vi.fn(),
-      watchCloseMock: watchClose,
-      watchMock: vi.fn(() => ({ close: watchClose })),
-      existsSyncMock: vi.fn(() => true),
-      statSyncMock: vi.fn(() => ({ isDirectory: () => true })),
-      readFileSyncMock: vi.fn((path: string) => {
-        if (path.endsWith("apps/assistant_bot/.env")) {
-          return 'ASSISTANT_BOT_DSN="postgresql://postgres:postgres@127.0.0.1:15441/trading_tools?sslmode=disable"\n';
-        }
-        return [
-          "TRADING_TOOLS_TIMESCALE_HOST=127.0.0.1",
-          "TRADING_TOOLS_TIMESCALE_PORT=15441",
-          "TRADING_TOOLS_TIMESCALE_DB=trading_tools",
-          "TRADING_TOOLS_TIMESCALE_USER=postgres",
-          "TRADING_TOOLS_TIMESCALE_PASSWORD=postgres",
-          "TRADING_TOOLS_TIMESCALE_SSLMODE=disable",
-        ].join("\n");
-      }),
-    };
-  });
+const {
+  spawnMock,
+  watchCloseMock,
+  watchMock,
+  watchCallbacks,
+  existsSyncMock,
+  statSyncMock,
+  readFileSyncMock,
+} = vi.hoisted(() => {
+  const watchClose = vi.fn();
+  const callbacks: WatchCallback[] = [];
+  return {
+    spawnMock: vi.fn(),
+    watchCloseMock: watchClose,
+    watchCallbacks: callbacks,
+    watchMock: vi.fn(
+      (
+        watchPath: fs.PathLike,
+        optionsOrListener?: fs.WatchOptions | fs.WatchListener<string>,
+        listener?: fs.WatchListener<string>,
+      ) => {
+        const callback =
+          typeof optionsOrListener === "function" ? optionsOrListener : listener ?? (() => {});
+        callbacks.push(() => callback("change", typeof watchPath === "string" ? watchPath : null));
+        return { close: watchClose };
+      },
+    ),
+    existsSyncMock: vi.fn((_: fs.PathLike) => true),
+    statSyncMock: vi.fn((_: fs.PathLike) => ({ isDirectory: () => true })),
+    readFileSyncMock: vi.fn((filePath: fs.PathOrFileDescriptor) => {
+      if (typeof filePath === "string" && filePath.endsWith("apps/assistant_bot/.env")) {
+        return 'ASSISTANT_BOT_DSN="postgresql://postgres:postgres@127.0.0.1:15441/trading_tools?sslmode=disable"\n';
+      }
+      return [
+        "TRADING_TOOLS_TIMESCALE_HOST=127.0.0.1",
+        "TRADING_TOOLS_TIMESCALE_PORT=15441",
+        "TRADING_TOOLS_TIMESCALE_DB=trading_tools",
+        "TRADING_TOOLS_TIMESCALE_USER=postgres",
+        "TRADING_TOOLS_TIMESCALE_PASSWORD=postgres",
+        "TRADING_TOOLS_TIMESCALE_SSLMODE=disable",
+      ].join("\n");
+    }),
+  };
+});
 
 vi.mock("node:child_process", () => ({
   spawn: spawnMock,
@@ -129,10 +151,25 @@ async function startService(
   return { service, logger };
 }
 
+async function stopService(
+  service: Awaited<ReturnType<typeof startService>>["service"],
+  logger: ReturnType<typeof createLogger>,
+): Promise<void> {
+  expect(service.stop).toBeTypeOf("function");
+  await service.stop?.({ config: {} as never, logger, stateDir: "", workspaceDir: "" });
+}
+
+function runWatchCallback(index: number): void {
+  const callback = watchCallbacks[index];
+  expect(callback).toBeTypeOf("function");
+  callback?.();
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   existsSyncMock.mockReturnValue(true);
   statSyncMock.mockReturnValue({ isDirectory: () => true });
+  watchCallbacks.length = 0;
 });
 
 afterEach(() => {
@@ -203,7 +240,7 @@ describe("assistant-bot sidecar service", () => {
       }),
     );
 
-    await service.stop({ config: {} as never, logger, stateDir: "", workspaceDir: "" });
+    await stopService(service, logger);
 
     expect(assistantChild.kill).toHaveBeenCalledWith("SIGTERM");
     expect(daemonChild.kill).toHaveBeenCalledWith("SIGTERM");
@@ -223,15 +260,14 @@ describe("assistant-bot sidecar service", () => {
 
     const { service, logger } = await startService();
 
-    const assistantWatchCallback = watchMock.mock.calls[0]?.[2] as () => void;
-    assistantWatchCallback();
+    runWatchCallback(0);
     await vi.advanceTimersByTimeAsync(baseConfig.assistantBot.watch.debounceMs);
 
     expect(assistantChild.kill).toHaveBeenCalledWith("SIGTERM");
     expect(daemonChild.kill).not.toHaveBeenCalled();
     expect(spawnMock).toHaveBeenCalledTimes(3);
 
-    await service.stop({ config: {} as never, logger, stateDir: "", workspaceDir: "" });
+    await stopService(service, logger);
   });
 
   it("restarts daemon then assistant-bot on daemon source changes", async () => {
@@ -247,8 +283,7 @@ describe("assistant-bot sidecar service", () => {
 
     const { service, logger } = await startService();
 
-    const daemonWatchCallback = watchMock.mock.calls[1]?.[2] as () => void;
-    daemonWatchCallback();
+    runWatchCallback(1);
     await vi.advanceTimersByTimeAsync(
       baseConfig.daemon.watch.debounceMs + baseConfig.startupGraceMs,
     );
@@ -280,7 +315,7 @@ describe("assistant-bot sidecar service", () => {
       expect.any(Object),
     );
 
-    await service.stop({ config: {} as never, logger, stateDir: "", workspaceDir: "" });
+    await stopService(service, logger);
   });
 
   it("restarts the full stack on shared source changes", async () => {
@@ -296,8 +331,7 @@ describe("assistant-bot sidecar service", () => {
 
     const { service, logger } = await startService();
 
-    const sharedWatchCallback = watchMock.mock.calls[2]?.[2] as () => void;
-    sharedWatchCallback();
+    runWatchCallback(2);
     await vi.advanceTimersByTimeAsync(
       Math.max(baseConfig.daemon.watch.debounceMs, baseConfig.assistantBot.watch.debounceMs) +
         baseConfig.startupGraceMs,
@@ -307,7 +341,7 @@ describe("assistant-bot sidecar service", () => {
     expect(daemonChild.kill).toHaveBeenCalledWith("SIGTERM");
     expect(spawnMock).toHaveBeenCalledTimes(4);
 
-    await service.stop({ config: {} as never, logger, stateDir: "", workspaceDir: "" });
+    await stopService(service, logger);
   });
 
   it("restarts only assistant-bot after assistant-bot exits unexpectedly", async () => {
@@ -327,7 +361,7 @@ describe("assistant-bot sidecar service", () => {
     expect(daemonChild.kill).not.toHaveBeenCalled();
     expect(spawnMock).toHaveBeenCalledTimes(3);
 
-    await service.stop({ config: {} as never, logger, stateDir: "", workspaceDir: "" });
+    await stopService(service, logger);
   });
 
   it("restarts the full stack instead of assistant-bot when daemon is down", async () => {
@@ -358,8 +392,7 @@ describe("assistant-bot sidecar service", () => {
     await vi.advanceTimersByTimeAsync(baseConfig.startupGraceMs);
     await startPromise;
 
-    const assistantWatchCallback = watchMock.mock.calls[0]?.[2] as () => void;
-    assistantWatchCallback();
+    runWatchCallback(0);
     await vi.advanceTimersByTimeAsync(
       baseConfig.assistantBot.watch.debounceMs + baseConfig.startupGraceMs,
     );
@@ -369,7 +402,7 @@ describe("assistant-bot sidecar service", () => {
       "assistant-bot-sidecar: assistant-bot restart requested while trade-daemon is down; restarting the full stack instead (source change under /tmp/trading-tools/apps/assistant_bot/src)",
     );
 
-    await service.stop({ config: {} as never, logger, stateDir: "", workspaceDir: "" });
+    await stopService(service, logger);
   });
 
   it("restarts daemon then assistant-bot after daemon exits unexpectedly", async () => {
@@ -391,7 +424,7 @@ describe("assistant-bot sidecar service", () => {
     expect(assistantChild.kill).toHaveBeenCalledWith("SIGTERM");
     expect(spawnMock).toHaveBeenCalledTimes(4);
 
-    await service.stop({ config: {} as never, logger, stateDir: "", workspaceDir: "" });
+    await stopService(service, logger);
   });
 
   it("warns on missing watch paths and still starts enabled processes", async () => {
@@ -411,13 +444,15 @@ describe("assistant-bot sidecar service", () => {
     );
     expect(spawnMock).toHaveBeenCalledTimes(2);
 
-    await service.stop({ config: {} as never, logger, stateDir: "", workspaceDir: "" });
+    await stopService(service, logger);
   });
 
   it("warns on missing env files and still starts enabled processes", async () => {
     const daemonChild = createChild();
     const assistantChild = createChild();
-    existsSyncMock.mockImplementation((input: string) => !input.endsWith(".env"));
+    existsSyncMock.mockImplementation((input) =>
+      typeof input === "string" ? !input.endsWith(".env") : true,
+    );
     spawnMock.mockReturnValueOnce(daemonChild).mockReturnValueOnce(assistantChild);
 
     const logger = createLogger();
@@ -434,7 +469,7 @@ describe("assistant-bot sidecar service", () => {
     );
     expect(spawnMock).toHaveBeenCalledTimes(2);
 
-    await service.stop({ config: {} as never, logger, stateDir: "", workspaceDir: "" });
+    await stopService(service, logger);
   });
 
   it("can run assistant-bot without daemon when daemon is disabled", async () => {
@@ -463,6 +498,6 @@ describe("assistant-bot sidecar service", () => {
       "assistant-bot-sidecar: assistant-bot is enabled while trade-daemon is disabled; wake processing may be idle",
     );
 
-    await service.stop({ config: {} as never, logger, stateDir: "", workspaceDir: "" });
+    await stopService(service, logger);
   });
 });

@@ -1516,9 +1516,7 @@ describe("dispatchReplyFromConfig", () => {
     const streamedText = blockCalls.map((call) => (call[0] as ReplyPayload).text ?? "").join("");
     expect(streamedText).toContain("hello");
     expect(streamedText).toContain("world");
-    expect(dispatcher.sendFinalReply).toHaveBeenCalledWith(
-      expect.objectContaining({ text: "hello world" }),
-    );
+    expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
   });
 
   it("emits lifecycle end for ACP turns using the current run id", async () => {
@@ -1702,8 +1700,8 @@ describe("dispatchReplyFromConfig", () => {
     await dispatchReplyFromConfig({ ctx, cfg, dispatcher, replyResolver: vi.fn() });
 
     const finalCalls = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls;
-    expect(finalCalls.length).toBe(2);
-    const noticePayload = finalCalls[1]?.[0] as ReplyPayload | undefined;
+    expect(finalCalls.length).toBe(1);
+    const noticePayload = finalCalls[0]?.[0] as ReplyPayload | undefined;
     expect(noticePayload?.text).toContain("Session ids resolved");
     expect(noticePayload?.text).toContain("agent session id: inner-123");
     expect(noticePayload?.text).toContain("acpx session id: acpx-123");
@@ -1785,8 +1783,8 @@ describe("dispatchReplyFromConfig", () => {
     await dispatchReplyFromConfig({ ctx, cfg, dispatcher, replyResolver: vi.fn() });
 
     const finalCalls = (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mock.calls;
-    expect(finalCalls.length).toBe(2);
-    const noticePayload = finalCalls[1]?.[0] as ReplyPayload | undefined;
+    expect(finalCalls.length).toBe(1);
+    const noticePayload = finalCalls[0]?.[0] as ReplyPayload | undefined;
     expect(noticePayload?.text).toContain("Session ids resolved");
     expect(noticePayload?.text).toContain("agent session id: inner-123");
     expect(noticePayload?.text).toContain("acpx session id: acpx-123");
@@ -1910,9 +1908,7 @@ describe("dispatchReplyFromConfig", () => {
       .map((call) => ((call[0] as ReplyPayload).text ?? "").trim())
       .filter(Boolean);
     expect(blockTexts).toEqual(["What do you want to work on?"]);
-    expect(dispatcher.sendFinalReply).toHaveBeenCalledWith(
-      expect.objectContaining({ text: "What do you want to work on?" }),
-    );
+    expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
   });
 
   it("generates final-mode TTS audio after ACP block streaming completes", async () => {

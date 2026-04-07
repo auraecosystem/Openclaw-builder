@@ -1,10 +1,5 @@
 import crypto from "node:crypto";
 import path from "node:path";
-import {
-  buildTelegramTopicConversationId,
-  normalizeConversationText,
-  parseTelegramChatIdFromTarget,
-} from "../../acp/conversation-id.js";
 import { resolveSessionAgentId, resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
 import { clearBootstrapSnapshotOnSessionRollover } from "../../agents/bootstrap-cache.js";
 import { disposeSessionMcpRuntime } from "../../agents/pi-bundle-mcp-tools.js";

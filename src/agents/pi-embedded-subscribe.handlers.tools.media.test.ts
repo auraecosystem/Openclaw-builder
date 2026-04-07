@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const saveMediaBufferMock = vi.hoisted(() =>
-  vi.fn(async () => ({
+  vi.fn(async (..._args: unknown[]) => ({
     id: "saved-media",
     path: "/tmp/materialized-inline-image.png",
     size: 4,

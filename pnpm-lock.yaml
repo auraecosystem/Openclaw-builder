@@ -294,6 +294,8 @@ importers:
 
   extensions/arcee: {}
 
+  extensions/assistant-bot-sidecar: {}
+
   extensions/bluebubbles:
     devDependencies:
       openclaw:

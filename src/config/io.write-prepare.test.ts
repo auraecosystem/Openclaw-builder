@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { OpenClawConfig } from "./types.js";
 import {
   collectChangedPaths,
   formatConfigValidationFailure,
@@ -61,7 +62,7 @@ describe("config io write prepare", () => {
   });
 
   it("does not mutate caller config when unsetting existing config objects", () => {
-    const input = {
+    const input: OpenClawConfig = {
       gateway: { mode: "local" },
       commands: { ownerDisplay: "hash" },
     };
@@ -76,14 +77,14 @@ describe("config io write prepare", () => {
   });
 
   it("keeps caller arrays immutable when unsetting array entries", () => {
-    const input = {
+    const input: OpenClawConfig = {
       gateway: { mode: "local" },
       tools: { alsoAllow: ["exec", "fetch", "read"] },
     };
 
     const next = unsetPathForWrite(input, ["tools", "alsoAllow", "1"]);
 
-    expect(input.tools.alsoAllow).toEqual(["exec", "fetch", "read"]);
+    expect(input.tools?.alsoAllow).toEqual(["exec", "fetch", "read"]);
     expect((next.next.tools as { alsoAllow?: string[] } | undefined)?.alsoAllow).toEqual([
       "exec",
       "read",
@@ -91,7 +92,7 @@ describe("config io write prepare", () => {
   });
 
   it("treats missing unset paths as no-op without mutating caller config", () => {
-    const input = {
+    const input: OpenClawConfig = {
       gateway: { mode: "local" },
       commands: { ownerDisplay: "hash" },
     };
@@ -107,7 +108,7 @@ describe("config io write prepare", () => {
   });
 
   it("ignores blocked prototype-key unset path segments", () => {
-    const input = {
+    const input: OpenClawConfig = {
       gateway: { mode: "local" },
       commands: { ownerDisplay: "hash" },
     };
@@ -270,7 +271,7 @@ describe("config io write prepare", () => {
   });
 
   it("keeps plugin AJV defaults out of the persisted candidate", () => {
-    const sourceConfig = {
+    const sourceConfig: OpenClawConfig = {
       gateway: { port: 18789 },
       channels: {
         bluebubbles: {
@@ -280,7 +281,7 @@ describe("config io write prepare", () => {
       },
     };
 
-    const runtimeConfig = {
+    const runtimeConfig: OpenClawConfig = {
       gateway: { port: 18789 },
       channels: {
         bluebubbles: {
@@ -291,7 +292,7 @@ describe("config io write prepare", () => {
       },
     };
 
-    const nextConfig = structuredClone(runtimeConfig);
+    const nextConfig: OpenClawConfig = structuredClone(runtimeConfig);
     nextConfig.gateway = {
       ...nextConfig.gateway,
       auth: { mode: "token" },
@@ -315,7 +316,7 @@ describe("config io write prepare", () => {
   });
 
   it("does not reintroduce legacy nested dm.policy defaults in the persisted candidate", () => {
-    const sourceConfig = {
+    const sourceConfig: OpenClawConfig = {
       channels: {
         discord: {
           dmPolicy: "pairing",
@@ -329,9 +330,20 @@ describe("config io write prepare", () => {
       gateway: { port: 18789 },
     };
 
-    const nextConfig = structuredClone(sourceConfig);
-    delete nextConfig.channels.discord.dm.policy;
-    delete nextConfig.channels.slack.dm.policy;
+    const nextConfig: OpenClawConfig = {
+      ...structuredClone(sourceConfig),
+      channels: {
+        ...structuredClone(sourceConfig.channels ?? {}),
+        discord: {
+          ...structuredClone(sourceConfig.channels?.discord ?? {}),
+          dm: { enabled: true },
+        },
+        slack: {
+          ...structuredClone(sourceConfig.channels?.slack ?? {}),
+          dm: { enabled: true },
+        },
+      },
+    };
 
     const persisted = resolvePersistCandidateForWrite({
       runtimeConfig: sourceConfig,

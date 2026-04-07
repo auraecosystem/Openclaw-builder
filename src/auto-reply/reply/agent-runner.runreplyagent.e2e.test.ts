@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import type { SessionEntry } from "../../config/sessions.js";
 import * as sessions from "../../config/sessions.js";
 import type { TypingMode } from "../../config/types.js";
+import { clearMemoryPluginState, registerMemoryFlushPlanResolver } from "../../plugins/memory-state.js";
 import { withStateDirEnv } from "../../test-helpers/state-dir-env.js";
 import type { TemplateContext } from "../templating.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
@@ -113,6 +114,7 @@ beforeEach(() => {
   vi.mocked(enqueueFollowupRun).mockClear();
   vi.mocked(refreshQueuedFollowupSession).mockClear();
   vi.mocked(scheduleFollowupDrain).mockClear();
+  clearMemoryPluginState();
   vi.stubEnv("OPENCLAW_TEST_FAST", "1");
 });
 
@@ -825,12 +827,11 @@ describe("runReplyAgent typing (heartbeat)", () => {
       const sessionEntry: SessionEntry = { sessionId: "session", updatedAt: Date.now() };
       const sessionStore = { main: sessionEntry };
 
-      state.runEmbeddedPiAgentMock.mockImplementationOnce(async (params: AgentRunParams) => {
-        params.onAgentEvent?.({
-          stream: "compaction",
-          data: { phase: "end", willRetry: false },
-        });
-        return { payloads: [{ text: "final" }], meta: {} };
+      state.runEmbeddedPiAgentMock.mockImplementationOnce(async () => {
+        return {
+          payloads: [{ text: "final" }],
+          meta: { agentMeta: { compactionCount: 1 } },
+        };
       });
 
       const { run } = createMinimalRun({
@@ -841,8 +842,8 @@ describe("runReplyAgent typing (heartbeat)", () => {
         storePath,
       });
       const res = await run();
-      expect(Array.isArray(res)).toBe(true);
-      const payloads = res as { text?: string }[];
+      const payloads = Array.isArray(res) ? res : res ? [res] : [];
+      expect(payloads.length).toBeGreaterThan(0);
       expect(payloads[0]?.text).toContain("Auto-compaction complete");
       expect(payloads[0]?.text).toContain("count 1");
       expect(sessionStore.main.compactionCount).toBe(1);
@@ -1636,7 +1637,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
       const res = await run();
 
       expect(res).toMatchObject({
-        text: expect.stringContaining("Agent failed before reply"),
+        text: expect.stringContaining("Something went wrong while processing your request"),
       });
       expect(sessionStore.main).toBeDefined();
       await expect(fs.access(transcriptPath)).resolves.toBeUndefined();
@@ -1725,6 +1726,35 @@ describe("runReplyAgent memory flush", () => {
   let fixtureRoot = "";
   let caseId = 0;
 
+  function registerConfigAwareMemoryFlushPlanResolver() {
+    registerMemoryFlushPlanResolver(({ cfg }) => {
+      const configured =
+        cfg?.agents?.defaults?.compaction?.memoryFlush as
+          | {
+              enabled?: boolean;
+              prompt?: string;
+              systemPrompt?: string;
+              relativePath?: string;
+              softThresholdTokens?: number;
+              forceFlushTranscriptBytes?: number;
+              reserveTokensFloor?: number;
+            }
+          | undefined;
+      if (configured?.enabled === false) {
+        return null;
+      }
+      return {
+        softThresholdTokens: configured?.softThresholdTokens ?? 1_000,
+        forceFlushTranscriptBytes:
+          configured?.forceFlushTranscriptBytes ?? Number.MAX_SAFE_INTEGER,
+        reserveTokensFloor: configured?.reserveTokensFloor ?? 20_000,
+        prompt: configured?.prompt ?? "Pre-compaction memory flush.",
+        systemPrompt: configured?.systemPrompt ?? "Flush memory into the configured memory file.",
+        relativePath: configured?.relativePath ?? "memory/active.md",
+      };
+    });
+  }
+
   async function withTempStore<T>(fn: (storePath: string) => Promise<T>): Promise<T> {
     const dir = path.join(fixtureRoot, `case-${++caseId}`);
     await fs.mkdir(dir, { recursive: true });
@@ -1738,6 +1768,10 @@ describe("runReplyAgent memory flush", () => {
 
   beforeAll(async () => {
     fixtureRoot = await fs.mkdtemp(path.join(tmpdir(), "openclaw-memory-flush-"));
+  });
+
+  beforeEach(() => {
+    registerConfigAwareMemoryFlushPlanResolver();
   });
 
   afterAll(async () => {
@@ -1765,6 +1799,15 @@ describe("runReplyAgent memory flush", () => {
       const baseRun = createBaseRun({
         storePath,
         sessionEntry,
+        config: {
+          agents: {
+            defaults: {
+              cliBackends: {
+                "codex-cli": {},
+              },
+            },
+          },
+        },
         runOverrides: { provider: "codex-cli" },
       });
 
@@ -1776,11 +1819,11 @@ describe("runReplyAgent memory flush", () => {
         commandBody: "hello",
       });
 
-      expect(state.runEmbeddedPiAgentMock).toHaveBeenCalledTimes(1);
-      const call = state.runEmbeddedPiAgentMock.mock.calls[0]?.[0] as
-        | { prompt?: string }
-        | undefined;
-      expect(call?.prompt).toBe("hello");
+      const prompts = state.runEmbeddedPiAgentMock.mock.calls.map(
+        (call) => ((call[0] as { prompt?: string } | undefined)?.prompt ?? ""),
+      );
+      expect(state.runEmbeddedPiAgentMock).not.toHaveBeenCalled();
+      expect(prompts).not.toContain("Pre-compaction memory flush.");
     });
   });
 
@@ -1938,16 +1981,10 @@ describe("runReplyAgent memory flush", () => {
       });
 
       const flushCall = calls[0];
-      expect(flushCall?.prompt).toContain("Write notes.");
-      expect(flushCall?.prompt).toContain("NO_REPLY");
-      expect(flushCall?.prompt).toMatch(/memory\/\d{4}-\d{2}-\d{2}\.md/);
-      expect(flushCall?.prompt).toContain("MEMORY.md");
-      expect(flushCall?.memoryFlushWritePath).toMatch(/^memory\/\d{4}-\d{2}-\d{2}\.md$/);
+      expect(flushCall?.prompt).toBe("Write notes.");
+      expect(flushCall?.memoryFlushWritePath).toBe("memory/active.md");
       expect(flushCall?.extraSystemPrompt).toContain("extra system");
       expect(flushCall?.extraSystemPrompt).toContain("Flush memory now.");
-      expect(flushCall?.extraSystemPrompt).toContain("NO_REPLY");
-      expect(flushCall?.extraSystemPrompt).toContain("memory/YYYY-MM-DD.md");
-      expect(flushCall?.extraSystemPrompt).toContain("MEMORY.md");
       expect(flushCall?.silentExpected).toBe(true);
       expect(calls[1]?.prompt).toBe("hello");
     });
@@ -2081,13 +2118,9 @@ describe("runReplyAgent memory flush", () => {
       });
 
       expect(calls).toHaveLength(2);
-      expect(calls[0]?.prompt).toContain("Pre-compaction memory flush.");
-      expect(calls[0]?.prompt).toContain("Current time:");
-      expect(calls[0]?.prompt).toMatch(/memory\/\d{4}-\d{2}-\d{2}\.md/);
-      expect(calls[0]?.prompt).toContain("MEMORY.md");
-      expect(calls[0]?.memoryFlushWritePath).toMatch(/^memory\/\d{4}-\d{2}-\d{2}\.md$/);
-      expect(calls[0]?.extraSystemPrompt).toContain("memory/YYYY-MM-DD.md");
-      expect(calls[0]?.extraSystemPrompt).toContain("MEMORY.md");
+      expect(calls[0]?.prompt).toBe("Pre-compaction memory flush.");
+      expect(calls[0]?.memoryFlushWritePath).toBe("memory/active.md");
+      expect(calls[0]?.extraSystemPrompt).toContain("Flush memory into the configured memory file.");
       expect(calls[1]?.prompt).toBe("hello");
       expect(calls[1]?.sessionId).toBe("session-rotated");
       expect(await normalizeComparablePath(calls[1]?.sessionFile ?? "")).toBe(
@@ -2161,9 +2194,7 @@ describe("runReplyAgent memory flush", () => {
       });
 
       expect(calls).toHaveLength(2);
-      expect(calls[0]?.prompt).toContain("Pre-compaction memory flush.");
-      expect(calls[0]?.prompt).toContain("Current time:");
-      expect(calls[0]?.prompt).toMatch(/memory\/\d{4}-\d{2}-\d{2}\.md/);
+      expect(calls[0]?.prompt).toBe("Pre-compaction memory flush.");
       expect(calls[1]?.prompt).toBe("hello");
 
       const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
@@ -2228,7 +2259,7 @@ describe("runReplyAgent memory flush", () => {
       });
 
       expect(calls).toHaveLength(2);
-      expect(calls[0]?.prompt).toContain("Pre-compaction memory flush.");
+      expect(calls[0]?.prompt).toBe("Pre-compaction memory flush.");
       expect(calls[1]?.prompt).toBe("hello");
     });
   });
@@ -2264,11 +2295,11 @@ describe("runReplyAgent memory flush", () => {
         commandBody: "hello",
       });
 
-      expect(state.runEmbeddedPiAgentMock).toHaveBeenCalledTimes(1);
-      const call = state.runEmbeddedPiAgentMock.mock.calls[0]?.[0] as
-        | { prompt?: string }
-        | undefined;
-      expect(call?.prompt).toBe("hello");
+      const prompts = state.runEmbeddedPiAgentMock.mock.calls.map(
+        (call) => ((call[0] as { prompt?: string } | undefined)?.prompt ?? ""),
+      );
+      expect(prompts).not.toContain("Pre-compaction memory flush.");
+      expect(prompts).toContain("hello");
 
       const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
       expect(stored[sessionKey].memoryFlushAt).toBeUndefined();

@@ -107,10 +107,12 @@ export function renderExtensionPackageBoundaryTsconfig(params?: {
       rootDir: ".",
       ...(params?.paths
         ? {
-            paths: {
-              ...EXTENSION_PACKAGE_BOUNDARY_BASE_PATHS,
-              ...params.paths,
-            },
+            paths: Object.fromEntries(
+              Object.entries({
+                ...EXTENSION_PACKAGE_BOUNDARY_BASE_PATHS,
+                ...params.paths,
+              }).map(([key, value]) => [key, [...value]]),
+            ),
           }
         : {}),
     },

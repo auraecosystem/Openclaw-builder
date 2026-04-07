@@ -1,17 +1,19 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import fs from "node:fs";
+import type { Readable } from "node:stream";
 import { parse as parseDotenv } from "dotenv";
-import type { OpenClawPluginService, PluginLogger } from "openclaw/plugin-sdk";
+import type { OpenClawPluginService, PluginLogger } from "openclaw/plugin-sdk/core";
 import type { AssistantBotSidecarConfig, ManagedProcessConfig } from "./config.js";
 
 type ManagedProcessName = "daemon" | "assistantBot";
 type RestartAction = "assistantBot" | "daemonAndAssistantBot";
+type ManagedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 type ManagedProcessState = {
   name: ManagedProcessName;
   label: string;
   config: ManagedProcessConfig;
-  child: ChildProcessWithoutNullStreams | null;
+  child: ManagedChildProcess | null;
   expectedExit: boolean;
   restartTimer: NodeJS.Timeout | null;
 };
@@ -99,7 +101,7 @@ function deriveTradeDbEnv(env: Record<string, string>): Record<string, string> {
   return derived;
 }
 
-function buildProcessEnv(state: ManagedProcessState, logger: PluginLogger): Record<string, string> {
+function buildProcessEnv(state: ManagedProcessState, logger: PluginLogger): NodeJS.ProcessEnv {
   const fileEnv = deriveTradeDbEnv(loadEnvFiles(state.config.envFiles, logger, state.label));
   return {
     ...process.env,
@@ -206,7 +208,7 @@ export function createAssistantBotSidecarService(
     const commandLine = describeCommand(state.config.command, state.config.args);
     logger.info(`assistant-bot-sidecar: starting ${state.label}: ${commandLine}`);
 
-    const child = spawn(state.config.command, state.config.args, {
+    const child: ManagedChildProcess = spawn(state.config.command, state.config.args, {
       cwd: state.config.cwd,
       env: buildProcessEnv(state, logger),
       stdio: ["ignore", "pipe", "pipe"],

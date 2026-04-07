@@ -524,7 +524,6 @@ export function buildAgentSystemPrompt(params: {
         ]
       : []),
     "If a task is more complex or takes longer, spawn a sub-agent. Completion is push-based: it will auto-announce when done.",
-    'On Discord, for OpenClaw subagents (`runtime: "subagent"`), prefer plain one-shot runs for now: use `mode: "run"`, do not set `thread: true`, do not pass `streamTo`, and relay the result back into the same thread yourself.',
     ...(acpHarnessSpawnAllowed
       ? [
           'For requests like "do this in codex/claude code/cursor/gemini" or similar ACP harnesses, treat it as ACP harness intent and call `sessions_spawn` with `runtime: "acp"`.',

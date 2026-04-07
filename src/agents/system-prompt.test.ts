@@ -400,21 +400,6 @@ describe("buildAgentSystemPrompt", () => {
     );
   });
 
-  it("guides Discord subagent requests to plain one-shot runs", () => {
-    const prompt = buildAgentSystemPrompt({
-      workspaceDir: "/tmp/openclaw",
-      toolNames: ["sessions_spawn", "subagents", "agents_list", "exec"],
-    });
-
-    expect(prompt).toContain(
-      'On Discord, for OpenClaw subagents (`runtime: "subagent"`), prefer plain one-shot runs for now',
-    );
-    expect(prompt).toContain('use `mode: "run"`');
-    expect(prompt).toContain("do not set `thread: true`");
-    expect(prompt).toContain("do not pass `streamTo`");
-    expect(prompt).toContain("relay the result back into the same thread yourself");
-  });
-
   it("omits ACP harness guidance when ACP is disabled", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",

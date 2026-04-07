@@ -531,7 +531,6 @@ describe("processDiscordMessage ack reactions", () => {
       effectiveWasMentioned: true,
     });
 
-    // oxlint-disable-next-line typescript/no-explicit-any
     await processDiscordMessage(ctx as any);
 
     expect(deliverDiscordReply).not.toHaveBeenCalled();
