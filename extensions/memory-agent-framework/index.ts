@@ -30,8 +30,21 @@ type RecallResult = {
 
 function baseArgs(cfg: AgentFrameworkConfig): string[] {
   const args = ["--json", "--backend-url", cfg.apiUrl];
-  if (cfg.apiKey) args.push("--api-key", cfg.apiKey);
+  if (cfg.apiKey) {
+    args.push("--api-key", cfg.apiKey);
+  }
   return args;
+}
+
+function describeCommandError(error: unknown): string {
+  const stderr =
+    typeof error === "object" && error && "stderr" in error && typeof error.stderr === "string"
+      ? error.stderr
+      : "";
+  if (stderr) {
+    return stderr;
+  }
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function recallMemory(
@@ -48,8 +61,7 @@ async function recallMemory(
     const data = JSON.parse(stdout) as { results?: RecallResult[] };
     return data.results ?? [];
   } catch (err: unknown) {
-    const stderr = (err as { stderr?: string }).stderr ?? "";
-    throw new Error(`recall failed: ${stderr || (err as Error).message}`);
+    throw new Error(`recall failed: ${describeCommandError(err)}`, { cause: err });
   }
 }
 
@@ -68,8 +80,7 @@ async function ingestContent(
         { timeout: 30_000 },
       );
     } catch (err: unknown) {
-      const stderr = (err as { stderr?: string }).stderr ?? "";
-      throw new Error(`ingest failed: ${stderr || (err as Error).message}`);
+      throw new Error(`ingest failed: ${describeCommandError(err)}`, { cause: err });
     }
   } finally {
     await unlink(tmp).catch(() => {});

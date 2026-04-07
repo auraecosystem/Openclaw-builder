@@ -9,6 +9,22 @@ const rl = createInterface({ input: process.stdin, output: process.stdout });
 const ask = (q: string): Promise<string> =>
   new Promise((res) => rl.question(q, res));
 
+type CodexPrompt = {
+  message: string;
+};
+
+function resolveAccountId(creds: object): string | undefined {
+  if (!("accountId" in creds) || typeof creds.accountId !== "string") {
+    return undefined;
+  }
+  const trimmed = creds.accountId.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function formatUnknownError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 console.log("Starting Codex OAuth flow...\n");
 
 try {
@@ -18,7 +34,7 @@ try {
       console.log("URL:", info.url);
       exec(`open "${info.url}"`);
     },
-    onPrompt: async (opts: any) => {
+    onPrompt: async (opts: CodexPrompt) => {
       const answer = await ask(`${opts.message}\n> `);
       return answer;
     },
@@ -37,7 +53,7 @@ try {
       access: creds.access,
       refresh: creds.refresh,
       expires: creds.expires,
-      accountId: (creds as any).accountId,
+      accountId: resolveAccountId(creds),
     };
 
     writeFileSync(authPath, JSON.stringify(store, null, 2));
@@ -56,8 +72,8 @@ try {
   } else {
     console.log("No credentials returned.");
   }
-} catch (e: any) {
-  console.error("Failed:", e.message);
+} catch (e: unknown) {
+  console.error("Failed:", formatUnknownError(e));
 } finally {
   rl.close();
 }
