@@ -1569,6 +1569,10 @@ export async function runAgentTurnWithFallback(params: {
           }
           return classification;
         },
+        // Propagate abort signal so the fallback layer recognizes terminal
+        // aborts (run-budget timeout, HTTP client disconnect) via signal.reason
+        // and skips pointless retries. Closes openclaw/openclaw#60388.
+        abortSignal: params.replyOperation?.abortSignal ?? params.opts?.abortSignal,
         run: async (provider, model, runOptions) => {
           const candidateRun = resolveRunForFallbackCandidate(provider, model);
           const activeProbe = effectiveRun.autoFallbackPrimaryProbe;
