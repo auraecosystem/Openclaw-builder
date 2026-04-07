@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import { hasOutboundReplyContent } from "openclaw/plugin-sdk/reply-payload";
 import { resolveBootstrapWarningSignaturesSeen } from "../../agents/bootstrap-budget.js";
 import { estimateMessagesTokens } from "../../agents/compaction.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
@@ -29,6 +30,7 @@ import { resolveMemoryFlushPlan } from "../../plugins/memory-state.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import type { TemplateContext } from "../templating.js";
 import type { VerboseLevel } from "../thinking.js";
+import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { GetReplyOptions } from "../types.js";
 import {
   buildEmbeddedRunExecutionParams,
@@ -690,15 +692,19 @@ export async function runMemoryFlushIfNeeded(params: {
       ...resolveModelFallbackOptions(params.followupRun.run),
       runId: flushRunId,
       run: async (provider, model, runOptions) => {
+        const maintenanceHasRepliedRef = { value: false };
         const { embeddedContext, senderContext, runBaseParams } = buildEmbeddedRunExecutionParams({
           run: params.followupRun.run,
           sessionCtx: params.sessionCtx,
-          hasRepliedRef: params.opts?.hasRepliedRef,
+          hasRepliedRef: maintenanceHasRepliedRef,
           provider,
           model,
           runId: flushRunId,
           allowTransientCooldownProbe: runOptions?.allowTransientCooldownProbe,
         });
+        logVerbose(
+          `memory flush run: internal-only delivery enabled sessionKey=${params.sessionKey ?? "unknown"} runId=${flushRunId}`,
+        );
         const result = await runEmbeddedPiAgent({
           ...embeddedContext,
           ...senderContext,
@@ -706,9 +712,17 @@ export async function runMemoryFlushIfNeeded(params: {
           allowGatewaySubagentBinding: true,
           silentExpected: true,
           trigger: "memory",
+          disableMessageTool: true,
           memoryFlushWritePath,
           prompt: activeMemoryFlushPlan.prompt,
           extraSystemPrompt: flushSystemPrompt,
+          onPartialReply: undefined,
+          onAssistantMessageStart: undefined,
+          onBlockReply: undefined,
+          onBlockReplyFlush: undefined,
+          onReasoningStream: undefined,
+          onReasoningEnd: undefined,
+          onToolResult: undefined,
           bootstrapPromptWarningSignaturesSeen,
           bootstrapPromptWarningSignature:
             bootstrapPromptWarningSignaturesSeen[bootstrapPromptWarningSignaturesSeen.length - 1],
@@ -723,6 +737,21 @@ export async function runMemoryFlushIfNeeded(params: {
             }
           },
         });
+        const payloads = Array.isArray(result.payloads) ? result.payloads : [];
+        const visiblePayloadCount = payloads.filter((payload) => {
+          if (!hasOutboundReplyContent(payload, { trimText: true })) {
+            return false;
+          }
+          const text = typeof payload.text === "string" ? payload.text.trim() : "";
+          return !text || !isSilentReplyText(text, SILENT_REPLY_TOKEN);
+        }).length;
+        const hasSilentReplyPayload = payloads.some((payload) => {
+          const text = typeof payload.text === "string" ? payload.text.trim() : "";
+          return text.length > 0 && isSilentReplyText(text, SILENT_REPLY_TOKEN);
+        });
+        logVerbose(
+          `memory flush run: suppressed delivery sessionKey=${params.sessionKey ?? "unknown"} runId=${flushRunId} visiblePayloads=${visiblePayloadCount} silentReply=${hasSilentReplyPayload} hasReplied=${maintenanceHasRepliedRef.value}`,
+        );
         if (result.meta?.agentMeta?.sessionId) {
           postCompactionSessionId = result.meta.agentMeta.sessionId;
         }

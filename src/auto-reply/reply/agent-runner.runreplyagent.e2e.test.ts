@@ -7,7 +7,7 @@ import * as sessions from "../../config/sessions.js";
 import type { TypingMode } from "../../config/types.js";
 import { withStateDirEnv } from "../../test-helpers/state-dir-env.js";
 import type { TemplateContext } from "../templating.js";
-import type { GetReplyOptions } from "../types.js";
+import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import {
   enqueueFollowupRun,
   refreshQueuedFollowupSession,
@@ -34,6 +34,15 @@ type EmbeddedRunParams = {
   sessionId?: string;
   sessionFile?: string;
   silentExpected?: boolean;
+  disableMessageTool?: boolean;
+  hasRepliedRef?: { value: boolean };
+  onPartialReply?: (payload: { text?: string; mediaUrls?: string[] }) => Promise<void> | void;
+  onAssistantMessageStart?: () => Promise<void> | void;
+  onBlockReply?: (payload: { text?: string; mediaUrls?: string[] }) => Promise<void> | void;
+  onBlockReplyFlush?: () => Promise<void> | void;
+  onReasoningStream?: (payload: { text?: string; mediaUrls?: string[] }) => Promise<void> | void;
+  onReasoningEnd?: () => Promise<void> | void;
+  onToolResult?: (payload: ReplyPayload) => Promise<void> | void;
   bootstrapPromptWarningSignaturesSeen?: string[];
   bootstrapPromptWarningSignature?: string;
   onAgentEvent?: (evt: { stream?: string; data?: { phase?: string; willRetry?: boolean } }) => void;
@@ -271,10 +280,11 @@ async function runReplyAgentWithBase(params: {
   sessionEntry: SessionEntry;
   commandBody: string;
   typingMode?: "instant";
-}): Promise<void> {
+  opts?: GetReplyOptions;
+}): Promise<unknown> {
   const runReplyAgent = await getRunReplyAgent();
   const { typing, sessionCtx, resolvedQueue, followupRun } = params.baseRun;
-  await runReplyAgent({
+  return await runReplyAgent({
     commandBody: params.commandBody,
     followupRun,
     queueKey: params.sessionKey,
@@ -283,6 +293,7 @@ async function runReplyAgentWithBase(params: {
     shouldFollowup: false,
     isActive: false,
     isStreaming: false,
+    opts: params.opts,
     typing,
     sessionCtx,
     sessionEntry: params.sessionEntry,
@@ -2347,5 +2358,110 @@ describe("runReplyAgent memory flush", () => {
       expect(stored[sessionKey].memoryFlushCompactionCount).toBe(2);
     });
   });
+
+  it("keeps memory flush NO_REPLY internal and still delivers the user reply", async () => {
+    await withTempStore(async (storePath) => {
+      const sessionKey = "main";
+      const sessionEntry: SessionEntry = {
+        sessionId: "session",
+        updatedAt: Date.now(),
+        totalTokens: 80_000,
+        compactionCount: 1,
+      };
+
+      await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+      const sharedHasRepliedRef = { value: false };
+      const calls: EmbeddedRunParams[] = [];
+
+      state.runEmbeddedPiAgentMock.mockImplementation(async (params: EmbeddedRunParams) => {
+        calls.push(params);
+        if (params.prompt?.includes("Pre-compaction memory flush.")) {
+          params.hasRepliedRef!.value = true;
+          await params.onPartialReply?.({ text: "maintenance partial" });
+          await params.onBlockReply?.({ text: "maintenance block", mediaUrls: [] });
+          await params.onToolResult?.({ text: "maintenance tool result" });
+          return {
+            payloads: [{ text: "NO_REPLY" }],
+            meta: {},
+          };
+        }
+        await params.onBlockReply?.({ text: "okay", mediaUrls: [] });
+        return {
+          payloads: [{ text: "okay" }],
+          meta: { agentMeta: { usage: { input: 1, output: 1 } } },
+        };
+      });
+
+      const baseRun = createBaseRun({
+        storePath,
+        sessionEntry,
+      });
+
+      const result = await runReplyAgentWithBase({
+        baseRun,
+        storePath,
+        sessionKey,
+        sessionEntry,
+        commandBody: 'state the single word, "okay", then stop.',
+        opts: {
+          hasRepliedRef: sharedHasRepliedRef,
+        },
+      });
+
+      expect(calls).toHaveLength(2);
+      expect(calls[0]?.disableMessageTool).toBe(true);
+      expect(calls[0]?.hasRepliedRef).not.toBe(sharedHasRepliedRef);
+      expect(calls[0]?.hasRepliedRef?.value).toBe(true);
+      expect(calls[0]?.onPartialReply).toBeUndefined();
+      expect(calls[0]?.onBlockReply).toBeUndefined();
+      expect(calls[0]?.onToolResult).toBeUndefined();
+      expect(calls[1]?.hasRepliedRef).toBe(sharedHasRepliedRef);
+      expect(sharedHasRepliedRef.value).toBe(false);
+      expect(result).toMatchObject({ text: "okay" });
+    });
+  });
+
+  it("suppresses visible maintenance payloads before delivering the real user reply", async () => {
+    await withTempStore(async (storePath) => {
+      const sessionKey = "main";
+      const sessionEntry: SessionEntry = {
+        sessionId: "session",
+        updatedAt: Date.now(),
+        totalTokens: 80_000,
+        compactionCount: 1,
+      };
+
+      await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+      state.runEmbeddedPiAgentMock.mockImplementation(async (params: EmbeddedRunParams) => {
+        if (params.prompt?.includes("Pre-compaction memory flush.")) {
+          return {
+            payloads: [{ text: "Internal maintenance summary" }],
+            meta: {},
+          };
+        }
+        await params.onBlockReply?.({ text: "okay", mediaUrls: [] });
+        return {
+          payloads: [{ text: "okay" }],
+          meta: { agentMeta: { usage: { input: 1, output: 1 } } },
+        };
+      });
+
+      const baseRun = createBaseRun({
+        storePath,
+        sessionEntry,
+      });
+
+      const result = await runReplyAgentWithBase({
+        baseRun,
+        storePath,
+        sessionKey,
+        sessionEntry,
+        commandBody: 'state the single word, "okay", then stop.',
+      });
+
+      expect(result).toMatchObject({ text: "okay" });
+    });
+  });
 });
-import type { ReplyPayload } from "../types.js";
