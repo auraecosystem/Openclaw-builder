@@ -1,7 +1,4 @@
-import type {
-  ProviderResolveDynamicModelContext,
-  ProviderRuntimeModel,
-} from "openclaw/plugin-sdk/plugin-entry";
+import type { ProviderResolveDynamicModelContext } from "openclaw/plugin-sdk/plugin-entry";
 import { defineSingleProviderPluginEntry } from "openclaw/plugin-sdk/provider-entry";
 import {
   buildProviderReplayFamilyHooks,
@@ -25,7 +22,7 @@ const OPENAI_COMPATIBLE_REPLAY_HOOKS = buildProviderReplayFamilyHooks({
 
 function resolveFireworksDynamicModel(
   ctx: ProviderResolveDynamicModelContext,
-): ProviderRuntimeModel | undefined {
+) {
   const modelId = ctx.modelId.trim();
   if (!modelId) {
     return undefined;
@@ -52,7 +49,7 @@ function resolveFireworksDynamicModel(
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: FIREWORKS_DEFAULT_CONTEXT_WINDOW,
       maxTokens: FIREWORKS_DEFAULT_MAX_TOKENS || DEFAULT_CONTEXT_TOKENS,
-    } as ProviderRuntimeModel)
+    })
   );
 }
 

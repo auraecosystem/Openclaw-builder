@@ -1,5 +1,4 @@
 import type {
-  SearchConfigRecord,
   WebSearchProviderPlugin,
   WebSearchProviderToolDefinition,
 } from "openclaw/plugin-sdk/provider-web-search";
@@ -95,7 +94,7 @@ function mergeScopedSearchConfig(
 }
 
 function createBraveToolDefinition(
-  searchConfig?: SearchConfigRecord,
+  searchConfig?: Record<string, unknown>,
 ): WebSearchProviderToolDefinition {
   const braveMode = resolveBraveMode(resolveBraveConfig(searchConfig));
 
@@ -136,11 +135,11 @@ export function createBraveWebSearchProvider(): WebSearchProviderPlugin {
     createTool: (ctx) =>
       createBraveToolDefinition(
         mergeScopedSearchConfig(
-          ctx.searchConfig as SearchConfigRecord | undefined,
+          ctx.searchConfig,
           "brave",
           resolveProviderWebSearchPluginConfig(ctx.config, "brave"),
           { mirrorApiKeyToTopLevel: true },
-        ) as SearchConfigRecord | undefined,
+        ),
       ),
   };
 }

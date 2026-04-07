@@ -17,7 +17,6 @@ import {
   resolveSiteName,
   setProviderWebSearchPluginConfigValue,
   setScopedCredentialValue,
-  type SearchConfigRecord,
   type WebSearchProviderPlugin,
   type WebSearchProviderToolDefinition,
   withTrustedWebSearchEndpoint,
@@ -33,6 +32,7 @@ const EXA_MAX_SEARCH_COUNT = 100;
 type ExaConfig = {
   apiKey?: string;
 };
+type ExaSearchConfig = Record<string, unknown> & { maxResults?: number };
 
 type ExaSearchType = (typeof EXA_SEARCH_TYPES)[number];
 type ExaFreshness = (typeof EXA_FRESHNESS_VALUES)[number];
@@ -88,7 +88,7 @@ function optionalStringEnum<T extends readonly string[]>(values: T, description:
   );
 }
 
-function resolveExaConfig(searchConfig?: SearchConfigRecord): ExaConfig {
+function resolveExaConfig(searchConfig?: Record<string, unknown>): ExaConfig {
   const exa = searchConfig?.exa;
   return exa && typeof exa === "object" && !Array.isArray(exa) ? (exa as ExaConfig) : {};
 }
@@ -448,7 +448,7 @@ function missingExaKeyPayload() {
 }
 
 function createExaToolDefinition(
-  searchConfig?: SearchConfigRecord,
+  searchConfig?: ExaSearchConfig,
 ): WebSearchProviderToolDefinition {
   return {
     description:
@@ -611,10 +611,10 @@ export function createExaWebSearchProvider(): WebSearchProviderPlugin {
     createTool: (ctx) =>
       createExaToolDefinition(
         mergeScopedSearchConfig(
-          ctx.searchConfig as SearchConfigRecord | undefined,
+          ctx.searchConfig,
           "exa",
           resolveProviderWebSearchPluginConfig(ctx.config, "exa"),
-        ) as SearchConfigRecord | undefined,
+        ),
       ),
   };
 }

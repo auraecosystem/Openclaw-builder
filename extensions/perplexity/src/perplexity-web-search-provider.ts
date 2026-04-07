@@ -24,7 +24,6 @@ import {
   setScopedCredentialValue,
   setProviderWebSearchPluginConfigValue,
   throwWebSearchApiError,
-  type SearchConfigRecord,
   type WebSearchCredentialResolutionSource,
   type WebSearchProviderPlugin,
   type WebSearchProviderToolDefinition,
@@ -45,6 +44,7 @@ type PerplexityConfig = {
   baseUrl?: string;
   model?: string;
 };
+type PerplexitySearchConfig = Record<string, unknown> & { maxResults?: number };
 
 type PerplexityTransport = "search_api" | "chat_completions";
 type PerplexityBaseUrlHint = "direct" | "openrouter";
@@ -74,7 +74,7 @@ type PerplexitySearchApiResponse = {
   }>;
 };
 
-function resolvePerplexityConfig(searchConfig?: SearchConfigRecord): PerplexityConfig {
+function resolvePerplexityConfig(searchConfig?: Record<string, unknown>): PerplexityConfig {
   const perplexity = searchConfig?.perplexity;
   return perplexity && typeof perplexity === "object" && !Array.isArray(perplexity)
     ? (perplexity as PerplexityConfig)
@@ -426,7 +426,7 @@ function createPerplexitySchema(transport?: PerplexityTransport) {
 }
 
 function createPerplexityToolDefinition(
-  searchConfig?: SearchConfigRecord,
+  searchConfig?: PerplexitySearchConfig,
   runtimeTransport?: PerplexityTransport,
 ): WebSearchProviderToolDefinition {
   const perplexityConfig = resolvePerplexityConfig(searchConfig);
@@ -693,10 +693,10 @@ export function createPerplexityWebSearchProvider(): WebSearchProviderPlugin {
     resolveRuntimeMetadata: (ctx) => ({
       perplexityTransport: resolveRuntimeTransport({
         searchConfig: mergeScopedSearchConfig(
-          ctx.searchConfig as SearchConfigRecord | undefined,
+          ctx.searchConfig,
           "perplexity",
           resolveProviderWebSearchPluginConfig(ctx.config, "perplexity"),
-        ) as SearchConfigRecord | undefined,
+        ),
         resolvedKey: ctx.resolvedCredential?.value,
         keySource: ctx.resolvedCredential?.source ?? "missing",
         fallbackEnvVar: ctx.resolvedCredential?.fallbackEnvVar,
@@ -705,10 +705,10 @@ export function createPerplexityWebSearchProvider(): WebSearchProviderPlugin {
     createTool: (ctx) =>
       createPerplexityToolDefinition(
         mergeScopedSearchConfig(
-          ctx.searchConfig as SearchConfigRecord | undefined,
+          ctx.searchConfig,
           "perplexity",
           resolveProviderWebSearchPluginConfig(ctx.config, "perplexity"),
-        ) as SearchConfigRecord | undefined,
+        ),
         ctx.runtimeMetadata?.perplexityTransport as PerplexityTransport | undefined,
       ),
   };
