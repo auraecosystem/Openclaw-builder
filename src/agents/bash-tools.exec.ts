@@ -1242,6 +1242,7 @@ function deriveExecShortName(fullPath: string): string {
 export function describeExecTool(params?: { agentId?: string; hasCronTool?: boolean }): string {
   const base = [
     "Execute shell commands with background continuation for work that starts now.",
+    "For public web research, prefer web_search for discovery and web_fetch for direct pages; use exec only when HTTP tools cannot express the fetch or parsing step.",
     "Use yieldMs/background to continue later via process tool.",
     "For long-running work started now, rely on automatic completion wake when it is enabled and the command emits output or fails; otherwise use process to confirm completion. Use process whenever you need logs, status, input, or intervention.",
     params?.hasCronTool

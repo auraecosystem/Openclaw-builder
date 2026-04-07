@@ -465,6 +465,7 @@ const ToolLoopDetectionDetectorSchema = z
     genericRepeat: z.boolean().optional(),
     knownPollNoProgress: z.boolean().optional(),
     pingPong: z.boolean().optional(),
+    externalSourceChurn: z.boolean().optional(),
   })
   .strict()
   .optional();
@@ -476,6 +477,7 @@ const ToolLoopDetectionSchema = z
     warningThreshold: z.number().int().positive().optional(),
     criticalThreshold: z.number().int().positive().optional(),
     globalCircuitBreakerThreshold: z.number().int().positive().optional(),
+    externalSourceFailureBudget: z.number().int().positive().optional(),
     detectors: ToolLoopDetectionDetectorSchema,
   })
   .strict()

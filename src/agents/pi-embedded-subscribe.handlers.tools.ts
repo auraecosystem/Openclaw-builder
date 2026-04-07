@@ -588,7 +588,7 @@ export function handleToolExecutionStart(
     // Best-effort typing signal; do not block tool summaries on slow emitters.
     void ctx.params.onAgentEvent?.({
       stream: "tool",
-      data: { phase: "start", name: toolName, toolCallId },
+      data: { phase: "start", name: toolName, toolCallId, args: sanitizeToolResult(args) },
     });
 
     if (isExecToolName(toolName)) {
@@ -874,6 +874,7 @@ export async function handleToolExecutionEnd(
       toolCallId,
       meta,
       isError: isToolError,
+      result: sanitizedResult as Record<string, unknown>,
     },
   });
 

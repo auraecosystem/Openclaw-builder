@@ -226,6 +226,10 @@ export function getActiveEmbeddedRunCount(): number {
   return Math.max(activeCount, getActiveReplyRunCount());
 }
 
+export function listActiveEmbeddedRunSessionIds(): string[] {
+  return Array.from(new Set([...ACTIVE_EMBEDDED_RUNS.keys(), ...listActiveReplyRunSessionIds()]));
+}
+
 export function getActiveEmbeddedRunSnapshot(
   sessionId: string,
 ): ActiveEmbeddedRunSnapshot | undefined {

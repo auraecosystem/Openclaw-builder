@@ -1,5 +1,6 @@
 import path from "node:path";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
+import { reconcileOrphanedEmbeddedRunSessions } from "../agents/embedded-run-orphan-recovery.js";
 import { getActiveEmbeddedRunCount } from "../agents/pi-embedded-runner/runs.js";
 import { registerSkillsChangeListener } from "../agents/skills/refresh.js";
 import { initSubagentRegistry } from "../agents/subagent-registry.js";
@@ -580,6 +581,7 @@ export async function startGatewayServer(
         }
       : cfgAtStart;
   if (!minimalTestGateway) {
+    await reconcileOrphanedEmbeddedRunSessions();
     await runChannelPluginStartupMaintenance({
       cfg: startupMaintenanceConfig,
       env: process.env,

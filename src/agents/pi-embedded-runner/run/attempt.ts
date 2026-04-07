@@ -77,6 +77,7 @@ import {
   resolveBootstrapPromptTruncationWarningMode,
   resolveBootstrapTotalMaxChars,
 } from "../../pi-embedded-helpers.js";
+import type { BlockReplyPayload } from "../../pi-embedded-payloads.js";
 import { subscribeEmbeddedPiSession } from "../../pi-embedded-subscribe.js";
 import { createPreparedEmbeddedPiSettingsManager } from "../../pi-project-settings.js";
 import { applyPiAutoCompactionGuard } from "../../pi-settings.js";
@@ -213,6 +214,10 @@ import {
   PREEMPTIVE_OVERFLOW_ERROR_TEXT,
   shouldPreemptivelyCompactBeforePrompt,
 } from "./preemptive-compaction.js";
+import {
+  createToolContinuationWatchdog,
+  type ToolContinuationWatchdogAgentEvent,
+} from "./tool-continuation-watchdog.js";
 import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
 
 export {
@@ -257,6 +262,25 @@ export {
 };
 
 const MAX_BTW_SNAPSHOT_MESSAGES = 100;
+const POST_TOOL_CONTINUATION_FAILURE_NOTE =
+  "Research stalled after a completed tool result. Summarize blockers and any partial findings before retrying.";
+
+function hasVisibleReplyPayload(payload?: {
+  text?: string;
+  mediaUrl?: string;
+  mediaUrls?: string[];
+}): boolean {
+  if (!payload) {
+    return false;
+  }
+  if (typeof payload.text === "string" && payload.text.trim().length > 0) {
+    return true;
+  }
+  if (typeof payload.mediaUrl === "string" && payload.mediaUrl.trim().length > 0) {
+    return true;
+  }
+  return Array.isArray(payload.mediaUrls) && payload.mediaUrls.some((url) => url.trim().length > 0);
+}
 
 function summarizeMessagePayload(msg: AgentMessage): { textChars: number; imageBlocks: number } {
   const content = (msg as { content?: unknown }).content;
@@ -1343,7 +1367,55 @@ export async function runEmbeddedAttempt(
           }
         }
       };
+      const isProbeSession = params.sessionId?.startsWith("probe-") ?? false;
+      let abortForToolContinuationTimeout: ((error: Error) => void) | undefined;
+      let deliveredVisibleReply = false;
+
+      const emitToolContinuationFailureNote = async () => {
+        if (params.silentExpected || deliveredVisibleReply) {
+          return;
+        }
+        const payload = { text: POST_TOOL_CONTINUATION_FAILURE_NOTE };
+        deliveredVisibleReply = true;
+        if (params.onBlockReply) {
+          await params.onBlockReply(payload);
+          return;
+        }
+        if (params.onPartialReply) {
+          await params.onPartialReply(payload);
+          return;
+        }
+        await params.onToolResult?.(payload);
+      };
+
+      const markVisibleReplyDelivered = (payload?: {
+        text?: string;
+        mediaUrl?: string;
+        mediaUrls?: string[];
+      }) => {
+        if (hasVisibleReplyPayload(payload)) {
+          deliveredVisibleReply = true;
+        }
+      };
+      const toolContinuationWatchdog = createToolContinuationWatchdog({
+        runId: params.runId,
+        sessionId: params.sessionId,
+        sessionKey: params.sessionKey,
+        isProbeSession,
+        emitFailureNote: emitToolContinuationFailureNote,
+        onTimeout: (error) => {
+          abortForToolContinuationTimeout?.(error);
+        },
+        logDebug: (message) => {
+          log.debug(message);
+        },
+        logError: (message) => {
+          log.error(message);
+        },
+      });
+
       const abortRun = (isTimeout = false, reason?: unknown) => {
+        toolContinuationWatchdog.clear(isTimeout ? "abort_timeout" : "abort");
         aborted = true;
         if (isTimeout) {
           timedOut = true;
@@ -1355,6 +1427,9 @@ export async function runEmbeddedAttempt(
         }
         abortCompaction();
         void activeSession.abort();
+      };
+      abortForToolContinuationTimeout = (error) => {
+        abortRun(true, error);
       };
       idleTimeoutTrigger = (error) => {
         abortRun(true, error);
@@ -1383,6 +1458,35 @@ export async function runEmbeddedAttempt(
         });
       };
 
+      const wrappedOnAssistantMessageStart = async () => {
+        toolContinuationWatchdog.clear("assistant_message_start");
+        await params.onAssistantMessageStart?.();
+      };
+
+      const wrappedOnPartialReply = async (payload: { text?: string; mediaUrls?: string[] }) => {
+        markVisibleReplyDelivered(payload);
+        await params.onPartialReply?.(payload);
+      };
+
+      const wrappedOnBlockReply = async (payload: BlockReplyPayload) => {
+        markVisibleReplyDelivered(payload);
+        await params.onBlockReply?.(payload);
+      };
+
+      const wrappedOnToolResult = async (payload: {
+        text?: string;
+        mediaUrl?: string;
+        mediaUrls?: string[];
+      }) => {
+        markVisibleReplyDelivered(payload);
+        await params.onToolResult?.(payload);
+      };
+
+      const wrappedOnAgentEvent = (evt: ToolContinuationWatchdogAgentEvent) => {
+        toolContinuationWatchdog.onAgentEvent(evt);
+        params.onAgentEvent?.(evt);
+      };
+
       const subscription = subscribeEmbeddedPiSession(
         buildEmbeddedSubscriptionParams({
           session: activeSession,
@@ -1393,17 +1497,17 @@ export async function runEmbeddedAttempt(
           toolResultFormat: params.toolResultFormat,
           shouldEmitToolResult: params.shouldEmitToolResult,
           shouldEmitToolOutput: params.shouldEmitToolOutput,
-          onToolResult: params.onToolResult,
+          onToolResult: wrappedOnToolResult,
           onReasoningStream: params.onReasoningStream,
           onReasoningEnd: params.onReasoningEnd,
-          onBlockReply: params.onBlockReply,
+          onBlockReply: wrappedOnBlockReply,
           onBlockReplyFlush: params.onBlockReplyFlush,
           blockReplyBreak: params.blockReplyBreak,
           blockReplyChunking: params.blockReplyChunking,
-          onPartialReply: params.onPartialReply,
+          onPartialReply: wrappedOnPartialReply,
           routeCommentaryToPartial: params.routeCommentaryToPartial,
-          onAssistantMessageStart: params.onAssistantMessageStart,
-          onAgentEvent: params.onAgentEvent,
+          onAssistantMessageStart: wrappedOnAssistantMessageStart,
+          onAgentEvent: wrappedOnAgentEvent,
           enforceFinalTag: params.enforceFinalTag,
           silentExpected: params.silentExpected,
           config: params.config,
@@ -1452,7 +1556,6 @@ export async function runEmbeddedAttempt(
       setActiveEmbeddedRun(params.sessionId, queueHandle, params.sessionKey);
 
       let abortWarnTimer: NodeJS.Timeout | undefined;
-      const isProbeSession = params.sessionId?.startsWith("probe-") ?? false;
       const compactionTimeoutMs = resolveCompactionTimeoutMs(params.config);
       let abortTimer: NodeJS.Timeout | undefined;
       let compactionGraceUsed = false;
@@ -2106,6 +2209,7 @@ export async function runEmbeddedAttempt(
         }
       } finally {
         clearTimeout(abortTimer);
+        toolContinuationWatchdog.dispose();
         if (abortWarnTimer) {
           clearTimeout(abortWarnTimer);
         }

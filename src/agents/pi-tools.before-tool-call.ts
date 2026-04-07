@@ -112,6 +112,10 @@ async function recordLoopOutcome(args: {
       sessionKey: args.ctx.sessionKey,
       sessionId: args.ctx?.agentId,
     });
+    if (args.ctx.runId && sessionState.loopDetectionRunId !== args.ctx.runId) {
+      sessionState.loopDetectionRunId = args.ctx.runId;
+      sessionState.externalSourceFailureStreaks?.clear();
+    }
     recordToolCallOutcome(sessionState, {
       toolName: args.toolName,
       toolParams: args.toolParams,
@@ -142,6 +146,10 @@ export async function runBeforeToolCallHook(args: {
       sessionKey: args.ctx.sessionKey,
       sessionId: args.ctx?.agentId,
     });
+    if (args.ctx.runId && sessionState.loopDetectionRunId !== args.ctx.runId) {
+      sessionState.loopDetectionRunId = args.ctx.runId;
+      sessionState.externalSourceFailureStreaks?.clear();
+    }
 
     const loopResult = detectToolCallLoop(sessionState, toolName, params, args.ctx.loopDetection);
 

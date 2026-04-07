@@ -595,7 +595,7 @@ let runEmbeddedAttemptPromise:
   | undefined;
 const ATTEMPT_SPAWN_WORKSPACE_TEST_SPECIFIER = "./attempt.ts?spawn-workspace-test";
 
-async function loadRunEmbeddedAttempt() {
+export async function loadRunEmbeddedAttempt() {
   runEmbeddedAttemptPromise ??= (
     import(ATTEMPT_SPAWN_WORKSPACE_TEST_SPECIFIER) as Promise<typeof import("./attempt.js")>
   ).then((mod) => mod.runEmbeddedAttempt);

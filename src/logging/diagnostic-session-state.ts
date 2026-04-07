@@ -6,9 +6,11 @@ export type SessionState = {
   lastActivity: number;
   state: SessionStateValue;
   queueDepth: number;
+  loopDetectionRunId?: string;
   toolCallHistory?: ToolCallRecord[];
   toolLoopWarningBuckets?: Map<string, number>;
   commandPollCounts?: Map<string, { count: number; lastPollAt: number }>;
+  externalSourceFailureStreaks?: Map<string, SourceFailureStreak>;
 };
 
 export type ToolCallRecord = {
@@ -17,6 +19,13 @@ export type ToolCallRecord = {
   toolCallId?: string;
   resultHash?: string;
   timestamp: number;
+};
+
+export type SourceFailureStreak = {
+  family: string;
+  count: number;
+  lastStatusBucket?: "4xx" | "5xx";
+  lastUpdatedAt: number;
 };
 
 export type SessionRef = {

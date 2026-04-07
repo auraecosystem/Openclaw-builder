@@ -159,6 +159,8 @@ export type ToolLoopDetectionDetectorConfig = {
   knownPollNoProgress?: boolean;
   /** Enable warning/blocking for no-progress ping-pong alternating patterns. */
   pingPong?: boolean;
+  /** Enable blocking when a run keeps probing public web sources that only fail. */
+  externalSourceChurn?: boolean;
 };
 
 export type ToolLoopDetectionConfig = {
@@ -172,6 +174,8 @@ export type ToolLoopDetectionConfig = {
   criticalThreshold?: number;
   /** Global no-progress breaker threshold (default: 30). */
   globalCircuitBreakerThreshold?: number;
+  /** Consecutive failure budget per public-web source family (default: 3). */
+  externalSourceFailureBudget?: number;
   /** Detector toggles. */
   detectors?: ToolLoopDetectionDetectorConfig;
 };

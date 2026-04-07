@@ -10,7 +10,8 @@ export type LoopDetectorKind =
   | "generic_repeat"
   | "known_poll_no_progress"
   | "global_circuit_breaker"
-  | "ping_pong";
+  | "ping_pong"
+  | "external_source_churn";
 
 export type LoopDetectionResult =
   | { stuck: false }
@@ -34,10 +35,12 @@ const DEFAULT_LOOP_DETECTION_CONFIG = {
   warningThreshold: WARNING_THRESHOLD,
   criticalThreshold: CRITICAL_THRESHOLD,
   globalCircuitBreakerThreshold: GLOBAL_CIRCUIT_BREAKER_THRESHOLD,
+  externalSourceFailureBudget: 3,
   detectors: {
     genericRepeat: true,
     knownPollNoProgress: true,
     pingPong: true,
+    externalSourceChurn: true,
   },
 };
 
@@ -47,10 +50,12 @@ type ResolvedLoopDetectionConfig = {
   warningThreshold: number;
   criticalThreshold: number;
   globalCircuitBreakerThreshold: number;
+  externalSourceFailureBudget: number;
   detectors: {
     genericRepeat: boolean;
     knownPollNoProgress: boolean;
     pingPong: boolean;
+    externalSourceChurn: boolean;
   };
 };
 
@@ -88,6 +93,10 @@ function resolveLoopDetectionConfig(config?: ToolLoopDetectionConfig): ResolvedL
     warningThreshold,
     criticalThreshold,
     globalCircuitBreakerThreshold,
+    externalSourceFailureBudget: asPositiveInt(
+      config?.externalSourceFailureBudget,
+      DEFAULT_LOOP_DETECTION_CONFIG.externalSourceFailureBudget,
+    ),
     detectors: {
       genericRepeat:
         config?.detectors?.genericRepeat ?? DEFAULT_LOOP_DETECTION_CONFIG.detectors.genericRepeat,
@@ -95,8 +104,42 @@ function resolveLoopDetectionConfig(config?: ToolLoopDetectionConfig): ResolvedL
         config?.detectors?.knownPollNoProgress ??
         DEFAULT_LOOP_DETECTION_CONFIG.detectors.knownPollNoProgress,
       pingPong: config?.detectors?.pingPong ?? DEFAULT_LOOP_DETECTION_CONFIG.detectors.pingPong,
+      externalSourceChurn:
+        config?.detectors?.externalSourceChurn ??
+        DEFAULT_LOOP_DETECTION_CONFIG.detectors.externalSourceChurn,
     },
   };
+}
+
+type SourceFailureClassification = {
+  family: "alltrails/cloudflare" | "overpass" | "osm_api" | "http_4xx" | "http_5xx";
+  statusBucket?: "4xx" | "5xx";
+};
+
+function classifyExternalSourceFamily(params: {
+  toolName: string;
+  toolParams: unknown;
+  result?: unknown;
+  error?: unknown;
+}): "alltrails/cloudflare" | "overpass" | "osm_api" | undefined {
+  const commandText = readPrimaryCommandText(params.toolName, params.toolParams).toLowerCase();
+  const outputText = readToolOutputText(params.result).toLowerCase();
+  const errorText =
+    params.error === undefined ? "" : formatErrorForHash(params.error).toLowerCase();
+  const haystack = [commandText, outputText, errorText].filter(Boolean).join("\n");
+  if (!haystack) {
+    return undefined;
+  }
+  if (haystack.includes("alltrails")) {
+    return "alltrails/cloudflare";
+  }
+  if (haystack.includes("overpass-api")) {
+    return "overpass";
+  }
+  if (haystack.includes("openstreetmap.org/api") || haystack.includes("api.openstreetmap.org")) {
+    return "osm_api";
+  }
+  return undefined;
 }
 
 /**
@@ -167,6 +210,113 @@ function extractTextContent(result: unknown): string {
     .map((entry) => entry.text)
     .join("\n")
     .trim();
+}
+
+function readToolDetailStatus(result: unknown): string | undefined {
+  if (!isPlainObject(result) || !isPlainObject(result.details)) {
+    return undefined;
+  }
+  const status = result.details.status;
+  return typeof status === "string" ? status.trim().toLowerCase() : undefined;
+}
+
+function readToolOutputText(result: unknown): string {
+  const text = extractTextContent(result);
+  return typeof text === "string" ? text.trim() : "";
+}
+
+function readPrimaryCommandText(toolName: string, params: unknown): string {
+  if (!isPlainObject(params)) {
+    return "";
+  }
+  const record = params;
+  const candidates =
+    toolName === "exec" || toolName === "bash"
+      ? [record.command, record.cmd, record.script]
+      : toolName === "process"
+        ? [record.command, record.cmd]
+        : [];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function readHttpStatusCode(
+  toolName: string,
+  params: unknown,
+  result: unknown,
+): number | undefined {
+  const text = [readToolOutputText(result), readPrimaryCommandText(toolName, params)]
+    .filter(Boolean)
+    .join("\n");
+  const statusMatches = text.match(/\b([45]\d{2})\b/g);
+  if (!statusMatches || statusMatches.length === 0) {
+    return undefined;
+  }
+  for (const rawMatch of statusMatches) {
+    const parsed = Number.parseInt(rawMatch, 10);
+    if (parsed >= 400 && parsed <= 599) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function classifyExternalSourceFailure(params: {
+  toolName: string;
+  toolParams: unknown;
+  result?: unknown;
+  error?: unknown;
+}): SourceFailureClassification | undefined {
+  const detailStatus = readToolDetailStatus(params.result);
+  if (detailStatus === "running") {
+    return undefined;
+  }
+
+  const commandText = readPrimaryCommandText(params.toolName, params.toolParams).toLowerCase();
+  const outputText = readToolOutputText(params.result).toLowerCase();
+  const errorText =
+    params.error === undefined ? "" : formatErrorForHash(params.error).toLowerCase();
+  const haystack = [commandText, outputText, errorText].filter(Boolean).join("\n");
+  if (!haystack) {
+    return undefined;
+  }
+
+  const statusCode = readHttpStatusCode(params.toolName, params.toolParams, params.result);
+  const statusBucket =
+    typeof statusCode === "number" && statusCode >= 500
+      ? "5xx"
+      : typeof statusCode === "number" && statusCode >= 400
+        ? "4xx"
+        : undefined;
+  const blockedByCloudflare =
+    haystack.includes("please enable js") ||
+    haystack.includes("disable any ad blocker") ||
+    haystack.includes("cloudflare");
+  const sourceFamily = classifyExternalSourceFamily(params);
+
+  if (sourceFamily === "alltrails/cloudflare" && blockedByCloudflare) {
+    return { family: "alltrails/cloudflare", statusBucket: statusBucket ?? "4xx" };
+  }
+  if (sourceFamily === "overpass" && (statusBucket || haystack.includes("504"))) {
+    return {
+      family: "overpass",
+      statusBucket: statusBucket ?? (haystack.includes("504") ? "5xx" : undefined),
+    };
+  }
+  if (sourceFamily === "osm_api" && statusBucket) {
+    return { family: "osm_api", statusBucket };
+  }
+  if (statusBucket === "5xx") {
+    return { family: "http_5xx", statusBucket };
+  }
+  if (statusBucket === "4xx") {
+    return { family: "http_4xx", statusBucket };
+  }
+  return undefined;
 }
 
 function formatErrorForHash(error: unknown): string {
@@ -385,6 +535,40 @@ export function detectToolCallLoop(
   const noProgressStreak = noProgress.count;
   const knownPollTool = isKnownPollToolCall(toolName, params);
   const pingPong = getPingPongStreak(history, currentHash);
+  const sourceFailure = classifyExternalSourceFailure({
+    toolName,
+    toolParams: params,
+  });
+  const sourceFamily =
+    sourceFailure?.family ??
+    classifyExternalSourceFamily({
+      toolName,
+      toolParams: params,
+    });
+  const sourceFailureStreak = sourceFamily
+    ? state.externalSourceFailureStreaks?.get(sourceFamily)
+    : undefined;
+
+  if (
+    sourceFamily &&
+    resolvedConfig.detectors.externalSourceChurn &&
+    sourceFailureStreak &&
+    sourceFailureStreak.count >= resolvedConfig.externalSourceFailureBudget
+  ) {
+    log.error(
+      `External source churn blocked: family=${sourceFamily} count=${sourceFailureStreak.count} tool=${toolName}`,
+    );
+    return {
+      stuck: true,
+      level: "critical",
+      detector: "external_source_churn",
+      count: sourceFailureStreak.count,
+      message:
+        `CRITICAL: Public source family ${sourceFamily} has failed ${sourceFailureStreak.count} times in this run. ` +
+        `Stop probing that source and summarize the blocker plus any partial findings instead.`,
+      warningKey: `source:${sourceFamily}:${sourceFailureStreak.lastStatusBucket ?? "none"}`,
+    };
+  }
 
   if (noProgressStreak >= resolvedConfig.globalCircuitBreakerThreshold) {
     log.error(
@@ -585,6 +769,43 @@ export function recordToolCallOutcome(
   if (state.toolCallHistory.length > resolvedConfig.historySize) {
     state.toolCallHistory.splice(0, state.toolCallHistory.length - resolvedConfig.historySize);
   }
+
+  if (!resolvedConfig.detectors.externalSourceChurn) {
+    return;
+  }
+  if (!state.externalSourceFailureStreaks) {
+    state.externalSourceFailureStreaks = new Map();
+  }
+
+  const sourceFailure = classifyExternalSourceFailure({
+    toolName: params.toolName,
+    toolParams: params.toolParams,
+    result: params.result,
+    error: params.error,
+  });
+  const sourceFamily = classifyExternalSourceFamily({
+    toolName: params.toolName,
+    toolParams: params.toolParams,
+    result: params.result,
+    error: params.error,
+  });
+  if (!sourceFailure) {
+    if (sourceFamily && readToolDetailStatus(params.result) !== "running") {
+      state.externalSourceFailureStreaks.delete(sourceFamily);
+    }
+    return;
+  }
+
+  const next = {
+    family: sourceFailure.family,
+    count: (state.externalSourceFailureStreaks.get(sourceFailure.family)?.count ?? 0) + 1,
+    lastStatusBucket: sourceFailure.statusBucket,
+    lastUpdatedAt: Date.now(),
+  };
+  state.externalSourceFailureStreaks.set(sourceFailure.family, next);
+  log.debug(
+    `External source failure recorded: family=${next.family} count=${next.count} statusBucket=${next.lastStatusBucket ?? "none"} tool=${params.toolName}`,
+  );
 }
 
 /**

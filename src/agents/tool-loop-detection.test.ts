@@ -543,6 +543,91 @@ describe("tool-loop-detection", () => {
       const result = detectToolCallLoop(state, "tool", { arg: 1 }, enabledLoopDetectionConfig);
       expect(result.stuck).toBe(false);
     });
+
+    it("blocks repeated external-source churn across varied overpass probes", () => {
+      const state = createState();
+      const config: ToolLoopDetectionConfig = {
+        enabled: true,
+        externalSourceFailureBudget: 3,
+        detectors: { externalSourceChurn: true },
+      };
+
+      for (let i = 0; i < 3; i += 1) {
+        const params = {
+          command: `curl https://overpass-api.de/api/interpreter?query=node(${i})`,
+        };
+        const toolCallId = `exec-overpass-${i}`;
+        recordToolCall(state, "exec", params, toolCallId, config);
+        recordToolCallOutcome(state, {
+          toolName: "exec",
+          toolParams: params,
+          toolCallId,
+          result: {
+            content: [{ type: "text", text: "HTTP/2 504 upstream request timeout" }],
+            details: { status: "completed", aggregated: "HTTP/2 504 upstream request timeout" },
+          },
+          config,
+        });
+      }
+
+      const loopResult = detectToolCallLoop(
+        state,
+        "exec",
+        { command: "curl https://overpass-api.de/api/interpreter?query=node(99)" },
+        config,
+      );
+      expect(loopResult).toMatchObject({
+        stuck: true,
+        level: "critical",
+        detector: "external_source_churn",
+        count: 3,
+      });
+      if (loopResult.stuck) {
+        expect(loopResult.message).toContain("Stop probing that source");
+      }
+    });
+
+    it("clears the source-failure streak after a successful terminal result", () => {
+      const state = createState();
+      const config: ToolLoopDetectionConfig = {
+        enabled: true,
+        externalSourceFailureBudget: 3,
+        detectors: { externalSourceChurn: true },
+      };
+      const failedParams = {
+        command: "curl https://api.openstreetmap.org/api/0.6/map?bbox=1,2,3,4",
+      };
+
+      for (let i = 0; i < 2; i += 1) {
+        const toolCallId = `exec-osm-fail-${i}`;
+        recordToolCall(state, "exec", failedParams, toolCallId, config);
+        recordToolCallOutcome(state, {
+          toolName: "exec",
+          toolParams: failedParams,
+          toolCallId,
+          result: {
+            content: [{ type: "text", text: "HTTP/2 429 too many requests" }],
+            details: { status: "completed", aggregated: "HTTP/2 429 too many requests" },
+          },
+          config,
+        });
+      }
+
+      recordToolCall(state, "exec", failedParams, "exec-osm-success", config);
+      recordToolCallOutcome(state, {
+        toolName: "exec",
+        toolParams: failedParams,
+        toolCallId: "exec-osm-success",
+        result: {
+          content: [{ type: "text", text: "<osm>ok</osm>" }],
+          details: { status: "completed", aggregated: "<osm>ok</osm>" },
+        },
+        config,
+      });
+
+      const loopResult = detectToolCallLoop(state, "exec", failedParams, config);
+      expect(loopResult.stuck).toBe(false);
+    });
   });
 
   describe("getToolCallStats", () => {
