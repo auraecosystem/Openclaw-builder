@@ -17,7 +17,13 @@ import { applyCloudflareAiGatewayConfig, buildCloudflareAiGatewayConfigPatch } f
 const PROVIDER_ID = "cloudflare-ai-gateway";
 const PROVIDER_ENV_VAR = "CLOUDFLARE_AI_GATEWAY_API_KEY";
 const PROFILE_ID = "cloudflare-ai-gateway:default";
-type CapturedSecretInput = Parameters<typeof buildApiKeyCredential>[1];
+type CapturedSecretInput =
+  | string
+  | {
+      source: "env" | "file" | "exec";
+      provider: string;
+      id: string;
+    };
 
 function readRequiredTextInput(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";

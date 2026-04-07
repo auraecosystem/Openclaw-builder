@@ -1,3 +1,4 @@
+import type { ModelDefinitionConfig } from "openclaw/plugin-sdk/provider-model-shared";
 export {
   ANTHROPIC_VERTEX_DEFAULT_MODEL_ID,
   buildAnthropicVertexProvider,
@@ -14,7 +15,27 @@ export {
 import { buildAnthropicVertexProvider } from "./provider-catalog.js";
 import { hasAnthropicVertexAvailableAuth } from "./region.js";
 
-type AnthropicVertexProviderConfig = ReturnType<typeof buildAnthropicVertexProvider>;
+type AnthropicVertexProviderConfig = {
+  baseUrl: string;
+  api?:
+    | "anthropic-messages"
+    | "azure-openai-responses"
+    | "bedrock-converse-stream"
+    | "github-copilot"
+    | "google-generative-ai"
+    | "ollama"
+    | "openai-codex-responses"
+    | "openai-completions"
+    | "openai-responses";
+  apiKey?:
+    | string
+    | {
+        source: "env" | "file" | "exec";
+        provider: string;
+        id: string;
+      };
+  models: ModelDefinitionConfig[];
+};
 
 export function mergeImplicitAnthropicVertexProvider(params: {
   existing: AnthropicVertexProviderConfig | undefined;

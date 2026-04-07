@@ -1,6 +1,5 @@
 import {
   coerceSecretRef,
-  type AuthProfileStore,
   resolveNonEnvSecretRefApiKeyMarker,
 } from "openclaw/plugin-sdk/provider-auth";
 import {
@@ -9,7 +8,15 @@ import {
 } from "./models.js";
 
 export type CloudflareAiGatewayCredential =
-  | AuthProfileStore["profiles"][string]
+  | {
+      type?: string;
+      keyRef?: unknown;
+      key?: string;
+      metadata?: {
+        accountId?: string;
+        gatewayId?: string;
+      };
+    }
   | undefined;
 
 type CloudflareAiGatewayCatalogProvider = {
