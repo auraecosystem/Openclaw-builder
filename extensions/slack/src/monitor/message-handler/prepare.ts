@@ -499,6 +499,7 @@ async function resolveSlackConversationContext(params: {
         channels: ctx.channelsConfig,
         channelKeys: ctx.channelsConfigKeys,
         defaultRequireMention: ctx.defaultRequireMention,
+        defaultThreadRequireExplicitMention: ctx.threadRequireExplicitMention,
         allowNameMatching: ctx.allowNameMatching,
       })
     : null;
@@ -807,7 +808,7 @@ export async function prepareSlackMessage(params: {
     !isDirectMessage &&
     ctx.botUserId &&
     message.thread_ts &&
-    !ctx.threadRequireExplicitMention &&
+    !channelConfig?.threadRequireExplicitMention &&
     !wasMentioned
   ) {
     const replyToBotKinds = implicitMentionKindWhen(
@@ -889,7 +890,7 @@ export async function prepareSlackMessage(params: {
     activation: {
       requireMention: shouldRequireMention,
       allowTextCommands,
-      ...(ctx.threadRequireExplicitMention ? { allowedImplicitMentionKinds: [] } : {}),
+      ...(channelConfig?.threadRequireExplicitMention ? { allowedImplicitMentionKinds: [] } : {}),
     },
   });
   const effectiveWasMentioned = messageIngress.activationAccess.effectiveWasMentioned ?? false;
