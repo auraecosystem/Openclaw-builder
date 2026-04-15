@@ -5,6 +5,7 @@ import {
   resolveSandboxDockerConfig,
 } from "../agents/sandbox/config.js";
 import { validateConfigObject } from "./validation.js";
+import { OpenClawSchema } from "./zod-schema.js";
 
 describe("sandbox docker config", () => {
   it("joins setupCommand arrays with newlines", () => {
@@ -25,6 +26,40 @@ describe("sandbox docker config", () => {
         "apt-get update\napt-get install -y curl",
       );
     }
+  });
+
+  it("generates JSON Schema for setupCommand with a representable type and no empty any-branches", () => {
+    const schema = OpenClawSchema.toJSONSchema({
+      target: "draft-07",
+      unrepresentable: "any",
+    }) as Record<string, unknown>;
+
+    // Walk: agents.defaults.sandbox.docker.setupCommand
+    const props = schema.properties as Record<string, Record<string, unknown>>;
+    const defaults = (props.agents.properties as Record<string, Record<string, unknown>>).defaults;
+    const sandbox = (defaults.properties as Record<string, Record<string, unknown>>).sandbox;
+    const docker = (sandbox.properties as Record<string, Record<string, unknown>>).docker;
+    const setupCommand = (docker.properties as Record<string, Record<string, unknown>>)
+      .setupCommand;
+
+    // Pre-fix, the schema collapsed to `{}` because the union's transform output
+    // was unrepresentable. The .pipe(z.string()) fix makes it resolve to a typed
+    // string (or, if the union survives, every branch must be typed — no empty
+    // any-schema branches).
+    const branches = setupCommand.anyOf as Record<string, unknown>[] | undefined;
+    if (branches !== undefined) {
+      expect(branches.length).toBeGreaterThan(0);
+      for (const branch of branches) {
+        expect(Object.keys(branch).length).toBeGreaterThan(0);
+        expect(branch).toHaveProperty("type");
+      }
+    } else {
+      expect(setupCommand.type).toBe("string");
+    }
+    // Belt-and-suspenders: serializing must never produce an empty-object branch.
+    expect(JSON.stringify(setupCommand)).not.toMatch(/"anyOf":\s*\[[^\]]*\{\s*\}/);
+    // And the entire setupCommand node must not have collapsed to an empty any-schema.
+    expect(Object.keys(setupCommand).length).toBeGreaterThan(0);
   });
 
   it("accepts safe binds array in sandbox.docker config", () => {

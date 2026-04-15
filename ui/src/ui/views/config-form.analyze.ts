@@ -5,7 +5,7 @@ export type ConfigSchemaAnalysis = {
   unsupportedPaths: string[];
 };
 
-const META_KEYS = new Set(["title", "description", "default", "nullable"]);
+const META_KEYS = new Set(["title", "description", "default", "nullable", "tags", "x-tags"]);
 
 function isAnySchema(schema: JsonSchema): boolean {
   const keys = Object.keys(schema ?? {}).filter((key) => !META_KEYS.has(key));
@@ -212,6 +212,15 @@ function normalizeUnion(
       continue;
     }
     remaining.push(entry);
+  }
+
+  // Filter out "any" schema branches ({} with no type constraints).
+  // These arise from unrepresentable Zod types (transforms) and provide
+  // no rendering value when typed branches are already present.
+  const typed = remaining.filter((entry) => !isAnySchema(entry));
+  if (typed.length > 0 && typed.length < remaining.length) {
+    remaining.length = 0;
+    remaining.push(...typed);
   }
 
   // Config secrets accept either a raw key string or a structured secret ref object.
