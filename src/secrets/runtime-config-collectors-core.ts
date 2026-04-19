@@ -1,11 +1,5 @@
-import {
-  resolveHttpMcpServerLaunchConfig,
-  type HttpMcpServerLaunchResult,
-} from "../agents/mcp-http.js";
-import {
-  resolveStdioMcpServerLaunchConfig,
-  type StdioMcpServerLaunchResult,
-} from "../agents/mcp-stdio.js";
+import { resolveHttpMcpServerLaunchConfig } from "../agents/mcp-http.js";
+import { resolveStdioMcpServerLaunchConfig } from "../agents/mcp-stdio.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { MediaUnderstandingModelConfig } from "../config/types.tools.js";
 import {
@@ -52,9 +46,11 @@ type McpSecretSurfaceActivity = {
   headers: { active: boolean; inactiveReason?: string };
 };
 
+type McpLaunchResult = { ok: true } | { ok: false; reason: string };
+
 function describeInactiveMcpSecretSurface(params: {
   transportLabel: string;
-  launch: StdioMcpServerLaunchResult | HttpMcpServerLaunchResult;
+  launch: McpLaunchResult;
 }): string {
   if (params.launch.ok) {
     return `${params.transportLabel} MCP transport is inactive because another transport is selected.`;

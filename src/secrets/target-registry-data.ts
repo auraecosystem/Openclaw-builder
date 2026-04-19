@@ -217,7 +217,7 @@ const CORE_SECRET_TARGET_REGISTRY: SecretTargetRegistryEntry[] = [
     secretShape: SECRET_INPUT_SHAPE,
     expectedResolvedValue: "string",
     includeInPlan: true,
-    includeInConfigure: false,
+    includeInConfigure: true,
     includeInAudit: true,
   },
   {
@@ -228,7 +228,7 @@ const CORE_SECRET_TARGET_REGISTRY: SecretTargetRegistryEntry[] = [
     secretShape: SECRET_INPUT_SHAPE,
     expectedResolvedValue: "string",
     includeInPlan: true,
-    includeInConfigure: false,
+    includeInConfigure: true,
     includeInAudit: true,
   },
   {
