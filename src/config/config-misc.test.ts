@@ -1010,7 +1010,7 @@ describe("mcp server schema", () => {
 });
 
 describe("mcp server schema", () => {
-  it("accepts SecretRef values for MCP stdio env and HTTP headers", () => {
+  it("accepts literal and SecretRef values for MCP stdio env and HTTP headers", () => {
     const res = OpenClawSchema.safeParse({
       mcp: {
         servers: {
@@ -1018,6 +1018,7 @@ describe("mcp server schema", () => {
             command: "node",
             args: ["scripts/mc-mcp-server.cjs"],
             env: {
+              MC_URL: "http://127.0.0.1:3000",
               MC_API_KEY: {
                 source: "env",
                 provider: "default",
@@ -1028,6 +1029,7 @@ describe("mcp server schema", () => {
           remote: {
             url: "https://example.invalid/mcp",
             headers: {
+              "X-Static-Header": "literal-header",
               Authorization: {
                 source: "env",
                 provider: "default",
