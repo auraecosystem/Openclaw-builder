@@ -388,6 +388,43 @@ describe("exec-policy CLI", () => {
     });
   });
 
+  it("clears normalized mode when setting legacy security or ask values", async () => {
+    mocks.setConfig({
+      tools: {
+        exec: {
+          mode: "auto",
+          security: "allowlist",
+          ask: "on-miss",
+        },
+      },
+    });
+
+    await runExecPolicyCommand(["exec-policy", "set", "--security", "full", "--json"]);
+
+    expect(mocks.getConfig().tools?.exec).toEqual({
+      security: "full",
+      ask: "on-miss",
+    });
+    expect(mocks.getConfig().tools?.exec).not.toHaveProperty("mode");
+  });
+
+  it("materializes mode-derived security when setting only legacy ask", async () => {
+    mocks.setConfig({
+      tools: {
+        exec: {
+          mode: "auto",
+        },
+      },
+    });
+
+    await runExecPolicyCommand(["exec-policy", "set", "--ask", "off", "--json"]);
+
+    expect(mocks.getConfig().tools?.exec).toEqual({
+      security: "allowlist",
+      ask: "off",
+    });
+  });
+
   it("sanitizes terminal control content before rendering the text table", async () => {
     mocks.setConfig({
       tools: {

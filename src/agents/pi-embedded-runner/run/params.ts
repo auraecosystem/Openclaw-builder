@@ -149,7 +149,13 @@ export type RunEmbeddedPiAgentParams = {
   bootstrapPromptWarningSignature?: string;
   execOverrides?: Pick<
     ExecToolDefaults,
-    "host" | "security" | "ask" | "node" | "notifyOnExit" | "notifyOnExitEmptySuccess"
+    | "host"
+    | "mode"
+    | "security"
+    | "ask"
+    | "node"
+    | "notifyOnExit"
+    | "notifyOnExitEmptySuccess"
   >;
   bashElevated?: ExecElevatedDefaults;
   timeoutMs: number;

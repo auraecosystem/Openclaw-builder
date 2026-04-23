@@ -7,6 +7,12 @@ import { resolveExecCommandHighlighting } from "../config/exec-command-highlight
 import type { ModelCompatConfig } from "../config/types.models.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { DiagnosticTraceContext } from "../infra/diagnostic-trace-context.js";
+import {
+  type ExecAsk,
+  type ExecMode,
+  type ExecSecurity,
+  resolveExecPolicyForMode,
+} from "../infra/exec-approvals.js";
 import { resolveMergedSafeBinProfileFixtures } from "../infra/exec-safe-bin-runtime-policy.js";
 import { logWarn } from "../logger.js";
 import { getPluginToolMeta } from "../plugins/tools.js";
@@ -286,15 +292,46 @@ function isApplyPatchAllowedForModel(params: {
   });
 }
 
+type ExecPolicyLayer = {
+  mode?: ExecMode;
+  security?: ExecSecurity;
+  ask?: ExecAsk;
+};
+
+function hasLegacyExecPolicy(exec?: ExecPolicyLayer): boolean {
+  return exec?.security !== undefined || exec?.ask !== undefined;
+}
+
+function applyExecPolicyLayer(base: ExecPolicyLayer, layer?: ExecPolicyLayer): ExecPolicyLayer {
+  if (!layer) {
+    return base;
+  }
+  if (layer.mode) {
+    return {
+      mode: layer.mode,
+      ...resolveExecPolicyForMode(layer.mode),
+    };
+  }
+  if (hasLegacyExecPolicy(layer)) {
+    return {
+      security: layer.security ?? base.security,
+      ask: layer.ask ?? base.ask,
+    };
+  }
+  return base;
+}
+
 function resolveExecConfig(params: { cfg?: OpenClawConfig; agentId?: string }) {
   const cfg = params.cfg;
   const globalExec = cfg?.tools?.exec;
   const agentExec =
     cfg && params.agentId ? resolveAgentConfig(cfg, params.agentId)?.tools?.exec : undefined;
+  const layeredPolicy = applyExecPolicyLayer(applyExecPolicyLayer({}, globalExec), agentExec);
   return {
     host: agentExec?.host ?? globalExec?.host,
-    security: agentExec?.security ?? globalExec?.security,
-    ask: agentExec?.ask ?? globalExec?.ask,
+    mode: layeredPolicy.mode,
+    security: layeredPolicy.security,
+    ask: layeredPolicy.ask,
     node: agentExec?.node ?? globalExec?.node,
     pathPrepend: agentExec?.pathPrepend ?? globalExec?.pathPrepend,
     safeBins: agentExec?.safeBins ?? globalExec?.safeBins,
@@ -725,10 +762,13 @@ export function createOpenClawCodingTools(options?: {
   }
   options?.recordToolPrepStage?.("base-coding-tools");
   const { cleanupMs: cleanupMsOverride, ...execDefaults } = options?.exec ?? {};
+  const execOverrideHasLegacyPolicy =
+    options?.exec?.security !== undefined || options?.exec?.ask !== undefined;
   const execTool = includeShellTools
     ? createLazyExecTool({
         ...execDefaults,
         host: options?.exec?.host ?? execConfig.host,
+        mode: options?.exec?.mode ?? (execOverrideHasLegacyPolicy ? undefined : execConfig.mode),
         security: options?.exec?.security ?? execConfig.security,
         ask: options?.exec?.ask ?? execConfig.ask,
         trigger: options?.trigger,

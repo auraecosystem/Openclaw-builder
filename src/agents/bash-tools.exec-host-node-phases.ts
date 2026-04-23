@@ -48,6 +48,7 @@ type NodeApprovalAnalysis = {
   allowlistSatisfied: boolean;
   durableApprovalSatisfied: boolean;
   inlineEvalHit: InterpreterInlineEvalHit | null;
+  autoReviewArgv?: string[];
 };
 
 export function shouldSkipNodeApprovalPrepare(params: {
@@ -367,5 +368,7 @@ export async function analyzeNodeApprovalRequirement(params: {
     allowlistSatisfied,
     durableApprovalSatisfied,
     inlineEvalHit,
+    autoReviewArgv:
+      baseAllowlistEval.segments.length === 1 ? baseAllowlistEval.segments[0]?.argv : undefined,
   };
 }

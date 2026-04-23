@@ -6,7 +6,11 @@ import type { ConfigFileSnapshot, OpenClawConfig } from "../config/config.js";
 import { resolveConfigPath, resolveStateDir } from "../config/paths.js";
 import type { SecurityAuditSuppression } from "../config/types.openclaw.js";
 import { isInterpreterLikeAllowlistPattern } from "../infra/command-analysis/inline-eval.js";
-import { type ExecApprovalsFile, loadExecApprovals } from "../infra/exec-approvals.js";
+import {
+  type ExecApprovalsFile,
+  loadExecApprovals,
+  resolveExecPolicyForMode,
+} from "../infra/exec-approvals.js";
 import {
   listInterpreterLikeSafeBins,
   resolveMergedSafeBinProfileFixtures,
@@ -36,6 +40,12 @@ import type { ExecFn } from "./windows-acl.js";
 
 type ExecDockerRawFn = typeof import("../agents/sandbox/docker.js").execDockerRaw;
 type ProbeGatewayFn = typeof import("../gateway/probe.js").probeGateway;
+type ExecAuditConfig = NonNullable<NonNullable<OpenClawConfig["tools"]>["exec"]>;
+type AuditExecPolicy = {
+  mode?: ExecAuditConfig["mode"];
+  security: NonNullable<ExecAuditConfig["security"]>;
+  ask: NonNullable<ExecAuditConfig["ask"]>;
+};
 
 export type {
   SecurityAuditFinding,
@@ -43,6 +53,40 @@ export type {
   SecurityAuditSeverity,
   SecurityAuditSummary,
 } from "./audit.types.js";
+
+function hasLegacyExecPolicy(exec?: ExecAuditConfig): boolean {
+  return exec?.security !== undefined || exec?.ask !== undefined;
+}
+
+function applyAuditExecPolicyLayer(
+  base: AuditExecPolicy,
+  exec?: ExecAuditConfig,
+): AuditExecPolicy {
+  if (!exec) {
+    return base;
+  }
+  if (exec.mode) {
+    return {
+      mode: exec.mode,
+      ...resolveExecPolicyForMode(exec.mode),
+    };
+  }
+  if (hasLegacyExecPolicy(exec)) {
+    return {
+      security: exec.security ?? base.security,
+      ask: exec.ask ?? base.ask,
+    };
+  }
+  return base;
+}
+
+function resolveAuditExecPolicy(params: { exec?: ExecAuditConfig; inherited?: ExecAuditConfig }) {
+  const base: AuditExecPolicy = { security: "deny", ask: "off" };
+  return applyAuditExecPolicyLayer(
+    applyAuditExecPolicyLayer(base, params.inherited),
+    params.exec,
+  );
+}
 
 export type SecurityAuditOptions = {
   config: OpenClawConfig;
@@ -595,12 +639,13 @@ export function collectExecRuntimeFindings(cfg: OpenClawConfig): SecurityAuditFi
     });
   }
 
+  const globalExecPolicy = resolveAuditExecPolicy({ exec: cfg.tools?.exec });
   const effectiveExecScopes = Array.from(
     new Map(
       [
         {
           id: DEFAULT_AGENT_ID,
-          security: cfg.tools?.exec?.security ?? "deny",
+          security: globalExecPolicy.security,
           host: cfg.tools?.exec?.host ?? "auto",
         },
         ...agents
@@ -608,11 +653,17 @@ export function collectExecRuntimeFindings(cfg: OpenClawConfig): SecurityAuditFi
             (entry): entry is NonNullable<(typeof agents)[number]> =>
               Boolean(entry) && typeof entry === "object" && typeof entry.id === "string",
           )
-          .map((entry) => ({
-            id: entry.id,
-            security: entry.tools?.exec?.security ?? cfg.tools?.exec?.security ?? "deny",
-            host: entry.tools?.exec?.host ?? cfg.tools?.exec?.host ?? "auto",
-          })),
+          .map((entry) => {
+            const execPolicy = resolveAuditExecPolicy({
+              exec: entry.tools?.exec,
+              inherited: cfg.tools?.exec,
+            });
+            return {
+              id: entry.id,
+              security: execPolicy.security,
+              host: entry.tools?.exec?.host ?? cfg.tools?.exec?.host ?? "auto",
+            };
+          }),
       ].map((entry) => [entry.id, entry] as const),
     ).values(),
   );

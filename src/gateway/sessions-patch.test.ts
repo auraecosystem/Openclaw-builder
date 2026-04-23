@@ -605,6 +605,42 @@ describe("gateway sessions patch", () => {
     expect(entry.groupActivation).toBe("always");
   });
 
+  test("execMode patches clear stale legacy exec policy fields", async () => {
+    const entry = expectPatchOk(
+      await runPatch({
+        store: {
+          [MAIN_SESSION_KEY]: {
+            sessionId: "main",
+            updatedAt: 1,
+            execSecurity: "full",
+            execAsk: "always",
+          },
+        },
+        patch: { key: MAIN_SESSION_KEY, execMode: " AUTO " },
+      }),
+    );
+    expect(entry.execMode).toBe("auto");
+    expect(entry.execSecurity).toBeUndefined();
+    expect(entry.execAsk).toBeUndefined();
+  });
+
+  test("legacy exec policy patches clear stale execMode", async () => {
+    const entry = expectPatchOk(
+      await runPatch({
+        store: {
+          [MAIN_SESSION_KEY]: {
+            sessionId: "main",
+            updatedAt: 1,
+            execMode: "auto",
+          },
+        },
+        patch: { key: MAIN_SESSION_KEY, execSecurity: "deny" },
+      }),
+    );
+    expect(entry.execMode).toBeUndefined();
+    expect(entry.execSecurity).toBe("deny");
+  });
+
   test("rejects invalid execHost values", async () => {
     const result = await runPatch({
       patch: { key: MAIN_SESSION_KEY, execHost: "edge" },

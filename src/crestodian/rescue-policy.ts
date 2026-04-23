@@ -1,4 +1,5 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { resolveExecPolicyForMode } from "../infra/exec-approvals.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 
 type CrestodianRescueDecision =
@@ -27,6 +28,11 @@ type CrestodianRescuePolicyInput = {
   senderIsOwner: boolean;
   isDirectMessage: boolean;
 };
+type ExecRescueConfig = NonNullable<NonNullable<OpenClawConfig["tools"]>["exec"]>;
+type ExecRescuePolicy = {
+  security: NonNullable<ExecRescueConfig["security"]>;
+  ask: NonNullable<ExecRescueConfig["ask"]>;
+};
 
 function resolvePendingTtlMinutes(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 15;
@@ -46,6 +52,26 @@ function resolveScopedExecConfig(cfg: OpenClawConfig, agentId?: string) {
   return resolveAgentEntry(cfg, agentId)?.tools?.exec;
 }
 
+function hasLegacyExecPolicy(exec?: ExecRescueConfig): boolean {
+  return exec?.security !== undefined || exec?.ask !== undefined;
+}
+
+function applyExecRescuePolicy(base: ExecRescuePolicy, exec?: ExecRescueConfig): ExecRescuePolicy {
+  if (!exec) {
+    return base;
+  }
+  if (exec.mode) {
+    return resolveExecPolicyForMode(exec.mode);
+  }
+  if (hasLegacyExecPolicy(exec)) {
+    return {
+      security: exec.security ?? base.security,
+      ask: exec.ask ?? base.ask,
+    };
+  }
+  return base;
+}
+
 function resolveScopedSandboxMode(
   cfg: OpenClawConfig,
   agentId?: string,
@@ -58,9 +84,11 @@ function resolveScopedSandboxMode(
 function isYoloHostPosture(cfg: OpenClawConfig, agentId?: string): boolean {
   const scopedExec = resolveScopedExecConfig(cfg, agentId);
   const globalExec = cfg.tools?.exec;
-  const security = scopedExec?.security ?? globalExec?.security ?? "full";
-  const ask = scopedExec?.ask ?? globalExec?.ask ?? "off";
-  return security === "full" && ask === "off";
+  const policy = applyExecRescuePolicy(
+    applyExecRescuePolicy({ security: "full", ask: "off" }, globalExec),
+    scopedExec,
+  );
+  return policy.security === "full" && policy.ask === "off";
 }
 
 export function resolveCrestodianRescuePolicy(

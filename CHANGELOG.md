@@ -27,6 +27,7 @@ Docs: https://docs.openclaw.ai
 - QA-Lab: schedule a live-frontier Codex-vs-Pi runtime token-efficiency artifact lane in the all-lanes QA workflow. Fixes #80175. Thanks @100yenadmin.
 - QA-Lab: hard-gate required OpenClaw dynamic runtime-tool drift in the standard Codex-vs-Pi tier with a blocking release-check verifier and publish the tool coverage report artifact. Fixes #80339; refs #80319. Thanks @100yenadmin.
 - QA-Lab: add the personal-agent approval-denial scenario so the benchmark pack verifies denied local reads stop cleanly without tool progress or fixture leaks. (#83150) Thanks @iFiras-Max1.
+- Exec/Codex harness: add normalized `tools.exec.mode`, including native `auto` review for exec approval misses and Codex app-server mapping from OpenClaw `auto` to Guardian-reviewed approvals.
 
 ### Fixes
 

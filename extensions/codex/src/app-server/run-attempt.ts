@@ -72,6 +72,7 @@ import {
   readCodexPluginConfig,
   resolveCodexPluginsPolicy,
   resolveCodexAppServerRuntimeOptions,
+  resolveOpenClawExecModeForCodexAppServer,
   withMcpElicitationsApprovalPolicy,
   type CodexAppServerRuntimeOptions,
   type CodexPluginConfig,
@@ -747,7 +748,19 @@ export async function runCodexAppServerAttempt(
   const attemptStartedAt = Date.now();
   const attemptClientFactory = options.clientFactory ?? defaultCodexAppServerClientFactory;
   const pluginConfig = readCodexPluginConfig(options.pluginConfig);
-  const configuredAppServer = resolveCodexAppServerRuntimeOptions({ pluginConfig });
+  const { sessionAgentId } = resolveSessionAgentIds({
+    sessionKey: params.sessionKey,
+    config: params.config,
+    agentId: params.agentId,
+  });
+  const configuredAppServer = resolveCodexAppServerRuntimeOptions({
+    pluginConfig,
+    execMode: resolveOpenClawExecModeForCodexAppServer({
+      execOverrides: params.execOverrides,
+      config: params.config,
+      agentId: sessionAgentId,
+    }),
+  });
   const resolvedWorkspace = resolveUserPath(params.workspaceDir);
   await fs.mkdir(resolvedWorkspace, { recursive: true });
   const sandboxSessionKey =
@@ -788,11 +801,6 @@ export async function runCodexAppServerAttempt(
     params.abortSignal?.addEventListener("abort", abortFromUpstream, { once: true });
   }
 
-  const { sessionAgentId } = resolveSessionAgentIds({
-    sessionKey: params.sessionKey,
-    config: params.config,
-    agentId: params.agentId,
-  });
   const agentDir = params.agentDir ?? resolveAgentDir(params.config ?? {}, sessionAgentId);
   let startupBinding = await readCodexAppServerBinding(params.sessionFile);
   const startupBindingAuthProfileId = startupBinding?.authProfileId;

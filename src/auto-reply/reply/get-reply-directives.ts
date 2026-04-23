@@ -300,7 +300,11 @@ export async function resolveReplyDirectives(params: {
     }
   }
   if (isGroup && ctx.WasMentioned !== true && parsedDirectives.hasExecDirective) {
-    if (parsedDirectives.execSecurity !== "deny") {
+    const unmentionedGroupExecAllowed =
+      parsedDirectives.execMode !== undefined
+        ? parsedDirectives.execMode === "deny"
+        : parsedDirectives.execSecurity === "deny";
+    if (!unmentionedGroupExecAllowed) {
       parsedDirectives = clearExecInlineDirectives(parsedDirectives);
     }
   }

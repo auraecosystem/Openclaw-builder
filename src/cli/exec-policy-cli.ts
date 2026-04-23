@@ -9,9 +9,11 @@ import {
 } from "../infra/exec-approvals-effective.js";
 import {
   normalizeExecAsk,
+  normalizeExecMode,
   normalizeExecSecurity,
   normalizeExecTarget,
   readExecApprovalsSnapshot,
+  resolveExecPolicyForMode,
   restoreExecApprovalsSnapshot,
   saveExecApprovals,
   type ExecApprovalsFile,
@@ -67,12 +69,19 @@ type ExecPolicyShowPayload = {
 
 type ExecPolicyShowSecurity = ExecSecurity | "unknown";
 type ExecPolicyShowAsk = ExecAsk | "unknown";
+type ExecPolicyShowMode = ExecPolicyScopeSnapshot["mode"]["requested"] | "unknown";
 
 type ExecPolicyShowScope = Omit<
   ExecPolicyScopeSnapshot,
-  "security" | "ask" | "askFallback" | "allowedDecisions"
+  "mode" | "security" | "ask" | "askFallback" | "allowedDecisions"
 > & {
   runtimeApprovalsSource: "local-file" | "node-runtime";
+  mode: {
+    requested: ExecPolicyScopeSnapshot["mode"]["requested"];
+    requestedSource: string;
+    effective: ExecPolicyShowMode;
+    note: string;
+  };
   security: {
     requested: ExecSecurity;
     requestedSource: string;
@@ -175,6 +184,7 @@ function applyConfigExecPolicy(draft: Record<string, unknown>, policy: ExecPolic
     tools?: {
       exec?: {
         host?: ExecTarget;
+        mode?: unknown;
         security?: ExecSecurity;
         ask?: ExecAsk;
       };
@@ -184,6 +194,21 @@ function applyConfigExecPolicy(draft: Record<string, unknown>, policy: ExecPolic
   root.tools.exec ??= {};
   if (policy.host !== undefined) {
     root.tools.exec.host = policy.host;
+  }
+  if (policy.security !== undefined || policy.ask !== undefined) {
+    const existingMode = normalizeExecMode(
+      typeof root.tools.exec.mode === "string" ? root.tools.exec.mode : undefined,
+    );
+    if (existingMode) {
+      const modePolicy = resolveExecPolicyForMode(existingMode);
+      if (policy.security === undefined) {
+        root.tools.exec.security = modePolicy.security;
+      }
+      if (policy.ask === undefined) {
+        root.tools.exec.ask = modePolicy.ask;
+      }
+    }
+    delete root.tools.exec.mode;
   }
   if (policy.security !== undefined) {
     root.tools.exec.security = policy.security;
@@ -256,6 +281,12 @@ function buildExecPolicyShowScope(snapshot: ExecPolicyScopeSnapshot): ExecPolicy
   return {
     ...baseScope,
     runtimeApprovalsSource: "node-runtime",
+    mode: {
+      requested: snapshot.mode.requested,
+      requestedSource: snapshot.mode.requestedSource,
+      effective: "unknown",
+      note: "runtime policy resolved by node approvals",
+    },
     security: {
       requested: snapshot.security.requested,
       requestedSource: snapshot.security.requestedSource,
@@ -316,6 +347,7 @@ function renderExecPolicyShow(payload: ExecPolicyShowPayload): void {
         Scope: sanitizeExecPolicyTableCell(scope.scopeLabel),
         Requested: sanitizeExecPolicyTableCell(
           `host=${scope.host.requested} (${scope.host.requestedSource})\n` +
+            `mode=${scope.mode.requested} (${scope.mode.requestedSource})\n` +
             `security=${scope.security.requested} (${scope.security.requestedSource})\n` +
             `ask=${scope.ask.requested} (${scope.ask.requestedSource})`,
         ),
@@ -325,7 +357,7 @@ function renderExecPolicyShow(payload: ExecPolicyShowPayload): void {
             `askFallback=${scope.askFallback.effective} (${scope.askFallback.source})`,
         ),
         Effective: sanitizeExecPolicyTableCell(
-          `security=${scope.security.effective}\nask=${scope.ask.effective}`,
+          `mode=${scope.mode.effective}\nsecurity=${scope.security.effective}\nask=${scope.ask.effective}`,
         ),
       })),
     }).trimEnd(),

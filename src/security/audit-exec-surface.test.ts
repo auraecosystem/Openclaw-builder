@@ -168,6 +168,53 @@ describe("security audit exec surface findings", () => {
     expect(hasFinding("security.exposure.open_channels_with_exec", "warn", findings)).toBe(true);
   });
 
+  it("flags open channel access combined with mode-only exec-enabled scopes", () => {
+    const findings = collectExecRuntimeFindings({
+      channels: {
+        discord: {
+          groupPolicy: "open",
+        },
+      },
+      tools: {
+        exec: {
+          mode: "auto",
+          host: "gateway",
+        },
+      },
+    } satisfies OpenClawConfig);
+
+    expect(hasFinding("security.exposure.open_channels_with_exec", "warn", findings)).toBe(true);
+  });
+
+  it("preserves mode-derived security for partial agent exec overrides", () => {
+    const findings = collectExecRuntimeFindings({
+      channels: {
+        discord: {
+          groupPolicy: "open",
+        },
+      },
+      tools: {
+        exec: {
+          mode: "auto",
+        },
+      },
+      agents: {
+        list: [
+          {
+            id: "helper",
+            tools: {
+              exec: {
+                ask: "off",
+              },
+            },
+          },
+        ],
+      },
+    } satisfies OpenClawConfig);
+
+    expect(hasFinding("security.exposure.open_channels_with_exec", "warn", findings)).toBe(true);
+  });
+
   it("escalates open channel exec exposure when full exec is configured", () => {
     const findings = collectExecRuntimeFindings({
       channels: {
@@ -178,6 +225,26 @@ describe("security audit exec surface findings", () => {
       tools: {
         exec: {
           security: "full",
+        },
+      },
+    } satisfies OpenClawConfig);
+
+    expect(hasFinding("tools.exec.security_full_configured", "critical", findings)).toBe(true);
+    expect(hasFinding("security.exposure.open_channels_with_exec", "critical", findings)).toBe(
+      true,
+    );
+  });
+
+  it("escalates open channel exec exposure when mode=full is configured", () => {
+    const findings = collectExecRuntimeFindings({
+      channels: {
+        slack: {
+          dmPolicy: "open",
+        },
+      },
+      tools: {
+        exec: {
+          mode: "full",
         },
       },
     } satisfies OpenClawConfig);

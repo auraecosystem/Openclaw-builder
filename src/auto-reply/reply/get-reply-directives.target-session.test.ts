@@ -87,6 +87,36 @@ function parseInlineDirectivesForTest(body: string) {
       execSecurity: undefined,
     };
   }
+  if (normalized === "/exec mode=full security=deny") {
+    return {
+      cleaned: "",
+      hasThinkDirective: false,
+      hasVerboseDirective: false,
+      hasTraceDirective: false,
+      traceLevel: undefined,
+      rawTraceLevel: undefined,
+      hasFastDirective: false,
+      hasReasoningDirective: false,
+      hasElevatedDirective: false,
+      hasExecDirective: true,
+      hasModelDirective: false,
+      hasQueueDirective: false,
+      hasStatusDirective: false,
+      queueReset: false,
+      thinkLevel: undefined,
+      verboseLevel: undefined,
+      fastMode: undefined,
+      reasoningLevel: undefined,
+      elevatedLevel: undefined,
+      rawElevatedLevel: undefined,
+      rawModelDirective: undefined,
+      execMode: "full",
+      execSecurity: "deny",
+      rawExecMode: "full",
+      rawExecSecurity: "deny",
+      hasExecOptions: true,
+    };
+  }
   return {
     cleaned: body,
     hasThinkDirective: false,
@@ -149,6 +179,7 @@ async function resolveHelloWithModelDefaults(params: {
   provider?: string;
   model?: string;
   ctx?: Parameters<typeof buildTestCtx>[0];
+  isGroup?: boolean;
 }) {
   const resolveDefaultThinkingLevel = vi.fn(async () => params.defaultThinking);
   const resolveDefaultReasoningLevel = vi.fn(async () => params.defaultReasoning);
@@ -186,7 +217,7 @@ async function resolveHelloWithModelDefaults(params: {
     storePath: "/tmp/sessions.json",
     sessionScope: "per-sender",
     groupResolution: undefined,
-    isGroup: false,
+    isGroup: params.isGroup ?? false,
     triggerBodyNormalized: "hello",
     resetTriggered: false,
     commandAuthorized: params.commandAuthorized ?? false,
@@ -331,6 +362,23 @@ describe("resolveReplyDirectives", () => {
     expect(modelSelectionInput.provider).toBe("openai");
     expect(modelSelectionInput.model).toBe("gpt-4o-mini");
     expect(modelSelectionInput.hasOneTurnModelOverride).toBe(true);
+  });
+
+  it("clears mixed non-deny exec mode directives from unmentioned group messages", async () => {
+    await resolveHelloWithModelDefaults({
+      defaultThinking: "off",
+      defaultReasoning: "on",
+      body: "/exec mode=full security=deny",
+      isGroup: true,
+      ctx: {
+        WasMentioned: false,
+      },
+    });
+
+    const execOverrideInput = mockCallInput(mocks.resolveReplyExecOverrides);
+    expect((execOverrideInput.directives as { hasExecDirective?: boolean }).hasExecDirective).toBe(
+      false,
+    );
   });
 
   it("prefers the target session entry from sessionStore for directive state", async () => {

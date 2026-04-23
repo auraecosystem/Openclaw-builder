@@ -64,6 +64,15 @@ const enforceStrictInlineEvalApprovalBoundaryMock = vi.hoisted(() =>
 const registerExecApprovalRequestForHostOrThrowMock = vi.hoisted(() =>
   vi.fn(async () => undefined),
 );
+const evaluateShellAllowlistMock = vi.hoisted(() =>
+  vi.fn(() => ({
+    allowlistMatches: [],
+    analysisOk: true,
+    allowlistSatisfied: false,
+    segments: [{ resolution: null, argv: ["bun", "./script.ts"] }],
+    segmentAllowlistEntries: [],
+  })),
+);
 const detectInterpreterInlineEvalArgvMock = vi.hoisted(() =>
   vi.fn(
     (): {
@@ -74,15 +83,12 @@ const detectInterpreterInlineEvalArgvMock = vi.hoisted(() =>
     } | null => null,
   ),
 );
+const defaultExecAutoReviewerMock = vi.hoisted(() =>
+  vi.fn(async () => ({ decision: "allow-once" as const })),
+);
 
 vi.mock("../infra/exec-approvals.js", () => ({
-  evaluateShellAllowlist: vi.fn(() => ({
-    allowlistMatches: [],
-    analysisOk: true,
-    allowlistSatisfied: false,
-    segments: [{ resolution: null, argv: ["bun", "./script.ts"] }],
-    segmentAllowlistEntries: [],
-  })),
+  evaluateShellAllowlist: evaluateShellAllowlistMock,
   hasDurableExecApproval: vi.fn(() => false),
   requiresExecApproval: requiresExecApprovalMock,
   resolveExecApprovalAllowedDecisions: vi.fn(() => ["allow-once", "allow-always", "deny"]),
@@ -95,6 +101,10 @@ vi.mock("../infra/exec-approvals.js", () => ({
 vi.mock("../infra/command-analysis/inline-eval.js", () => ({
   describeInterpreterInlineEval: vi.fn(() => "inline-eval"),
   detectInterpreterInlineEvalArgv: detectInterpreterInlineEvalArgvMock,
+}));
+
+vi.mock("../infra/exec-auto-review.js", () => ({
+  defaultExecAutoReviewer: defaultExecAutoReviewerMock,
 }));
 
 vi.mock("../infra/node-shell.js", () => ({
@@ -303,6 +313,16 @@ describe("executeNodeHostCommand", () => {
     }));
     detectInterpreterInlineEvalArgvMock.mockReset();
     detectInterpreterInlineEvalArgvMock.mockReturnValue(null);
+    evaluateShellAllowlistMock.mockReset();
+    evaluateShellAllowlistMock.mockReturnValue({
+      allowlistMatches: [],
+      analysisOk: true,
+      allowlistSatisfied: false,
+      segments: [{ resolution: null, argv: ["bun", "./script.ts"] }],
+      segmentAllowlistEntries: [],
+    });
+    defaultExecAutoReviewerMock.mockReset();
+    defaultExecAutoReviewerMock.mockResolvedValue({ decision: "allow-once" });
     registerExecApprovalRequestForHostOrThrowMock.mockReset();
   });
 
@@ -350,6 +370,85 @@ describe("executeNodeHostCommand", () => {
     expect(runParams.turnSourceTo).toBe("telegram:12345");
     expect(runParams.turnSourceAccountId).toBe("work");
     expect(runParams.turnSourceThreadId).toBe("42");
+  });
+
+  it("does not auto-review when host policy requires every command to ask", async () => {
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: { allowlist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "allowlist",
+      hostAsk: "always",
+      askFallback: "deny",
+    });
+
+    const result = await executeNodeHostCommand({
+      command: "pwd",
+      workdir: "/tmp/work",
+      env: {},
+      security: "allowlist",
+      ask: "on-miss",
+      autoReview: true,
+      defaultTimeoutSec: 30,
+      approvalRunningNoticeMs: 0,
+      warnings: [],
+      agentId: "requested-agent",
+      sessionKey: "requested-session",
+    });
+
+    expect(defaultExecAutoReviewerMock).not.toHaveBeenCalled();
+    expect(createAndRegisterDefaultExecApprovalRequestMock).toHaveBeenCalledTimes(1);
+    expect(result.details?.status).toBe("approval-pending");
+  });
+
+  it("auto-reviews node commands using the original parsed argv", async () => {
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: { allowlist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "allowlist",
+      hostAsk: "on-miss",
+      askFallback: "deny",
+    });
+    parsePreparedSystemRunPayloadMock.mockReturnValue({
+      plan: {
+        ...preparedPlan,
+        argv: ["/bin/sh", "-lc", "pwd"],
+        commandText: "/bin/sh -lc pwd",
+        commandPreview: "pwd",
+        mutableFileOperand: null,
+      },
+    });
+    evaluateShellAllowlistMock.mockReturnValue({
+      allowlistMatches: [],
+      analysisOk: true,
+      allowlistSatisfied: false,
+      segments: [{ resolution: null, argv: ["pwd"] }],
+      segmentAllowlistEntries: [],
+    });
+
+    const result = await executeNodeHostCommand({
+      command: "pwd",
+      workdir: "/tmp/work",
+      env: {},
+      security: "allowlist",
+      ask: "on-miss",
+      autoReview: true,
+      defaultTimeoutSec: 30,
+      approvalRunningNoticeMs: 0,
+      warnings: [],
+      agentId: "requested-agent",
+      sessionKey: "requested-session",
+    });
+
+    expect(defaultExecAutoReviewerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "pwd",
+        argv: ["pwd"],
+        host: "node",
+      }),
+    );
+    expect(createAndRegisterDefaultExecApprovalRequestMock).not.toHaveBeenCalled();
+    expect(result.details?.status).toBe("completed");
+    const runParams = requireRunParams(requireGatewayCommand("system.run"));
+    expect(runParams.approved).toBe(true);
+    expect(runParams.approvalDecision).toBe("allow-once");
   });
 
   it("builds a local systemRunPlan when approval is required and the node omits prepare", async () => {

@@ -94,6 +94,7 @@ describe("resolveExecDefaults", () => {
 
     expect(defaults.host).toBe("auto");
     expect(defaults.effectiveHost).toBe("gateway");
+    expect(defaults.mode).toBe("full");
     expect(defaults.security).toBe("full");
     expect(defaults.ask).toBe("off");
   });
@@ -112,8 +113,93 @@ describe("resolveExecDefaults", () => {
 
     expect(defaults.host).toBe("auto");
     expect(defaults.effectiveHost).toBe("sandbox");
+    expect(defaults.mode).toBe("deny");
     expect(defaults.security).toBe("deny");
     expect(defaults.ask).toBe("off");
+  });
+
+  it("maps normalized auto mode to allowlist plus on-miss approvals", () => {
+    expect(
+      resolveExecDefaults({
+        cfg: {
+          tools: {
+            exec: {
+              mode: "auto",
+            },
+          },
+        },
+        sandboxAvailable: false,
+      }),
+    ).toMatchObject({
+      mode: "auto",
+      security: "allowlist",
+      ask: "on-miss",
+    });
+  });
+
+  it("keeps legacy security overrides ahead of higher-scope normalized mode", () => {
+    expect(
+      resolveExecDefaults({
+        cfg: {
+          tools: {
+            exec: {
+              mode: "auto",
+            },
+          },
+          agents: {
+            list: [
+              {
+                id: "agent-a",
+                tools: {
+                  exec: {
+                    security: "full",
+                    ask: "off",
+                  },
+                },
+              },
+            ],
+          },
+        },
+        agentId: "agent-a",
+        sandboxAvailable: false,
+      }),
+    ).toMatchObject({
+      mode: "full",
+      security: "full",
+      ask: "off",
+    });
+  });
+
+  it("preserves mode-derived security for partial legacy agent overrides", () => {
+    expect(
+      resolveExecDefaults({
+        cfg: {
+          tools: {
+            exec: {
+              mode: "auto",
+            },
+          },
+          agents: {
+            list: [
+              {
+                id: "agent-a",
+                tools: {
+                  exec: {
+                    ask: "off",
+                  },
+                },
+              },
+            ],
+          },
+        },
+        agentId: "agent-a",
+        sandboxAvailable: false,
+      }),
+    ).toMatchObject({
+      mode: "allowlist",
+      security: "allowlist",
+      ask: "off",
+    });
   });
 
   it("blocks node advertising in helper calls when sandbox is available", () => {

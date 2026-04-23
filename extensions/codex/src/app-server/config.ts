@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { hostname as readHostName } from "node:os";
+import { normalizeAgentId } from "openclaw/plugin-sdk/routing";
 import { z } from "zod";
 import type { CodexSandboxPolicy, CodexServiceTier } from "./protocol.js";
 
@@ -11,6 +12,7 @@ const WINDOWS_CODEX_REQUIREMENTS_SUFFIX = "\\OpenAI\\Codex\\requirements.toml";
 
 type CodexAppServerTransportMode = "stdio" | "websocket";
 type CodexAppServerPolicyMode = "yolo" | "guardian";
+type OpenClawExecMode = "deny" | "allowlist" | "ask" | "auto" | "full";
 type CodexAppServerDefaultPolicy = {
   mode: CodexAppServerPolicyMode;
   approvalPolicy?: CodexAppServerApprovalPolicy;
@@ -311,6 +313,7 @@ export function resolveCodexPluginsPolicy(pluginConfig?: unknown): ResolvedCodex
 export function resolveCodexAppServerRuntimeOptions(
   params: {
     pluginConfig?: unknown;
+    execMode?: OpenClawExecMode;
     env?: NodeJS.ProcessEnv;
     requirementsToml?: string | null;
     requirementsPath?: string;
@@ -337,18 +340,20 @@ export function resolveCodexAppServerRuntimeOptions(
   const url = readNonEmptyString(config.url);
   const explicitPolicyMode =
     resolvePolicyMode(config.mode) ?? resolvePolicyMode(env.OPENCLAW_CODEX_APP_SERVER_MODE);
+  const normalizedPolicyMode = params.execMode === "auto" ? "guardian" : undefined;
   const defaultPolicy = explicitPolicyMode
     ? undefined
     : resolveDefaultCodexAppServerPolicy({
         transport,
         env,
+        forceGuardian: normalizedPolicyMode === "guardian",
         requirementsToml: params.requirementsToml,
         requirementsPath: params.requirementsPath,
         readRequirementsFile: params.readRequirementsFile,
         platform: params.platform,
         hostName: params.hostName,
       });
-  const policyMode = explicitPolicyMode ?? defaultPolicy?.mode ?? "yolo";
+  const policyMode = explicitPolicyMode ?? normalizedPolicyMode ?? defaultPolicy?.mode ?? "yolo";
   const serviceTier = normalizeCodexServiceTier(config.serviceTier);
   if (transport === "websocket" && !url) {
     throw new Error(
@@ -547,6 +552,7 @@ function resolvePolicyMode(value: unknown): CodexAppServerPolicyMode | undefined
 
 function resolveDefaultCodexAppServerPolicy(params: {
   transport: CodexAppServerTransportMode;
+  forceGuardian?: boolean;
   env?: NodeJS.ProcessEnv;
   requirementsToml?: string | null;
   requirementsPath?: string;
@@ -573,7 +579,7 @@ function resolveDefaultCodexAppServerPolicy(params: {
     allowedApprovalPolicies === undefined || allowedApprovalPolicies.has("never");
   const yoloReviewerAllowed =
     allowedApprovalsReviewers === undefined || allowedApprovalsReviewers.has("user");
-  if (yoloSandboxAllowed && yoloApprovalAllowed && yoloReviewerAllowed) {
+  if (!params.forceGuardian && yoloSandboxAllowed && yoloApprovalAllowed && yoloReviewerAllowed) {
     return { mode: "yolo" };
   }
   return {
@@ -890,6 +896,70 @@ function resolveSandbox(value: unknown): CodexAppServerSandboxMode | undefined {
 function resolveApprovalsReviewer(value: unknown): CodexAppServerApprovalsReviewer | undefined {
   return value === "auto_review" || value === "guardian_subagent" || value === "user"
     ? value
+    : undefined;
+}
+
+export function resolveOpenClawExecModeFromConfig(params: {
+  config?: unknown;
+  agentId?: string;
+}): OpenClawExecMode | undefined {
+  const root = readRecord(params.config);
+  const globalExec = readRecord(readRecord(root?.tools)?.exec);
+  const globalMode = readExecMode(globalExec?.mode);
+  const agentId = params.agentId?.trim();
+  if (!agentId) {
+    return globalMode;
+  }
+  const agents = readRecord(root?.agents);
+  const agentList = Array.isArray(agents?.list) ? agents.list : [];
+  const normalizedAgentId = normalizeAgentId(agentId);
+  const agentEntry = agentList.find((entry) => {
+    const id = readRecord(entry)?.id;
+    return typeof id === "string" && normalizeAgentId(id) === normalizedAgentId;
+  });
+  const agentExec = readRecord(readRecord(readRecord(agentEntry)?.tools)?.exec);
+  const agentMode = readExecMode(agentExec?.mode);
+  if (agentMode !== undefined) {
+    return agentMode;
+  }
+  if (agentExec?.security !== undefined) {
+    return undefined;
+  }
+  return globalMode;
+}
+
+export function resolveOpenClawExecModeForCodexAppServer(params: {
+  execOverrides?: {
+    mode?: unknown;
+    security?: unknown;
+    ask?: unknown;
+  };
+  config?: unknown;
+  agentId?: string;
+}): OpenClawExecMode | undefined {
+  const mode = readExecMode(params.execOverrides?.mode);
+  if (mode !== undefined) {
+    return mode;
+  }
+  if (params.execOverrides?.security !== undefined) {
+    return undefined;
+  }
+  return resolveOpenClawExecModeFromConfig({ config: params.config, agentId: params.agentId });
+}
+
+function readExecMode(value: unknown): OpenClawExecMode | undefined {
+  return value === "deny" ||
+    value === "allowlist" ||
+    value === "ask" ||
+    value === "auto" ||
+    value === "full"
+    ? value
+    : undefined;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
     : undefined;
 }
 

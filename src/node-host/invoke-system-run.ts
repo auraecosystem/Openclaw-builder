@@ -13,9 +13,12 @@ import {
   recordAllowlistMatchesUse,
   resolveApprovalAuditTrustPath,
   resolveExecApprovals,
+  resolveExecModePolicy,
+  resolveExecPolicyForMode,
   type ExecAllowlistEntry,
   type ExecAsk,
   type ExecCommandSegment,
+  type ExecMode,
   type ExecSecurity,
 } from "../infra/exec-approvals.js";
 import type { ExecHostRequest, ExecHostResponse, ExecHostRunResult } from "../infra/exec-host.js";
@@ -126,6 +129,38 @@ const APPROVAL_SCRIPT_OPERAND_BINDING_DENIED_MESSAGE =
 const APPROVAL_SCRIPT_OPERAND_DRIFT_DENIED_MESSAGE =
   "SYSTEM_RUN_DENIED: approval script operand changed before execution";
 type ExecToolConfig = NonNullable<NonNullable<OpenClawConfig["tools"]>["exec"]>;
+
+type LayeredExecPolicy = {
+  mode?: ExecMode;
+  security: ExecSecurity;
+  ask: ExecAsk;
+};
+
+function hasLegacyExecPolicyOverride(exec?: ExecToolConfig): boolean {
+  return exec?.security !== undefined || exec?.ask !== undefined;
+}
+
+function applyExecPolicyLayer(
+  base: LayeredExecPolicy,
+  layer?: ExecToolConfig,
+): LayeredExecPolicy {
+  if (!layer) {
+    return base;
+  }
+  if (layer.mode) {
+    return {
+      mode: layer.mode,
+      ...resolveExecPolicyForMode(layer.mode),
+    };
+  }
+  if (hasLegacyExecPolicyOverride(layer)) {
+    return {
+      security: layer.security ?? base.security,
+      ask: layer.ask ?? base.ask,
+    };
+  }
+  return base;
+}
 
 function warnWritableTrustedDirOnce(message: string): void {
   if (safeBinTrustedDirWarningCache.has(message)) {
@@ -373,10 +408,24 @@ async function evaluateSystemRunPolicyPhase(
 ): Promise<SystemRunPolicyPhase | null> {
   const cfg = await loadSystemRunConfig(opts);
   const agentExec = resolveAgentExecConfig(cfg, parsed.agentId);
-  const configuredSecurity = opts.resolveExecSecurity(
-    agentExec?.security ?? cfg.tools?.exec?.security,
+  const globalExec = cfg.tools?.exec;
+  const layeredPolicy = applyExecPolicyLayer(
+    applyExecPolicyLayer(
+      {
+        security: opts.resolveExecSecurity(undefined),
+        ask: opts.resolveExecAsk(undefined),
+      },
+      globalExec,
+    ),
+    agentExec,
   );
-  const configuredAsk = opts.resolveExecAsk(agentExec?.ask ?? cfg.tools?.exec?.ask);
+  const modePolicy = resolveExecModePolicy({
+    mode: layeredPolicy.mode,
+    security: layeredPolicy.security,
+    ask: layeredPolicy.ask,
+  });
+  const configuredSecurity = modePolicy.security;
+  const configuredAsk = modePolicy.ask;
   const approvals = resolveExecApprovals(parsed.agentId, {
     security: configuredSecurity,
     ask: configuredAsk,

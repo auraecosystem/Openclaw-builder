@@ -46,6 +46,7 @@ const SESSION_ENTRY_RESERVED_SLOT_KEY_LIST = [
   "lastTtsReadLatestHash",
   "lastTtsReadLatestAt",
   "execHost",
+  "execMode",
   "execSecurity",
   "execAsk",
   "execNode",
