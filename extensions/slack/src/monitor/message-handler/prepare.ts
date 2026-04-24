@@ -12,6 +12,8 @@ import {
   logInboundDrop,
   matchesMentionWithExplicit,
   resolveEnvelopeFormatOptions,
+  resolveInboundMentionDecision,
+  resolveMentionPatternsEnabled,
   resolveUnmentionedGroupInboundPolicy,
   toInboundMediaFacts,
 } from "openclaw/plugin-sdk/channel-inbound";
@@ -725,7 +727,16 @@ export async function prepareSlackMessage(params: {
           canResolveExplicit: Boolean(ctx.botUserId),
         },
       }));
-  let mentionRegexes = resolveCachedMentionRegexes(ctx, routing.route.agentId);
+  const resolvePolicyMentionRegexes = (agentId: string | undefined) =>
+    resolveMentionPatternsEnabled({
+      cfg: ctx.cfg,
+      provider: "slack",
+      conversationId: message.channel,
+      agentId,
+    })
+      ? resolveCachedMentionRegexes(ctx, agentId)
+      : [];
+  let mentionRegexes = resolvePolicyMentionRegexes(routing.route.agentId);
   let wasMentioned = resolveWasMentioned(mentionRegexes);
   const hasBoundSession = Boolean(
     routing.runtimeBoundSessionKey || routing.configuredBindingSessionKey,
@@ -750,7 +761,7 @@ export async function prepareSlackMessage(params: {
       seedTopLevelRoomThread: true,
       assistantThreadTs: assistantThreadContext?.threadTs,
     });
-    mentionRegexes = resolveCachedMentionRegexes(ctx, routing.route.agentId);
+    mentionRegexes = resolvePolicyMentionRegexes(routing.route.agentId);
     wasMentioned = resolveWasMentioned(mentionRegexes);
   }
   const {
