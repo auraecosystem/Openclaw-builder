@@ -146,6 +146,7 @@ export function emitGatewaySessionEndPluginHook(params: {
     | "reset"
     | "idle"
     | "daily"
+    | "adaptive"
     | "compaction"
     | "deleted"
     | "shutdown"
