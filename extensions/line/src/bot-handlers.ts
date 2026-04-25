@@ -275,6 +275,7 @@ async function shouldProcessLineEvent(
       provider: "line",
       conversationId: peerId,
       agentId,
+      providerPolicy: account.config.mentionPatterns,
     })
       ? buildMentionRegexes(cfg, agentId)
       : [];
@@ -469,6 +470,7 @@ async function handleMessageEvent(event: MessageEvent, context: LineHandlerConte
           timestamp: event.timestamp,
         },
       });
+
 
     }
     return;

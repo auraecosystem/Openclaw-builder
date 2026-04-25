@@ -732,6 +732,7 @@ export async function prepareSlackMessage(params: {
       cfg: ctx.cfg,
       provider: "slack",
       conversationId: message.channel,
+      providerPolicy: account.config.mentionPatterns,
       agentId,
     })
       ? resolveCachedMentionRegexes(ctx, agentId)

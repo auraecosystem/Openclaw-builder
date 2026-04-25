@@ -515,6 +515,7 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
       groupPolicy,
       dmPolicy,
       storeAllowFrom,
+      providerMentionPatterns: accountInfo.config.mentionPatterns,
       historyLimit,
       groupHistories,
       echoCache: sentMessageCache,
