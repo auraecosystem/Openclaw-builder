@@ -2,7 +2,7 @@ import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { resolveRuntimeConfigCacheKey } from "../../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
-import { fireAndForgetHook } from "../../hooks/fire-and-forget.js";
+import { fireAndForgetBoundedHook } from "../../hooks/fire-and-forget.js";
 import {
   type AgentTurnEndHookContext,
   createInternalHookEvent,
@@ -1787,14 +1787,16 @@ export class AcpSessionManager {
     } else {
       this.turnLatencyStats.completed += 1;
     }
-    fireAndForgetHook(
-      triggerInternalHook(
-        createInternalHookEvent("agent", "turn:end", params.sessionKey, {
-          sessionKey: params.sessionKey,
-          success: !params.errorCode,
-          durationMs,
-        } satisfies AgentTurnEndHookContext),
-      ),
+    fireAndForgetBoundedHook(
+      () =>
+        triggerInternalHook(
+          createInternalHookEvent("agent", "turn:end", params.sessionKey, {
+            sessionKey: params.sessionKey,
+            success: !params.errorCode,
+            durationMs,
+            ...(params.errorCode ? { errorCode: params.errorCode } : {}),
+          } satisfies AgentTurnEndHookContext),
+        ),
       "agent:turn:end internal hook failed",
     );
   }
