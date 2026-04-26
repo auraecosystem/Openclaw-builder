@@ -68,6 +68,7 @@ export type ChatHost = ChatInputHistoryState & {
   sessionsResult?: SessionsListResult | null;
   updateComplete?: Promise<unknown>;
   requestUpdate?: () => void;
+  querySelector?: (selectors: string) => Element | null;
   refreshSessionsAfterChat: Set<string>;
   pendingAbort?: { runId?: string | null; sessionKey: string } | null;
   chatSubmitGuards?: Map<string, Promise<void>>;
