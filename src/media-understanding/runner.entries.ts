@@ -453,14 +453,15 @@ async function resolveProviderExecutionAuth(params: {
     agentDir: params.agentDir,
     workspaceDir: params.workspaceDir,
   });
-  const primaryApiKey =
-    !auth.apiKey?.trim() && auth.mode === "aws-sdk" ? "" : requireApiKey(auth, params.providerId);
+  const allowEmptyExecution = !auth.apiKey?.trim() && auth.mode === "aws-sdk";
+  const primaryApiKey = allowEmptyExecution ? "" : requireApiKey(auth, params.providerId);
   return {
     apiKeys: collectProviderApiKeysForExecution({
       provider: params.providerId,
       primaryApiKey,
     }),
     providerConfig: params.cfg.models?.providers?.[params.providerId],
+    allowEmptyExecution,
   };
 }
 
@@ -472,7 +473,7 @@ async function resolveProviderExecutionContext(params: {
   agentDir?: string;
   workspaceDir?: string;
 }) {
-  const { apiKeys, providerConfig } = await resolveProviderExecutionAuth({
+  const { apiKeys, providerConfig, allowEmptyExecution } = await resolveProviderExecutionAuth({
     providerId: params.providerId,
     cfg: params.cfg,
     entry: params.entry,
@@ -491,7 +492,7 @@ async function resolveProviderExecutionContext(params: {
     sanitizeConfiguredProviderRequest(params.config?.request),
     sanitizeConfiguredProviderRequest(params.entry.request),
   );
-  return { apiKeys, baseUrl, headers, request };
+  return { apiKeys, baseUrl, headers, request, allowEmptyExecution };
 }
 
 export function formatDecisionSummary(decision: MediaUnderstandingDecision): string {
@@ -644,14 +645,15 @@ export async function runProviderEntry(params: {
       timeoutMs,
     });
     assertMinAudioSize({ size: media.size, attachmentIndex: params.attachmentIndex });
-    const { apiKeys, baseUrl, headers, request } = await resolveProviderExecutionContext({
-      providerId,
-      cfg,
-      entry,
-      config: params.config,
-      agentDir: params.agentDir,
-      workspaceDir: params.workspaceDir,
-    });
+    const { apiKeys, baseUrl, headers, request, allowEmptyExecution } =
+      await resolveProviderExecutionContext({
+        providerId,
+        cfg,
+        entry,
+        config: params.config,
+        agentDir: params.agentDir,
+        workspaceDir: params.workspaceDir,
+      });
     const providerQuery = resolveProviderQuery({
       providerId,
       config: params.config,
@@ -670,6 +672,7 @@ export async function runProviderEntry(params: {
       provider: providerId,
       apiKeys,
       transientRetry: providerOperationRetryConfig("read"),
+      allowEmptyKey: allowEmptyExecution,
       execute: async (apiKey) =>
         transcribeAudio({
           buffer: media.buffer,
@@ -717,18 +720,20 @@ export async function runProviderEntry(params: {
       `Video attachment ${params.attachmentIndex + 1} base64 payload ${estimatedBase64Bytes} exceeds ${maxBase64Bytes}`,
     );
   }
-  const { apiKeys, baseUrl, headers, request } = await resolveProviderExecutionContext({
-    providerId,
-    cfg,
-    entry,
-    config: params.config,
-    agentDir: params.agentDir,
-    workspaceDir: params.workspaceDir,
-  });
+  const { apiKeys, baseUrl, headers, request, allowEmptyExecution } =
+    await resolveProviderExecutionContext({
+      providerId,
+      cfg,
+      entry,
+      config: params.config,
+      agentDir: params.agentDir,
+      workspaceDir: params.workspaceDir,
+    });
   const result = await executeWithApiKeyRotation({
     provider: providerId,
     apiKeys,
     transientRetry: providerOperationRetryConfig("read"),
+    allowEmptyKey: allowEmptyExecution,
     execute: (apiKey) =>
       describeVideo({
         buffer: media.buffer,
