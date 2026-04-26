@@ -14,6 +14,8 @@ import {
 } from "../utils/delivery-context.shared.js";
 import type { DeliveryContext } from "../utils/delivery-context.types.js";
 
+export type SystemEventAudience = "internal" | "user-facing";
+
 export type SystemEvent = {
   text: string;
   ts: number;
@@ -22,6 +24,46 @@ export type SystemEvent = {
   forceSenderIsOwnerFalse?: boolean;
   /** @deprecated Use forceSenderIsOwnerFalse. Kept for installed plugin compatibility. */
   trusted?: boolean;
+  /**
+   * Where this event is intended to surface in the agent transcript /
+   * channel path.
+   *
+   *  - `"user-facing"` (default): event text is drained on the regular
+   *    reply turn and emitted into the next prompt as a plain
+   *    `System: ...` line. Visible in the agent transcript and channel
+   *    surfaces.
+   *  - `"internal"`: event text is still drained on the regular reply
+   *    turn, but the consumer at `drainFormattedSystemEvents` wraps it in
+   *    `INTERNAL_RUNTIME_CONTEXT_BEGIN`/`END` delimiters with the same
+   *    canonical header lines as `formatAgentInternalEventsForPrompt` in
+   *    `src/agents/internal-events.ts`. The model still sees the content
+   *    as runtime context, but every user-facing surface strips it via
+   *    the existing `stripInternalRuntimeContext` consumers
+   *    (`sanitize-user-facing-text.ts`, `memory-host-sdk/host/session-files.ts`,
+   *    `agents/internal-events.ts`, etc.).
+   *
+   * **Scope (important):**
+   *  - This field is the *hidden runtime context* lane only. It is not a
+   *    delivery-routing primitive: events that have a positive user
+   *    delivery contract (exec completion via `notifyOnExit`, cron
+   *    payloads, heartbeat acks) MUST NOT be migrated to `"internal"` —
+   *    those have their own heartbeat-driven delivery paths
+   *    (`buildExecEventPrompt` / `buildCronEventPrompt`) plus tactical
+   *    producer-side skips (e.g. `bd60df3e53`). Marking them internal
+   *    would suppress delivery on regular reply turns where the model is
+   *    instructed to keep wrapped content private.
+   *  - Operator-side inspection surfaces — `openclaw status`, log output,
+   *    raw queue diagnostics — that read events via `peekSystemEvents`
+   *    or `peekSystemEventEntries` continue to expose internal events
+   *    for debugging. Callers that want audience-filtered views should
+   *    iterate `peekSystemEventEntries` and branch on the field
+   *    themselves.
+   *
+   * Independent of `trusted`. Adding `audience` does not change any
+   * existing default behavior; callers that omit it keep emitting
+   * `"user-facing"` events.
+   */
+  audience?: SystemEventAudience;
 };
 
 const MAX_EVENTS = 20;
@@ -46,6 +88,7 @@ type SystemEventOptions = {
   forceSenderIsOwnerFalse?: boolean;
   /** @deprecated Use forceSenderIsOwnerFalse. Kept for installed plugin compatibility. */
   trusted?: boolean;
+  audience?: SystemEventAudience;
 };
 
 function requireSessionKey(key?: string | null): string {
@@ -101,11 +144,18 @@ function findDuplicateInQueue(
   contextKey: string | null,
   deliveryContext: DeliveryContext | undefined,
   forceSenderIsOwnerFalse: boolean,
+  audience: SystemEventAudience,
 ): SystemEvent | undefined {
   if (contextKey === null) {
     const last = queue[queue.length - 1];
     return last &&
-      isDuplicateSystemEvent(last, { text, contextKey, deliveryContext, forceSenderIsOwnerFalse })
+      isDuplicateSystemEvent(last, {
+        text,
+        contextKey,
+        deliveryContext,
+        forceSenderIsOwnerFalse,
+        audience,
+      })
       ? last
       : undefined;
   }
@@ -116,6 +166,7 @@ function findDuplicateInQueue(
         contextKey,
         deliveryContext,
         forceSenderIsOwnerFalse,
+        audience,
       })
     ) {
       return event;
@@ -143,6 +194,7 @@ export function enqueueSystemEvent(text: string, options: SystemEventOptions) {
     options.forceSenderIsOwnerFalse ??
     // Preserve the old plugin SDK contract without carrying trust labels into prompts.
     options.trusted === false;
+  const audience = options.audience ?? "user-facing";
   if (
     findDuplicateInQueue(
       entry.queue,
@@ -150,6 +202,7 @@ export function enqueueSystemEvent(text: string, options: SystemEventOptions) {
       normalizedContextKey,
       normalizedDeliveryContext,
       forceSenderIsOwnerFalse,
+      audience,
     )
   ) {
     return false;
@@ -161,6 +214,7 @@ export function enqueueSystemEvent(text: string, options: SystemEventOptions) {
     contextKey: normalizedContextKey,
     deliveryContext: normalizedDeliveryContext,
     forceSenderIsOwnerFalse,
+    audience,
   });
   if (entry.queue.length > MAX_EVENTS) {
     entry.queue.shift();
@@ -201,13 +255,14 @@ function isDuplicateSystemEvent(
   existing: QueuedSystemEvent,
   incoming: Pick<
     SystemEvent,
-    "text" | "contextKey" | "deliveryContext" | "forceSenderIsOwnerFalse" | "trusted"
+    "text" | "contextKey" | "deliveryContext" | "forceSenderIsOwnerFalse" | "trusted" | "audience"
   >,
 ): boolean {
   return (
     existing.text === incoming.text &&
     (existing.contextKey ?? null) === (incoming.contextKey ?? null) &&
     existing.forceSenderIsOwnerFalse === resolveEventOwnerDowngrade(incoming) &&
+    (existing.audience ?? "user-facing") === (incoming.audience ?? "user-facing") &&
     areDeliveryContextsEqual(existing.deliveryContext, incoming.deliveryContext)
   );
 }
@@ -218,6 +273,7 @@ function areSystemEventsEqual(left: QueuedSystemEvent, right: SystemEvent): bool
     left.ts === right.ts &&
     (left.contextKey ?? null) === (right.contextKey ?? null) &&
     left.forceSenderIsOwnerFalse === resolveEventOwnerDowngrade(right) &&
+    (left.audience ?? "user-facing") === (right.audience ?? "user-facing") &&
     areDeliveryContextsEqual(left.deliveryContext, right.deliveryContext)
   );
 }
