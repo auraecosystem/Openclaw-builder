@@ -384,6 +384,14 @@ export function createOpenClawCodingTools(options?: {
   /** Disable hook-owned diagnostics when an outer runtime owns tool diagnostics. */
   emitBeforeToolCallDiagnostics?: boolean;
   /**
+   * Skip wrapToolWithBeforeToolCallHook on the returned tools. Used by the
+   * /tools/invoke HTTP surface, which runs runBeforeToolCallHook itself.
+   * Avoids double-firing the hook and adjusted-params leaks; the only safe way
+   * since exec/process are re-spread by applyDeferredFollowupToolDescriptions
+   * after wrapping, dropping symbol-keyed unwrap markers.
+   */
+  skipBeforeToolCallHook?: boolean;
+  /**
    * Provider of the currently selected model (used for provider-specific tool quirks).
    * Example: "anthropic", "openai", "google", "openai-codex".
    */
@@ -1078,32 +1086,35 @@ export function createOpenClawCodingTools(options?: {
     }),
   );
   options?.recordToolPrepStage?.("schema-normalization");
-  const withHooks = normalized.map((tool) =>
-    wrapToolWithBeforeToolCallHook(
-      tool,
-      {
-        agentId,
-        ...(options?.config ? { config: options.config } : {}),
-        cwd: sandboxRoot ?? workspaceRoot,
-        ...(sandboxRoot && allowWorkspaceWrites
-          ? { sandbox: { root: sandboxRoot, bridge: sandboxFsBridge! } }
-          : {}),
-        sessionKey: options?.sessionKey,
-        sessionId: options?.sessionId,
-        runId: options?.runId,
-        channelId: options?.hookChannelId ?? options?.currentChannelId,
-        ...(options?.trace ? { trace: options.trace } : {}),
-        loopDetection: resolveToolLoopDetectionConfig({ cfg: options?.config, agentId }),
-        onToolOutcome: options?.onToolOutcome,
-      },
-      { emitDiagnostics: options?.emitBeforeToolCallDiagnostics },
-    ),
-  );
+  const withHooks = options?.skipBeforeToolCallHook
+    ? normalized
+    : normalized.map((tool) =>
+        wrapToolWithBeforeToolCallHook(
+          tool,
+          {
+            agentId,
+            ...(options?.config ? { config: options.config } : {}),
+            cwd: sandboxRoot ?? workspaceRoot,
+            ...(sandboxRoot && allowWorkspaceWrites
+              ? { sandbox: { root: sandboxRoot, bridge: sandboxFsBridge! } }
+              : {}),
+            sessionKey: options?.sessionKey,
+            sessionId: options?.sessionId,
+            runId: options?.runId,
+            channelId: options?.hookChannelId ?? options?.currentChannelId,
+            ...(options?.trace ? { trace: options.trace } : {}),
+            loopDetection: resolveToolLoopDetectionConfig({ cfg: options?.config, agentId }),
+            onToolOutcome: options?.onToolOutcome,
+          },
+          { emitDiagnostics: options?.emitBeforeToolCallDiagnostics },
+        ),
+      );
   options?.recordToolPrepStage?.("tool-hooks");
   const withAbort = options?.abortSignal
     ? withHooks.map((tool) => wrapToolWithAbortSignal(tool, options.abortSignal))
     : withHooks;
   options?.recordToolPrepStage?.("abort-wrappers");
+
   const withDeferredFollowupDescriptions = applyDeferredFollowupToolDescriptions(withAbort, {
     agentId,
   });
@@ -1115,3 +1126,22 @@ export function createOpenClawCodingTools(options?: {
   return withDeferredFollowupDescriptions;
 }
 export { testing as __testing };
+
+// HTTP-safe variant of createOpenClawCodingTools.
+//
+// Returns the same tool set but WITHOUT wrapToolWithBeforeToolCallHook applied
+// to ANY tool — including exec/process which applyDeferredFollowupToolDescriptions
+// re-spreads after wrapping (the spread drops symbol-keyed wrap markers, so a
+// post-construction unwrap step cannot reach those tools).
+//
+// The gateway /tools/invoke handler (handleToolsInvokeHttpRequest) calls
+// runBeforeToolCallHook itself before dispatching execute(); routing
+// hook-wrapped tools through that path would double-fire the hook and leak
+// adjusted-params state (the wrapper stashes adjusted params keyed by
+// toolCallId; only the agent subscribe path drains them via
+// consumeAdjustedParamsForToolCall).
+export function createOpenClawCodingToolsRaw(
+  options?: Parameters<typeof createOpenClawCodingTools>[0],
+): AnyAgentTool[] {
+  return createOpenClawCodingTools({ ...options, skipBeforeToolCallHook: true });
+}
