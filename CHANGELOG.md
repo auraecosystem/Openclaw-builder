@@ -191,6 +191,7 @@ Docs: https://docs.openclaw.ai
 - Docker: keep the bundled Codex plugin in official release image keep lists so the default OpenAI agent harness remains available after Docker pruning. Fixes #83613. (#83626) Thanks @YuanHanzhong.
 - CLI/channels: preserve the first line of `openclaw channels logs` output when the rolling tail window starts exactly on a line boundary, mirroring the already-fixed `readLogSlice` behavior in `src/logging/log-tail.ts`.
 - Control UI: treat terminal session status as authoritative over stale active-run flags so completed terminal runs stop showing abort/live UI. (#84057)
+- DeepInfra: stop suppressing dynamic chat-catalog discovery when the auth wizard has seeded entries, dynamically discover image-generation and video-generation models via `registerModelCatalogProvider` (matching the OpenRouter live-catalog pattern), and inject Anthropic ephemeral `cache_control` markers into streamed payloads for `anthropic/*` models so prompt caching actually fires instead of staying advertised-but-broken. Thanks @ats3v.
 - CLI: preserve embedded equals signs in inline root option values instead of truncating after the second separator. (#83995) Thanks @ThiagoCAltoe.
 - Matrix/config: accept `messages.queue.byChannel.matrix` queue overrides and keep queue provider schema/type keys aligned for Matrix, Google Chat, and Mattermost. Thanks @bdjben.
 - CLI: format `openclaw acp client` failures through the shared error formatter so object-shaped errors stay readable instead of printing `[object Object]`. Fixes #83904. (#84080)
