@@ -31,6 +31,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- DeepInfra: stop suppressing dynamic chat-catalog discovery when the auth wizard has seeded entries, dynamically discover image-generation and video-generation models via `registerModelCatalogProvider` (matching the OpenRouter live-catalog pattern), and inject Anthropic ephemeral `cache_control` markers into streamed payloads for `anthropic/*` models so prompt caching actually fires instead of staying advertised-but-broken. Thanks @ats3v.
 - Agents/OpenAI: preserve structured provider error code, type, and redacted body metadata on boundary-aware transport failures.
 - CLI/agents: retry transient normal-close Gateway handshakes before falling back to embedded `openclaw agent` execution.
 - CLI/update: keep managed Gateway service stop/restart status lines out of `openclaw update --json` stdout so package-update automation can parse the JSON payload.
