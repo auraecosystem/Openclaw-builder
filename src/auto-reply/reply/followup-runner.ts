@@ -53,7 +53,11 @@ import {
 import type { ReplyOperation } from "./reply-run-registry.js";
 import { admitReplyTurn } from "./reply-turn-admission.js";
 import { isRoutableChannel, routeReply } from "./route-reply.js";
-import { incrementRunCompactionCount, persistRunSessionUsage } from "./session-run-accounting.js";
+import {
+  incrementRunCompactionCount,
+  persistRunSessionUsage,
+  resolveRunSessionModelPersistence,
+} from "./session-run-accounting.js";
 import { createTypingSignaler } from "./typing-mode.js";
 import type { TypingController } from "./typing.js";
 
@@ -961,6 +965,12 @@ export function createFollowupRunner(params: {
       const modelUsed = runResult.meta?.agentMeta?.model ?? fallbackModel ?? defaultModel;
       const providerUsed =
         runResult.meta?.agentMeta?.provider ?? fallbackProvider ?? queued.run.provider;
+      const sessionModelPersistence = resolveRunSessionModelPersistence({
+        selectedProvider: queued.run.provider,
+        selectedModel: queued.run.model,
+        providerUsed,
+        modelUsed,
+      });
       const contextTokensUsed =
         resolveContextTokensForModel({
           cfg: queued.run.config,
@@ -983,6 +993,7 @@ export function createFollowupRunner(params: {
           preserveUserFacingSessionModelState: preserveUserFacingSessionState,
           modelUsed,
           providerUsed,
+          ...sessionModelPersistence,
           contextTokensUsed,
           systemPromptReport: runResult.meta?.systemPromptReport,
           cliSessionBinding: runResult.meta?.agentMeta?.cliSessionBinding,

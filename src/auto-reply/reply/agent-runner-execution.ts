@@ -1824,6 +1824,16 @@ export async function runAgentTurnWithFallback(params: {
             bootstrapPromptWarningSignaturesSeen = resolveBootstrapWarningSignaturesSeen(
               result.meta?.systemPromptReport,
             );
+            if (rollbackFallbackCandidateSelection) {
+              try {
+                await rollbackFallbackCandidateSelection();
+                clearPendingFallbackRollback(rollbackFallbackCandidateSelection);
+              } catch (rollbackError) {
+                logVerbose(
+                  `failed to roll back fallback candidate selection after success (non-fatal): ${String(rollbackError)}`,
+                );
+              }
+            }
             return result;
           }
           const { embeddedContext, senderContext, runBaseParams } = buildEmbeddedRunExecutionParams(
@@ -2219,6 +2229,16 @@ export async function runAgentTurnWithFallback(params: {
                 result.meta?.agentMeta?.compactionCount ?? 0,
               );
               attemptCompactionCount = Math.max(attemptCompactionCount, resultCompactionCount);
+              if (rollbackFallbackCandidateSelection) {
+                try {
+                  await rollbackFallbackCandidateSelection();
+                  clearPendingFallbackRollback(rollbackFallbackCandidateSelection);
+                } catch (rollbackError) {
+                  logVerbose(
+                    `failed to roll back fallback candidate selection after success (non-fatal): ${String(rollbackError)}`,
+                  );
+                }
+              }
               return result;
             } catch (err) {
               if (rollbackFallbackCandidateSelection) {

@@ -82,6 +82,8 @@ export async function persistSessionUsageUpdate(params: {
   lastCallUsage?: NormalizedUsage;
   modelUsed?: string;
   providerUsed?: string;
+  sessionModel?: string;
+  sessionModelProvider?: string;
   contextTokensUsed?: number;
   promptTokens?: number;
   usageIsContextSnapshot?: boolean;
@@ -143,11 +145,13 @@ export async function persistSessionUsageUpdate(params: {
                 providerUsed: params.providerUsed ?? entry.modelProvider,
                 modelUsed: params.modelUsed ?? entry.model,
               });
+          const sessionModelProvider = params.sessionModelProvider ?? params.providerUsed;
+          const sessionModel = params.sessionModel ?? params.modelUsed;
           const patch: Partial<SessionEntry> = {
             modelProvider: preserveSessionModelState
               ? entry.modelProvider
-              : (params.providerUsed ?? entry.modelProvider),
-            model: preserveSessionModelState ? entry.model : (params.modelUsed ?? entry.model),
+              : (sessionModelProvider ?? entry.modelProvider),
+            model: preserveSessionModelState ? entry.model : (sessionModel ?? entry.model),
             ...(resolvedContextTokens !== undefined
               ? { contextTokens: resolvedContextTokens }
               : {}),
@@ -192,7 +196,12 @@ export async function persistSessionUsageUpdate(params: {
     return;
   }
 
-  if (params.modelUsed || params.contextTokensUsed) {
+  if (
+    params.modelUsed ||
+    params.contextTokensUsed ||
+    params.sessionModel ||
+    params.sessionModelProvider
+  ) {
     try {
       await updateSessionStoreEntry({
         storePath,
@@ -204,11 +213,13 @@ export async function persistSessionUsageUpdate(params: {
           const contextTokens = preserveUserFacingRunState
             ? entry.contextTokens
             : (params.contextTokensUsed ?? entry.contextTokens);
+          const sessionModelProvider = params.sessionModelProvider ?? params.providerUsed;
+          const sessionModel = params.sessionModel ?? params.modelUsed;
           const patch: Partial<SessionEntry> = {
             modelProvider: preserveSessionModelState
               ? entry.modelProvider
-              : (params.providerUsed ?? entry.modelProvider),
-            model: preserveSessionModelState ? entry.model : (params.modelUsed ?? entry.model),
+              : (sessionModelProvider ?? entry.modelProvider),
+            model: preserveSessionModelState ? entry.model : (sessionModel ?? entry.model),
             ...(contextTokens !== undefined ? { contextTokens } : {}),
             systemPromptReport: preserveUserFacingRunState
               ? entry.systemPromptReport
