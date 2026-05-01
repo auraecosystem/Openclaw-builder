@@ -236,7 +236,7 @@ describe("security audit trust model findings", () => {
         name: "fires when a per-account groupAllowFrom contains a wildcard",
         cfg: {
           channels: {
-            discord: {
+            whatsapp: {
               accounts: {
                 pepper: {
                   groupPolicy: "allowlist",
@@ -254,7 +254,7 @@ describe("security audit trust model findings", () => {
           );
           expect(finding?.severity).toBe("warn");
           expect(finding?.detail).toContain(
-            'channels.discord.accounts.pepper.groupAllowFrom includes "*"',
+            'channels.whatsapp.accounts.pepper.groupAllowFrom includes "*"',
           );
         },
       },
