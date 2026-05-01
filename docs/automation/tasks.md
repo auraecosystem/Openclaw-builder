@@ -97,6 +97,7 @@ Not every agent run creates a task. Heartbeat turns and normal interactive chat 
 | Cron jobs (all types)  | `cron`       | Every cron execution (main-session and isolated)                       | `silent`              |
 | CLI operations         | `cli`        | `openclaw agent` commands that run through the gateway                 | `silent`              |
 | Agent media jobs       | `cli`        | Session-backed `image_generate`/`music_generate`/`video_generate` runs | `silent`              |
+| Plugin-owned jobs      | `cli`        | Plugin lifecycle API creates a task record             | `done_only`           |
 
 <AccordionGroup>
   <Accordion title="Notify defaults for cron and media">
@@ -104,6 +105,9 @@ Not every agent run creates a task. Heartbeat turns and normal interactive chat 
 
     Session-backed `image_generate`, `music_generate`, and `video_generate` runs also use `silent` notify policy. They still create task records, but completion is handed back to the original agent session as an internal wake so the agent can write the follow-up message and attach the finished media itself. Generated-media completion events require message-tool delivery: the agent must send the finished media with the `message` tool, then reply `NO_REPLY`. If the completion agent only writes a private final reply or misses the media attachment, OpenClaw marks the completion handoff as failed; it does not auto-post the generated media as a fallback.
 
+  </Accordion>
+  <Accordion title="Plugin-owned task records">
+    Gateway-loaded plugins can create owner-bound `cli` task records through the Plugin SDK task lifecycle runtime. These records must include a plugin-namespaced `taskKind`, for example `my-plugin.session`, so one plugin-owned run can be updated and finalized without colliding with other `cli` task records that share a run ID.
   </Accordion>
   <Accordion title="Concurrent media-generation guardrail">
     While a session-backed media-generation task is still active, media tools also act as guardrails for accidental retries. Repeated `image_generate` calls for the same prompt return the matching active task status, while a distinct image prompt can start its own task. `music_generate` and `video_generate` calls still return the active task status for that session instead of starting a second concurrent generation. Use `action: "status"` when you want an explicit progress/status lookup from the agent side.
