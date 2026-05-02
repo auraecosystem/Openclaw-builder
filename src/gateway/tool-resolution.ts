@@ -174,8 +174,6 @@ export function resolveGatewayScopedTools(params: {
     inheritedToolDenylist,
   });
 
-  const surface = params.surface ?? "http";
-
   // Include coding tools (exec, edit, read, browser, etc.) so they are
   // reachable via /tools/invoke HTTP API. Normally only wired into agent
   // session runners; direct invocation without an LLM round-trip is needed

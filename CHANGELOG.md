@@ -13,6 +13,7 @@ Docs: https://docs.openclaw.ai
 - Agents/config: allow `agents.list[].experimental.localModelLean` so lean local-model mode can be enabled for one configured agent instead of globally.
 - Providers/xAI: add device-code OAuth login so remote and headless setups can authorize xAI without a localhost browser callback. (#84005) Thanks @fuller-stack-dev.
 - Providers/OpenRouter: honor provider-level `params.provider` routing policy for OpenRouter requests, with model and agent params overriding the defaults. Thanks @amknight.
+- Gateway/tools-invoke: wire coding primitive tools (`read`, plus opt-in `write`/`edit`/`exec`/`process`) into the HTTP `/tools/invoke` endpoint via a new unwrapped factory `createOpenClawCodingToolsRaw()`. Enables deterministic automation flows (linting, tests, browser capture) without a full LLM round-trip. The new factory honors the resolver's plugin-suppression intent end-to-end and excludes provider-gated tools (`apply_patch`) that cannot be safely materialized without session-bound model context. The default HTTP deny list now also includes the canonical mutating tool names `write`, `edit`, and `process`, so they require explicit `gateway.tools.allow` opt-in. Refs #37131. Thanks @simonusa.
 
 ### Fixes
 
