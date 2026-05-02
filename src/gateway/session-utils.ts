@@ -761,8 +761,11 @@ export function resolveDeletedAgentIdFromSessionKey(
   return agentId;
 }
 
-export function loadSessionEntry(sessionKey: string, opts?: { agentId?: string }) {
-  const cfg = getRuntimeConfig();
+export function loadSessionEntry(
+  sessionKey: string,
+  opts?: { agentId?: string; cfg?: OpenClawConfig },
+) {
+  const cfg = opts?.cfg ?? getRuntimeConfig();
   const key = normalizeOptionalString(sessionKey) ?? "";
   const target = resolveGatewaySessionStoreTarget({
     cfg,
