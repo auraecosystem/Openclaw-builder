@@ -177,7 +177,6 @@ import type {
   OpenClawPluginToolFactory,
   PluginConfigUiHint,
   PluginBundleFormat,
-  PluginDiagnostic,
   PluginFormat,
   PluginHookHandlerMap,
   PluginHookName,
