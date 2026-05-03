@@ -230,6 +230,7 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
   const renderMode = account.config?.renderMode ?? "auto";
   const streamingEnabled = account.config?.streaming !== false && renderMode !== "raw";
   const coreBlockStreamingEnabled = account.config?.blockStreaming === true;
+  const streamingSearchFallbackEnabled = account.config?.streamingSearchFallback === true;
   const reasoningPreviewEnabled = streamingEnabled && params.allowReasoningPreview === true;
 
   let streaming: FeishuStreamingSession | null = null;
@@ -383,9 +384,13 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
       await partialUpdateQueue;
       if (streaming?.isActive()) {
         statusLine = "";
-        const text = buildCombinedStreamText(reasoningText, streamText);
+        const rawText = buildCombinedStreamText(reasoningText, streamText);
+        const text = rawText;
         const finalNote = resolveCardNote(agentId, identity, prefixContext.prefixContext);
         await streaming.close(text, { note: finalNote });
+        if (streamingSearchFallbackEnabled && rawText.trim()) {
+          await sendSearchableStreamingFallback(rawText);
+        }
         // Track the raw streamed text so the duplicate-final check in deliver()
         // can skip the redundant text delivery that arrives after onIdle closes
         // the streaming card.
@@ -506,6 +511,32 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
             },
     });
   };
+
+  async function sendSearchableStreamingFallback(text: string) {
+    try {
+      const chunkSource = core.channel.text.convertMarkdownTables(text, tableMode);
+      const chunks = resolveTextChunksWithFallback(
+        chunkSource,
+        core.channel.text.chunkTextWithMode(chunkSource, textChunkLimit, chunkMode),
+      );
+      for (const [index, chunk] of chunks.entries()) {
+        await sendMessageFeishu({
+          cfg,
+          to: chatId,
+          text: chunk,
+          replyToMessageId: sendReplyToMessageId,
+          replyInThread: effectiveReplyInThread,
+          allowTopLevelReplyFallback,
+          mentions: index === 0 ? mentionTargets : undefined,
+          accountId,
+        });
+      }
+    } catch (error) {
+      params.runtime.error?.(
+        `feishu[${account.accountId}]: streaming searchable text fallback failed: ${String(error)}`,
+      );
+    }
+  }
 
   const { dispatcher, replyOptions, markDispatchIdle } =
     core.channel.reply.createReplyDispatcherWithTyping({
