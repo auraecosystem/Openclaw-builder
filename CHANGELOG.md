@@ -1290,6 +1290,7 @@ Docs: https://docs.openclaw.ai
 - Diffs plugin: accept `defaults.ttlSeconds` as a plugin-wide artifact lifetime default, so LAN-viewable diff links can keep their configured six-hour TTL without doctor quarantining the plugin entry. (#77456) Thanks @VACInc.
 - Gate zalouser startup name matching [AI]. (#77411) Thanks @pgondhi987.
 - Active Memory: send a bounded latest-message search query to the recall worker so channel/runtime metadata does not become the memory search string. Fixes #65309. Thanks @joeykrug, @westley3601, @pimenov, and @tasi333.
+- Task Flow: rebuild legacy `flow_runs` SQLite tables that still require `owner_session_key`, preserving existing rows while restoring managed-flow writes on upgraded installs. Fixes #65563. Thanks @Xer0x-official.
 - fix(device-pair): require pairing scope for pair command [AI]. (#76377) Thanks @pgondhi987.
 - Providers/OpenRouter: keep DeepSeek V4 `reasoning_effort` on OpenRouter-supported values, mapping stale `max` thinking overrides to `xhigh` so `openrouter/deepseek/deepseek-v4-pro` no longer fails with OpenRouter's invalid-effort 400. Fixes #77350. (#77423) Thanks @krllagent, @mushuiyu886, and @sallyom.
 - fix(qqbot): keep private commands off framework surface [AI]. (#77212) Thanks @pgondhi987.
