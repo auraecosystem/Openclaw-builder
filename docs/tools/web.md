@@ -118,6 +118,8 @@ local while `web_search` and `x_search` can use xAI Responses under the hood.
 
 Direct OpenAI Responses models use OpenAI's hosted `web_search` tool automatically when OpenClaw web search is enabled and no managed provider is pinned. This is provider-owned behavior in the bundled OpenAI plugin and only applies to native OpenAI API traffic, not OpenAI-compatible proxy base URLs or Azure routes. Set `tools.web.search.provider` to another provider such as `brave` to keep the managed `web_search` tool for OpenAI models, or set `tools.web.search.enabled: false` to disable both managed search and native OpenAI search.
 
+GitHub Copilot GPT models (`gpt-*`, `o1`, `o1-*`, `o3-*`, `o4-*`, `chatgpt-*`) routed through the Copilot provider also use native `web_search` when `tools.web.search.provider` is unset, `auto`, or `openai`. Non-GPT models on Copilot (Claude, Gemini) are unaffected and continue using the managed search provider. Pin `tools.web.search.provider` to another value (e.g. `brave`, `searxng`) to override this for Copilot GPT models.
+
 ## Native Codex web search
 
 Codex-capable models can optionally use the provider-native Responses `web_search` tool instead of OpenClaw's managed `web_search` function.
