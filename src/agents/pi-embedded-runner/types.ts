@@ -12,6 +12,7 @@ import type {
   MessagingToolSourceReplyPayload,
 } from "../pi-embedded-messaging.types.js";
 import type { AgentRunTimeoutPhase } from "../run-timeout-attribution.js";
+import type { EmbeddedRunStageSummary } from "./run/attempt-stage-timing.js";
 
 export type EmbeddedPiAgentMeta = {
   sessionId: string;
@@ -135,6 +136,7 @@ export type EmbeddedRunFailureSignal = {
 
 export type EmbeddedPiRunMeta = {
   durationMs: number;
+  prepStages?: EmbeddedRunStageSummary;
   agentMeta?: EmbeddedPiAgentMeta;
   aborted?: boolean;
   systemPromptReport?: SessionSystemPromptReport;
