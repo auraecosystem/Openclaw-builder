@@ -655,6 +655,7 @@ export function runAgentAttempt(params: {
     images: params.isFallbackRetry ? undefined : params.opts.images,
     imageOrder: params.isFallbackRetry ? undefined : params.opts.imageOrder,
     clientTools: params.opts.clientTools,
+    toolsAllow: params.opts.toolsAllow,
     provider: embeddedPiProvider,
     model: params.modelOverride,
     modelFallbacksOverride: params.modelFallbacksOverride,
