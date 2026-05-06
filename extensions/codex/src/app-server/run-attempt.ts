@@ -3475,7 +3475,7 @@ function filterCodexDynamicToolsForAllowlist<T extends { name: string }>(
   tools: T[],
   toolsAllow?: string[],
 ): T[] {
-  if (!toolsAllow) {
+  if (toolsAllow === undefined) {
     return tools;
   }
   if (toolsAllow.length === 0) {
