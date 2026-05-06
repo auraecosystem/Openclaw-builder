@@ -135,6 +135,7 @@ export type SpawnSubagentParams = {
   sandbox?: SpawnSubagentSandboxMode;
   context?: SpawnSubagentContextMode;
   lightContext?: boolean;
+  toolsAllow?: string[];
   expectsCompletionMessage?: boolean;
   attachments?: Array<{
     name: string;
@@ -1174,6 +1175,7 @@ export async function spawnSubagentDirect(
               bootstrapContextRunKind: "default" as const,
             }
           : {}),
+        ...(params.toolsAllow !== undefined ? { toolsAllow: params.toolsAllow } : {}),
         ...publicSpawnedMetadata,
       },
       timeoutMs: resolveSubagentAgentGatewayTimeoutMs(runTimeoutSeconds),
