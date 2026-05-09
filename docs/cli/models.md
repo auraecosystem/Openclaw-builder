@@ -219,9 +219,14 @@ Notes:
   method (defaulting to that provider's `setup-token` method when it exposes
   one).
 - `paste-token` accepts a token string generated elsewhere or from automation.
-- `paste-token` requires `--provider`, prompts for the token value, and writes
-  it to the default profile id `<provider>:manual` unless you pass
+- `paste-token` requires `--provider`, prompts for the token value by default,
+  and writes it to the default profile id `<provider>:manual` unless you pass
   `--profile-id`.
+- `paste-token --token <value>` skips the interactive prompt for scripted
+  setup. Treat this as a convenience for trusted shells only: inline tokens can
+  be captured by shell history, command echoing, CI logs, or process-list tools.
+  Prefer the interactive prompt when possible, and redact command transcripts
+  before sharing them.
 - `paste-token --expires-in <duration>` stores an absolute token expiry from a
   relative duration such as `365d` or `12h`.
 - For `openai-codex`, OpenAI API keys and ChatGPT/OAuth token material are
