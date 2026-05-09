@@ -522,6 +522,10 @@ type DiagnosticModelCallBaseEvent = DiagnosticBaseEvent & {
   contextWindowSource?: "model" | "modelsConfig" | "agentContextTokens" | "default";
   contextWindowReferenceTokens?: number;
   upstreamRequestIdHash?: string;
+  /** Bounded, redacted input messages for content capture. Only populated when diagnostics.otel.captureContent.inputMessages is enabled. */
+  inputMessages?: string[];
+  /** Bounded, redacted output messages for content capture. Only populated when diagnostics.otel.captureContent.outputMessages is enabled. */
+  outputMessages?: string[];
 };
 
 export type DiagnosticModelCallStartedEvent = DiagnosticModelCallBaseEvent & {
