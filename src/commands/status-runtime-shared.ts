@@ -58,6 +58,8 @@ export async function resolveStatusUsageSummary(params: StatusUsageSummaryOption
     timeoutMs: params.timeoutMs,
     config: params.config,
     agentDir: params.agentDir ?? resolveDefaultAgentDir(params.config),
+    skipPluginAuthWithoutCredentialSource: true,
+    allowOAuthRefresh: false,
   });
 }
 
