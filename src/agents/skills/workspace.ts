@@ -1203,6 +1203,10 @@ function limitPromptToIncludedCount(
   };
 }
 
+function withCompactPromptFormat(limit: SkillsPromptLimitResult): SkillsPromptLimitResult {
+  return { ...limit, compact: true };
+}
+
 export function buildWorkspaceSkillSnapshot(
   workspaceDir: string,
   opts?: WorkspaceSkillBuildOptions & { snapshotVersion?: number },
@@ -1300,11 +1304,9 @@ function resolveWorkspaceSkillPromptState(
     remoteNote,
   });
   while (prompt.length > limits.maxSkillsPromptChars && limit.skillsForPrompt.length > 0) {
-    limit = limitPromptToIncludedCount(
-      promptSkills,
-      limit.skillsForPrompt.length - 1,
-      limit.compact,
-    );
+    limit = limit.compact
+      ? limitPromptToIncludedCount(promptSkills, limit.skillsForPrompt.length - 1, limit.compact)
+      : withCompactPromptFormat(limit);
     prompt = renderLimitedSkillsPrompt({
       limit,
       total: resolvedSkills.length,
