@@ -25,6 +25,7 @@ import {
 } from "../../../context-engine/host-compat.js";
 import { resolveContextEngineOwnerPluginId } from "../../../context-engine/registry.js";
 import type { AssembleResult } from "../../../context-engine/types.js";
+import { resolveDiagnosticContentCapturePolicy } from "../../../infra/diagnostic-content-capture.js";
 import { emitTrustedDiagnosticEvent } from "../../../infra/diagnostic-events.js";
 import {
   createChildDiagnosticTraceContext,
@@ -324,7 +325,6 @@ import {
 import {
   diagnosticErrorCategory,
   wrapStreamFnWithDiagnosticModelCallEvents,
-  resolveContentCapturePolicy,
 } from "./attempt.model-diagnostic-events.js";
 import {
   buildAfterTurnRuntimeContext,
@@ -3189,7 +3189,7 @@ export async function runEmbeddedAttempt(
               firstModelCallStarted: true,
             });
           },
-          contentCapture: resolveContentCapturePolicy(otelCaptureContent),
+          contentCapture: resolveDiagnosticContentCapturePolicy(otelCaptureContent),
         },
       );
 

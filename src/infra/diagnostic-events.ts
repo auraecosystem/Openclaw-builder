@@ -522,9 +522,9 @@ type DiagnosticModelCallBaseEvent = DiagnosticBaseEvent & {
   contextWindowSource?: "model" | "modelsConfig" | "agentContextTokens" | "default";
   contextWindowReferenceTokens?: number;
   upstreamRequestIdHash?: string;
-  /** Bounded, redacted input messages for content capture. Only populated when diagnostics.otel.captureContent.inputMessages is enabled. */
+  /** Raw model input text captured after diagnostics.otel.captureContent.inputMessages opt-in; consumers are responsible for export-time bounding and redaction. */
   inputMessages?: string[];
-  /** Bounded, redacted output messages for content capture. Only populated when diagnostics.otel.captureContent.outputMessages is enabled. */
+  /** Raw model output text captured after diagnostics.otel.captureContent.outputMessages opt-in; consumers are responsible for export-time bounding and redaction. */
   outputMessages?: string[];
 };
 

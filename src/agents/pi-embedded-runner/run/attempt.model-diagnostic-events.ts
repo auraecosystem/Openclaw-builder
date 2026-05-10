@@ -1,5 +1,6 @@
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { fireAndForgetBoundedHook } from "../../../hooks/fire-and-forget.js";
+import type { DiagnosticContentCapturePolicy } from "../../../infra/diagnostic-content-capture.js";
 import {
   diagnosticErrorCategory,
   diagnosticErrorFailureKind,
@@ -26,10 +27,10 @@ import type {
 
 export { diagnosticErrorCategory };
 
-type ContentCapturePolicy = {
-  inputMessages: boolean;
-  outputMessages: boolean;
-};
+type ModelCallContentCapturePolicy = Pick<
+  DiagnosticContentCapturePolicy,
+  "inputMessages" | "outputMessages"
+>;
 
 type ModelCallDiagnosticContext = {
   runId: string;
@@ -45,7 +46,7 @@ type ModelCallDiagnosticContext = {
   trace: DiagnosticTraceContext;
   nextCallId: () => string;
   onStarted?: () => void;
-  contentCapture: ContentCapturePolicy;
+  contentCapture: ModelCallContentCapturePolicy;
 };
 
 type ModelCallEventBase = Omit<
@@ -83,33 +84,6 @@ const MODEL_CALL_STREAM_RETURN_TIMEOUT_MS = 1000;
 const TRACEPARENT_HEADER_NAME = "traceparent";
 type ModelCallStreamOptions = Parameters<StreamFn>[2];
 
-const NO_CONTENT_CAPTURE: ContentCapturePolicy = {
-  inputMessages: false,
-  outputMessages: false,
-};
-
-/**
- * Resolve the diagnostics.otel.captureContent config value to a policy.
- * Mirrors the OTEL service's resolveContentCapturePolicy but only exposes
- * the fields relevant to model-call content capture.
- */
-export function resolveContentCapturePolicy(value: unknown): ContentCapturePolicy {
-  if (value === true) {
-    return { inputMessages: true, outputMessages: true };
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return NO_CONTENT_CAPTURE;
-  }
-  const config = value as Record<string, unknown>;
-  if (config.enabled !== true) {
-    return NO_CONTENT_CAPTURE;
-  }
-  return {
-    inputMessages: config.inputMessages === true,
-    outputMessages: config.outputMessages === true,
-  };
-}
-
 function utf8JsonByteLength(value: unknown): number | undefined {
   try {
     return Buffer.byteLength(JSON.stringify(value), "utf8");
@@ -129,13 +103,16 @@ function observeResponseChunk(
   state: ModelCallObservationState,
   startedAt: number,
   chunk: unknown,
+  contentCapture: ModelCallContentCapturePolicy,
 ): void {
   state.timeToFirstByteMs ??= Math.max(0, Date.now() - startedAt);
   const bytes = utf8JsonByteLength(chunk);
   if (bytes !== undefined) {
     state.responseStreamBytes += bytes;
   }
-  // Collect output text chunks for content capture
+  if (!contentCapture.outputMessages) {
+    return;
+  }
   const text = extractTextFromChunk(chunk);
   if (text) {
     state.outputTextChunks.push(text);
@@ -243,6 +220,19 @@ function extractInputMessages(model: unknown): string[] {
         const content = (item as Record<string, unknown>).content;
         if (typeof content === "string" && content.length > 0) {
           messages.push(content);
+        } else if (Array.isArray(content)) {
+          for (const part of content) {
+            if (
+              typeof part === "object" &&
+              part !== null &&
+              (part as Record<string, unknown>).type === "input_text"
+            ) {
+              const text = (part as Record<string, unknown>).text;
+              if (typeof text === "string" && text.length > 0) {
+                messages.push(text);
+              }
+            }
+          }
         }
       }
     }
@@ -473,7 +463,7 @@ function emitModelCallCompleted(
   eventBase: ModelCallEventBase,
   startedAt: number,
   state: ModelCallObservationState,
-  contentCapture: ContentCapturePolicy,
+  contentCapture: ModelCallContentCapturePolicy,
 ): void {
   const durationMs = Date.now() - startedAt;
   const sizeTimingFields = modelCallSizeTimingFields(state);
@@ -501,7 +491,7 @@ function emitModelCallError(
   startedAt: number,
   state: ModelCallObservationState,
   fields: ModelCallErrorFields,
-  contentCapture: ContentCapturePolicy,
+  contentCapture: ModelCallContentCapturePolicy,
 ): void {
   const durationMs = Date.now() - startedAt;
   const sizeTimingFields = modelCallSizeTimingFields(state);
@@ -531,7 +521,7 @@ function withDiagnosticTraceparentHeader(
   options: ModelCallStreamOptions,
   trace: DiagnosticTraceContext,
   state: ModelCallObservationState,
-  contentCapture: ContentCapturePolicy,
+  contentCapture: ModelCallContentCapturePolicy,
 ): ModelCallStreamOptions {
   const traceparent = formatDiagnosticTraceparent(trace);
   const originalOnPayload = options?.onPayload;
@@ -634,7 +624,7 @@ async function* observeModelCallIterator<T>(
   eventBase: ModelCallEventBase,
   startedAt: number,
   state: ModelCallObservationState,
-  contentCapture: ContentCapturePolicy,
+  contentCapture: ModelCallContentCapturePolicy,
 ): AsyncIterable<T> {
   let terminalEmitted = false;
   try {
@@ -643,7 +633,7 @@ async function* observeModelCallIterator<T>(
       if (next.done) {
         break;
       }
-      observeResponseChunk(state, startedAt, next.value);
+      observeResponseChunk(state, startedAt, next.value, contentCapture);
       yield next.value;
     }
     terminalEmitted = true;
@@ -666,7 +656,7 @@ function observeModelCallStream<T extends AsyncIterable<unknown>>(
   eventBase: ModelCallEventBase,
   startedAt: number,
   state: ModelCallObservationState,
-  contentCapture: ContentCapturePolicy,
+  contentCapture: ModelCallContentCapturePolicy,
 ): T {
   const observedIterator = () =>
     observeModelCallIterator(createIterator(), eventBase, startedAt, state, contentCapture)[
@@ -700,7 +690,7 @@ function observeModelCallResult(
   eventBase: ModelCallEventBase,
   startedAt: number,
   state: ModelCallObservationState,
-  contentCapture: ContentCapturePolicy,
+  contentCapture: ModelCallContentCapturePolicy,
 ): unknown {
   const createIterator = asyncIteratorFactory(result);
   if (createIterator) {
