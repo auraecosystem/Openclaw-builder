@@ -515,6 +515,8 @@ export function resolveProviderToolCompatFamilyCacheKey(
   ctx: ProviderNormalizeToolSchemasContext,
 ): ProviderToolSchemaCacheKey {
   switch (family) {
+    case "deepseek":
+      throw new Error("DeepSeek tool compatibility does not provide a schema cache key");
     case "gemini":
       return { family: "gemini" };
     case "openai":
@@ -532,7 +534,7 @@ export function resolveProviderToolCompatFamilyCacheKey(
 export function buildProviderToolCompatFamilyHooks(family: ProviderToolCompatFamily): {
   normalizeToolSchemas: (ctx: ProviderNormalizeToolSchemasContext) => AnyAgentTool[];
   inspectToolSchemas: (ctx: ProviderNormalizeToolSchemasContext) => ProviderToolSchemaDiagnostic[];
-  resolveToolSchemaCacheKey: (
+  resolveToolSchemaCacheKey?: (
     ctx: ProviderNormalizeToolSchemasContext,
   ) => ProviderToolSchemaCacheKey;
 } {
