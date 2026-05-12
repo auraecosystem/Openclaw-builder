@@ -676,7 +676,7 @@ type ClosableDispatcher = {
   destroy?: () => void;
 };
 
-function destroyDispatcher(candidate: ClosableDispatcher): void {
+export function destroyDispatcher(candidate: ClosableDispatcher): void {
   try {
     candidate.destroy?.();
   } catch {
