@@ -15,6 +15,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Cron/gateway: annotate fast successful main-session `systemEvent` jobs using `wakeMode="next-heartbeat"` with a persisted `possible-main-next-heartbeat-ghost-run` warning, making heartbeat handoff runs visible without changing scheduler delivery semantics. Fixes #63106. (#72677) Thanks .
 - Agents/media: send direct fallback for generated media still missing after an active requester wake fails. (#85489) Thanks @fuller-stack-dev.
 - Agent transcript: include OpenClaw agent session logs when finding local transcript candidates.
 - Sessions/doctor: load large session stores without clone amplification during read-only doctor checks and reclaim stale `sessions.json.*.tmp` sidecars. Fixes #56827. Thanks @openperf.
