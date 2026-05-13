@@ -12,7 +12,6 @@ import {
   logInboundDrop,
   matchesMentionWithExplicit,
   resolveEnvelopeFormatOptions,
-  resolveInboundMentionDecision,
   resolveMentionPatternsEnabled,
   resolveUnmentionedGroupInboundPolicy,
   toInboundMediaFacts,

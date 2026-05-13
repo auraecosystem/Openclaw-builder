@@ -390,7 +390,6 @@ export async function handleIrcInbound(params: {
     return;
   }
 
-
   const fromLabel = message.isGroup ? message.target : senderDisplay;
   const { storePath, body } = buildEnvelope({
     channel: "IRC",
@@ -467,7 +466,9 @@ export async function handleIrcInbound(params: {
   });
 }
 
-export const __testing = {
+export const testing = {
   resolveIrcConversationId,
   resolveIrcEffectiveAllowlists,
 };
+
+export { testing as __testing };

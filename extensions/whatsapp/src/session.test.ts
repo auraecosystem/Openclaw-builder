@@ -611,7 +611,7 @@ describe("web session", () => {
 
       await waitForCredsSaveQueue(authDir);
 
-      expect(openMock.tempHandles).toHaveLength(2);
+      expect(openMock.tempHandles).toHaveLength(3);
       expect(maxInFlight).toBe(1);
       expect(inFlight).toBe(0);
     } finally {

@@ -30,7 +30,7 @@ function isMissingTargetModuleError(
 
 function isPluginSdkAliasMiss(error: { code?: unknown; message?: unknown }): boolean {
   return (
-    error.code === "MODULE_NOT_FOUND" &&
+    (error.code === "MODULE_NOT_FOUND" || error.code === "ERR_MODULE_NOT_FOUND") &&
     typeof error.message === "string" &&
     (error.message.includes("'openclaw/plugin-sdk") ||
       error.message.includes('"openclaw/plugin-sdk') ||
@@ -48,7 +48,6 @@ function isSourceTransformFallbackError(error: unknown, modulePath: string): boo
   return (
     code === "ERR_REQUIRE_ESM" ||
     code === "ERR_REQUIRE_ASYNC_MODULE" ||
-    code === "ERR_MODULE_NOT_FOUND" ||
     isPluginSdkAliasMiss(candidate) ||
     isMissingTargetModuleError(candidate, modulePath)
   );
