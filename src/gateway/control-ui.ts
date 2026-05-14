@@ -2,6 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
+import { brotliCompressSync, constants as zlibConstants, gzipSync } from "node:zlib";
 import { resolveAgentAvatar, resolvePublicAgentAvatarSource } from "../agents/identity-avatar.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { matchRootFileOpenFailure, openRootFileSync } from "../infra/boundary-file-read.js";
@@ -19,6 +20,7 @@ import { getAgentScopedMediaLocalRoots } from "../media/local-roots.js";
 import { resolveMediaReferenceLocalPath } from "../media/media-reference.js";
 import { detectMime } from "../media/mime.js";
 import { AVATAR_MAX_BYTES } from "../shared/avatar-policy.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { resolveUserPath } from "../utils.js";
 import { resolveRuntimeServiceVersion } from "../version.js";
 import { DEFAULT_ASSISTANT_IDENTITY, resolveAssistantIdentity } from "./assistant-identity.js";
@@ -136,6 +138,16 @@ const STATIC_ASSET_EXTENSIONS = new Set([
   ".txt",
   ".webmanifest",
 ]);
+const COMPRESSIBLE_STATIC_ASSET_EXTENSIONS = new Set([
+  ".css",
+  ".html",
+  ".js",
+  ".json",
+  ".map",
+  ".svg",
+  ".txt",
+  ".webmanifest",
+]);
 
 const CONTROL_UI_NAMESPACE_PREFIX = "/__openclaw__/";
 const CONTROL_UI_ROOT_PUBLIC_ASSETS = new Set([
@@ -210,6 +222,10 @@ function respondHeadForFile(req: IncomingMessage, res: ServerResponse, filePath:
   }
   res.statusCode = 200;
   setStaticFileHeaders(res, filePath);
+  const encoding = selectStaticAssetEncoding(req, filePath);
+  if (encoding) {
+    res.setHeader("Content-Encoding", encoding);
+  }
   res.end();
   return true;
 }
@@ -699,7 +715,7 @@ export async function handleControlUiAvatarRequest(
     return true;
   }
 
-  serveResolvedFile(res, safeAvatar.path, safeAvatar.buffer);
+  serveResolvedFile(req, res, safeAvatar.path, safeAvatar.buffer);
   return true;
 }
 
@@ -709,14 +725,80 @@ function setStaticFileHeaders(res: ServerResponse, filePath: string) {
   // Static UI should never be cached aggressively while iterating; allow the
   // browser to revalidate.
   res.setHeader("Cache-Control", "no-cache");
+  if (isCompressibleStaticAsset(filePath)) {
+    res.setHeader("Vary", "Accept-Encoding");
+  }
 }
 
-function serveResolvedFile(res: ServerResponse, filePath: string, body: Buffer) {
+function isCompressibleStaticAsset(filePath: string): boolean {
+  return COMPRESSIBLE_STATIC_ASSET_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+function parseAcceptEncoding(req: IncomingMessage): Set<string> {
+  const rawHeader = req.headers?.["accept-encoding"];
+  const raw = Array.isArray(rawHeader) ? rawHeader.join(",") : (rawHeader ?? "");
+  const accepted = new Set<string>();
+  for (const item of raw.split(",")) {
+    const parts = item.split(";").map((part) => part.trim());
+    const encoding = normalizeLowercaseStringOrEmpty(parts[0] ?? "");
+    if (!encoding) {
+      continue;
+    }
+    const q = parts
+      .slice(1)
+      .find((part) => part.toLowerCase().startsWith("q="))
+      ?.slice(2)
+      .trim();
+    if (q !== undefined && Number(q) <= 0) {
+      continue;
+    }
+    accepted.add(encoding);
+  }
+  return accepted;
+}
+
+function selectStaticAssetEncoding(req: IncomingMessage, filePath: string): "br" | "gzip" | null {
+  if (!isCompressibleStaticAsset(filePath)) {
+    return null;
+  }
+  const accepted = parseAcceptEncoding(req);
+  if (accepted.has("br")) {
+    return "br";
+  }
+  if (accepted.has("gzip") || accepted.has("*")) {
+    return "gzip";
+  }
+  return null;
+}
+
+function compressStaticAssetBody(body: Buffer, encoding: "br" | "gzip"): Buffer {
+  if (encoding === "br") {
+    return brotliCompressSync(body, {
+      params: {
+        [zlibConstants.BROTLI_PARAM_QUALITY]: 5,
+      },
+    });
+  }
+  return gzipSync(body);
+}
+
+function serveResolvedFile(
+  req: IncomingMessage,
+  res: ServerResponse,
+  filePath: string,
+  body: Buffer,
+) {
   setStaticFileHeaders(res, filePath);
-  res.end(body);
+  const encoding = selectStaticAssetEncoding(req, filePath);
+  if (!encoding) {
+    res.end(body);
+    return;
+  }
+  res.setHeader("Content-Encoding", encoding);
+  res.end(compressStaticAssetBody(body, encoding));
 }
 
-function serveResolvedIndexHtml(res: ServerResponse, body: string) {
+function serveResolvedIndexHtml(req: IncomingMessage, res: ServerResponse, body: string) {
   const hashes = computeInlineScriptHashes(body);
   if (hashes.length > 0) {
     res.setHeader(
@@ -724,9 +806,15 @@ function serveResolvedIndexHtml(res: ServerResponse, body: string) {
       buildControlUiCspHeader({ inlineScriptHashes: hashes }),
     );
   }
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.setHeader("Cache-Control", "no-cache");
-  res.end(body);
+  const filePath = "index.html";
+  setStaticFileHeaders(res, filePath);
+  const encoding = selectStaticAssetEncoding(req, filePath);
+  if (!encoding) {
+    res.end(body);
+    return;
+  }
+  res.setHeader("Content-Encoding", encoding);
+  res.end(compressStaticAssetBody(Buffer.from(body, "utf8"), encoding));
 }
 
 function isExpectedSafePathError(error: unknown): boolean {
@@ -970,10 +1058,10 @@ export async function handleControlUiHttpRequest(
         return true;
       }
       if (path.basename(safeFile.path) === "index.html") {
-        serveResolvedIndexHtml(res, fs.readFileSync(safeFile.fd, "utf8"));
+        serveResolvedIndexHtml(req, res, fs.readFileSync(safeFile.fd, "utf8"));
         return true;
       }
-      serveResolvedFile(res, safeFile.path, fs.readFileSync(safeFile.fd));
+      serveResolvedFile(req, res, safeFile.path, fs.readFileSync(safeFile.fd));
       return true;
     } finally {
       fs.closeSync(safeFile.fd);
@@ -998,7 +1086,7 @@ export async function handleControlUiHttpRequest(
       if (respondHeadForFile(req, res, safeIndex.path)) {
         return true;
       }
-      serveResolvedIndexHtml(res, fs.readFileSync(safeIndex.fd, "utf8"));
+      serveResolvedIndexHtml(req, res, fs.readFileSync(safeIndex.fd, "utf8"));
       return true;
     } finally {
       fs.closeSync(safeIndex.fd);
