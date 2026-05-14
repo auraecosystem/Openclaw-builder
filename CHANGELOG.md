@@ -11,6 +11,8 @@ Docs: https://docs.openclaw.ai
 - QA-Lab: add a live-only Codex Pi-shaped Read vocabulary canary so runtime parity catches native workspace-read prompt compatibility drift. (#80323) Thanks @100yenadmin.
 
 ### Fixes
+ 
+- Agents/session-write-lock: extend the payload-less orphan-lock init grace from 5 s to 30 s. Fixes #80686. Thanks @wAngByg.
 
 - CLI/sessions: accept `openclaw sessions list` as an alias for `openclaw sessions`, matching other list-style commands. Fixes #81139. (#81163) Thanks @YB0y.
 - Channels/stream previews: widen compact progress draft lines and cut prose at word boundaries while preserving command/path suffixes, with `streaming.progress.maxLineChars` for channel-specific tuning.
