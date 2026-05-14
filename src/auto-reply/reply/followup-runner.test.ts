@@ -2243,6 +2243,7 @@ describe("createFollowupRunner messaging delivery and dedupe", () => {
       };
       sessionStore[sessionKey] = nextEntry;
       Object.assign(sessionEntry, nextEntry);
+      return true;
     });
 
     const { onBlockReply } = await runMessagingCase({
