@@ -210,10 +210,10 @@ describe("Codex trajectory recorder", () => {
         sessionId: "session-invalid-suffix",
         model: { api: "responses" },
       } as never,
-      env: { OPENCLAW_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES: "2mb" },
+      env: { OPENCLAW_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES: "abc-not-a-size" },
     });
 
-    // 2mb = 2_097_152 bytes — a small event should pass through without truncation
+    // Invalid value falls back to default 262144 bytes — a small event should pass through without truncation
     recorder?.recordEvent("session.started", { payload: "small" });
     await recorder?.flush();
 
