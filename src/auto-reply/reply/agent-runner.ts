@@ -290,8 +290,9 @@ async function clearPersistedAutoFallbackSelectionAfterAccounting(params: {
   storePath: string;
   sessionKey: string;
   expected: AutoFallbackSelectionSnapshot;
-}): Promise<void> {
-  const persist = async () => {
+}): Promise<boolean> {
+  const persist = async (): Promise<boolean> => {
+    let didMatch = false;
     await updateSessionStoreEntry({
       storePath: params.storePath,
       sessionKey: params.sessionKey,
@@ -299,6 +300,7 @@ async function clearPersistedAutoFallbackSelectionAfterAccounting(params: {
         if (!matchesAutoFallbackSelectionSnapshot(entry, params.expected)) {
           return null;
         }
+        didMatch = true;
         const preserveUserAuthProfile = hasUserAuthProfileOverride(entry);
         return {
           providerOverride: undefined,
@@ -316,20 +318,21 @@ async function clearPersistedAutoFallbackSelectionAfterAccounting(params: {
         };
       },
     });
+    return didMatch;
   };
 
   try {
-    await persist();
-    return;
+    return await persist();
   } catch (err) {
     logVerbose(`failed to persist fallback selection cleanup (non-fatal): ${String(err)}`);
   }
 
   try {
-    await persist();
+    return await persist();
   } catch (err) {
     logVerbose(`retry failed to persist fallback selection cleanup (non-fatal): ${String(err)}`);
   }
+  return false;
 }
 
 function buildInlinePluginStatusPayload(params: {
@@ -1706,9 +1709,10 @@ export async function runReplyAgent(params: {
       providerUsed,
       modelUsed,
     });
-    const autoFallbackSelectionToClear = !preserveUserFacingSessionState && fallbackStateEntry
-      ? snapshotAutoFallbackSelection(fallbackStateEntry)
-      : undefined;
+    const autoFallbackSelectionToClear =
+      !preserveUserFacingSessionState && fallbackStateEntry
+        ? snapshotAutoFallbackSelection(fallbackStateEntry)
+        : undefined;
     if (fallbackTransition.stateChanged && !preserveUserFacingSessionState) {
       if (fallbackStateEntry) {
         fallbackStateEntry.fallbackNoticeSelectedModel = fallbackTransition.nextState.selectedModel;
@@ -1778,9 +1782,18 @@ export async function runReplyAgent(params: {
     });
 
     if (autoFallbackSelectionToClear && didPersistRunSessionUsage) {
+      const didPersistAutoFallbackCleanup =
+        sessionKey && storePath
+          ? await clearPersistedAutoFallbackSelectionAfterAccounting({
+              storePath,
+              sessionKey,
+              expected: autoFallbackSelectionToClear,
+            })
+          : true;
       const currentFallbackStateEntry =
         (sessionKey ? activeSessionStore?.[sessionKey] : undefined) ?? fallbackStateEntry;
       if (
+        didPersistAutoFallbackCleanup &&
         currentFallbackStateEntry &&
         clearAutoFallbackSelectionAfterAccounting(
           currentFallbackStateEntry,
@@ -1791,13 +1804,6 @@ export async function runReplyAgent(params: {
         if (sessionKey && activeSessionStore) {
           activeSessionStore[sessionKey] = currentFallbackStateEntry;
         }
-      }
-      if (sessionKey && storePath) {
-        await clearPersistedAutoFallbackSelectionAfterAccounting({
-          storePath,
-          sessionKey,
-          expected: autoFallbackSelectionToClear,
-        });
       }
     }
 

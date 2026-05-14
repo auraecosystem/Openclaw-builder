@@ -315,8 +315,9 @@ async function clearPersistedAutoFallbackSelectionAfterAccounting(params: {
   storePath: string;
   sessionKey: string;
   expected: AutoFallbackSelectionSnapshot;
-}): Promise<void> {
-  const persist = async () => {
+}): Promise<boolean> {
+  const persist = async (): Promise<boolean> => {
+    let didMatch = false;
     await updateSessionStoreEntry({
       storePath: params.storePath,
       sessionKey: params.sessionKey,
@@ -324,6 +325,7 @@ async function clearPersistedAutoFallbackSelectionAfterAccounting(params: {
         if (!matchesAutoFallbackSelectionSnapshot(entry, params.expected)) {
           return null;
         }
+        didMatch = true;
         const preserveUserAuthProfile = hasUserAuthProfileOverride(entry);
         return {
           providerOverride: undefined,
@@ -341,22 +343,23 @@ async function clearPersistedAutoFallbackSelectionAfterAccounting(params: {
         };
       },
     });
+    return didMatch;
   };
 
   try {
-    await persist();
-    return;
+    return await persist();
   } catch (err) {
     logVerbose(`failed to persist followup fallback selection cleanup (non-fatal): ${String(err)}`);
   }
 
   try {
-    await persist();
+    return await persist();
   } catch (err) {
     logVerbose(
       `retry failed to persist followup fallback selection cleanup (non-fatal): ${String(err)}`,
     );
   }
+  return false;
 }
 
 function resolveQueuedSelectedModel(params: {
@@ -1158,21 +1161,6 @@ export function createFollowupRunner(params: {
             sessionStore[replySessionKey] = fallbackStateEntry;
           }
         }
-        if (storePath && replySessionKey) {
-          try {
-            await updateSessionStoreEntry({
-              storePath,
-              sessionKey: replySessionKey,
-              update: async () => ({
-                fallbackNoticeSelectedModel: fallbackTransition.nextState.selectedModel,
-                fallbackNoticeActiveModel: fallbackTransition.nextState.activeModel,
-                fallbackNoticeReason: fallbackTransition.nextState.reason,
-              }),
-            });
-          } catch (err) {
-            logVerbose(`failed to persist followup fallback notice (non-fatal): ${String(err)}`);
-          }
-        }
       }
 
       if (storePath && replySessionKey) {
@@ -1191,13 +1179,27 @@ export function createFollowupRunner(params: {
           contextTokensUsed,
           systemPromptReport: runResult.meta?.systemPromptReport,
           cliSessionBinding: runResult.meta?.agentMeta?.cliSessionBinding,
+          sessionPatch: fallbackTransition.stateChanged
+            ? {
+                fallbackNoticeSelectedModel: fallbackTransition.nextState.selectedModel,
+                fallbackNoticeActiveModel: fallbackTransition.nextState.activeModel,
+                fallbackNoticeReason: fallbackTransition.nextState.reason,
+              }
+            : undefined,
           logLabel: "followup",
         });
         if (autoFallbackSelectionToClear && didPersistRunSessionUsage) {
+          const didPersistAutoFallbackCleanup =
+            await clearPersistedAutoFallbackSelectionAfterAccounting({
+              storePath,
+              sessionKey: replySessionKey,
+              expected: autoFallbackSelectionToClear,
+            });
           const currentFallbackStateEntry =
             (replySessionKey ? sessionStore?.[replySessionKey] : undefined) ??
             fallbackStateEntry;
           if (
+            didPersistAutoFallbackCleanup &&
             currentFallbackStateEntry &&
             clearAutoFallbackSelectionAfterAccounting(
               currentFallbackStateEntry,
@@ -1208,11 +1210,6 @@ export function createFollowupRunner(params: {
               sessionStore[replySessionKey] = currentFallbackStateEntry;
             }
           }
-          await clearPersistedAutoFallbackSelectionAfterAccounting({
-            storePath,
-            sessionKey: replySessionKey,
-            expected: autoFallbackSelectionToClear,
-          });
         }
       }
 

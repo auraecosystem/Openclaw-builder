@@ -328,6 +328,7 @@ export async function buildStatusText(params: BuildStatusTextParams): Promise<st
     modelRefs.active.label,
   );
   if (
+    !fallbackNoticeOverridesRuntimeModel &&
     runtimeAliasModelEquivalent &&
     normalizeOptionalLowercaseString(selectedModelAuth) === "unknown" &&
     activeModelAuth &&

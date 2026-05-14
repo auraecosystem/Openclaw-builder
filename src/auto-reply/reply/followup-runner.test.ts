@@ -305,6 +305,7 @@ async function persistRunSessionUsageForFollowupTest(
     systemPromptReport: preserveUserFacingRunState
       ? entry.systemPromptReport
       : (params.systemPromptReport ?? entry.systemPromptReport),
+    ...params.sessionPatch,
   };
   if (params.usage && !preserveUserFacingRunState) {
     nextEntry.inputTokens = params.usage.input ?? 0;
@@ -2561,7 +2562,8 @@ describe("createFollowupRunner messaging delivery and dedupe", () => {
   });
 
   it("uses the auto fallback origin as queued followup selected routing", async () => {
-    const storePath = "/tmp/openclaw-followup-fallback-origin.json";
+    const storeDir = await fs.mkdtemp(path.join(tmpdir(), "openclaw-followup-fallback-origin-"));
+    const storePath = path.join(storeDir, "sessions.json");
     const sessionKey = "main";
     const sessionEntry: SessionEntry = {
       sessionId: "session",
@@ -2576,6 +2578,7 @@ describe("createFollowupRunner messaging delivery and dedupe", () => {
       authProfileOverrideCompactionCount: 2,
     };
     const sessionStore: Record<string, SessionEntry> = { [sessionKey]: sessionEntry };
+    await fs.writeFile(storePath, JSON.stringify(sessionStore), "utf8");
     registerFollowupTestSessionStore(storePath, sessionStore);
     runEmbeddedPiAgentMock.mockResolvedValueOnce({
       payloads: [{ text: "hello world!" }],

@@ -93,6 +93,7 @@ export async function persistSessionUsageUpdate(params: {
   cliSessionBinding?: import("../../config/sessions.js").CliSessionBinding;
   preserveFreshTotalTokensOnStaleUsage?: boolean;
   preserveUserFacingSessionModelState?: boolean;
+  sessionPatch?: Partial<SessionEntry>;
   logLabel?: string;
 }): Promise<boolean> {
   const { storePath, sessionKey } = params;
@@ -159,6 +160,7 @@ export async function persistSessionUsageUpdate(params: {
               ? entry.systemPromptReport
               : (params.systemPromptReport ?? entry.systemPromptReport),
             updatedAt: Date.now(),
+            ...params.sessionPatch,
           };
           if (hasUsage && !preserveUserFacingRunState) {
             patch.inputTokens = params.usage?.input ?? 0;
@@ -226,6 +228,7 @@ export async function persistSessionUsageUpdate(params: {
               ? entry.systemPromptReport
               : (params.systemPromptReport ?? entry.systemPromptReport),
             updatedAt: Date.now(),
+            ...params.sessionPatch,
           };
           return preserveUserFacingRunState
             ? patch

@@ -2273,7 +2273,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
     expect(stored.fallbackNoticeActiveModel).toBe("anthropic/claude-haiku");
   });
 
-  it("does not fail successful replies when persisted auto fallback cleanup cannot write", async () => {
+  it("keeps in-memory auto fallback selection when persisted cleanup cannot write", async () => {
     const sessionEntry: SessionEntry = {
       sessionId: "session",
       updatedAt: Date.now(),
@@ -2320,9 +2320,11 @@ describe("runReplyAgent typing (heartbeat)", () => {
       await rm(storePath, { force: true, recursive: true });
     }
 
-    expect(sessionEntry.providerOverride).toBeUndefined();
-    expect(sessionEntry.modelOverride).toBeUndefined();
-    expect(sessionEntry.modelOverrideSource).toBeUndefined();
+    expect(sessionEntry.providerOverride).toBe("openai-codex");
+    expect(sessionEntry.modelOverride).toBe("gpt-5.4");
+    expect(sessionEntry.modelOverrideSource).toBe("auto");
+    expect(sessionEntry.modelOverrideFallbackOriginProvider).toBe("anthropic");
+    expect(sessionEntry.modelOverrideFallbackOriginModel).toBe("claude-opus");
   });
 
   it("does not persist fallback state for an equivalent CLI runtime alias", async () => {
