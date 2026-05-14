@@ -1357,19 +1357,37 @@ export async function runAgentTurnWithFallback(params: {
       pendingFallbackCandidateRollback = undefined;
     }
   };
+  const rollbackFallbackCandidateSelectionWithRetry = async (
+    rollback: () => Promise<void>,
+    message: string,
+  ) => {
+    const attemptRollback = async (retry: boolean): Promise<boolean> => {
+      try {
+        await rollback();
+        clearPendingFallbackRollback(rollback);
+        return true;
+      } catch (rollbackError) {
+        logVerbose(`${retry ? "retry " : ""}${message} (non-fatal): ${String(rollbackError)}`);
+        return false;
+      }
+    };
+
+    if (await attemptRollback(false)) {
+      return;
+    }
+
+    await attemptRollback(true);
+  };
   const rollbackClassifiedFallbackCandidateSelection = async (provider: string, model: string) => {
     const pending = pendingFallbackCandidateRollback;
     if (!pending || pending.provider !== provider || pending.model !== model) {
       return;
     }
     pendingFallbackCandidateRollback = undefined;
-    try {
-      await pending.rollback();
-    } catch (rollbackError) {
-      logVerbose(
-        `failed to roll back classified fallback candidate selection (non-fatal): ${String(rollbackError)}`,
-      );
-    }
+    await rollbackFallbackCandidateSelectionWithRetry(
+      pending.rollback,
+      "failed to roll back classified fallback candidate selection",
+    );
   };
   const persistFallbackCandidateSelection = async (
     provider: string,
@@ -1751,14 +1769,10 @@ export async function runAgentTurnWithFallback(params: {
                 if (!rollbackFallbackCandidateSelection) {
                   return;
                 }
-                try {
-                  await rollbackFallbackCandidateSelection();
-                  clearPendingFallbackRollback(rollbackFallbackCandidateSelection);
-                } catch (rollbackError) {
-                  logVerbose(
-                    `failed to roll back fallback candidate selection (non-fatal): ${String(rollbackError)}`,
-                  );
-                }
+                await rollbackFallbackCandidateSelectionWithRetry(
+                  rollbackFallbackCandidateSelection,
+                  "failed to roll back fallback candidate selection",
+                );
               },
               runParams: {
                 sessionId: params.followupRun.run.sessionId,
@@ -1825,14 +1839,10 @@ export async function runAgentTurnWithFallback(params: {
               result.meta?.systemPromptReport,
             );
             if (rollbackFallbackCandidateSelection) {
-              try {
-                await rollbackFallbackCandidateSelection();
-                clearPendingFallbackRollback(rollbackFallbackCandidateSelection);
-              } catch (rollbackError) {
-                logVerbose(
-                  `failed to roll back fallback candidate selection after success (non-fatal): ${String(rollbackError)}`,
-                );
-              }
+              await rollbackFallbackCandidateSelectionWithRetry(
+                rollbackFallbackCandidateSelection,
+                "failed to roll back fallback candidate selection after success",
+              );
             }
             return result;
           }
@@ -2230,26 +2240,18 @@ export async function runAgentTurnWithFallback(params: {
               );
               attemptCompactionCount = Math.max(attemptCompactionCount, resultCompactionCount);
               if (rollbackFallbackCandidateSelection) {
-                try {
-                  await rollbackFallbackCandidateSelection();
-                  clearPendingFallbackRollback(rollbackFallbackCandidateSelection);
-                } catch (rollbackError) {
-                  logVerbose(
-                    `failed to roll back fallback candidate selection after success (non-fatal): ${String(rollbackError)}`,
-                  );
-                }
+                await rollbackFallbackCandidateSelectionWithRetry(
+                  rollbackFallbackCandidateSelection,
+                  "failed to roll back fallback candidate selection after success",
+                );
               }
               return result;
             } catch (err) {
               if (rollbackFallbackCandidateSelection) {
-                try {
-                  await rollbackFallbackCandidateSelection();
-                  clearPendingFallbackRollback(rollbackFallbackCandidateSelection);
-                } catch (rollbackError) {
-                  logVerbose(
-                    `failed to roll back fallback candidate selection (non-fatal): ${String(rollbackError)}`,
-                  );
-                }
+                await rollbackFallbackCandidateSelectionWithRetry(
+                  rollbackFallbackCandidateSelection,
+                  "failed to roll back fallback candidate selection",
+                );
               }
               lifecycleBackstop.emit("error", err);
               throw err;
