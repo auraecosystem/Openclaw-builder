@@ -471,9 +471,9 @@ export async function sendChatMessage(
   if (!state.client || !state.connected) {
     return null;
   }
-  const msg = message.trim();
+  const hasText = message.trim().length > 0;
   const hasAttachments = attachments && attachments.length > 0;
-  if (!msg && !hasAttachments) {
+  if (!hasText && !hasAttachments) {
     return null;
   }
   if (state.chatSending) {
@@ -495,8 +495,9 @@ export async function sendChatMessage(
       mimeType?: string;
     };
   }> = [];
-  if (msg) {
-    contentBlocks.push({ type: "text", text: msg });
+  const messageToSend = hasText ? message : "";
+  if (hasText) {
+    contentBlocks.push({ type: "text", text: messageToSend });
   }
   // Add image previews to the message for display
   if (hasAttachments) {
@@ -545,7 +546,7 @@ export async function sendChatMessage(
   state.chatStreamStartedAt = now;
 
   try {
-    await requestChatSend(state, { message: msg, attachments, runId });
+    await requestChatSend(state, { message: messageToSend, attachments, runId });
     return runId;
   } catch (err) {
     const error = formatConnectError(err);
@@ -580,15 +581,15 @@ export async function sendDetachedChatMessage(
   if (!state.client || !state.connected) {
     return null;
   }
-  const msg = message.trim();
+  const hasText = message.trim().length > 0;
   const hasAttachments = attachments && attachments.length > 0;
-  if (!msg && !hasAttachments) {
+  if (!hasText && !hasAttachments) {
     return null;
   }
   state.lastError = null;
   const runId = generateUUID();
   try {
-    await requestChatSend(state, { message: msg, attachments, runId });
+    await requestChatSend(state, { message: hasText ? message : "", attachments, runId });
     return runId;
   } catch (err) {
     state.lastError = formatConnectError(err);
@@ -604,15 +605,15 @@ export async function sendSteerChatMessage(
   if (!state.client || !state.connected) {
     return null;
   }
-  const msg = message.trim();
+  const hasText = message.trim().length > 0;
   const hasAttachments = attachments && attachments.length > 0;
-  if (!msg && !hasAttachments) {
+  if (!hasText && !hasAttachments) {
     return null;
   }
   state.lastError = null;
   const runId = generateUUID();
   try {
-    await requestChatSend(state, { message: msg, attachments, runId });
+    await requestChatSend(state, { message: hasText ? message : "", attachments, runId });
     return runId;
   } catch (err) {
     state.lastError = formatConnectError(err);

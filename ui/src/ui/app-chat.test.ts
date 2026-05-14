@@ -742,6 +742,40 @@ describe("handleSendChat", () => {
     expect(host.chatMessage).toBe("");
   });
 
+  it("preserves leading code-block whitespace when sending chat text", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "chat.send") {
+        return { status: "started" };
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const diagram = [
+      "```text",
+      "+5V --+-- R68 3.3K --+-- TP175",
+      "      |               +-- R122 10K",
+      "      |               +-- Z3 -> GND",
+      "```",
+    ].join("\n");
+    const host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      chatMessage: diagram,
+      sessionKey: "agent:main",
+    });
+
+    await handleSendChat(host);
+
+    const payload = findRequestPayload(
+      request as unknown as MockCallSource,
+      "chat.send",
+      "chat send payload",
+    );
+    expect(payload.message).toBe(diagram);
+    const userMessage = requireRecord(host.chatMessages[0], "optimistic user message");
+    const content = userMessage.content as Array<Record<string, unknown>>;
+    expect(content[0]?.text).toBe(diagram);
+    expect(host.chatMessage).toBe("");
+  });
+
   it("waits for an in-flight model picker update before sending chat", async () => {
     const switchUpdate = createDeferred<boolean>();
     const request = vi.fn(async (method: string) => {
@@ -1207,18 +1241,25 @@ describe("handleSendChat", () => {
   });
 
   it("keeps queued normal messages recallable before transcript history catches up", async () => {
+    const queuedDiagram = [
+      "```text",
+      "+5V --+-- R68 3.3K",
+      "      |",
+      "      +-- TP128",
+      "```",
+    ].join("\n");
     const host = makeHost({
-      chatMessage: "queued while busy",
+      chatMessage: queuedDiagram,
       chatRunId: "run-1",
     });
 
     await handleSendChat(host);
 
     expect(host.chatQueue).toHaveLength(1);
-    expect(host.chatQueue[0]?.text).toBe("queued while busy");
+    expect(host.chatQueue[0]?.text).toBe(queuedDiagram);
     expect(host.chatMessage).toBe("");
     expect(navigateChatInputHistory(host, "up")).toBe(true);
-    expect(host.chatMessage).toBe("queued while busy");
+    expect(host.chatMessage).toBe(queuedDiagram);
   });
 
   it("coalesces duplicate in-flight chat submits before the gateway acknowledges them", async () => {
@@ -1339,11 +1380,12 @@ describe("handleSendChat", () => {
       }
       throw new Error(`Unexpected request: ${method}`);
     });
+    const queuedDiagram = ["```text", "root", "  child", "    leaf", "```"].join("\n");
     const host = makeHost({
       client: { request } as unknown as ChatHost["client"],
       chatRunId: "run-1",
       chatStream: "Working...",
-      chatQueue: [{ id: "queued-1", text: "tighten the plan", createdAt: 1 }],
+      chatQueue: [{ id: "queued-1", text: queuedDiagram, createdAt: 1 }],
       sessionKey: "agent:main:main",
     });
 
@@ -1359,7 +1401,7 @@ describe("handleSendChat", () => {
     expect(uuidPattern.test(idempotencyKey as string)).toBe(true);
     expect(payload).toEqual({
       sessionKey: "agent:main:main",
-      message: "tighten the plan",
+      message: queuedDiagram,
       deliver: false,
       idempotencyKey,
       attachments: undefined,
@@ -1367,7 +1409,7 @@ describe("handleSendChat", () => {
     expect(host.chatRunId).toBe("run-1");
     expect(host.chatStream).toBe("Working...");
     expect(host.chatQueue).toHaveLength(1);
-    expect(host.chatQueue[0]?.text).toBe("tighten the plan");
+    expect(host.chatQueue[0]?.text).toBe(queuedDiagram);
     expect(host.chatQueue[0]?.kind).toBe("steered");
     expect(host.chatQueue[0]?.pendingRunId).toBe("run-1");
   });
