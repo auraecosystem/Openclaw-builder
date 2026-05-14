@@ -69,13 +69,19 @@ function matchesExternalOption(
   return false;
 }
 
-function isPackageManagerTypeProbe(id: string): boolean {
+function isDeclarationModuleId(id: string): boolean {
+  return id.endsWith(".d.ts") || id.endsWith(".d.mts") || id.endsWith(".d.cts");
+}
+
+function isPackageManagerTypeProbe(id: string, parentId: string | undefined): boolean {
   const normalizedId = id.replaceAll("\\", "/");
+  const normalizedParentId = parentId?.replaceAll("\\", "/") ?? "";
   return (
     normalizedId.includes("/node_modules/undici-types/index.d.ts") ||
     normalizedId.includes("/node_modules/undici/index.d.ts") ||
     normalizedId.includes("/node_modules/@types/node-fetch/index.d.ts") ||
-    normalizedId.includes("/node_modules/node-fetch")
+    normalizedId.includes("/node_modules/node-fetch/@types/index.d.ts") ||
+    (isDeclarationModuleId(normalizedParentId) && normalizedId.endsWith("/node_modules/node-fetch"))
   );
 }
 
@@ -84,7 +90,7 @@ function isThirdPartyDeclarationTypeImport(id: string, parentId: string | undefi
   return (
     id === "axios" &&
     normalizedParentId.includes("node_modules/@slack/") &&
-    normalizedParentId.endsWith(".d.ts")
+    isDeclarationModuleId(normalizedParentId)
   );
 }
 
@@ -128,7 +134,7 @@ function buildInputOptions(options: InputOptionsArg): InputOptionsReturn {
     ...options,
     external(id: string, parentId: string | undefined, isResolved: boolean) {
       return (
-        isPackageManagerTypeProbe(id) ||
+        isPackageManagerTypeProbe(id, parentId) ||
         isThirdPartyDeclarationTypeImport(id, parentId) ||
         shouldNeverBundleDependency(id) ||
         matchesExternalOption(previousExternal, id, parentId, isResolved)
