@@ -226,6 +226,19 @@ describe("tsdown config", () => {
     }
     const externalize = external;
     expect(externalize("qrcode-terminal/lib/main.js", undefined, false)).toBe(true);
+    expect(
+      externalize(
+        "../../../../../node_modules/undici-types/index.d.ts",
+        "node_modules/@anthropic-ai/vertex-sdk/internal/types.d.ts",
+        false,
+      ),
+    ).toBe(true);
+    expect(externalize("axios", "node_modules/@slack/web-api/dist/WebClient.d.ts", false)).toBe(
+      true,
+    );
+    expect(externalize("axios", "node_modules/@slack/web-api/dist/WebClient.js", false)).toBe(
+      false,
+    );
   });
 
   it("always bundles plugin SDK package-local runtime dependencies", () => {
