@@ -2146,6 +2146,9 @@ export class QmdMemoryManager implements MemorySearchManager {
     if (typeof server.command === "string" && server.command.length > 0) {
       const copiedEnv = asRecord(server.env) ?? {};
       server.env = { ...copiedEnv, ...this.buildMcporterQmdEnv() };
+      if (server.lifecycle === undefined) {
+        server.lifecycle = { mode: "keep-alive", idleTimeoutMs: 300_000 };
+      }
       return server;
     }
 

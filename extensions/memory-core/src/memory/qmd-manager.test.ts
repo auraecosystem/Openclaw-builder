@@ -3436,6 +3436,69 @@ describe("QmdMemoryManager", () => {
     await manager.close();
   });
 
+  it("adds keep-alive lifecycle when configured stdio mcporter JSON omits it", async () => {
+    cfg = {
+      ...cfg,
+      memory: {
+        backend: "qmd",
+        qmd: {
+          includeDefaultMemory: false,
+          update: { interval: "0s", debounceMs: 60_000, onBoot: false },
+          paths: [{ path: workspaceDir, pattern: "**/*.md", name: "workspace" }],
+          mcporter: { enabled: true, serverName: "custom-qmd", startDaemon: false },
+        },
+      },
+    } as OpenClawConfig;
+
+    spawnMock.mockImplementation((cmd: string, args: string[]) => {
+      const child = createMockChild({ autoClose: false });
+      if (isMcporterCommand(cmd) && args[0] === "config") {
+        emitAndClose(
+          child,
+          "stdout",
+          JSON.stringify({
+            name: "custom-qmd",
+            source: "user",
+            command: "node",
+            args: ["/opt/qmd-wrapper.js", "mcp"],
+            env: { CUSTOM_KEEP: "1" },
+          }),
+        );
+        return child;
+      }
+      if (isMcporterCommand(cmd) && args[0] === "call") {
+        emitAndClose(child, "stdout", JSON.stringify({ results: [] }));
+        return child;
+      }
+      emitAndClose(child, "stdout", "[]");
+      return child;
+    });
+
+    const { manager } = await createManager();
+    await manager.search("hello", { sessionKey: "agent:main:slack:dm:u123" });
+
+    const mcporterCall = spawnMock.mock.calls.find(
+      (call: unknown[]) => isMcporterCommand(call[0]) && (call[1] as string[])[0] === "call",
+    );
+    const args = (requireValue(mcporterCall, "mcporter search call missing")[1] ?? []) as string[];
+    const configPath = args[args.indexOf("--config") + 1];
+    const config = JSON.parse(await fs.readFile(configPath ?? "", "utf8")) as {
+      mcpServers?: Record<
+        string,
+        {
+          lifecycle?: { mode?: string; idleTimeoutMs?: number };
+        }
+      >;
+    };
+
+    expect(config.mcpServers?.["custom-qmd"]?.lifecycle).toEqual({
+      mode: "keep-alive",
+      idleTimeoutMs: 300_000,
+    });
+
+    await manager.close();
+  });
+
   it("preserves a configured remote mcporter server without injecting QMD env", async () => {
     cfg = {
       ...cfg,
