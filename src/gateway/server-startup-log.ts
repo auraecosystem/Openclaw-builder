@@ -12,6 +12,7 @@ import {
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { getResolvedLoggerSettings } from "../logging.js";
 import { collectEnabledInsecureOrDangerousFlags } from "../security/dangerous-config-flags.js";
+import type { ResolvedGatewayAuthMode } from "./auth.js";
 import { isLoopbackHost } from "./net.js";
 
 type StartupThinkLevel =
@@ -32,6 +33,8 @@ export function logGatewayStartup(params: {
   loadedPluginIds: readonly string[];
   startupStartedAt?: number;
   tlsEnabled?: boolean;
+  controlUiEnabled?: boolean;
+  authMode?: ResolvedGatewayAuthMode;
   log: { info: (msg: string, meta?: Record<string, unknown>) => void; warn: (msg: string) => void };
   isNixMode: boolean;
 }) {
@@ -66,6 +69,8 @@ export function logGatewayStartup(params: {
     bindHost: params.bindHost,
     bindHosts: params.bindHosts,
     tlsEnabled: params.tlsEnabled,
+    controlUiEnabled: params.controlUiEnabled,
+    authMode: params.authMode,
   });
   if (controlUiSecureContextWarning) {
     params.log.warn(controlUiSecureContextWarning);
@@ -163,13 +168,16 @@ function resolveControlUiSecureContextWarning(params: {
   bindHost: string;
   bindHosts?: string[];
   tlsEnabled?: boolean;
+  controlUiEnabled?: boolean;
+  authMode?: ResolvedGatewayAuthMode;
 }): string | null {
   const controlUiConfig = params.cfg.gateway?.controlUi;
-  const controlUiEnabled = controlUiConfig?.enabled ?? true;
+  const controlUiEnabled = params.controlUiEnabled ?? controlUiConfig?.enabled ?? true;
   if (!controlUiEnabled || controlUiConfig?.dangerouslyDisableDeviceAuth === true) {
     return null;
   }
-  if (params.tlsEnabled === true || params.cfg.gateway?.auth?.mode === "trusted-proxy") {
+  const authMode = params.authMode ?? params.cfg.gateway?.auth?.mode;
+  if (params.tlsEnabled === true || authMode === "trusted-proxy") {
     return null;
   }
   const listenHosts = params.bindHosts?.length ? params.bindHosts : [params.bindHost];
