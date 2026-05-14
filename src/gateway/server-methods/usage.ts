@@ -1344,7 +1344,7 @@ export const usageHandlers: GatewayRequestHandlers = {
     };
 
     const tail = buildUsageAggregateTail({
-      byChannelMap: byChannelMap,
+      byChannelMap,
       latencyTotals,
       dailyLatencyMap,
       modelDailyMap,

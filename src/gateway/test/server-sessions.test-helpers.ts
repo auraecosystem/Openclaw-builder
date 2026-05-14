@@ -473,7 +473,7 @@ export async function directSessionReq<TPayload = unknown>(
       broadcastToConnIds: vi.fn(),
       getSessionEventSubscriberConnIds: () => new Set<string>(),
       loadGatewayModelCatalog: async () => piSdkMock.models,
-      getRuntimeConfig: getRuntimeConfig,
+      getRuntimeConfig,
       ...opts?.context,
     } as never,
     client: opts?.client ?? null,

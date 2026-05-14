@@ -425,7 +425,7 @@ export const buildTelegramMessageContext = async ({
   const activationOverride = resolveGroupActivation({
     chatId,
     messageThreadId: resolvedThreadId,
-    sessionKey: sessionKey,
+    sessionKey,
     agentId: route.agentId,
   });
   const baseRequireMention = resolveGroupRequireMention(chatId);

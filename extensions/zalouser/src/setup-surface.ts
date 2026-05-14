@@ -238,7 +238,7 @@ const zalouserDmPolicy: ChannelSetupDmPolicy = {
         ? (normalizeAccountId(accountId) ?? DEFAULT_ACCOUNT_ID)
         : resolveDefaultZalouserAccountId(cfg);
     return await promptZalouserAllowFrom({
-      cfg: cfg,
+      cfg,
       prompter,
       accountId: id,
     });
@@ -440,7 +440,7 @@ export const zalouserSetupWizard: ChannelSetupWizard = {
         );
         return [];
       }
-      const updatedAccount = resolveZalouserAccountSync({ cfg: cfg, accountId });
+      const updatedAccount = resolveZalouserAccountSync({ cfg, accountId });
       try {
         const resolved = await resolveZaloGroupsByEntries({
           profile: updatedAccount.profile,

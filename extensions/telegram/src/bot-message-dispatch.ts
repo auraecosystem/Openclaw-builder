@@ -1210,7 +1210,7 @@ export const dispatchTelegramMessage = async ({
       draftMaxChars,
       applyTextToPayload,
       applyTextToFollowUpPayload,
-      splitFinalTextForStream: splitFinalTextForStream,
+      splitFinalTextForStream,
       sendPayload,
       flushDraftLane,
       stopDraftLane: async (lane) => {
