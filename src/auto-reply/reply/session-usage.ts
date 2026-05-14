@@ -112,7 +112,7 @@ export async function persistSessionUsageUpdate(params: {
 
   if (hasUsage || hasFreshContextSnapshot) {
     try {
-      await updateSessionStoreEntry({
+      const updatedEntry = await updateSessionStoreEntry({
         storePath,
         sessionKey,
         update: async (entry) => {
@@ -190,7 +190,7 @@ export async function persistSessionUsageUpdate(params: {
             : applyCliSessionIdToSessionPatch(params, entry, patch);
         },
       });
-      return true;
+      return updatedEntry !== null;
     } catch (err) {
       logVerbose(`failed to persist ${label}usage update: ${String(err)}`);
       return false;
@@ -204,7 +204,7 @@ export async function persistSessionUsageUpdate(params: {
     params.sessionModelProvider
   ) {
     try {
-      await updateSessionStoreEntry({
+      const updatedEntry = await updateSessionStoreEntry({
         storePath,
         sessionKey,
         update: async (entry) => {
@@ -232,7 +232,7 @@ export async function persistSessionUsageUpdate(params: {
             : applyCliSessionIdToSessionPatch(params, entry, patch);
         },
       });
-      return true;
+      return updatedEntry !== null;
     } catch (err) {
       logVerbose(`failed to persist ${label}model/context update: ${String(err)}`);
       return false;

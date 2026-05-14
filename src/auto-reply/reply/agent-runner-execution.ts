@@ -171,6 +171,20 @@ const FALLBACK_SELECTION_STATE_KEYS = [
   "authProfileOverrideCompactionCount",
 ] as const satisfies ReadonlyArray<keyof FallbackSelectionState>;
 
+const FALLBACK_SELECTION_MODEL_STATE_KEYS = [
+  "providerOverride",
+  "modelOverride",
+  "modelOverrideSource",
+  "modelOverrideFallbackOriginProvider",
+  "modelOverrideFallbackOriginModel",
+] as const satisfies ReadonlyArray<keyof FallbackSelectionState>;
+
+const FALLBACK_SELECTION_AUTH_STATE_KEYS = [
+  "authProfileOverride",
+  "authProfileOverrideSource",
+  "authProfileOverrideCompactionCount",
+] as const satisfies ReadonlyArray<keyof FallbackSelectionState>;
+
 function setFallbackSelectionStateField(
   entry: SessionEntry,
   key: keyof FallbackSelectionState,
@@ -351,11 +365,13 @@ function rollbackFallbackSelectionStateIfUnchanged(
   previousState: FallbackSelectionState,
   now = Date.now(),
 ): boolean {
+  const currentState = snapshotFallbackSelectionState(entry);
+  if (FALLBACK_SELECTION_MODEL_STATE_KEYS.some((key) => currentState[key] !== expectedState[key])) {
+    return false;
+  }
+
   let updated = false;
-  for (const key of FALLBACK_SELECTION_STATE_KEYS) {
-    if (entry[key] !== expectedState[key]) {
-      continue;
-    }
+  for (const key of FALLBACK_SELECTION_MODEL_STATE_KEYS) {
     const previousValue = previousState[key];
     if (previousValue === undefined) {
       if (Object.hasOwn(entry, key)) {
@@ -366,6 +382,24 @@ function rollbackFallbackSelectionStateIfUnchanged(
     }
     if (entry[key] !== previousValue) {
       updated = setFallbackSelectionStateField(entry, key, previousValue) || updated;
+    }
+  }
+  const authStateUnchanged = FALLBACK_SELECTION_AUTH_STATE_KEYS.every(
+    (key) => currentState[key] === expectedState[key],
+  );
+  if (authStateUnchanged) {
+    for (const key of FALLBACK_SELECTION_AUTH_STATE_KEYS) {
+      const previousValue = previousState[key];
+      if (previousValue === undefined) {
+        if (Object.hasOwn(entry, key)) {
+          delete entry[key];
+          updated = true;
+        }
+        continue;
+      }
+      if (entry[key] !== previousValue) {
+        updated = setFallbackSelectionStateField(entry, key, previousValue) || updated;
+      }
     }
   }
   if (updated) {
@@ -1478,15 +1512,15 @@ export async function runAgentTurnWithFallback(params: {
     }
 
     return async () => {
-      const rolledBackInMemory = rollbackFallbackSelectionStateIfUnchanged(
-        activeSessionEntry,
-        nextState,
-        previousState,
-      );
-      if (rolledBackInMemory) {
-        params.activeSessionStore![params.sessionKey!] = activeSessionEntry;
-      }
       if (!params.storePath) {
+        const rolledBackInMemory = rollbackFallbackSelectionStateIfUnchanged(
+          activeSessionEntry,
+          nextState,
+          previousState,
+        );
+        if (rolledBackInMemory) {
+          params.activeSessionStore![params.sessionKey!] = activeSessionEntry;
+        }
         return;
       }
       await updateSessionStore(params.storePath, (store) => {
@@ -1498,6 +1532,14 @@ export async function runAgentTurnWithFallback(params: {
           store[params.sessionKey!] = persistedEntry;
         }
       });
+      const rolledBackInMemory = rollbackFallbackSelectionStateIfUnchanged(
+        activeSessionEntry,
+        nextState,
+        previousState,
+      );
+      if (rolledBackInMemory) {
+        params.activeSessionStore![params.sessionKey!] = activeSessionEntry;
+      }
     };
   };
   const clearRecoveredAutoFallbackPrimaryProbe = async (paramsForClear: {
