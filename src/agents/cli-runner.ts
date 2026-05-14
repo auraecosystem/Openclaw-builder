@@ -4,6 +4,7 @@ import type { ReplyPayload } from "../auto-reply/reply-payload.js";
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { isClaudeCliProvider } from "../plugin-sdk/anthropic-cli.js";
 import { buildAgentHookContextChannelFields } from "../plugins/hook-agent-context.js";
 import { resolveBlockMessage } from "../plugins/hook-decision-types.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
@@ -12,6 +13,7 @@ import {
   loadCliSessionHistoryMessages,
 } from "./cli-runner/session-history.js";
 import type { PreparedCliRunContext, RunCliAgentParams } from "./cli-runner/types.js";
+import { claudeCliSessionTranscriptHasContent as claudeCliSessionTranscriptHasContentImpl } from "./command/attempt-execution.helpers.js";
 import { FailoverError, isFailoverError, resolveFailoverStatus } from "./failover-error.js";
 import {
   bootstrapHarnessContextEngine,
@@ -30,6 +32,62 @@ import { classifyFailoverReason, isFailoverErrorMessage } from "./pi-embedded-he
 import type { EmbeddedPiRunResult } from "./pi-embedded-runner.js";
 
 const log = createSubsystemLogger("agents/cli-runner");
+
+// Injectable deps so tests can stub the on-disk Claude CLI transcript probe
+// without touching ~/.claude/projects. Mirrors the pattern in
+// `src/agents/cli-runner/prepare.ts`.
+const cliRunnerDeps = {
+  claudeCliSessionTranscriptHasContent: claudeCliSessionTranscriptHasContentImpl,
+};
+
+export function setCliRunnerTestDeps(overrides: Partial<typeof cliRunnerDeps>): void {
+  Object.assign(cliRunnerDeps, overrides);
+}
+
+export function restoreCliRunnerTestDeps(): void {
+  cliRunnerDeps.claudeCliSessionTranscriptHasContent = claudeCliSessionTranscriptHasContentImpl;
+}
+
+/**
+ * Confirm that claude-cli flushed an assistant-role record to its
+ * `~/.claude/projects/<cwd>/<sid>.jsonl` transcript before we persist
+ * the sessionId for next-turn reuse. If we persist a sessionId whose
+ * transcript was never written (mid-turn subprocess kill from a
+ * concurrent fingerprint-mismatched turn, internal failure, etc.), the
+ * next turn's `claudeCliSessionTranscriptHasContent` invalidator
+ * correctly rejects it as `missing-transcript` and resets the session
+ * — but at the cost of user-visible amnesia. We close that window here.
+ *
+ * The bounded retry tolerates the brief gap between claude-cli's stdio
+ * close and the OS making the JSONL line visible to readers (cooperative
+ * fsync semantics on APFS, but not guaranteed under stress). On a true
+ * negative (the file genuinely lacks an assistant message), this still
+ * resolves to false within ~200ms.
+ *
+ * For non-claude-cli providers we return `true` unconditionally — those
+ * providers don't write to `~/.claude/projects` so the probe would always
+ * say "missing" and incorrectly strip valid binding metadata.
+ */
+export async function isCliBindingFlushed(
+  sessionId: string | undefined,
+  provider: string | undefined,
+): Promise<boolean> {
+  if (!provider || !isClaudeCliProvider(provider)) {
+    return true;
+  }
+  if (!sessionId) {
+    return false;
+  }
+  for (const delayMs of [0, 50, 150]) {
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    if (await cliRunnerDeps.claudeCliSessionTranscriptHasContent({ sessionId })) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function flushSessionManagerFile(sessionManager: SessionManager): void {
   (sessionManager as unknown as { _rewriteFile?: () => void })["_rewriteFile"]?.();
@@ -470,6 +528,7 @@ export async function runPreparedCliAgent(
   const buildCliRunResult = (resultParams: {
     output: Awaited<ReturnType<typeof executePreparedCliRun>>;
     effectiveCliSessionId?: string;
+    bindingFlushOk?: boolean;
   }): EmbeddedPiRunResult => {
     const text = resultParams.output.text?.trim();
     const rawText = resultParams.output.rawText?.trim();
@@ -512,12 +571,28 @@ export async function runPreparedCliAgent(
           refusal: false,
         },
         agentMeta: {
-          sessionId: resultParams.effectiveCliSessionId ?? params.sessionId ?? "",
+          // When the Claude CLI transcript-flush check failed for an
+          // effectiveCliSessionId, also drop the bare `sessionId` here so the
+          // session-store fallback in `command/session-store.ts` doesn't
+          // re-persist the unflushed sid via `setCliSessionId(...)` and
+          // re-introduce the same `missing-transcript` reset on the next turn.
+          // For non-claude-cli providers `bindingFlushOk` is always true (see
+          // `isCliBindingFlushed`), so this branch only ever zeroes for the
+          // unflushed-claude-cli case.
+          sessionId:
+            resultParams.effectiveCliSessionId && resultParams.bindingFlushOk === false
+              ? ""
+              : (resultParams.effectiveCliSessionId ?? params.sessionId ?? ""),
           provider: params.provider,
           model: context.modelId,
           usage: resultParams.output.usage,
           ...(resultParams.output.usage ? { lastCallUsage: resultParams.output.usage } : {}),
-          ...(resultParams.effectiveCliSessionId
+          // Only persist cliSessionBinding when claude-cli actually flushed
+          // the transcript for this sessionId. Without this gate, a turn
+          // that died mid-flight produces a binding the next turn's
+          // invalidator correctly rejects as `missing-transcript`, resetting
+          // the session and causing user-visible amnesia.
+          ...(resultParams.effectiveCliSessionId && resultParams.bindingFlushOk !== false
             ? {
                 cliSessionBinding: {
                   sessionId: resultParams.effectiveCliSessionId,
@@ -637,6 +712,7 @@ export async function runPreparedCliAgent(
         assistantText,
         output,
       });
+      const bindingFlushOk = await isCliBindingFlushed(effectiveCliSessionId, params.provider);
       await runCliAgentEndHook(params, {
         event: {
           messages: buildAgentEndMessages(lastAssistant),
@@ -646,7 +722,7 @@ export async function runPreparedCliAgent(
         ctx: hookContext,
         hookRunner,
       });
-      return buildCliRunResult({ output, effectiveCliSessionId });
+      return buildCliRunResult({ output, effectiveCliSessionId, bindingFlushOk });
     } catch (err) {
       if (isFailoverError(err)) {
         const retryableSessionId = context.reusableCliSession.sessionId ?? params.cliSessionId;
@@ -669,6 +745,10 @@ export async function runPreparedCliAgent(
               assistantText,
               output,
             });
+            const bindingFlushOk = await isCliBindingFlushed(
+              effectiveCliSessionId,
+              params.provider,
+            );
             await runCliAgentEndHook(params, {
               event: {
                 messages: buildAgentEndMessages(lastAssistant),
@@ -678,7 +758,7 @@ export async function runPreparedCliAgent(
               ctx: hookContext,
               hookRunner,
             });
-            return buildCliRunResult({ output, effectiveCliSessionId });
+            return buildCliRunResult({ output, effectiveCliSessionId, bindingFlushOk });
           } catch (retryErr) {
             const retryMessage = formatErrorMessage(retryErr);
             await runCliAgentEndHook(params, {
