@@ -519,7 +519,7 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
         chunkSource,
         core.channel.text.chunkTextWithMode(chunkSource, textChunkLimit, chunkMode),
       );
-      for (const [index, chunk] of chunks.entries()) {
+      for (const chunk of chunks) {
         await sendMessageFeishu({
           cfg,
           to: chatId,
@@ -527,7 +527,6 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
           replyToMessageId: sendReplyToMessageId,
           replyInThread: effectiveReplyInThread,
           allowTopLevelReplyFallback,
-          mentions: index === 0 ? mentionTargets : undefined,
           accountId,
         });
       }
