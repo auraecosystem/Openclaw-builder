@@ -276,16 +276,16 @@ function refreshQueuedFollowupSessionForFollowupTest(params: {
 
 async function persistRunSessionUsageForFollowupTest(
   params: Parameters<typeof import("./session-run-accounting.js").persistRunSessionUsage>[0],
-): Promise<void> {
+): Promise<boolean> {
   const { storePath, sessionKey } = params;
   if (!storePath || !sessionKey) {
-    return;
+    return false;
   }
   const registeredStore = FOLLOWUP_TEST_SESSION_STORES.get(storePath);
   const store = registeredStore ?? loadSessionStore(storePath, { skipCache: true });
   const entry = store[sessionKey];
   if (!entry) {
-    return;
+    return false;
   }
   const preserveSessionModelState =
     params.isHeartbeat === true || params.preserveUserFacingSessionModelState === true;
@@ -322,9 +322,10 @@ async function persistRunSessionUsageForFollowupTest(
   }
   store[sessionKey] = nextEntry;
   if (registeredStore) {
-    return;
+    return true;
   }
   await saveSessionStore(storePath, store);
+  return true;
 }
 
 async function loadFreshFollowupRunnerModuleForTest() {
