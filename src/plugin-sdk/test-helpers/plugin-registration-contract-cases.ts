@@ -127,6 +127,8 @@ export const pluginRegistrationContractCases = {
   senseaudio: {
     pluginId: "senseaudio",
     mediaUnderstandingProviderIds: ["senseaudio"],
+    speechProviderIds: ["senseaudio"],
+    requireSpeechVoices: true,
   },
   tavily: {
     pluginId: "tavily",
