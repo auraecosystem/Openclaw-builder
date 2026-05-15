@@ -593,7 +593,7 @@ jobs:
 
       - name: Download full release validation manifest
         if: ${{ inputs.full_release_validation_run_id != '' }}
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: full-release-validation-${{ inputs.full_release_validation_run_id }}
           path: full-release-validation
