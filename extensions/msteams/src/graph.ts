@@ -3,6 +3,7 @@ import { fetchWithSsrFGuard, type MSTeamsConfig } from "../runtime-api.js";
 import { GRAPH_ROOT } from "./attachments/shared.js";
 
 const GRAPH_BETA = "https://graph.microsoft.com/beta";
+const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
 import { createMSTeamsTokenProvider, loadMSTeamsSdkWithAuth } from "./sdk.js";
 import { readAccessToken } from "./token-response.js";
 import { resolveDelegatedAccessToken, resolveMSTeamsCredentials } from "./token.js";
@@ -27,11 +28,6 @@ type GraphChannel = {
 
 export type GraphResponse<T> = { value?: T[] };
 
-type GuardedGraphResponse = {
-  response: Response;
-  release: () => Promise<void>;
-};
-
 export function normalizeQuery(value?: string | null): string {
   return value?.trim() ?? "";
 }
@@ -48,11 +44,12 @@ async function requestGraph(params: {
   headers?: Record<string, string>;
   body?: unknown;
   errorPrefix?: string;
-}): Promise<GuardedGraphResponse> {
+}): Promise<Response> {
   const hasBody = params.body !== undefined;
+  const url = `${params.root ?? GRAPH_ROOT}${params.path}`;
   const currentFetch = globalThis.fetch;
   const { response, release } = await fetchWithSsrFGuard({
-    url: `${params.root ?? GRAPH_ROOT}${params.path}`,
+    url,
     fetchImpl: async (input, guardedInit) => await currentFetch(input, guardedInit),
     init: {
       method: params.method,
@@ -66,33 +63,31 @@ async function requestGraph(params: {
     },
     auditContext: "msteams.graph",
   });
-  if (!response.ok) {
-    try {
+  try {
+    if (!response.ok) {
       const text = await response.text().catch(() => "");
       throw new Error(
         `${params.errorPrefix ?? "Graph"} ${params.path} failed (${response.status}): ${text || "unknown error"}`,
       );
-    } finally {
-      await release();
     }
+    const body = NULL_BODY_STATUSES.has(response.status) ? null : await response.arrayBuffer();
+    return new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: new Headers(response.headers),
+    });
+  } finally {
+    await release();
   }
-  return { response, release };
 }
 
-async function readOptionalGraphJson<T>(res: Response, path?: string): Promise<T> {
+async function readOptionalGraphJson<T>(res: Response, label: string): Promise<T> {
   // Use optional chaining to stay resilient to partial test mocks that do not
   // provide a status or Headers instance (they only shim `ok` + `json()`).
   if (res.status === 204 || res.headers?.get?.("content-length") === "0") {
     return undefined as T;
   }
-  try {
-    return (await res.json()) as T;
-  } catch (err) {
-    if (err instanceof SyntaxError && path) {
-      throw new Error(`Graph ${path} failed: malformed JSON response`, { cause: err });
-    }
-    throw err;
-  }
+  return await readProviderJsonResponse<T>(res, label);
 }
 
 export async function fetchGraphJson<T>(params: {
@@ -104,18 +99,14 @@ export async function fetchGraphJson<T>(params: {
   /** Request body (serialized as JSON). Only used for non-GET methods. */
   body?: unknown;
 }): Promise<T> {
-  const { response, release } = await requestGraph({
+  const res = await requestGraph({
     token: params.token,
     path: params.path,
     method: params.method as "GET" | "POST" | "DELETE" | undefined,
     body: params.body,
     headers: params.headers,
   });
-  try {
-    return await readOptionalGraphJson<T>(response, params.path);
-  } finally {
-    await release();
-  }
+  return await readOptionalGraphJson<T>(res, `Graph ${params.path} failed`);
 }
 
 /**
@@ -260,18 +251,14 @@ export async function postGraphJson<T>(params: {
   path: string;
   body?: unknown;
 }): Promise<T> {
-  const { response, release } = await requestGraph({
+  const res = await requestGraph({
     token: params.token,
     path: params.path,
     method: "POST",
     body: params.body,
     errorPrefix: "Graph POST",
   });
-  try {
-    return await readOptionalGraphJson<T>(response, params.path);
-  } finally {
-    await release();
-  }
+  return readOptionalGraphJson<T>(res, `Graph POST ${params.path} failed`);
 }
 
 export async function postGraphBetaJson<T>(params: {
@@ -279,7 +266,7 @@ export async function postGraphBetaJson<T>(params: {
   path: string;
   body?: unknown;
 }): Promise<T> {
-  const { response, release } = await requestGraph({
+  const res = await requestGraph({
     token: params.token,
     path: params.path,
     method: "POST",
@@ -287,21 +274,16 @@ export async function postGraphBetaJson<T>(params: {
     body: params.body,
     errorPrefix: "Graph beta POST",
   });
-  try {
-    return await readOptionalGraphJson<T>(response, params.path);
-  } finally {
-    await release();
-  }
+  return readOptionalGraphJson<T>(res, `Graph beta POST ${params.path} failed`);
 }
 
 export async function deleteGraphRequest(params: { token: string; path: string }): Promise<void> {
-  const { release } = await requestGraph({
+  await requestGraph({
     token: params.token,
     path: params.path,
     method: "DELETE",
     errorPrefix: "Graph DELETE",
   });
-  await release();
 }
 
 export async function patchGraphJson<T>(params: {
@@ -309,21 +291,14 @@ export async function patchGraphJson<T>(params: {
   path: string;
   body?: unknown;
 }): Promise<T> {
-  const { response, release } = await requestGraph({
+  const res = await requestGraph({
     token: params.token,
     path: params.path,
     method: "PATCH",
     body: params.body,
     errorPrefix: "Graph PATCH",
   });
-  try {
-    if (response.status === 204 || response.headers.get("content-length") === "0") {
-      return undefined as T;
-    }
-    return (await response.json()) as T;
-  } finally {
-    await release();
-  }
+  return readOptionalGraphJson<T>(res, `Graph PATCH ${params.path} failed`);
 }
 
 export async function listChannelsForTeam(token: string, teamId: string): Promise<GraphChannel[]> {
