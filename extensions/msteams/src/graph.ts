@@ -1,3 +1,4 @@
+import { readProviderJsonResponse } from "openclaw/plugin-sdk/provider-http";
 import { fetchWithSsrFGuard, type MSTeamsConfig } from "../runtime-api.js";
 import { GRAPH_ROOT } from "./attachments/shared.js";
 
@@ -78,13 +79,20 @@ async function requestGraph(params: {
   return { response, release };
 }
 
-async function readOptionalGraphJson<T>(res: Response): Promise<T> {
+async function readOptionalGraphJson<T>(res: Response, path?: string): Promise<T> {
   // Use optional chaining to stay resilient to partial test mocks that do not
   // provide a status or Headers instance (they only shim `ok` + `json()`).
   if (res.status === 204 || res.headers?.get?.("content-length") === "0") {
     return undefined as T;
   }
-  return (await res.json()) as T;
+  try {
+    return (await res.json()) as T;
+  } catch (err) {
+    if (err instanceof SyntaxError && path) {
+      throw new Error(`Graph ${path} failed: malformed JSON response`, { cause: err });
+    }
+    throw err;
+  }
 }
 
 export async function fetchGraphJson<T>(params: {
@@ -104,7 +112,7 @@ export async function fetchGraphJson<T>(params: {
     headers: params.headers,
   });
   try {
-    return await readOptionalGraphJson<T>(response);
+    return await readOptionalGraphJson<T>(response, params.path);
   } finally {
     await release();
   }
@@ -137,7 +145,7 @@ export async function fetchGraphAbsoluteUrl<T>(params: {
         `Graph ${params.url} failed (${response.status}): ${text || "unknown error"}`,
       );
     }
-    return (await response.json()) as T;
+    return await readProviderJsonResponse<T>(response, `Graph ${params.url} failed`);
   } finally {
     await release();
   }
@@ -260,7 +268,7 @@ export async function postGraphJson<T>(params: {
     errorPrefix: "Graph POST",
   });
   try {
-    return await readOptionalGraphJson<T>(response);
+    return await readOptionalGraphJson<T>(response, params.path);
   } finally {
     await release();
   }
@@ -280,7 +288,7 @@ export async function postGraphBetaJson<T>(params: {
     errorPrefix: "Graph beta POST",
   });
   try {
-    return await readOptionalGraphJson<T>(response);
+    return await readOptionalGraphJson<T>(response, params.path);
   } finally {
     await release();
   }
