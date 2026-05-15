@@ -36,5 +36,6 @@ describe("loadBundledCapabilityRuntimeRegistry", () => {
       memoryEmbeddingProviders: ["local"],
       tools: ["memory_get", "memory_search"],
     });
+    expect(plugin?.memoryEmbeddingProviderIds).toEqual(["local"]);
   });
 });

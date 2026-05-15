@@ -129,6 +129,14 @@ function resolvePluginModuleExport(moduleExport: unknown): {
   return {};
 }
 
+function appendUniqueIds(target: string[], ids: readonly string[]): void {
+  for (const id of ids) {
+    if (!target.includes(id)) {
+      target.push(id);
+    }
+  }
+}
+
 function createCapabilityPluginRecord(params: {
   id: string;
   name?: string;
@@ -321,31 +329,53 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
       const captured = createCapturedPluginRegistration();
       register(captured.api);
       record.cliBackendIds.push(...captured.cliBackends.map((entry) => entry.id));
-      record.providerIds.push(...captured.providers.map((entry) => entry.id));
-      record.speechProviderIds.push(...captured.speechProviders.map((entry) => entry.id));
-      record.realtimeTranscriptionProviderIds.push(
-        ...captured.realtimeTranscriptionProviders.map((entry) => entry.id),
+      appendUniqueIds(
+        record.providerIds,
+        captured.providers.map((entry) => entry.id),
       );
-      record.realtimeVoiceProviderIds.push(
-        ...captured.realtimeVoiceProviders.map((entry) => entry.id),
+      appendUniqueIds(
+        record.speechProviderIds,
+        captured.speechProviders.map((entry) => entry.id),
       );
-      record.mediaUnderstandingProviderIds.push(
-        ...captured.mediaUnderstandingProviders.map((entry) => entry.id),
+      appendUniqueIds(
+        record.realtimeTranscriptionProviderIds,
+        captured.realtimeTranscriptionProviders.map((entry) => entry.id),
       );
-      record.imageGenerationProviderIds.push(
-        ...captured.imageGenerationProviders.map((entry) => entry.id),
+      appendUniqueIds(
+        record.realtimeVoiceProviderIds,
+        captured.realtimeVoiceProviders.map((entry) => entry.id),
       );
-      record.videoGenerationProviderIds.push(
-        ...captured.videoGenerationProviders.map((entry) => entry.id),
+      appendUniqueIds(
+        record.mediaUnderstandingProviderIds,
+        captured.mediaUnderstandingProviders.map((entry) => entry.id),
       );
-      record.musicGenerationProviderIds.push(
-        ...captured.musicGenerationProviders.map((entry) => entry.id),
+      appendUniqueIds(
+        record.imageGenerationProviderIds,
+        captured.imageGenerationProviders.map((entry) => entry.id),
       );
-      record.webFetchProviderIds.push(...captured.webFetchProviders.map((entry) => entry.id));
-      record.webSearchProviderIds.push(...captured.webSearchProviders.map((entry) => entry.id));
-      record.migrationProviderIds.push(...captured.migrationProviders.map((entry) => entry.id));
-      record.memoryEmbeddingProviderIds.push(
-        ...captured.memoryEmbeddingProviders.map((entry) => entry.id),
+      appendUniqueIds(
+        record.videoGenerationProviderIds,
+        captured.videoGenerationProviders.map((entry) => entry.id),
+      );
+      appendUniqueIds(
+        record.musicGenerationProviderIds,
+        captured.musicGenerationProviders.map((entry) => entry.id),
+      );
+      appendUniqueIds(
+        record.webFetchProviderIds,
+        captured.webFetchProviders.map((entry) => entry.id),
+      );
+      appendUniqueIds(
+        record.webSearchProviderIds,
+        captured.webSearchProviders.map((entry) => entry.id),
+      );
+      appendUniqueIds(
+        record.migrationProviderIds,
+        captured.migrationProviders.map((entry) => entry.id),
+      );
+      appendUniqueIds(
+        record.memoryEmbeddingProviderIds,
+        captured.memoryEmbeddingProviders.map((entry) => entry.id),
       );
       record.agentHarnessIds.push(...captured.agentHarnesses.map((entry) => entry.id));
       record.toolNames.push(...captured.tools.map((entry) => entry.name));
