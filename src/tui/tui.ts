@@ -11,7 +11,7 @@ import {
   ProcessTerminal,
   Text,
   TUI,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 import { resolveAgentIdByWorkspacePath, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { getRuntimeConfig, type OpenClawConfig } from "../config/config.js";
 import type { SessionsListParams } from "../gateway/protocol/index.js";
@@ -249,6 +249,23 @@ export function createStartupConversationSummaryListParams(agentId: string): Ses
   };
 }
 
+type StartupConversationSummarySession = {
+  key?: string;
+  derivedTitle?: string | null;
+  lastMessagePreview?: string | null;
+};
+
+export function selectStartupConversationSummarySession(
+  sessions: StartupConversationSummarySession[] | undefined,
+  currentSessionKey: string,
+): StartupConversationSummarySession | undefined {
+  const current = currentSessionKey.trim();
+  return (
+    sessions?.find((session) => current && session.key === current) ??
+    sessions?.find((session) => session.key !== current)
+  );
+}
+
 export function createBackspaceDeduper(params?: { dedupeWindowMs?: number; now?: () => number }) {
   const dedupeWindowMs = Math.max(0, Math.floor(params?.dedupeWindowMs ?? 8));
   const now = params?.now ?? (() => Date.now());
@@ -381,10 +398,14 @@ type DrainableTui = {
   };
 };
 
+const TUI_SHUTDOWN_DRAIN_MAX_MS = 500;
+const TUI_SHUTDOWN_DRAIN_IDLE_MS = 100;
+const TUI_SHUTDOWN_HARD_EXIT_MS = 2000;
+
 export async function drainAndStopTuiSafely(tui: DrainableTui): Promise<void> {
   if (typeof tui.terminal?.drainInput === "function") {
     try {
-      await tui.terminal.drainInput();
+      await tui.terminal.drainInput(TUI_SHUTDOWN_DRAIN_MAX_MS, TUI_SHUTDOWN_DRAIN_IDLE_MS);
     } catch {
       // Best-effort only. A failed drain should not skip terminal shutdown.
     }
@@ -393,6 +414,7 @@ export async function drainAndStopTuiSafely(tui: DrainableTui): Promise<void> {
 }
 
 type CtrlCAction = "clear" | "warn" | "exit";
+type TuiCtrlCAction = CtrlCAction | "force-exit";
 
 export function resolveCtrlCAction(params: {
   hasInput: boolean;
@@ -417,6 +439,23 @@ export function resolveCtrlCAction(params: {
     action: "warn",
     nextLastCtrlCAt: params.now,
   };
+}
+
+export function resolveTuiCtrlCAction(params: {
+  hasInput: boolean;
+  now: number;
+  lastCtrlCAt: number;
+  exitRequested?: boolean;
+  wasDisconnected?: boolean;
+  exitWindowMs?: number;
+}): { action: TuiCtrlCAction; nextLastCtrlCAt: number } {
+  if (params.exitRequested === true) {
+    return { action: "force-exit", nextLastCtrlCAt: params.lastCtrlCAt };
+  }
+  if (params.wasDisconnected === true) {
+    return { action: "exit", nextLastCtrlCAt: params.lastCtrlCAt };
+  }
+  return resolveCtrlCAction(params);
 }
 
 export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
@@ -1124,8 +1163,17 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
   });
 
   const deferredFinish = createDeferredTuiFinish();
+  const forceExit = () => {
+    try {
+      process.stderr.write("openclaw tui forcing exit\n");
+    } catch {
+      // Best effort only; force exit must not depend on stderr.
+    }
+    process.exit(130);
+  };
   const requestExit = (result?: Partial<TuiResult>) => {
     if (exitRequested) {
+      forceExit();
       return;
     }
     exitRequested = true;
@@ -1133,6 +1181,8 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
       exitReason: result?.exitReason ?? "exit",
       ...(result?.crestodianMessage ? { crestodianMessage: result.crestodianMessage } : {}),
     };
+    const hardExitTimer = setTimeout(forceExit, TUI_SHUTDOWN_HARD_EXIT_MS);
+    hardExitTimer.unref?.();
     client.stop();
     void drainAndStopTuiSafely(tui)
       .catch((err) => {
@@ -1145,6 +1195,7 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
         }
       })
       .finally(() => {
+        clearTimeout(hardExitTimer);
         deferredFinish.requestFinish();
       });
   };
@@ -1207,11 +1258,17 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
   };
   const handleCtrlC = () => {
     const now = Date.now();
-    const decision = resolveCtrlCAction({
+    const decision = resolveTuiCtrlCAction({
       hasInput: editor.getText().trim().length > 0,
       now,
       lastCtrlCAt,
+      exitRequested,
+      wasDisconnected,
     });
+    if (decision.action === "force-exit") {
+      forceExit();
+      return;
+    }
     lastCtrlCAt = decision.nextLastCtrlCAt;
     if (decision.action === "clear") {
       editor.setText("");
@@ -1298,10 +1355,13 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
           const sessionsRes = await client.listSessions(
             createStartupConversationSummaryListParams(currentAgentId),
           );
-          const activeNonCurrent = sessionsRes.sessions?.find((s) => s.key !== currentSessionKey);
-          if (activeNonCurrent) {
+          const summarySession = selectStartupConversationSummarySession(
+            sessionsRes.sessions,
+            currentSessionKey,
+          );
+          if (summarySession) {
             const summaryStr =
-              activeNonCurrent.derivedTitle || activeNonCurrent.lastMessagePreview || "";
+              summarySession.derivedTitle || summarySession.lastMessagePreview || "";
             const dynamicLines = formatStartupConversationSummary(summaryStr);
             if (dynamicLines.length > 0) {
               chatLog.addSystem("");
