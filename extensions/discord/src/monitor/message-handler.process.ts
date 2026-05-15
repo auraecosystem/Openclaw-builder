@@ -717,6 +717,7 @@ async function processDiscordMessageInner(
                   await draftPreview.pushToolProgress(
                     buildChannelProgressDraftLineForEntry(discordConfig, {
                       event: "item",
+                      itemId: payload.itemId,
                       itemKind: payload.kind,
                       title: payload.title,
                       name: payload.name,
