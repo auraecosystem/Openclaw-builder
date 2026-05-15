@@ -96,11 +96,13 @@ export type DetachedTaskDeliveryStatusParams = {
   runtime?: TaskRuntime;
   sessionKey?: string;
   deliveryStatus: TaskDeliveryStatus;
+  error?: string;
 };
 
 export type DetachedTaskCancelParams = {
   cfg: OpenClawConfig;
   taskId: string;
+  reason?: string;
 };
 
 export type DetachedTaskCancelResult = {

@@ -1,5 +1,11 @@
-import type { Api, Model } from "@mariozechner/pi-ai";
-import { describe, expect, it, vi } from "vitest";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  onInternalDiagnosticEvent,
+  resetDiagnosticEventsForTest,
+  type DiagnosticEventMetadata,
+  type DiagnosticEventPayload,
+} from "../../infra/diagnostic-events.js";
 import type { EmbeddedRunAttemptResult } from "../pi-embedded-runner/run/types.js";
 import type { AgentHarness, AgentHarnessAttemptParams } from "./types.js";
 import type { AgentHarnessV2 } from "./v2.js";
@@ -9,6 +15,7 @@ function createAttemptParams(): AgentHarnessAttemptParams {
   return {
     prompt: "hello",
     sessionId: "session-1",
+    sessionKey: "session-key",
     runId: "run-1",
     sessionFile: "/tmp/session.jsonl",
     workspaceDir: "/tmp/workspace",
@@ -17,9 +24,20 @@ function createAttemptParams(): AgentHarnessAttemptParams {
     modelId: "gpt-5.4",
     model: { id: "gpt-5.4", provider: "codex" } as Model<Api>,
     authStorage: {} as never,
+    authProfileStore: { version: 1, profiles: {} },
     modelRegistry: {} as never,
     thinkLevel: "low",
+    messageChannel: "qa",
+    trigger: "manual",
   } as AgentHarnessAttemptParams;
+}
+
+function createDiagnosticTrace() {
+  return {
+    traceId: "11111111111111111111111111111111",
+    spanId: "2222222222222222",
+    traceFlags: "01",
+  };
 }
 
 function createAttemptResult(): EmbeddedRunAttemptResult {
@@ -29,9 +47,11 @@ function createAttemptResult(): EmbeddedRunAttemptResult {
     timedOut: false,
     idleTimedOut: false,
     timedOutDuringCompaction: false,
+    timedOutDuringToolExecution: false,
     promptError: null,
     promptErrorSource: null,
     sessionIdUsed: "session-1",
+    diagnosticTrace: createDiagnosticTrace(),
     messagesSnapshot: [],
     assistantTexts: ["ok"],
     toolMetas: [],
@@ -46,7 +66,36 @@ function createAttemptResult(): EmbeddedRunAttemptResult {
   };
 }
 
+async function flushDiagnosticEvents(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+function captureDiagnosticEvents(): {
+  events: Array<{ event: DiagnosticEventPayload; metadata: DiagnosticEventMetadata }>;
+  unsubscribe: () => void;
+} {
+  const events: Array<{ event: DiagnosticEventPayload; metadata: DiagnosticEventMetadata }> = [];
+  const unsubscribe = onInternalDiagnosticEvent((event, metadata) => {
+    if (event.type.startsWith("harness.run.")) {
+      events.push({ event, metadata });
+    }
+  });
+  return { events, unsubscribe };
+}
+
+function mockCallArg(mock: { mock: { calls: unknown[][] } }, index = 0): unknown {
+  const call = mock.mock.calls[index];
+  if (!call) {
+    throw new Error(`Expected mock call at index ${index}`);
+  }
+  return call[0];
+}
+
 describe("AgentHarness V2 compatibility adapter", () => {
+  afterEach(() => {
+    resetDiagnosticEventsForTest();
+  });
+
   it("executes prepare/start/send/outcome/cleanup as one bounded lifecycle", async () => {
     const params = createAttemptParams();
     const result = createAttemptResult();
@@ -84,15 +133,14 @@ describe("AgentHarness V2 compatibility adapter", () => {
           throw new Error("expected started session during successful cleanup");
         }
         events.push(`cleanup:${session.lifecycleState}`);
-        expect(cleanupResult).toMatchObject({ agentHarnessId: "native-v2" });
+        expect((cleanupResult as { agentHarnessId?: string }).agentHarnessId).toBe("native-v2");
         expect(error).toBeUndefined();
       },
     };
 
-    await expect(runAgentHarnessV2LifecycleAttempt(harness, params)).resolves.toMatchObject({
-      agentHarnessId: "native-v2",
-      sessionIdUsed: "session-1",
-    });
+    const attemptResult = await runAgentHarnessV2LifecycleAttempt(harness, params);
+    expect((attemptResult as { agentHarnessId?: string }).agentHarnessId).toBe("native-v2");
+    expect(attemptResult.sessionIdUsed).toBe("session-1");
     expect(events).toEqual([
       "prepare",
       "start:prepared",
@@ -100,6 +148,118 @@ describe("AgentHarness V2 compatibility adapter", () => {
       "outcome:started",
       "cleanup:started",
     ]);
+  });
+
+  it("emits trusted harness lifecycle diagnostics for successful attempts", async () => {
+    resetDiagnosticEventsForTest();
+    const params = createAttemptParams();
+    const result = {
+      ...createAttemptResult(),
+      agentHarnessResultClassification: "reasoning-only",
+      yieldDetected: true,
+      itemLifecycle: { startedCount: 3, completedCount: 2, activeCount: 1 },
+    } as EmbeddedRunAttemptResult;
+    const harness: AgentHarnessV2 = {
+      id: "codex",
+      label: "Codex",
+      pluginId: "codex-plugin",
+      supports: () => ({ supported: true }),
+      prepare: async () => ({
+        harnessId: "codex",
+        label: "Codex",
+        pluginId: "codex-plugin",
+        params,
+        lifecycleState: "prepared",
+      }),
+      start: async (prepared) => ({ ...prepared, lifecycleState: "started" }),
+      send: async () => result,
+      resolveOutcome: async (_session, rawResult) => rawResult,
+      cleanup: async () => {},
+    };
+    const diagnostics = captureDiagnosticEvents();
+    try {
+      await runAgentHarnessV2LifecycleAttempt(harness, params);
+      await flushDiagnosticEvents();
+    } finally {
+      diagnostics.unsubscribe();
+    }
+
+    expect(diagnostics.events.map(({ event }) => event.type)).toEqual([
+      "harness.run.started",
+      "harness.run.completed",
+    ]);
+    expect(diagnostics.events.every(({ metadata }) => metadata.trusted)).toBe(true);
+    const completedEvent = diagnostics.events[1]?.event as
+      | (DiagnosticEventPayload & Record<string, unknown>)
+      | undefined;
+    expect(completedEvent?.type).toBe("harness.run.completed");
+    expect(completedEvent?.runId).toBe("run-1");
+    expect(completedEvent?.sessionKey).toBe("session-key");
+    expect(completedEvent?.sessionId).toBe("session-1");
+    expect(completedEvent?.provider).toBe("codex");
+    expect(completedEvent?.model).toBe("gpt-5.4");
+    expect(completedEvent?.channel).toBe("qa");
+    expect(completedEvent?.trigger).toBe("manual");
+    expect(completedEvent?.harnessId).toBe("codex");
+    expect(completedEvent?.pluginId).toBe("codex-plugin");
+    expect(completedEvent?.outcome).toBe("completed");
+    expect(completedEvent?.resultClassification).toBe("reasoning-only");
+    expect(completedEvent?.yieldDetected).toBe(true);
+    expect(completedEvent?.itemLifecycle).toEqual({
+      startedCount: 3,
+      completedCount: 2,
+      activeCount: 1,
+    });
+    expect(typeof completedEvent?.durationMs).toBe("number");
+  });
+
+  it("emits trusted harness error diagnostics with the failing lifecycle phase", async () => {
+    resetDiagnosticEventsForTest();
+    const params = createAttemptParams();
+    const sendError = new Error("codex app-server send failed");
+    const harness: AgentHarnessV2 = {
+      id: "codex",
+      label: "Codex",
+      supports: () => ({ supported: true }),
+      prepare: async () => ({
+        harnessId: "codex",
+        label: "Codex",
+        params,
+        lifecycleState: "prepared",
+      }),
+      start: async (prepared) => ({ ...prepared, lifecycleState: "started" }),
+      send: async () => {
+        throw sendError;
+      },
+      resolveOutcome: async (_session, rawResult) => rawResult,
+      cleanup: async () => {
+        throw new Error("cleanup failed");
+      },
+    };
+    const diagnostics = captureDiagnosticEvents();
+    try {
+      await expect(runAgentHarnessV2LifecycleAttempt(harness, params)).rejects.toThrow(
+        "codex app-server send failed",
+      );
+      await flushDiagnosticEvents();
+    } finally {
+      diagnostics.unsubscribe();
+    }
+
+    expect(diagnostics.events.map(({ event }) => event.type)).toEqual([
+      "harness.run.started",
+      "harness.run.error",
+    ]);
+    expect(diagnostics.events.every(({ metadata }) => metadata.trusted)).toBe(true);
+    const errorEvent = diagnostics.events[1]?.event as
+      | (DiagnosticEventPayload & Record<string, unknown>)
+      | undefined;
+    expect(errorEvent?.type).toBe("harness.run.error");
+    expect(errorEvent?.phase).toBe("send");
+    expect(errorEvent?.errorCategory).toBe("Error");
+    expect(errorEvent?.cleanupFailed).toBe(true);
+    expect(errorEvent?.harnessId).toBe("codex");
+    expect(typeof errorEvent?.durationMs).toBe("number");
   });
 
   it("runs cleanup with the original failure and preserves that failure", async () => {
@@ -129,13 +289,14 @@ describe("AgentHarness V2 compatibility adapter", () => {
     await expect(runAgentHarnessV2LifecycleAttempt(harness, params)).rejects.toThrow(
       "codex app-server send failed",
     );
-    expect(cleanup).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error: sendError,
-        prepared: expect.objectContaining({ lifecycleState: "prepared" }),
-        session: expect.objectContaining({ lifecycleState: "started" }),
-      }),
-    );
+    const cleanupInput = mockCallArg(cleanup) as {
+      error?: unknown;
+      prepared?: { lifecycleState?: string };
+      session?: { lifecycleState?: string };
+    };
+    expect(cleanupInput.error).toBe(sendError);
+    expect(cleanupInput.prepared?.lifecycleState).toBe("prepared");
+    expect(cleanupInput.session?.lifecycleState).toBe("started");
   });
 
   it("runs cleanup for failed prepare/start lifecycle stages", async () => {
@@ -163,11 +324,14 @@ describe("AgentHarness V2 compatibility adapter", () => {
     await expect(runAgentHarnessV2LifecycleAttempt(harness, params)).rejects.toThrow(
       "codex app-server start failed",
     );
-    expect(cleanup).toHaveBeenCalledWith({
-      error: startError,
-      prepared: expect.objectContaining({ lifecycleState: "prepared" }),
-      session: undefined,
-    });
+    const cleanupInput = mockCallArg(cleanup) as {
+      error?: unknown;
+      prepared?: { lifecycleState?: string };
+      session?: unknown;
+    };
+    expect(cleanupInput.error).toBe(startError);
+    expect(cleanupInput.prepared?.lifecycleState).toBe("prepared");
+    expect(cleanupInput.session).toBeUndefined();
   });
 
   it("passes raw send results to cleanup when outcome resolution fails", async () => {
@@ -196,14 +360,16 @@ describe("AgentHarness V2 compatibility adapter", () => {
     await expect(runAgentHarnessV2LifecycleAttempt(harness, params)).rejects.toThrow(
       "outcome classification failed",
     );
-    expect(cleanup).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error: outcomeError,
-        result: rawResult,
-        prepared: expect.objectContaining({ lifecycleState: "prepared" }),
-        session: expect.objectContaining({ lifecycleState: "started" }),
-      }),
-    );
+    const cleanupInput = mockCallArg(cleanup) as {
+      error?: unknown;
+      result?: unknown;
+      prepared?: { lifecycleState?: string };
+      session?: { lifecycleState?: string };
+    };
+    expect(cleanupInput.error).toBe(outcomeError);
+    expect(cleanupInput.result).toBe(rawResult);
+    expect(cleanupInput.prepared?.lifecycleState).toBe("prepared");
+    expect(cleanupInput.session?.lifecycleState).toBe("started");
   });
 
   it("surfaces cleanup failures after successful outcomes", async () => {
@@ -250,13 +416,11 @@ describe("AgentHarness V2 compatibility adapter", () => {
     expect(v2.resume).toBeUndefined();
     expect(await v2.send(session)).toBe(result);
     expect(runAttempt).toHaveBeenCalledWith(params);
-    expect(session).toMatchObject({
-      harnessId: "codex",
-      label: "Codex",
-      pluginId: "codex-plugin",
-      params,
-      lifecycleState: "started",
-    });
+    expect(session.harnessId).toBe("codex");
+    expect(session.label).toBe("Codex");
+    expect(session.pluginId).toBe("codex-plugin");
+    expect(session.params).toBe(params);
+    expect(session.lifecycleState).toBe("started");
     expect(prepared.lifecycleState).toBe("prepared");
   });
 
@@ -275,10 +439,9 @@ describe("AgentHarness V2 compatibility adapter", () => {
     const v2 = adaptAgentHarnessToV2(harness);
     const session = await v2.start(await v2.prepare(params));
 
-    expect(await v2.resolveOutcome(session, result)).toMatchObject({
-      agentHarnessId: "codex",
-      agentHarnessResultClassification: "empty",
-    });
+    const outcome = await v2.resolveOutcome(session, result);
+    expect(outcome.agentHarnessId).toBe("codex");
+    expect(outcome.agentHarnessResultClassification).toBe("empty");
     expect(harness.classify).toHaveBeenCalledWith(result, params);
   });
 
@@ -298,10 +461,9 @@ describe("AgentHarness V2 compatibility adapter", () => {
     const v2 = adaptAgentHarnessToV2(harness);
     const session = await v2.start(await v2.prepare(params));
 
-    expect(await v2.resolveOutcome(session, result)).toMatchObject({
-      agentHarnessId: "codex",
-      agentHarnessResultClassification: "reasoning-only",
-    });
+    const outcome = await v2.resolveOutcome(session, result);
+    expect(outcome.agentHarnessId).toBe("codex");
+    expect(outcome.agentHarnessResultClassification).toBe("reasoning-only");
   });
 
   it("clears stale non-ok classification when classification resolves to ok", async () => {
@@ -323,7 +485,7 @@ describe("AgentHarness V2 compatibility adapter", () => {
     const session = await v2.start(await v2.prepare(params));
 
     const classified = await v2.resolveOutcome(session, result);
-    expect(classified).toMatchObject({ agentHarnessId: "codex" });
+    expect(classified.agentHarnessId).toBe("codex");
     expect(classified).not.toHaveProperty("agentHarnessResultClassification");
   });
 
@@ -369,9 +531,7 @@ describe("AgentHarness V2 compatibility adapter", () => {
         sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp/workspace",
       }),
-    ).resolves.toMatchObject({
-      compacted: true,
-    });
+    ).resolves.toHaveProperty("compacted", true);
     await v2.reset?.({ reason: "reset" });
     await v2.dispose?.();
 

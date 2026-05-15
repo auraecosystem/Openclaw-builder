@@ -6,16 +6,19 @@ import type {
   TtsDirectiveOverrides,
   TtsDirectiveParseResult,
 } from "../tts/provider-types.js";
+import type { TtsConfigResolutionContext } from "../tts/tts-config.js";
 import type { ResolvedTtsConfig, ResolvedTtsModelOverrides } from "../tts/tts-types.js";
 import type { ReplyPayload } from "./reply-payload.js";
 
 export type { ResolvedTtsConfig, ResolvedTtsModelOverrides };
+export type { TtsConfigResolutionContext };
 export type { TtsDirectiveOverrides, TtsDirectiveParseResult };
 
 export type TtsAttemptReasonCode =
   | "success"
   | "no_provider_registered"
   | "not_configured"
+  | "unsupported_for_streaming"
   | "unsupported_for_telephony"
   | "timeout"
   | "provider_error";
@@ -66,6 +69,8 @@ export type ResolveExplicitTtsOverridesParams = {
   modelId?: string;
   voiceId?: string;
   agentId?: string;
+  channelId?: string;
+  accountId?: string;
 };
 
 export type TtsRequestParams = {
@@ -77,12 +82,14 @@ export type TtsRequestParams = {
   disableFallback?: boolean;
   timeoutMs?: number;
   agentId?: string;
+  accountId?: string;
 };
 
 export type TtsTelephonyRequestParams = {
   text: string;
   cfg: OpenClawConfig;
   prefsPath?: string;
+  overrides?: TtsDirectiveOverrides;
 };
 
 export type ListSpeechVoicesParams = {
@@ -101,6 +108,7 @@ export type MaybeApplyTtsToPayloadParams = {
   inboundAudio?: boolean;
   ttsAuto?: string;
   agentId?: string;
+  accountId?: string;
 };
 
 export type TtsTestFacade = {
@@ -112,6 +120,8 @@ export type TtsTestFacade = {
     channel: string | undefined;
     target: TtsSpeechTarget | undefined;
     voiceCompatible: boolean | undefined;
+    fileExtension?: string;
+    outputFormat?: string;
   }) => boolean;
   summarizeText: (...args: unknown[]) => Promise<SummarizeResult>;
   getResolvedSpeechProviderConfig: (
@@ -145,6 +155,8 @@ export type TtsSynthesisResult = {
   error?: string;
   latencyMs?: number;
   provider?: string;
+  providerModel?: string;
+  providerVoice?: string;
   persona?: string;
   fallbackFrom?: string;
   attemptedProviders?: string[];
@@ -155,12 +167,33 @@ export type TtsSynthesisResult = {
   target?: TtsSpeechTarget;
 };
 
+export type TtsStreamResult = {
+  success: boolean;
+  audioStream?: ReadableStream<Uint8Array>;
+  error?: string;
+  latencyMs?: number;
+  provider?: string;
+  persona?: string;
+  fallbackFrom?: string;
+  attemptedProviders?: string[];
+  attempts?: TtsProviderAttempt[];
+  outputFormat?: string;
+  voiceCompatible?: boolean;
+  fileExtension?: string;
+  target?: TtsSpeechTarget;
+  release?: () => Promise<void>;
+};
+
+export type TtsSynthesisStreamResult = TtsStreamResult;
+
 export type TtsTelephonyResult = {
   success: boolean;
   audioBuffer?: Buffer;
   error?: string;
   latencyMs?: number;
   provider?: string;
+  providerModel?: string;
+  providerVoice?: string;
   persona?: string;
   fallbackFrom?: string;
   attemptedProviders?: string[];
@@ -170,6 +203,7 @@ export type TtsTelephonyResult = {
 };
 
 export type TextToSpeech = (params: TtsRequestParams) => Promise<TtsResult>;
+export type TextToSpeechStream = (params: TtsRequestParams) => Promise<TtsStreamResult>;
 export type TextToSpeechTelephony = (
   params: TtsTelephonyRequestParams,
 ) => Promise<TtsTelephonyResult>;
@@ -199,7 +233,10 @@ export type TtsRuntimeFacade = {
   maybeApplyTtsToPayload: (params: MaybeApplyTtsToPayloadParams) => Promise<ReplyPayload>;
   resolveExplicitTtsOverrides: (params: ResolveExplicitTtsOverridesParams) => TtsDirectiveOverrides;
   resolveTtsAutoMode: (params: ResolveTtsAutoModeParams) => TtsAutoMode;
-  resolveTtsConfig: (cfg: OpenClawConfig, agentId?: string) => ResolvedTtsConfig;
+  resolveTtsConfig: (
+    cfg: OpenClawConfig,
+    contextOrAgentId?: string | TtsConfigResolutionContext,
+  ) => ResolvedTtsConfig;
   resolveTtsPrefsPath: (config: ResolvedTtsConfig) => string;
   resolveTtsProviderOrder: (primary: TtsProvider, cfg?: OpenClawConfig) => TtsProvider[];
   setLastTtsAttempt: (entry: TtsStatusEntry | undefined) => void;
@@ -210,6 +247,8 @@ export type TtsRuntimeFacade = {
   setTtsPersona: (prefsPath: string, persona: string | null | undefined) => void;
   setTtsProvider: (prefsPath: string, provider: TtsProvider) => void;
   synthesizeSpeech: (params: TtsRequestParams) => Promise<TtsSynthesisResult>;
+  streamSpeech: (params: TtsRequestParams) => Promise<TtsSynthesisStreamResult>;
   textToSpeech: TextToSpeech;
+  textToSpeechStream: TextToSpeechStream;
   textToSpeechTelephony: TextToSpeechTelephony;
 };

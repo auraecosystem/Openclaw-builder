@@ -1,14 +1,14 @@
-import fs from "node:fs";
 import path from "node:path";
 import type { OpenClawConfig } from "../config/types.js";
 import type { TtsAutoMode, TtsConfig, TtsProvider } from "../config/types.tts.js";
+import { tryReadJsonSync } from "../infra/json-files.js";
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
 } from "../shared/string-coerce.js";
 import { resolveConfigDir, resolveUserPath } from "../utils.js";
 import { normalizeTtsAutoMode } from "./tts-auto-mode.js";
-import { resolveEffectiveTtsConfig } from "./tts-config.js";
+import { resolveEffectiveTtsConfig, type TtsConfigResolutionContext } from "./tts-config.js";
 
 const DEFAULT_TTS_MAX_LENGTH = 1500;
 const DEFAULT_TTS_SUMMARIZE = true;
@@ -87,14 +87,7 @@ function resolveTtsPrefsPathValue(prefsPath: string | undefined): string {
 }
 
 function readPrefs(prefsPath: string): TtsUserPrefs {
-  try {
-    if (!fs.existsSync(prefsPath)) {
-      return {};
-    }
-    return JSON.parse(fs.readFileSync(prefsPath, "utf8")) as TtsUserPrefs;
-  } catch {
-    return {};
-  }
+  return tryReadJsonSync<TtsUserPrefs>(prefsPath) ?? {};
 }
 
 function resolveTtsAutoModeFromPrefs(prefs: TtsUserPrefs): TtsAutoMode | undefined {
@@ -222,8 +215,15 @@ export function resolveStatusTtsSnapshot(params: {
   cfg: OpenClawConfig;
   sessionAuto?: string;
   agentId?: string;
+  channelId?: string;
+  accountId?: string;
 }): TtsStatusSnapshot | null {
-  const raw: TtsConfig = resolveEffectiveTtsConfig(params.cfg, params.agentId);
+  const context: TtsConfigResolutionContext = {
+    agentId: params.agentId,
+    channelId: params.channelId,
+    accountId: params.accountId,
+  };
+  const raw: TtsConfig = resolveEffectiveTtsConfig(params.cfg, context);
   const prefsPath = resolveTtsPrefsPathValue(raw.prefsPath);
   const prefs = readPrefs(prefsPath);
   const autoMode =

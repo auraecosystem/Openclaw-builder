@@ -1,15 +1,17 @@
 import { resolveChannelDefaultAccountId } from "../../channels/plugins/helpers.js";
-import { listChannelPlugins } from "../../channels/plugins/index.js";
 import {
   createMessageActionDiscoveryContext,
   resolveMessageActionDiscoveryForPlugin,
 } from "../../channels/plugins/message-action-discovery.js";
+import { listReadOnlyChannelPluginsForConfig } from "../../channels/plugins/read-only.js";
 import type {
   ChannelCapabilities,
   ChannelCapabilitiesDiagnostics,
   ChannelCapabilitiesDisplayLine,
   ChannelPlugin,
 } from "../../channels/plugins/types.public.js";
+import { formatCliCommand } from "../../cli/command-format.js";
+import { formatUnknownChannelMessage } from "../../cli/error-format.js";
 import { commitConfigWithPendingPluginInstalls } from "../../cli/plugins-install-record-commit.js";
 import { refreshPluginRegistryAfterConfigMutation } from "../../cli/plugins-registry-refresh.js";
 import {
@@ -229,17 +231,27 @@ export async function channelsCapabilitiesCommand(
   const rawTarget = normalizeOptionalString(opts.target) ?? "";
 
   if (opts.account && (!rawChannel || rawChannel === "all")) {
-    runtime.error(danger("--account requires a specific --channel."));
+    runtime.error(
+      danger(
+        `--account requires a specific --channel. Run ${formatCliCommand("openclaw channels list")} to choose one.`,
+      ),
+    );
     runtime.exit(1);
     return;
   }
   if (rawTarget && (!rawChannel || rawChannel === "all")) {
-    runtime.error(danger("--target requires a specific --channel."));
+    runtime.error(
+      danger(
+        `--target requires a specific --channel. Run ${formatCliCommand("openclaw channels list")} to choose one.`,
+      ),
+    );
     runtime.exit(1);
     return;
   }
 
-  const plugins = listChannelPlugins();
+  const plugins = listReadOnlyChannelPluginsForConfig(cfg, {
+    includeSetupFallbackPlugins: true,
+  });
   const selected =
     !rawChannel || rawChannel === "all"
       ? plugins
@@ -285,7 +297,7 @@ export async function channelsCapabilitiesCommand(
         })();
 
   if (!selected || selected.length === 0) {
-    runtime.error(danger(`Unknown channel "${rawChannel}".`));
+    runtime.error(danger(formatUnknownChannelMessage({ channel: rawChannel })));
     runtime.exit(1);
     return;
   }
@@ -315,6 +327,7 @@ export async function channelsCapabilitiesCommand(
       channel: report.channel,
       accountId: report.accountId,
       name: report.accountName,
+      channelLabel: report.plugin.meta.label ?? report.channel,
       channelStyle: theme.accent,
       accountStyle: theme.heading,
     });
