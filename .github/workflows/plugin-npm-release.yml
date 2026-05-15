@@ -299,13 +299,17 @@ jobs:
             exit 1
           fi
 
-      - name: Publish with npm trusted publishing
+      - name: Publish package with npm trusted publishing
         env:
           OPENCLAW_NPM_PUBLISH_AUTH_MODE: trusted-publisher
-          # Keep the long-lived token only for stable-release dist-tag mirroring;
-          # package publish itself must use GitHub OIDC trusted publishing.
+        run: bash scripts/plugin-npm-publish.sh --publish-package "${{ matrix.plugin.packageDir }}"
+
+      - name: Mirror stable-release npm dist-tags
+        env:
+          # Long-lived npm auth is isolated to dist-tag mirroring and is not
+          # present while the trusted-publishing package publish subprocess runs.
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: bash scripts/plugin-npm-publish.sh --publish "${{ matrix.plugin.packageDir }}"
+        run: bash scripts/plugin-npm-publish.sh --mirror-dist-tags "${{ matrix.plugin.packageDir }}"
 
       - name: Verify published runtime
         env:
