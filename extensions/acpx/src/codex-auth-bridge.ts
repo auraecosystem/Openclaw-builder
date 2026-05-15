@@ -23,6 +23,7 @@ const CLAUDE_ACP_BIN = "claude-agent-acp";
 const GEMINI_ACP_BIN = "gemini";
 const GEMINI_ACP_ARGS = ["--acp"];
 const RUN_CONFIGURED_COMMAND_SENTINEL = "--openclaw-run-configured";
+const OPENCLAW_ACPX_PRESERVE_GEMINI_AUTH_ENV = "OPENCLAW_ACPX_PRESERVE_GEMINI_AUTH_ENV";
 const requireFromHere = createRequire(import.meta.url);
 
 type PackageManifest = {
@@ -34,6 +35,7 @@ type PackageManifest = {
 type BuiltInAcpHarnessMetadata = {
   displayName: string;
   stripEnvVars?: string[];
+  preserveStrippedEnvVarsFlag?: string;
 };
 
 const BUILT_IN_ACP_HARNESS_METADATA = {
@@ -49,6 +51,7 @@ const BUILT_IN_ACP_HARNESS_METADATA = {
       "GOOGLE_GENAI_USE_GCA",
       "GOOGLE_GENAI_USE_VERTEXAI",
     ],
+    preserveStrippedEnvVarsFlag: OPENCLAW_ACPX_PRESERVE_GEMINI_AUTH_ENV,
   },
 } satisfies Record<string, BuiltInAcpHarnessMetadata>;
 
@@ -302,6 +305,7 @@ function buildAdapterWrapperScript(params: {
   envSetup: string;
   stderrLogFileNamePrefix?: string;
   stripEnvVars?: string[];
+  preserveStrippedEnvVarsFlag?: string;
 }): string {
   return `#!/usr/bin/env node
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -312,11 +316,24 @@ import { fileURLToPath } from "node:url";
 const providerEnvVarsToStrip = new Set([
   ${(params.stripEnvVars ?? []).map(quoteCommandPart).join(",\n  ")}
 ]);
+const preserveStrippedEnvVarsFlag = ${params.preserveStrippedEnvVarsFlag ? quoteCommandPart(params.preserveStrippedEnvVarsFlag) : "undefined"};
+
+function isTruthyEnvFlag(value) {
+  return /^(?:1|true|yes|on)$/i.test(String(value ?? "").trim());
+}
 
 function createChildEnv(sourceEnv) {
   const childEnv = { ...sourceEnv };
-  for (const name of providerEnvVarsToStrip) {
-    delete childEnv[name];
+  const preserveStrippedEnvVars = preserveStrippedEnvVarsFlag
+    ? isTruthyEnvFlag(sourceEnv[preserveStrippedEnvVarsFlag])
+    : false;
+  if (preserveStrippedEnvVarsFlag) {
+    delete childEnv[preserveStrippedEnvVarsFlag];
+  }
+  if (!preserveStrippedEnvVars) {
+    for (const name of providerEnvVarsToStrip) {
+      delete childEnv[name];
+    }
   }
   return childEnv;
 }
@@ -646,6 +663,7 @@ function buildGeminiAcpWrapperScript(): string {
     defaultArgs: GEMINI_ACP_ARGS,
     envSetup: `const env = createChildEnv(process.env);`,
     stripEnvVars: BUILT_IN_ACP_HARNESS_METADATA.gemini.stripEnvVars,
+    preserveStrippedEnvVarsFlag: BUILT_IN_ACP_HARNESS_METADATA.gemini.preserveStrippedEnvVarsFlag,
   });
 }
 
