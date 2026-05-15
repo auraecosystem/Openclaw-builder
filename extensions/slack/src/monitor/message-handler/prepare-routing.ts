@@ -12,6 +12,7 @@ import type { ResolvedSlackAccount } from "../../accounts.js";
 import { parseSlackTarget, type SlackTargetKind } from "../../targets.js";
 import { resolveSlackThreadContext } from "../../threading.js";
 import type { SlackMessageEvent } from "../../types.js";
+import type { SlackChannelConfigResolved } from "../channel-config.js";
 
 export type SlackRoutingContextDeps = {
   cfg: OpenClawConfig;
@@ -155,6 +156,7 @@ export function resolveSlackRoutingContext(params: {
   isGroupDm: boolean;
   isRoom: boolean;
   isRoomish: boolean;
+  channelConfig?: SlackChannelConfigResolved | null;
   seedTopLevelRoomThread?: boolean;
 }): SlackRoutingContext {
   const {
@@ -165,6 +167,7 @@ export function resolveSlackRoutingContext(params: {
     isGroupDm,
     isRoom,
     isRoomish,
+    channelConfig,
     seedTopLevelRoomThread,
   } = params;
   let route = resolveSlackInitialAgentRoute({
@@ -176,7 +179,7 @@ export function resolveSlackRoutingContext(params: {
   });
 
   const chatType = isDirectMessage ? "direct" : isGroupDm ? "group" : "channel";
-  const replyToMode = resolveSlackReplyToMode(account, chatType);
+  const replyToMode = channelConfig?.replyToMode ?? resolveSlackReplyToMode(account, chatType);
   const threadContext = resolveSlackThreadContext({ message, replyToMode });
   const threadTs = threadContext.incomingThreadTs;
   const isThreadReply = threadContext.isThreadReply;
