@@ -8,10 +8,10 @@ import { parseBooleanValue } from "../utils/boolean.js";
 import { safeJsonStringify } from "../utils/safe-json.js";
 import {
   TRAJECTORY_RUNTIME_CAPTURE_MAX_BYTES,
-  TRAJECTORY_RUNTIME_EVENT_MAX_BYTES,
   resolveTrajectoryFilePath,
   resolveTrajectoryPointerFilePath,
   resolveTrajectoryPointerOpenFlags,
+  resolveTrajectoryRuntimeEventMaxBytes,
 } from "./paths.js";
 import type { TrajectoryEvent, TrajectoryToolDefinition } from "./types.js";
 
@@ -22,6 +22,7 @@ export {
   resolveTrajectoryFilePath,
   resolveTrajectoryPointerFilePath,
   resolveTrajectoryPointerOpenFlags,
+  resolveTrajectoryRuntimeEventMaxBytes,
   safeTrajectorySessionFileName,
 } from "./paths.js";
 
@@ -117,8 +118,9 @@ function truncateOversizedTrajectoryEvent(
   event: TrajectoryEvent,
   line: string,
 ): string | undefined {
+  const limitBytes = resolveTrajectoryRuntimeEventMaxBytes();
   const bytes = Buffer.byteLength(line, "utf8");
-  if (bytes <= TRAJECTORY_RUNTIME_EVENT_MAX_BYTES) {
+  if (bytes <= limitBytes) {
     return line;
   }
   const truncated = safeJsonStringify({
@@ -126,11 +128,11 @@ function truncateOversizedTrajectoryEvent(
     data: {
       truncated: true,
       originalBytes: bytes,
-      limitBytes: TRAJECTORY_RUNTIME_EVENT_MAX_BYTES,
+      limitBytes,
       reason: "trajectory-event-size-limit",
     },
   });
-  if (truncated && Buffer.byteLength(truncated, "utf8") <= TRAJECTORY_RUNTIME_EVENT_MAX_BYTES) {
+  if (truncated && Buffer.byteLength(truncated, "utf8") <= limitBytes) {
     return truncated;
   }
   return undefined;
