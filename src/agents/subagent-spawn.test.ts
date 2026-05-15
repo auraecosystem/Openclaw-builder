@@ -199,6 +199,7 @@ describe("spawnSubagentDirect seam flow", () => {
       {
         task: "inspect the spawn seam",
         model: "openai-codex/gpt-5.4",
+        fastMode: false,
       },
       {
         agentSessionKey: "agent:main:main",
@@ -249,6 +250,7 @@ describe("spawnSubagentDirect seam flow", () => {
       model: "gpt-5.4",
       overrideSource: "user",
     });
+    expect(persistedStore?.[childSessionKey]?.fastMode).toBe(false);
     expect(operations.indexOf("store:update")).toBeGreaterThan(-1);
     expect(operations.indexOf("gateway:agent")).toBeGreaterThan(
       operations.lastIndexOf("store:update"),

@@ -143,6 +143,7 @@ session to confirm the effective tool list.
 
 - **Model:** inherits the caller unless you set `agents.defaults.subagents.model` (or per-agent `agents.list[].subagents.model`); an explicit `sessions_spawn.model` still wins.
 - **Thinking:** inherits the caller unless you set `agents.defaults.subagents.thinking` (or per-agent `agents.list[].subagents.thinking`); an explicit `sessions_spawn.thinking` still wins.
+- **Fast mode:** follows the child session's normal fast-mode resolution unless `sessions_spawn.fastMode` is set. Use `false` to keep one child on standard processing even when the target agent or model defaults enable fast mode.
 - **Run timeout:** if `sessions_spawn.runTimeoutSeconds` is omitted, OpenClaw uses `agents.defaults.subagents.runTimeoutSeconds` when set; otherwise it falls back to `0` (no timeout).
 - **Task delivery:** native sub-agents receive the delegated task in their first visible `[Subagent Task]` message. The sub-agent system prompt carries runtime rules and routing context, not a hidden duplicate of the task.
 
@@ -202,6 +203,9 @@ Per-agent overrides use `agents.list[].subagents.delegationMode`.
 </ParamField>
 <ParamField path="thinking" type="string">
   Override thinking level for the sub-agent run.
+</ParamField>
+<ParamField path="fastMode" type="boolean">
+  Optional fast-mode override for the child session. Set `false` to force standard processing for this spawn; omit to inherit the target agent and model defaults.
 </ParamField>
 <ParamField path="runTimeoutSeconds" type="number">
   Defaults to `agents.defaults.subagents.runTimeoutSeconds` when set, otherwise `0`. When set, the sub-agent run is aborted after N seconds.

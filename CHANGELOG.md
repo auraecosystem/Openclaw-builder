@@ -6,6 +6,7 @@ Docs: https://docs.openclaw.ai
 
 ### Changes
 
+- Agents/subagents: add `sessions_spawn.fastMode` so native subagent and ACP child sessions can opt a single spawn in or out of provider fast mode without changing agent or model defaults.
 - Agents/skills: cache hydrated `resolvedSkills` across warm gateway turns while keying reuse by the redacted effective config, reducing redundant skill snapshot rebuilds without crossing config-gated skill boundaries. (#81451) Thanks @solodmd.
 
 ### Fixes

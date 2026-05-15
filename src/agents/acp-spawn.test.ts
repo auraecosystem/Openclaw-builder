@@ -763,6 +763,7 @@ describe("spawnAcpDirect", () => {
         agentId: "codex",
         mode: "session",
         thread: true,
+        fastMode: false,
       },
       {
         agentSessionKey: "agent:main:main",
@@ -781,6 +782,7 @@ describe("spawnAcpDirect", () => {
     expectSessionPatchFields({
       key: accepted.childSessionKey,
       spawnedBy: "agent:main:main",
+      fastMode: false,
     });
     expectBindingCallFields({
       targetKind: "session",
