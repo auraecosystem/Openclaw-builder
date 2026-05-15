@@ -7,6 +7,7 @@ Docs: https://docs.openclaw.ai
 ### Changes
 
 - Agents/skills: cache hydrated `resolvedSkills` across warm gateway turns while keying reuse by the redacted effective config, reducing redundant skill snapshot rebuilds without crossing config-gated skill boundaries. (#81451) Thanks @solodmd.
+- Media: allow host-read local attachment sends for validated TXT, JSON, YAML, and YML documents while keeping full-buffer text validation and binary-disguise rejection.
 
 ### Fixes
 
