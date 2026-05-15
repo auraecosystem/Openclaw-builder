@@ -288,6 +288,10 @@ export type PluginManifestConfigContracts = {
   secretInputs?: PluginManifestSecretInputContracts;
 };
 
+export type PluginManifestPermissions = {
+  conversationAccess?: true;
+};
+
 export type PluginManifest = {
   id: string;
   configSchema: JsonSchemaObject;
@@ -391,6 +395,7 @@ export type PluginManifest = {
   /** Manifest-owned config behavior consumed by generic core helpers. */
   configContracts?: PluginManifestConfigContracts;
   channelConfigs?: Record<string, PluginManifestChannelConfig>;
+  permissions?: PluginManifestPermissions;
 };
 
 export type PluginManifestContracts = {
@@ -915,6 +920,13 @@ function normalizeManifestConfigContracts(
     ...(secretInputs ? { secretInputs } : {}),
   } satisfies PluginManifestConfigContracts;
   return Object.keys(configContracts).length > 0 ? configContracts : undefined;
+}
+
+function normalizeManifestPermissions(value: unknown): PluginManifestPermissions | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return value.conversationAccess === true ? { conversationAccess: true } : undefined;
 }
 
 function normalizeManifestModelSupport(value: unknown): PluginManifestModelSupport | undefined {
@@ -1642,6 +1654,7 @@ export function loadPluginManifest(
   const toolMetadata = normalizePluginToolMetadata(raw.toolMetadata);
   const configContracts = normalizeManifestConfigContracts(raw.configContracts);
   const channelConfigs = normalizeChannelConfigs(raw.channelConfigs);
+  const permissions = normalizeManifestPermissions(raw.permissions);
 
   let uiHints: Record<string, PluginConfigUiHint> | undefined;
   if (isRecord(raw.uiHints)) {
@@ -1694,6 +1707,7 @@ export function loadPluginManifest(
       toolMetadata,
       configContracts,
       channelConfigs,
+      permissions,
     },
     manifestPath,
   });

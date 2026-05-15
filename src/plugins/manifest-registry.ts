@@ -169,6 +169,7 @@ export type PluginManifestRecord = {
   toolMetadata?: Record<string, PluginManifestToolMetadata>;
   configContracts?: PluginManifestConfigContracts;
   channelConfigs?: Record<string, PluginManifestChannelConfig>;
+  permissions?: PluginManifest["permissions"];
   channelCatalogMeta?: {
     id: string;
     label?: string;
@@ -471,6 +472,7 @@ function buildRecord(params: {
     toolMetadata: params.manifest.toolMetadata,
     configContracts: params.manifest.configContracts,
     channelConfigs,
+    permissions: params.manifest.permissions,
     ...(params.candidate.packageManifest?.channel?.id
       ? {
           channelCatalogMeta: {
@@ -653,6 +655,8 @@ function matchesInstalledPluginRecord(params: {
   }
   const resolvedCandidateSource = resolveUserPath(params.candidate.source, params.env);
   const candidateSource = safeRealpathSync(resolvedCandidateSource) ?? resolvedCandidateSource;
+  const resolvedCandidateRoot = resolveUserPath(params.candidate.rootDir, params.env);
+  const candidateRoot = safeRealpathSync(resolvedCandidateRoot) ?? resolvedCandidateRoot;
   const trackedPaths = [record.installPath, record.sourcePath]
     .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
     .map((entry) => {
@@ -663,7 +667,12 @@ function matchesInstalledPluginRecord(params: {
     return false;
   }
   return trackedPaths.some((trackedPath) => {
-    return candidateSource === trackedPath || isPathInside(trackedPath, candidateSource);
+    return (
+      candidateSource === trackedPath ||
+      isPathInside(trackedPath, candidateSource) ||
+      candidateRoot === trackedPath ||
+      isPathInside(trackedPath, candidateRoot)
+    );
   });
 }
 
