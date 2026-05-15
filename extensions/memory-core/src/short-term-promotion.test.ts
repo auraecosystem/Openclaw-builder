@@ -2261,6 +2261,79 @@ describe("short-term promotion", () => {
       });
     });
 
+    it("preserves unmarked root promotion sections when writing the archive pointer", async () => {
+      await withTempWorkspace(async (workspaceDir) => {
+        await writeDailyMemoryNote(workspaceDir, "2026-04-29", [
+          "Notes",
+          "",
+          "Pin the support tunnel timeout at 45 seconds.",
+        ]);
+
+        const memoryPath = path.join(workspaceDir, "MEMORY.md");
+        await fs.writeFile(
+          memoryPath,
+          [
+            "# Long-Term Memory",
+            "",
+            "## Promoted From Short-Term Memory (2026-03-31)",
+            "",
+            "- Legacy manual promotion without a machine marker must stay in MEMORY.md.",
+            "",
+          ].join("\n"),
+          "utf-8",
+        );
+
+        await recordShortTermRecalls({
+          workspaceDir,
+          query: "support tunnel timeout",
+          nowMs: Date.parse("2026-04-29T10:00:00.000Z"),
+          results: [
+            {
+              path: "memory/2026-04-29.md",
+              startLine: 3,
+              endLine: 3,
+              score: 0.94,
+              snippet: "Pin the support tunnel timeout at 45 seconds.",
+              source: "memory",
+            },
+          ],
+        });
+
+        const ranked = await rankShortTermPromotionCandidates({
+          workspaceDir,
+          minScore: 0,
+          minRecallCount: 0,
+          minUniqueQueries: 0,
+        });
+
+        const applied = await applyShortTermPromotions({
+          workspaceDir,
+          candidates: ranked,
+          minScore: 0,
+          minRecallCount: 0,
+          minUniqueQueries: 0,
+          nowMs: Date.parse("2026-04-29T10:00:00.000Z"),
+          memoryFileMaxChars: 10_000,
+        });
+
+        expect(applied.applied).toBe(1);
+        expect(applied.compactedSections).toBe(0);
+
+        const memoryText = await fs.readFile(memoryPath, "utf-8");
+        expect(memoryText).toContain("Latest promotion archive:");
+        expect(memoryText).toContain("## Promoted From Short-Term Memory (2026-03-31)");
+        expect(memoryText).toContain(
+          "Legacy manual promotion without a machine marker must stay in MEMORY.md.",
+        );
+        expect(memoryText).not.toContain("Pin the support tunnel timeout at 45 seconds.");
+        expect(memoryText.match(/## Promoted From Short-Term Memory/g)?.length).toBe(2);
+
+        const archiveText = await fs.readFile(applied.archivePath, "utf-8");
+        expect(archiveText).toContain("Pin the support tunnel timeout at 45 seconds.");
+        expect(archiveText).not.toContain("Legacy manual promotion without a machine marker");
+      });
+    });
+
     it("keeps MEMORY.md compact while preserving existing non-promotion content", async () => {
       await withTempWorkspace(async (workspaceDir) => {
         await writeDailyMemoryNote(workspaceDir, "2026-04-29", [

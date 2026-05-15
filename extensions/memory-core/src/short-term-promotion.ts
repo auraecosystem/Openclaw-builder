@@ -1633,18 +1633,31 @@ function buildPromotionPointerSection(archiveRelativePath: string): string {
   ].join("\n");
 }
 
+function isManagedPromotionPointerSection(section: string): boolean {
+  return (
+    /Latest promotion archive:/i.test(section) ||
+    /Detailed promoted-memory excerpts are archived/i.test(section)
+  );
+}
+
 function ensurePromotionPointerSection(memoryText: string, archiveRelativePath: string): string {
   const pointerSection = buildPromotionPointerSection(archiveRelativePath);
   const baseText = memoryText.trimEnd().length > 0 ? memoryText.trimEnd() : "# Long-Term Memory";
   const sectionPattern =
-    /(?:^|\n)## Promoted From Short-Term Memory(?: \([^)]+\))?\n[\s\S]*?(?=\n## |\n<!-- OPENCLAW_CACHE_BOUNDARY -->|$)/;
-  // On first apply after upgrade, collapse any existing detailed promotion
-  // section (dated or undated) into the stable pointer-only section.
-  if (sectionPattern.test(baseText)) {
-    return `${baseText.replace(sectionPattern, (match) => {
-      const prefix = match.startsWith("\n") ? "\n" : "";
-      return `${prefix}${pointerSection}`;
-    })}\n`;
+    /(?:^|\n)## Promoted From Short-Term Memory(?: \([^)]+\))?\n[\s\S]*?(?=\n## |\n<!-- OPENCLAW_CACHE_BOUNDARY -->|$)/g;
+  // On first apply after upgrade, collapse existing managed promotion output
+  // into the stable pointer-only section. Unmarked human-written sections with
+  // the same heading are preserved as normal MEMORY.md content.
+  for (const match of baseText.matchAll(sectionPattern)) {
+    const section = match[0] ?? "";
+    if (!section.includes(PROMOTION_MARKER_PREFIX) && !isManagedPromotionPointerSection(section)) {
+      continue;
+    }
+    const index = match.index ?? 0;
+    const prefix = section.startsWith("\n") ? "\n" : "";
+    return `${baseText.slice(0, index)}${prefix}${pointerSection}${baseText.slice(
+      index + section.length,
+    )}\n`;
   }
 
   const cacheBoundary = "\n<!-- OPENCLAW_CACHE_BOUNDARY -->";
