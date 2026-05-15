@@ -32,10 +32,28 @@ import {
 // strand it for the heartbeat path, but the heartbeat exec/consume
 // selectors now skip internal events. The audience field is the source
 // of truth for routing; text-shape only matters for user-facing events.
-const selectGenericSystemEvents = (events: readonly SystemEvent[]): SystemEvent[] => {
+//
+// `isHeartbeat=true` callers leave `audience: "internal"` events queued.
+// Heartbeat replies use `buildReplyPromptEnvelopeBase`'s fixed transcript
+// prompt and do not preserve `systemEventBlocks` on the prompt body, so
+// draining (= consuming) an internal event during a heartbeat would
+// silently drop the wrapped runtime-context block before the next
+// non-heartbeat user turn can see it. Wait for the regular reply turn,
+// which DOES carry `systemEventBlocks` and therefore actually delivers
+// the wrapped context to the model.
+const selectGenericSystemEvents = (
+  events: readonly SystemEvent[],
+  isHeartbeat: boolean,
+): SystemEvent[] => {
   const selected: SystemEvent[] = [];
   for (const event of events) {
-    if (event.audience === "internal" || !isExecCompletionEvent(event.text)) {
+    if (event.audience === "internal") {
+      if (!isHeartbeat) {
+        selected.push(event);
+      }
+      continue;
+    }
+    if (!isExecCompletionEvent(event.text)) {
       selected.push(event);
     }
   }
@@ -53,6 +71,7 @@ export async function drainFormattedSystemEventBlock(params: {
   sessionKey: string;
   isMainSession: boolean;
   isNewSession: boolean;
+  isHeartbeat?: boolean;
 }): Promise<FormattedSystemEventBlock | undefined> {
   const compactSystemEvent = (line: string, audience: SystemEventAudience): string | null => {
     const trimmed = line.trim();
@@ -133,7 +152,10 @@ export async function drainFormattedSystemEventBlock(params: {
   // so the heartbeat path can consume and deliver them.
   const queued = consumeSelectedSystemEventEntries(
     params.sessionKey,
-    selectGenericSystemEvents(peekSystemEventEntries(params.sessionKey)),
+    selectGenericSystemEvents(
+      peekSystemEventEntries(params.sessionKey),
+      params.isHeartbeat === true,
+    ),
   );
   for (const event of queued) {
     const audience: SystemEventAudience = event.audience ?? "user-facing";
@@ -206,6 +228,7 @@ export async function drainFormattedSystemEvents(params: {
   sessionKey: string;
   isMainSession: boolean;
   isNewSession: boolean;
+  isHeartbeat?: boolean;
 }): Promise<string | undefined> {
   return (await drainFormattedSystemEventBlock(params))?.text;
 }

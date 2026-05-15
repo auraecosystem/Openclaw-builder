@@ -694,6 +694,40 @@ describe("system events (session routing)", () => {
       expect(stripped).not.toContain("middle");
       expect(stripped).not.toContain("[[OPENCLAW_INTERNAL_CONTEXT_BEGIN]]");
     });
+
+    it("leaves audience: internal events queued during a heartbeat drain", async () => {
+      // Heartbeat replies use the fixed transcript prompt envelope, which
+      // does NOT carry `systemEventBlocks` on the prompt body. If the
+      // generic drain consumed internal events here, the cron-awareness
+      // wrap would be silently dropped before the next non-heartbeat user
+      // turn could see it. The internal event must stay queued for the
+      // non-heartbeat drain that actually delivers `systemEventBlocks` to
+      // the model.
+      const key = "agent:main:test-audience-heartbeat-preserve";
+      enqueueSystemEvent("internal awareness body", { sessionKey: key, audience: "internal" });
+      enqueueSystemEvent("user-facing line", { sessionKey: key });
+
+      // First drain: as a heartbeat reply. Only user-facing events flow
+      // out; the wrap markers must not appear because no internal events
+      // were drained.
+      const heartbeat = await drainFormattedEvents(key, { isHeartbeat: true });
+      expect(heartbeat).toBeDefined();
+      expect(heartbeat).toMatch(/^System:\s+\[[^\]]+\] user-facing line$/m);
+      expect(heartbeat).not.toContain(INTERNAL_RUNTIME_CONTEXT_BEGIN);
+      expect(heartbeat).not.toContain("internal awareness body");
+
+      // The internal event must still be queued for the next non-heartbeat
+      // drain. Verify directly on the queue, then drain again as a normal
+      // reply turn and confirm the wrap appears.
+      expect(peekSystemEvents(key)).toEqual(["internal awareness body"]);
+
+      const normal = await drainFormattedEvents(key);
+      expect(normal).toBeDefined();
+      expect(normal).toContain(INTERNAL_RUNTIME_CONTEXT_BEGIN);
+      expect(normal).toContain("internal awareness body");
+      expect(normal).toContain(INTERNAL_RUNTIME_CONTEXT_END);
+      expect(peekSystemEvents(key)).toEqual([]);
+    });
   });
 });
 
