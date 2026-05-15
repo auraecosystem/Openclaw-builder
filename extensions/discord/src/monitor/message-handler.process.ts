@@ -151,6 +151,7 @@ async function processDiscordMessageInner(
     discordRestFetch,
     abortSignal,
     botLoopProtection,
+    replyTypingFeedback,
   } = ctx;
   if (isProcessAborted(abortSignal)) {
     return;
