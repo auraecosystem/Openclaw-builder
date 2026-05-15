@@ -1652,6 +1652,14 @@ export const FIELD_HELP: Record<string, string> = {
     "Maximum bytes per cron run-log file before pruning rewrites to the last keepLines entries (for example `2mb`, default `2000000`).",
   "cron.runLog.keepLines":
     "How many trailing run-log lines to retain when a file exceeds maxBytes (default `2000`). Increase for longer forensic history or lower for smaller disks.",
+  "cron.modelPreflight":
+    "Controls the lightweight local model-provider preflight used before isolated cron agent turns. Tune this when local or LAN providers such as Ollama need a few seconds to wake before /api/tags or /models responds.",
+  "cron.modelPreflight.timeoutMs":
+    "Per-attempt timeout in milliseconds for local model-provider preflight probes (default: 2500). Increase for slow LAN or cold-starting providers.",
+  "cron.modelPreflight.maxAttempts":
+    "Number of local model-provider preflight attempts before the cron run is marked skipped (default: 1). Increase to let sleeping Ollama/vLLM/LM Studio hosts wake before cron gives up.",
+  "cron.modelPreflight.retryDelayMs":
+    "Delay in milliseconds between failed local model-provider preflight attempts (default: 0). Use with maxAttempts to create a warm-up window before isolated cron runs are skipped.",
   hooks:
     "Inbound webhook automation surface for mapping external events into wake or agent actions in OpenClaw. Keep this locked down with explicit token/session/agent controls before exposing it beyond trusted networks.",
   "hooks.enabled":

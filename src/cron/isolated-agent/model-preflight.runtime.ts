@@ -7,6 +7,8 @@ import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 
 const PREFLIGHT_CACHE_TTL_MS = 5 * 60_000;
 const PREFLIGHT_TIMEOUT_MS = 2_500;
+const PREFLIGHT_MAX_ATTEMPTS = 1;
+const PREFLIGHT_RETRY_DELAY_MS = 0;
 
 type PreflightApi = "ollama" | "openai-completions";
 
@@ -26,6 +28,7 @@ type EndpointPreflightResult =
   | {
       status: "unavailable";
       error: unknown;
+      attempts: number;
     };
 
 type CachedEndpointPreflightResult = {
@@ -124,10 +127,11 @@ function formatUnavailableReason(params: {
   model: string;
   baseUrl: string;
   error: unknown;
+  attempts: number;
 }): string {
   return [
     `Agent cron job uses ${params.provider}/${params.model} but the local provider endpoint is not reachable at ${params.baseUrl}.`,
-    `Skipping this cron run; OpenClaw will retry the provider preflight on a later scheduled run.`,
+    `Skipping this cron run after ${params.attempts} preflight attempt${params.attempts === 1 ? "" : "s"}; OpenClaw will retry the provider preflight on a later scheduled run.`,
     `Last error: ${String(params.error)}`,
   ].join(" ");
 }
@@ -137,6 +141,7 @@ function buildUnavailableResult(params: {
   model: string;
   baseUrl: string;
   error: unknown;
+  attempts: number;
 }): CronModelProviderPreflightResult {
   return {
     status: "unavailable",
@@ -149,19 +154,42 @@ function buildUnavailableResult(params: {
       model: params.model,
       baseUrl: params.baseUrl,
       error: params.error,
+      attempts: params.attempts,
     }),
   };
+}
+
+function normalizePositiveInteger(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    return fallback;
+  }
+  return value;
+}
+
+function normalizeNonNegativeInteger(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    return fallback;
+  }
+  return value;
+}
+
+function sleepMs(delayMs: number): Promise<void> {
+  if (delayMs <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 async function probeLocalProviderEndpoint(params: {
   api: PreflightApi;
   baseUrl: string;
+  timeoutMs: number;
 }): Promise<void> {
   const { response, release } = await fetchWithSsrFGuard({
     url: buildProbeUrl(params.api, params.baseUrl),
     init: { method: "GET" },
     policy: buildLocalProviderSsrFPolicy(params.baseUrl),
-    timeoutMs: PREFLIGHT_TIMEOUT_MS,
+    timeoutMs: params.timeoutMs,
     auditContext: "cron-model-provider-preflight",
   });
   try {
@@ -189,6 +217,16 @@ export async function preflightCronModelProvider(params: {
   if (!baseUrl || !api || !isLocalProviderBaseUrl(baseUrl)) {
     return { status: "available" };
   }
+  const preflightConfig = params.cfg.cron?.modelPreflight;
+  const timeoutMs = normalizePositiveInteger(preflightConfig?.timeoutMs, PREFLIGHT_TIMEOUT_MS);
+  const maxAttempts = normalizePositiveInteger(
+    preflightConfig?.maxAttempts,
+    PREFLIGHT_MAX_ATTEMPTS,
+  );
+  const retryDelayMs = normalizeNonNegativeInteger(
+    preflightConfig?.retryDelayMs,
+    PREFLIGHT_RETRY_DELAY_MS,
+  );
 
   const nowMs = params.nowMs ?? Date.now();
   const cacheKey = `${api}\0${baseUrl}`;
@@ -202,25 +240,34 @@ export async function preflightCronModelProvider(params: {
       model: params.model,
       baseUrl,
       error: cached.result.error,
+      attempts: cached.result.attempts,
     });
   }
 
   let result: EndpointPreflightResult;
-  try {
-    await probeLocalProviderEndpoint({ api, baseUrl });
-    result = { status: "available" };
-  } catch (error) {
-    result = { status: "unavailable", error };
+  let lastError: unknown;
+  let attempts = 0;
+  for (attempts = 1; attempts <= maxAttempts; attempts += 1) {
+    try {
+      await probeLocalProviderEndpoint({ api, baseUrl, timeoutMs });
+      result = { status: "available" };
+      preflightCache.set(cacheKey, { checkedAtMs: nowMs, result });
+      return { status: "available" };
+    } catch (error) {
+      lastError = error;
+      if (attempts < maxAttempts) {
+        await sleepMs(retryDelayMs);
+      }
+    }
   }
+  result = { status: "unavailable", error: lastError, attempts: maxAttempts };
   preflightCache.set(cacheKey, { checkedAtMs: nowMs, result });
-  if (result.status === "available") {
-    return { status: "available" };
-  }
   return buildUnavailableResult({
     provider: params.provider,
     model: params.model,
     baseUrl,
     error: result.error,
+    attempts: result.attempts,
   });
 }
 
