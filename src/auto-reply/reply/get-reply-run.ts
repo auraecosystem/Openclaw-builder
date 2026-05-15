@@ -895,14 +895,16 @@ export async function runPreparedReply(
   preparedSessionState = resolvePreparedSessionState();
   const resolveActiveQueueSessionId = () =>
     piRuntime?.resolveActiveEmbeddedRunSessionId(sessionKey) ?? preparedSessionState.sessionId;
+  const resolveLaneSize = () => (sessionLaneKey ? getQueueSize(sessionLaneKey) : 0);
   const resolveQueueBusyState = () => {
+    const currentLaneSize = resolveLaneSize();
     const activeSessionId = resolveActiveQueueSessionId();
     if (!activeSessionId || !piRuntime) {
-      return { activeSessionId: undefined, isActive: false, isStreaming: false };
+      return { activeSessionId: undefined, isActive: currentLaneSize > 0, isStreaming: false };
     }
     return {
       activeSessionId,
-      isActive: piRuntime.isEmbeddedPiRunActive(activeSessionId),
+      isActive: piRuntime.isEmbeddedPiRunActive(activeSessionId) || currentLaneSize > 0,
       isStreaming: piRuntime.isEmbeddedPiRunStreaming(activeSessionId),
     };
   };

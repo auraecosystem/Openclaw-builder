@@ -111,6 +111,24 @@ let listSkillCommandsForAgentsForTesting: typeof listSkillCommandsForAgents | un
 let isVerboseForTesting: typeof isVerbose | undefined;
 let shouldLogVerboseForTesting: typeof shouldLogVerbose | undefined;
 
+function recordDiscordTransportEventStatus(setStatus: DiscordMonitorStatusSink | undefined) {
+  if (!setStatus) {
+    return;
+  }
+  const at = Date.now();
+  // Raw gateway events are transport-level only. Accepted preflighted messages update
+  // human inbound activity separately, after bot/self/filter checks.
+  setStatus({ lastEventAt: at });
+}
+
+function recordDiscordAcceptedInboundStatus(setStatus: DiscordMonitorStatusSink | undefined) {
+  if (!setStatus) {
+    return;
+  }
+  const at = Date.now();
+  setStatus({ lastEventAt: at, lastInboundAt: at });
+}
+
 function logDiscordStartupPhase(
   params: Omit<Parameters<typeof logDiscordStartupPhaseBase>[0], "isVerbose">,
 ) {
@@ -542,11 +560,10 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
     });
     deactivateMessageHandler = messageHandler.deactivate;
     const trackInboundEvent = opts.setStatus
-      ? () => {
-          const at = Date.now();
-          // Gateway heartbeat ACKs are transport-level; Discord app events stay app-level only.
-          opts.setStatus?.({ lastEventAt: at, lastInboundAt: at });
-        }
+      ? () => recordDiscordTransportEventStatus(opts.setStatus)
+      : undefined;
+    const trackAcceptedInboundEvent = opts.setStatus
+      ? () => recordDiscordAcceptedInboundStatus(opts.setStatus)
       : undefined;
     registerDiscordMonitorListeners({
       cfg,
@@ -565,6 +582,7 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
       logger,
       messageHandler,
       trackInboundEvent,
+      trackAcceptedInboundEvent,
     });
 
     logDiscordStartupPhase({
@@ -628,6 +646,8 @@ export const __testing = {
   resolveThreadBindingsEnabled: resolveThreadBindingsEnabledForTesting,
   formatDiscordDeployErrorDetails,
   formatDiscordDeployErrorMessage,
+  recordDiscordTransportEventStatus,
+  recordDiscordAcceptedInboundStatus,
   setFetchDiscordApplicationId(mock?: typeof fetchDiscordApplicationId) {
     fetchDiscordApplicationIdForTesting = mock;
   },

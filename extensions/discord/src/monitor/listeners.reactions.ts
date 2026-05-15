@@ -33,6 +33,7 @@ type DiscordReactionListenerParams = {
   runtime: RuntimeEnv;
   logger: DiscordListenerLogger;
   onEvent?: () => void;
+  onAcceptedEvent?: () => void;
 } & DiscordReactionRoutingParams;
 
 type DiscordReactionRoutingParams = {
@@ -118,6 +119,7 @@ async function runDiscordReactionHandler(params: {
         allowNameMatching: params.handlerParams.allowNameMatching,
         guildEntries: params.handlerParams.guildEntries,
         logger: params.handlerParams.logger,
+        onAcceptedEvent: params.handlerParams.onAcceptedEvent,
       }),
   });
 }
@@ -504,6 +506,7 @@ async function handleDiscordReactionEvent(
         forceSenderIsOwnerFalse: true,
         trusted: false,
       });
+      params.onAcceptedEvent?.();
     };
     const shouldNotifyReaction = (options: {
       mode: DiscordReactionMode;
