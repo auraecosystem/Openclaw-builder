@@ -506,6 +506,7 @@ function createChatContext(): Pick<
   | "agentDeltaSentAt"
   | "bufferedAgentEvents"
   | "chatAbortedRuns"
+  | "clearChatRunState"
   | "addChatRun"
   | "removeChatRun"
   | "dedupe"
@@ -525,6 +526,7 @@ function createChatContext(): Pick<
     agentDeltaSentAt: new Map(),
     bufferedAgentEvents: new Map(),
     chatAbortedRuns: new Map(),
+    clearChatRunState: vi.fn(),
     addChatRun: vi.fn(),
     removeChatRun: vi.fn(),
     dedupe: new Map(),
