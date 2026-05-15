@@ -301,6 +301,9 @@ jobs:
 
       - name: Publish package with npm trusted publishing
         env:
+          # Confirm mirror auth exists before OIDC package publish, without
+          # exposing the long-lived npm token to the publish subprocess.
+          OPENCLAW_NPM_DIST_TAG_MIRROR_AUTH_AVAILABLE: ${{ secrets.NPM_TOKEN != '' && '1' || '0' }}
           OPENCLAW_NPM_PUBLISH_AUTH_MODE: trusted-publisher
         run: bash scripts/plugin-npm-publish.sh --publish-package "${{ matrix.plugin.packageDir }}"
 

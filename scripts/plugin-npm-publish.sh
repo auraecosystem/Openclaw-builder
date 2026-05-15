@@ -42,10 +42,17 @@ const auth = resolveNpmDistTagMirrorAuth({
   npmToken: process.env.NPM_TOKEN,
 });
 const publishMode = process.env.PUBLISH_MODE;
+const mirrorAuthPresenceFlag = ["1", "true", "yes", "available"]
+  .includes((process.env.OPENCLAW_NPM_DIST_TAG_MIRROR_AUTH_AVAILABLE ?? "").trim().toLowerCase());
 const shouldRequireMirrorAuth = shouldRequireNpmDistTagMirrorAuth({
-  mode: publishMode === "--publish" || publishMode === "--mirror-dist-tags" ? "--publish" : "--dry-run",
+  mode:
+    publishMode === "--publish" ||
+    publishMode === "--publish-package" ||
+    publishMode === "--mirror-dist-tags"
+      ? "--publish"
+      : "--dry-run",
   mirrorDistTags: plan.mirrorDistTags,
-  hasAuth: auth.hasAuth,
+  hasAuth: auth.hasAuth || mirrorAuthPresenceFlag,
 });
 console.log(plan.channel);
 console.log(plan.publishTag);
@@ -73,7 +80,21 @@ log "Current beta dist-tag: ${current_beta_version:-<missing>}"
 log "Resolved release channel: ${release_channel}"
 log "Resolved publish tag: ${publish_tag}"
 log "Resolved mirror dist-tags: ${mirror_dist_tags_csv:-<none>}"
+mirror_auth_presence_flag="${OPENCLAW_NPM_DIST_TAG_MIRROR_AUTH_AVAILABLE:-}"
+case "${mirror_auth_presence_flag,,}" in
+  1|true|yes|available)
+    mirror_auth_available="true"
+    ;;
+  *)
+    mirror_auth_available="false"
+    ;;
+esac
+if [[ "${mirror_auth_source}" != "none" ]]; then
+  mirror_auth_available="true"
+fi
+
 log "Mirror dist-tag auth source: ${mirror_auth_source}"
+log "Mirror dist-tag auth availability: ${mirror_auth_available}"
 log "Mirror dist-tag auth requirement: ${mirror_auth_requirement}"
 
 build_package_runtime() {
@@ -117,13 +138,23 @@ if [[ "${mode}" != "--mirror-dist-tags" ]]; then
   fi
 fi
 
-if [[ "${mirror_auth_requirement}" == "required" && -z "${mirror_auth_token}" ]]; then
-  echo "npm dist-tag mirroring requires explicit npm auth via NODE_AUTH_TOKEN or NPM_TOKEN." >&2
-  if [[ "${mode}" == "--mirror-dist-tags" ]]; then
+if [[ "${mirror_auth_requirement}" == "required" ]]; then
+  if [[ "${mode}" == "--publish-package" ]]; then
+    echo "npm dist-tag mirroring requires confirmed npm auth availability before package publish." >&2
+    echo "Set OPENCLAW_NPM_DIST_TAG_MIRROR_AUTH_AVAILABLE=1 only after confirming the later mirror step has npm auth." >&2
+  elif [[ "${mode}" == "--mirror-dist-tags" ]]; then
+    echo "npm dist-tag mirroring requires explicit npm auth via NODE_AUTH_TOKEN or NPM_TOKEN." >&2
     echo "Refusing npm latest/beta promotion without npm auth." >&2
   else
+    echo "npm dist-tag mirroring requires explicit npm auth via NODE_AUTH_TOKEN or NPM_TOKEN." >&2
     echo "Refusing publish before npm latest/beta promotion can diverge." >&2
   fi
+  exit 1
+fi
+
+if [[ "${mode}" == "--mirror-dist-tags" && -n "${mirror_dist_tags_csv}" && -z "${mirror_auth_token}" ]]; then
+  echo "npm dist-tag mirroring requires explicit npm auth via NODE_AUTH_TOKEN or NPM_TOKEN." >&2
+  echo "Refusing npm latest/beta promotion without npm auth." >&2
   exit 1
 fi
 

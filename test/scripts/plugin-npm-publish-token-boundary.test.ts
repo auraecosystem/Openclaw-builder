@@ -32,7 +32,7 @@ case "\${1:-}" in
       env | sort > "\${OPENCLAW_TEST_NPM_RECORD}"
       exit 66
     fi
-    echo "publish token env absent" > "\${OPENCLAW_TEST_NPM_RECORD}"
+    echo "publish token env absent\n" > "\${OPENCLAW_TEST_NPM_RECORD}"
     ;;
   dist-tag)
     if [[ -z "\${NPM_CONFIG_USERCONFIG:-}" ]]; then
@@ -91,6 +91,52 @@ describe("plugin npm trusted-publishing token boundary", () => {
     });
   });
 
+  it("refuses stable package publish before mirror auth availability is confirmed", () => {
+    withFixture(({ binDir, packageDir, record }) => {
+      writePackage(packageDir, "2026.4.1");
+
+      const result = spawnSync("bash", [PUBLISH_SCRIPT, "--publish-package", packageDir], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH ?? ""}`,
+          OPENCLAW_NPM_PUBLISH_AUTH_MODE: "trusted-publisher",
+          OPENCLAW_PLUGIN_NPM_RUNTIME_BUILD: "0",
+          OPENCLAW_TEST_NPM_RECORD: record,
+        },
+      });
+
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(1);
+      expect(result.stderr).toContain(
+        "requires confirmed npm auth availability before package publish",
+      );
+      expect(readFileSync(record, "utf8")).toBe("");
+    });
+  });
+
+  it("allows stable trusted-publisher package publish with only mirror auth availability", () => {
+    withFixture(({ binDir, packageDir, record }) => {
+      writePackage(packageDir, "2026.4.1");
+
+      const result = spawnSync("bash", [PUBLISH_SCRIPT, "--publish-package", packageDir], {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH ?? ""}`,
+          OPENCLAW_NPM_DIST_TAG_MIRROR_AUTH_AVAILABLE: "1",
+          OPENCLAW_NPM_PUBLISH_AUTH_MODE: "trusted-publisher",
+          OPENCLAW_PLUGIN_NPM_RUNTIME_BUILD: "0",
+          OPENCLAW_TEST_NPM_RECORD: record,
+        },
+      });
+
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(readFileSync(record, "utf8")).toBe("publish token env absent\n");
+    });
+  });
+
   it("runs dist-tag mirroring as a separate npm-authenticated path", () => {
     withFixture(({ binDir, packageDir, record }) => {
       writePackage(packageDir, "2026.4.1");
@@ -125,8 +171,9 @@ describe("plugin npm trusted-publishing token boundary", () => {
       )?.[0] ?? "";
 
     expect(publishStep).not.toBe("");
-    expect(publishStep).not.toContain("NPM_TOKEN");
+    expect(publishStep).not.toContain("NPM_TOKEN: ${{ secrets.NPM_TOKEN }}");
     expect(publishStep).toContain("--publish-package");
+    expect(publishStep).toContain("OPENCLAW_NPM_DIST_TAG_MIRROR_AUTH_AVAILABLE");
     expect(mirrorStep).not.toBe("");
     expect(mirrorStep).toContain("NPM_TOKEN");
     expect(mirrorStep).toContain("--mirror-dist-tags");
