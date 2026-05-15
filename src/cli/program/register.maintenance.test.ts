@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerMaintenanceCommands } from "./register.maintenance.js";
 
 const mocks = vi.hoisted(() => ({
@@ -45,6 +45,8 @@ function commandCall(mock: ReturnType<typeof vi.fn>): [typeof runtime, Record<st
 }
 
 describe("registerMaintenanceCommands doctor action", () => {
+  const previousExitCode = process.exitCode;
+
   async function runMaintenanceCli(args: string[]) {
     const program = new Command();
     registerMaintenanceCommands(program);
@@ -53,6 +55,11 @@ describe("registerMaintenanceCommands doctor action", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    process.exitCode = undefined;
+  });
+
+  afterEach(() => {
+    process.exitCode = previousExitCode;
   });
 
   it("exits with code 0 after successful doctor run", async () => {
@@ -66,6 +73,17 @@ describe("registerMaintenanceCommands doctor action", () => {
     expect(options.nonInteractive).toBe(true);
     expect(options.yes).toBe(true);
     expect(runtime.exit).toHaveBeenCalledWith(0);
+  });
+
+  it("propagates a non-zero process.exitCode set during doctor run (#77804)", async () => {
+    doctorCommand.mockImplementation(async () => {
+      process.exitCode = 1;
+    });
+
+    await runMaintenanceCli(["doctor", "--non-interactive"]);
+
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+    expect(runtime.exit).not.toHaveBeenCalledWith(0);
   });
 
   it("exits with code 1 when doctor fails", async () => {
