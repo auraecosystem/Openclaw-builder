@@ -71,12 +71,12 @@ export async function ensureCodexPluginActivation(
     params.identity.marketplaceName,
   );
   if (!resolved) {
-    const hasCuratedMarketplace = listed.marketplaces.some(
-      (marketplace) => marketplace.name === CODEX_PLUGINS_MARKETPLACE_NAME,
+    const hasMarketplace = listed.marketplaces.some(
+      (marketplace) => marketplace.name === params.identity.marketplaceName,
     );
-    if (!hasCuratedMarketplace) {
+    if (!hasMarketplace) {
       return activationFailure(params.identity, "marketplace_missing", {
-        message: `Codex marketplace ${CODEX_PLUGINS_MARKETPLACE_NAME} was not found.`,
+        message: `Codex marketplace ${params.identity.marketplaceName} was not found.`,
       });
     }
     return activationFailure(params.identity, "plugin_missing", {
