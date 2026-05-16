@@ -117,8 +117,8 @@ function trimTrajectoryWriterCache(): void {
 function truncateOversizedTrajectoryEvent(
   event: TrajectoryEvent,
   line: string,
+  limitBytes: number,
 ): string | undefined {
-  const limitBytes = resolveTrajectoryRuntimeEventMaxBytes();
   const bytes = Buffer.byteLength(line, "utf8");
   if (bytes <= limitBytes) {
     return line;
@@ -241,6 +241,13 @@ export function createTrajectoryRuntimeRecorder(
     return null;
   }
 
+  // Resolve the per-event byte cap once at recorder creation from the captured
+  // `env`, matching how `OPENCLAW_TRAJECTORY` enablement and trajectory path
+  // resolution already pin to the recorder's env. Re-reading it per event from
+  // ambient `process.env` would (a) ignore an injected `params.env` override
+  // and (b) let mid-session ambient mutations silently change behavior.
+  const eventMaxBytes = resolveTrajectoryRuntimeEventMaxBytes(env);
+
   const filePath = resolveTrajectoryFilePath({
     env,
     sessionFile: params.sessionFile,
@@ -322,7 +329,7 @@ export function createTrajectoryRuntimeRecorder(
     if (!line) {
       return undefined;
     }
-    const boundedLine = truncateOversizedTrajectoryEvent(event, line);
+    const boundedLine = truncateOversizedTrajectoryEvent(event, line, eventMaxBytes);
     if (!boundedLine) {
       return undefined;
     }
