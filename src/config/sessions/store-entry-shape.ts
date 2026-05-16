@@ -9,11 +9,21 @@ function isSafeSessionId(value: unknown): value is string {
   if (typeof value !== "string") {
     return false;
   }
-  try {
-    validateSessionId(value);
-    return true;
-  } catch {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 255) {
     return false;
+  }
+  if (trimmed.includes("/") || trimmed.includes("\\") || trimmed === "." || trimmed === "..") {
+    return false;
+  }
+  return /^[A-Za-z0-9][A-Za-z0-9._:@-]*$/.test(trimmed);
+}
+
+function normalizeTranscriptSessionId(value: string): string | undefined {
+  try {
+    return validateSessionId(value);
+  } catch {
+    return undefined;
   }
 }
 
@@ -24,29 +34,23 @@ function normalizeOptionalTimestamp(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
-type NormalizePersistedSessionEntryShapeOptions = {
-  allowMissingSessionId?: boolean;
-};
-
-export function normalizePersistedSessionEntryShape(
-  value: unknown,
-  options: NormalizePersistedSessionEntryShapeOptions = {},
-): SessionEntry | undefined {
+export function normalizePersistedSessionEntryShape(value: unknown): SessionEntry | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
 
   let next = value as unknown as SessionEntry;
-  if (value.sessionId === undefined) {
-    if (!options.allowMissingSessionId) {
-      return undefined;
-    }
-  } else {
+  const sessionFile = typeof value.sessionFile === "string" ? value.sessionFile.trim() : undefined;
+  if (value.sessionId !== undefined) {
     if (!isSafeSessionId(value.sessionId)) {
       return undefined;
     }
     const sessionId = value.sessionId.trim();
-    if (sessionId !== value.sessionId) {
+    const transcriptSessionId = normalizeTranscriptSessionId(sessionId);
+    if (!transcriptSessionId && !sessionFile) {
+      const { sessionId: _dropSessionId, ...rest } = next;
+      next = rest as SessionEntry;
+    } else if (sessionId !== value.sessionId) {
       next = { ...next, sessionId };
     }
   }

@@ -15,7 +15,13 @@ export function getInvalidPersistedCronJobReason(
     return "missing-id";
   }
   const schedule = candidate.schedule;
-  if (!schedule || typeof schedule !== "object" || Array.isArray(schedule)) {
+  if (!schedule || Array.isArray(schedule)) {
+    return "missing-schedule";
+  }
+  if (typeof schedule === "string") {
+    return null;
+  }
+  if (typeof schedule !== "object") {
     return "missing-schedule";
   }
   const scheduleRecord = schedule as Record<string, unknown>;
