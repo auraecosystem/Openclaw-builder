@@ -44,6 +44,10 @@ vi.mock("../plugins/provider-auth-choices.js", () => ({
 const upsertAuthProfile = vi.hoisted(() => vi.fn());
 vi.mock("../agents/auth-profiles.js", () => ({
   upsertAuthProfile,
+  upsertAuthProfileWithLock: async (params: Parameters<typeof upsertAuthProfile>[0]) => {
+    upsertAuthProfile(params);
+    return { version: 1, profiles: {} };
+  },
 }));
 
 const resolveDefaultAgentId = vi.hoisted(() => vi.fn(() => "default"));
