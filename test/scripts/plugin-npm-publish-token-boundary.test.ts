@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -32,7 +32,7 @@ case "\${1:-}" in
       env | sort > "\${OPENCLAW_TEST_NPM_RECORD}"
       exit 66
     fi
-    echo "publish token env absent\n" > "\${OPENCLAW_TEST_NPM_RECORD}"
+    printf '%s\n' "publish token env absent" > "\${OPENCLAW_TEST_NPM_RECORD}"
     ;;
   dist-tag)
     if [[ -z "\${NPM_CONFIG_USERCONFIG:-}" ]]; then
@@ -111,7 +111,7 @@ describe("plugin npm trusted-publishing token boundary", () => {
       expect(result.stderr).toContain(
         "requires confirmed npm auth availability before package publish",
       );
-      expect(readFileSync(record, "utf8")).toBe("");
+      expect(existsSync(record) ? readFileSync(record, "utf8") : "").toBe("");
     });
   });
 
