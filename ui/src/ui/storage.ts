@@ -88,6 +88,9 @@ export type UiSettings = {
   chatFocusMode: boolean;
   chatShowThinking: boolean;
   chatShowToolCalls: boolean;
+  responseCompletionSound?: boolean;
+  responseCompletionVolume?: number;
+  responseCompletionOnlyWhenHidden?: boolean;
   chatAutoScroll?: ChatAutoScrollMode;
   splitRatio: number; // Sidebar split ratio (0.4 to 0.7, default 0.6)
   navCollapsed: boolean; // Collapsible sidebar state
@@ -231,6 +234,9 @@ export function loadSettings(): UiSettings {
     chatFocusMode: false,
     chatShowThinking: true,
     chatShowToolCalls: true,
+  responseCompletionSound: false,
+    responseCompletionVolume: 75,
+    responseCompletionOnlyWhenHidden: true,
     chatAutoScroll: "near-bottom",
     splitRatio: 0.6,
     navCollapsed: false,
@@ -277,6 +283,20 @@ export function loadSettings(): UiSettings {
         typeof parsed.chatShowToolCalls === "boolean"
           ? parsed.chatShowToolCalls
           : defaults.chatShowToolCalls,
+  responseCompletionSound:
+        typeof parsed.responseCompletionSound === "boolean"
+          ? parsed.responseCompletionSound
+          : defaults.responseCompletionSound,
+      responseCompletionVolume:
+        typeof parsed.responseCompletionVolume === "number" &&
+        parsed.responseCompletionVolume >= 0 &&
+        parsed.responseCompletionVolume <= 100
+          ? parsed.responseCompletionVolume
+          : defaults.responseCompletionVolume,
+      responseCompletionOnlyWhenHidden:
+        typeof parsed.responseCompletionOnlyWhenHidden === "boolean"
+          ? parsed.responseCompletionOnlyWhenHidden
+          : defaults.responseCompletionOnlyWhenHidden,
       chatAutoScroll: normalizeChatAutoScrollMode(parsed.chatAutoScroll),
       splitRatio:
         typeof parsed.splitRatio === "number" &&
@@ -415,6 +435,12 @@ function persistSettings(next: UiSettings) {
     chatFocusMode: next.chatFocusMode,
     chatShowThinking: next.chatShowThinking,
     chatShowToolCalls: next.chatShowToolCalls,
+  responseCompletionSound: next.responseCompletionSound === true,
+    responseCompletionVolume:
+      typeof next.responseCompletionVolume === "number"
+        ? Math.min(100, Math.max(0, next.responseCompletionVolume))
+        : 75,
+    responseCompletionOnlyWhenHidden: next.responseCompletionOnlyWhenHidden !== false,
     chatAutoScroll: normalizeChatAutoScrollMode(next.chatAutoScroll),
     splitRatio: next.splitRatio,
     navCollapsed: next.navCollapsed,

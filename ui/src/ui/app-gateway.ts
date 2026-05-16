@@ -60,6 +60,7 @@ import {
 } from "./gateway.ts";
 import { GatewayBrowserClient } from "./gateway.ts";
 import type { Tab } from "./navigation.ts";
+import { signalResponseCompletion } from "./response-completion-cue.ts";
 import { buildAgentMainSessionKey, normalizeAgentId, parseAgentSessionKey } from "./session-key.ts";
 import type { UiSettings } from "./storage.ts";
 import type {
@@ -659,6 +660,7 @@ function handleTerminalChatEvent(
   payload: ChatEventPayload | undefined,
   state: ReturnType<typeof handleChatEvent>,
   activeRunIdBeforeEvent: string | null,
+  visibleStateBeforeEvent: { chatMessagesLength: number; chatStream: string | null },
 ): boolean {
   if (state !== "final" && state !== "error" && state !== "aborted") {
     return false;
@@ -676,6 +678,17 @@ function handleTerminalChatEvent(
     payload?.runId,
   );
   const runId = payload?.runId;
+  if (state === "final" && activeRunIdBeforeEvent) {
+    signalResponseCompletion(host.settings, {
+      message: payload?.message,
+      assistantName: host.assistantName,
+      runId,
+      streamText: visibleStateBeforeEvent.chatStream,
+      visibleOutput:
+        chatMessagesLength(host) > visibleStateBeforeEvent.chatMessagesLength ||
+        Boolean(visibleStateBeforeEvent.chatStream?.trim()),
+    });
+  }
   if (runId && host.refreshSessionsAfterChat.has(runId)) {
     host.refreshSessionsAfterChat.delete(runId);
     if (state === "final") {
@@ -711,6 +724,16 @@ function isEventForDifferentActiveRun(
   return Boolean(activeRunId && payload && payload.runId !== activeRunId);
 }
 
+function chatMessagesLength(host: GatewayHost): number {
+  const messages = (host as GatewayHost & { chatMessages?: unknown }).chatMessages;
+  return Array.isArray(messages) ? messages.length : 0;
+}
+
+function chatStreamText(host: GatewayHost): string | null {
+  const stream = (host as GatewayHost & { chatStream?: unknown }).chatStream;
+  return typeof stream === "string" ? stream : null;
+}
+
 function resolveChatEventSessionListAgentId(
   host: GatewayHost,
   payload: ChatEventPayload | undefined,
@@ -743,12 +766,22 @@ function handleChatGatewayEvent(host: GatewayHost, payload: ChatEventPayload | u
     return;
   }
   const activeRunIdBeforeEvent = host.chatRunId;
+  const visibleStateBeforeEvent = {
+    chatMessagesLength: chatMessagesLength(host),
+    chatStream: chatStreamText(host),
+  };
   const state = handleChatEvent(host as unknown as ChatState, payload);
   const terminalEventIsForDifferentActiveRun = isEventForDifferentActiveRun(
     payload,
     activeRunIdBeforeEvent,
   );
-  const historyReloaded = handleTerminalChatEvent(host, payload, state, activeRunIdBeforeEvent);
+  const historyReloaded = handleTerminalChatEvent(
+    host,
+    payload,
+    state,
+    activeRunIdBeforeEvent,
+    visibleStateBeforeEvent,
+  );
   const deferredReloadHost = host as GatewayHostWithDeferredSessionMessageReload;
   const deferredSessionKey = deferredReloadHost.pendingSessionMessageReloadSessionKey?.trim();
   const payloadSessionKey = payload?.sessionKey?.trim();

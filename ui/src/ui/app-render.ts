@@ -319,10 +319,10 @@ function dismissUpdateBanner(updateAvailable: unknown) {
 }
 
 const COMMUNICATION_SECTION_KEYS = [
+  "__notifications__",
   "channels",
   "messages",
   "broadcast",
-  "__notifications__",
   "talk",
   "audio",
 ] as const;
@@ -989,6 +989,15 @@ export function renderApp(state: AppViewState) {
     setTextScale: (value) => state.setTextScale(value),
     gatewayUrl: state.settings.gatewayUrl,
     assistantName: state.assistantName,
+    responseCompletionSound: state.settings.responseCompletionSound === true,
+    responseCompletionVolume: state.settings.responseCompletionVolume ?? 75,
+    responseCompletionOnlyWhenHidden: state.settings.responseCompletionOnlyWhenHidden !== false,
+    onResponseCompletionSoundChange: (enabled: boolean) =>
+      state.applySettings({ ...state.settings, responseCompletionSound: enabled }),
+    onResponseCompletionVolumeChange: (volume: number) =>
+      state.applySettings({ ...state.settings, responseCompletionVolume: volume }),
+    onResponseCompletionOnlyWhenHiddenChange: (enabled: boolean) =>
+      state.applySettings({ ...state.settings, responseCompletionOnlyWhenHidden: enabled }),
     configPath: state.configSnapshot?.path ?? null,
     rawAvailable: typeof state.configSnapshot?.raw === "string",
   } satisfies Omit<
