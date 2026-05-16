@@ -37,6 +37,7 @@ import {
   sanitizeConfiguredModelProviderRequest,
   type ModelProviderRequestTransportOverrides,
 } from "../provider-request-config.js";
+import { discoverCachedPiStores } from "./model-discovery-cache.js";
 import {
   buildInlineProviderModels,
   type InlineProviderConfig,
@@ -135,6 +136,19 @@ function resolveRuntimeHooks(params?: {
     return SKIP_PI_DISCOVERY_PROVIDER_RUNTIME_HOOKS;
   }
   return DEFAULT_PROVIDER_RUNTIME_HOOKS;
+}
+
+function discoverCachedPiStoresForAgent(
+  resolvedAgentDir: string,
+  cfg: OpenClawConfig | undefined,
+): {
+  authStorage: AuthStorage;
+  modelRegistry: ModelRegistry;
+} {
+  return discoverCachedPiStores({
+    agentDir: resolvedAgentDir,
+    inheritedAuthDir: resolveDefaultAgentDir(cfg ?? {}),
+  });
 }
 
 function canonicalizeLegacyResolvedModel(params: {
@@ -497,10 +511,12 @@ function mergeConfiguredRuntimeModelParams(params: {
   provider: string;
   modelId: string;
   discoveredParams?: unknown;
+  providerParams?: unknown;
   configuredParams?: unknown;
 }): Record<string, unknown> | undefined {
   return mergeModelParams(
     readModelParams(params.discoveredParams),
+    readModelParams(params.providerParams),
     findConfiguredAgentModelParams({
       cfg: params.cfg,
       provider: params.provider,
@@ -590,6 +606,7 @@ function applyConfiguredProviderOverrides(params: {
   const configuredHeaders = sanitizeModelHeaders(configuredModel?.headers, {
     stripSecretRefMarkers: true,
   });
+  const providerParams = readModelParams(providerConfig.params);
   if (
     !configuredModel &&
     !providerConfig.baseUrl &&
@@ -600,6 +617,8 @@ function applyConfiguredProviderOverrides(params: {
     requestTimeoutMs === undefined &&
     !providerHeaders &&
     !mergedRequest &&
+    !providerRequest &&
+    !providerParams &&
     !providerConfig.localService
   ) {
     const resolvedParams = mergeModelParams(
@@ -615,6 +634,7 @@ function applyConfiguredProviderOverrides(params: {
   }
   const resolvedParams = mergeModelParams(
     readModelParams(discoveredModel.params),
+    providerParams,
     defaultModelParams,
     readModelParams(configuredModel?.params),
   );
@@ -728,6 +748,7 @@ function resolveExplicitModelWithRegistry(params: {
       cfg,
       provider,
       modelId,
+      providerParams: providerConfig?.params,
       configuredParams: inlineMatch.params,
     });
     return {
@@ -793,6 +814,7 @@ function resolveExplicitModelWithRegistry(params: {
       cfg,
       provider,
       modelId,
+      providerParams: providerConfig?.params,
       configuredParams: fallbackInlineMatch.params,
     });
     return {
@@ -925,6 +947,7 @@ function resolveConfiguredFallbackModel(params: {
     cfg,
     provider,
     modelId,
+    providerParams: providerConfig?.params,
     configuredParams: configuredModel?.params,
   });
   if (!providerConfig && !modelId.startsWith("mock-")) {
@@ -1112,8 +1135,16 @@ export function resolveModel(
   };
   const resolvedAgentDir = agentDir ?? resolveDefaultAgentDir(cfg ?? {});
   const workspaceDir = options?.workspaceDir ?? cfg?.agents?.defaults?.workspace;
-  const authStorage = options?.authStorage ?? discoverAuthStorage(resolvedAgentDir);
-  const modelRegistry = options?.modelRegistry ?? discoverModels(authStorage, resolvedAgentDir);
+  const cachedStores =
+    !options?.authStorage && !options?.modelRegistry
+      ? discoverCachedPiStoresForAgent(resolvedAgentDir, cfg)
+      : undefined;
+  const authStorage =
+    options?.authStorage ?? cachedStores?.authStorage ?? discoverAuthStorage(resolvedAgentDir);
+  const modelRegistry =
+    options?.modelRegistry ??
+    cachedStores?.modelRegistry ??
+    discoverModels(authStorage, resolvedAgentDir);
   const runtimeHooks = resolveRuntimeHooks(options);
   const model = resolveModelWithRegistry({
     provider: normalizedRef.provider,
@@ -1175,13 +1206,19 @@ export async function resolveModelAsync(
     options?.skipPiDiscovery && (!options.authStorage || !options.modelRegistry)
       ? createEmptyPiDiscoveryStores()
       : undefined;
+  const cachedStores =
+    !emptyDiscoveryStores && !options?.authStorage && !options?.modelRegistry
+      ? discoverCachedPiStoresForAgent(resolvedAgentDir, cfg)
+      : undefined;
   const authStorage =
     options?.authStorage ??
     emptyDiscoveryStores?.authStorage ??
+    cachedStores?.authStorage ??
     discoverAuthStorage(resolvedAgentDir);
   const modelRegistry =
     options?.modelRegistry ??
     emptyDiscoveryStores?.modelRegistry ??
+    cachedStores?.modelRegistry ??
     discoverModels(authStorage, resolvedAgentDir);
   const runtimeHooks = resolveRuntimeHooks(options);
   const explicitModel = resolveExplicitModelWithRegistry({
