@@ -479,6 +479,61 @@ describe("gateway hot reload", () => {
     );
   }
 
+  it("defers channel hot reload until active work drains", async () => {
+    await withNonMinimalGatewayServer(async () => {
+      const onHotReload = hoisted.getOnHotReload();
+      expect(onHotReload).toBeTypeOf("function");
+
+      hoisted.providerManager.stopChannel.mockClear();
+      hoisted.providerManager.startChannel.mockClear();
+      hoisted.activeEmbeddedRunCount.value = 1;
+      embeddedRunMock.activeIds.add("reload-active");
+      vi.useFakeTimers();
+      const reloadPromise = onHotReload?.(
+        {
+          changedPaths: ["channels.discord.token"],
+          restartGateway: false,
+          restartReasons: [],
+          hotReasons: ["channels.discord.token"],
+          reloadHooks: false,
+          restartGmailWatcher: false,
+          restartCron: false,
+          restartHeartbeat: false,
+          restartChannels: new Set(["discord"]),
+          noopPaths: [],
+        },
+        {
+          gateway: { reload: { deferralTimeoutMs: 60_000 } },
+          channels: { discord: { token: "token" } },
+        },
+      );
+      try {
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(500);
+        expect(hoisted.providerManager.stopChannel).not.toHaveBeenCalled();
+        expect(hoisted.providerManager.startChannel).not.toHaveBeenCalled();
+
+        hoisted.activeEmbeddedRunCount.value = 0;
+        embeddedRunMock.activeIds.clear();
+        await vi.advanceTimersByTimeAsync(500);
+        await reloadPromise;
+      } finally {
+        hoisted.activeEmbeddedRunCount.value = 0;
+        embeddedRunMock.activeIds.clear();
+        await vi.advanceTimersByTimeAsync(500).catch(() => {});
+        vi.useRealTimers();
+        await reloadPromise?.catch(() => {});
+      }
+
+      expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("discord", undefined, {
+        manual: false,
+      });
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord", undefined, {
+        includeKnownAccounts: true,
+      });
+    });
+  });
+
   it("uses the configured timeout when active work does not drain before channel reload", async () => {
     await withNonMinimalGatewayServer(async () => {
       const onHotReload = hoisted.getOnHotReload();
@@ -521,7 +576,9 @@ describe("gateway hot reload", () => {
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("discord", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord");
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord", undefined, {
+        includeKnownAccounts: true,
+      });
     });
   });
 
@@ -574,7 +631,9 @@ describe("gateway hot reload", () => {
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("discord", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord");
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord", undefined, {
+        includeKnownAccounts: true,
+      });
     });
   });
 
@@ -624,7 +683,9 @@ describe("gateway hot reload", () => {
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("telegram", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("telegram");
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("telegram", undefined, {
+        includeKnownAccounts: true,
+      });
     });
   });
 
@@ -708,23 +769,33 @@ describe("gateway hot reload", () => {
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("whatsapp", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("whatsapp");
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("whatsapp", undefined, {
+        includeKnownAccounts: true,
+      });
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("telegram", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("telegram");
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("telegram", undefined, {
+        includeKnownAccounts: true,
+      });
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("discord", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord");
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord", undefined, {
+        includeKnownAccounts: true,
+      });
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("signal", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("signal");
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("signal", undefined, {
+        includeKnownAccounts: true,
+      });
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("imessage", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("imessage");
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("imessage", undefined, {
+        includeKnownAccounts: true,
+      });
 
       const onRestart = hoisted.getOnRestart();
       expect(onRestart).toBeTypeOf("function");

@@ -391,7 +391,9 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
       ...store.tasks.keys(),
     ]);
     for (const [id, snapshot] of store.runtimes.entries()) {
-      if (snapshot.running || snapshot.restartPending || snapshot.connected) {
+      // `connected` can be stale after a clean stop. Treat only active or
+      // explicitly handoff-pending accounts as known-live restart candidates.
+      if (snapshot.running || snapshot.restartPending) {
         known.add(id);
       }
     }
@@ -820,6 +822,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
         setRuntime(channelId, id, {
           accountId: id,
           running: false,
+          connected: false,
           restartPending: !manual,
           lastStopAt: Date.now(),
         });
