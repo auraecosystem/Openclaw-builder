@@ -137,9 +137,13 @@ const WikiPageGroupSchema = z.strictObject({
     .refine(
       (val) => {
         // Reject absolute paths and path traversal
-        if (path.isAbsolute(val)) return false;
+        if (path.isAbsolute(val)) {
+          return false;
+        }
         const normalized = path.normalize(val);
-        if (normalized.startsWith("..") || normalized.includes(".." + path.sep)) return false;
+        if (normalized.startsWith("..") || normalized.includes(".." + path.sep)) {
+          return false;
+        }
         return true;
       },
       { message: "dir must be a relative path without traversal (no ..)" },
@@ -256,10 +260,16 @@ export function loadExtraPageGroupsFromVault(vaultPath: string): WikiPageGroup[]
     return parsed.pageGroups
     .filter((g: WikiPageGroup) => {
       // Security: reject absolute paths and path traversal
-      if (typeof g.dir !== "string") return false;
-      if (path.isAbsolute(g.dir)) return false;
+      if (typeof g.dir !== "string") {
+        return false;
+      }
+      if (path.isAbsolute(g.dir)) {
+        return false;
+      }
       const normalized = path.normalize(g.dir);
-      if (normalized.startsWith("..") || normalized.includes(".." + path.sep)) return false;
+      if (normalized.startsWith("..") || normalized.includes(".." + path.sep)) {
+        return false;
+      }
       return true;
     })
     .map((g: WikiPageGroup) =>
