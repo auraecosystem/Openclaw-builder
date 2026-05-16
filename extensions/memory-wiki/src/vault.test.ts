@@ -2,7 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createMemoryWikiTestHarness } from "./test-helpers.js";
-import { initializeMemoryWikiVault, WIKI_VAULT_DIRECTORIES } from "./vault.js";
+import { initializeMemoryWikiVault } from "./vault.js";
+import { buildVaultDirectories, DEFAULT_PAGE_GROUPS } from "./config.js";
 
 const { createVault } = createMemoryWikiTestHarness();
 
@@ -22,10 +23,10 @@ describe("initializeMemoryWikiVault", () => {
     });
 
     expect(result.created).toBe(true);
+    const expectedDirs = buildVaultDirectories(config.pageGroups);
     await Promise.all(
-      WIKI_VAULT_DIRECTORIES.map(async (relativeDir) => {
-        const dirStat = await fs.stat(path.join(rootDir, relativeDir));
-        expect(dirStat.isDirectory()).toBe(true);
+      expectedDirs.map(async (relativeDir) => {
+        await expect(fs.stat(path.join(rootDir, relativeDir))).resolves.toBeTruthy();
       }),
     );
     await expect(fs.readFile(path.join(rootDir, "AGENTS.md"), "utf8")).resolves.toContain(

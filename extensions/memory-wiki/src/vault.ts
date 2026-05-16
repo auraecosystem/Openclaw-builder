@@ -4,22 +4,9 @@ import {
   replaceManagedMarkdownBlock,
   withTrailingNewline,
 } from "openclaw/plugin-sdk/memory-host-markdown";
-import { FsSafeError, pathExists, root as fsRoot } from "openclaw/plugin-sdk/security-runtime";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
+import { buildVaultDirectories } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
-
-export const WIKI_VAULT_DIRECTORIES = [
-  "entities",
-  "concepts",
-  "syntheses",
-  "sources",
-  "reports",
-  "_attachments",
-  "_views",
-  ".openclaw-wiki",
-  ".openclaw-wiki/locks",
-  ".openclaw-wiki/cache",
-] as const;
 
 type InitializeMemoryWikiVaultResult = {
   rootDir: string;
@@ -73,22 +60,25 @@ This vault is maintained by the OpenClaw memory-wiki plugin.
 `);
 }
 
+async function pathExists(inputPath: string): Promise<boolean> {
+  try {
+    await fs.access(inputPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function writeFileIfMissing(
-  rootDir: string,
-  relativePath: string,
+  filePath: string,
   content: string,
   createdFiles: string[],
 ): Promise<void> {
-  const root = await fsRoot(rootDir);
-  try {
-    await root.create(relativePath, content);
-  } catch (err) {
-    if (err instanceof FsSafeError && err.code === "already-exists") {
-      return;
-    }
-    throw err;
+  if (await pathExists(filePath)) {
+    return;
   }
-  createdFiles.push(path.join(rootDir, relativePath));
+  await fs.writeFile(filePath, content, "utf8");
+  createdFiles.push(filePath);
 }
 
 export async function initializeMemoryWikiVault(
@@ -104,7 +94,7 @@ export async function initializeMemoryWikiVault(
   }
   await fs.mkdir(rootDir, { recursive: true });
 
-  for (const relativeDir of WIKI_VAULT_DIRECTORIES) {
+  for (const relativeDir of buildVaultDirectories(config.pageGroups)) {
     const fullPath = path.join(rootDir, relativeDir);
     if (!(await pathExists(fullPath))) {
       createdDirectories.push(fullPath);
@@ -112,18 +102,20 @@ export async function initializeMemoryWikiVault(
     await fs.mkdir(fullPath, { recursive: true });
   }
 
-  await writeFileIfMissing(rootDir, "AGENTS.md", buildAgentsMarkdown(), createdFiles);
-  await writeFileIfMissing(rootDir, "WIKI.md", buildWikiOverviewMarkdown(config), createdFiles);
-  await writeFileIfMissing(rootDir, "index.md", buildIndexMarkdown(), createdFiles);
+  await writeFileIfMissing(path.join(rootDir, "AGENTS.md"), buildAgentsMarkdown(), createdFiles);
   await writeFileIfMissing(
-    rootDir,
-    "inbox.md",
+    path.join(rootDir, "WIKI.md"),
+    buildWikiOverviewMarkdown(config),
+    createdFiles,
+  );
+  await writeFileIfMissing(path.join(rootDir, "index.md"), buildIndexMarkdown(), createdFiles);
+  await writeFileIfMissing(
+    path.join(rootDir, "inbox.md"),
     withTrailingNewline("# Inbox\n\nDrop raw ideas, questions, and source links here.\n"),
     createdFiles,
   );
   await writeFileIfMissing(
-    rootDir,
-    ".openclaw-wiki/state.json",
+    path.join(rootDir, ".openclaw-wiki", "state.json"),
     withTrailingNewline(
       JSON.stringify(
         {
@@ -137,7 +129,7 @@ export async function initializeMemoryWikiVault(
     ),
     createdFiles,
   );
-  await writeFileIfMissing(rootDir, ".openclaw-wiki/log.jsonl", "", createdFiles);
+  await writeFileIfMissing(path.join(rootDir, ".openclaw-wiki", "log.jsonl"), "", createdFiles);
 
   if (createdDirectories.length > 0 || createdFiles.length > 0) {
     await appendMemoryWikiLog(rootDir, {

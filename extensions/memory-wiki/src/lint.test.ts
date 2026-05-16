@@ -47,7 +47,7 @@ describe("lintMemoryWikiVault", () => {
 
     const result = await lintMemoryWikiVault(config);
 
-    expect(result.issues.map((issue) => issue.code)).not.toContain("broken-wikilink");
+    expect(result.issues.filter((issue) => issue.code === "broken-wikilink")).toEqual([]);
   });
 
   it("detects duplicate ids, provenance gaps, contradictions, and open questions", async () => {
@@ -142,18 +142,89 @@ describe("lintMemoryWikiVault", () => {
     expect(result.issues.map((issue) => issue.code)).toContain("claim-low-confidence");
     expect(result.issues.map((issue) => issue.code)).toContain("stale-page");
     expect(result.issues.map((issue) => issue.code)).toContain("stale-claim");
-    expect(result.issuesByCategory.contradictions.map((issue) => issue.code)).toContain(
-      "claim-conflict",
-    );
+    expect(
+      result.issuesByCategory.contradictions.some((issue) => issue.code === "claim-conflict"),
+    ).toBe(true);
     expect(result.issuesByCategory["open-questions"].length).toBeGreaterThanOrEqual(2);
-    expect(result.issuesByCategory.provenance.map((issue) => issue.code)).toContain(
-      "missing-import-provenance",
-    );
-    expect(result.issuesByCategory.provenance.map((issue) => issue.code)).toContain(
-      "claim-missing-evidence",
-    );
+    expect(
+      result.issuesByCategory.provenance.some(
+        (issue) => issue.code === "missing-import-provenance",
+      ),
+    ).toBe(true);
+    expect(
+      result.issuesByCategory.provenance.some((issue) => issue.code === "claim-missing-evidence"),
+    ).toBe(true);
     await expect(fs.readFile(result.reportPath, "utf8")).resolves.toContain("### Errors");
     await expect(fs.readFile(result.reportPath, "utf8")).resolves.toContain("### Contradictions");
     await expect(fs.readFile(result.reportPath, "utf8")).resolves.toContain("### Open Questions");
+  });
+
+  it("writes lint report to configured report dir", async () => {
+    const { rootDir, config } = await createVault({
+      prefix: "memory-wiki-lint-reportdir-",
+      config: {
+        vault: { renderMode: "obsidian" },
+        pageGroups: [
+          { kind: "source", dir: "sources", heading: "Sources" },
+          { kind: "entity", dir: "entities", heading: "Entities" },
+          { kind: "concept", dir: "concepts", heading: "Concepts" },
+          { kind: "synthesis", dir: "syntheses", heading: "Syntheses" },
+          { kind: "report", dir: "reports", heading: "Reports" },
+        ],
+      },
+    });
+    await Promise.all(
+      ["entities", "sources"].map((dir) => fs.mkdir(path.join(rootDir, dir), { recursive: true })),
+    );
+    await fs.writeFile(
+      path.join(rootDir, "entities", "alpha.md"),
+      renderWikiMarkdown({
+        frontmatter: { pageType: "entity", id: "entity.alpha", title: "Alpha" },
+        body: "# Alpha\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "sources", "beta.md"),
+      renderWikiMarkdown({
+        frontmatter: { pageType: "source", id: "source.beta", title: "Beta" },
+        body: "# Beta\n",
+      }),
+      "utf8",
+    );
+
+    const result = await lintMemoryWikiVault(config);
+
+    expect(result.reportPath).toBe(path.join(rootDir, "reports", "lint.md"));
+    await expect(fs.readFile(result.reportPath, "utf8")).resolves.toBeTruthy();
+  });
+
+  it("writes lint report to fallback reports/ when no report kind in config", async () => {
+    const { rootDir, config } = await createVault({
+      prefix: "memory-wiki-lint-fallback-",
+      config: {
+        vault: { renderMode: "obsidian" },
+        pageGroups: [
+          { kind: "source", dir: "sources", heading: "Sources" },
+          { kind: "entity", dir: "entities", heading: "Entities" },
+        ],
+      },
+    });
+    await Promise.all(
+      ["entities", "sources"].map((dir) => fs.mkdir(path.join(rootDir, dir), { recursive: true })),
+    );
+    await fs.writeFile(
+      path.join(rootDir, "entities", "alpha.md"),
+      renderWikiMarkdown({
+        frontmatter: { pageType: "entity", id: "entity.alpha", title: "Alpha" },
+        body: "# Alpha\n",
+      }),
+      "utf8",
+    );
+
+    const result = await lintMemoryWikiVault(config);
+
+    expect(result.reportPath).toBe(path.join(rootDir, "reports", "lint.md"));
+    await expect(fs.readFile(result.reportPath, "utf8")).resolves.toBeTruthy();
   });
 });

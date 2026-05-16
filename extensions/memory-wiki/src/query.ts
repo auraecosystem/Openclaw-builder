@@ -1,22 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { MemorySearchResult } from "openclaw/plugin-sdk/memory-core-host-runtime-files";
 import { resolveDefaultAgentId, resolveSessionAgentId } from "openclaw/plugin-sdk/memory-host-core";
+import type { MemorySearchResult } from "openclaw/plugin-sdk/memory-host-files";
 import { getActiveMemorySearchManager } from "openclaw/plugin-sdk/memory-host-search";
-import {
-  extractTranscriptStemFromSessionsMemoryHit,
-  loadCombinedSessionStoreForGateway,
-  resolveTranscriptStemToSessionKeys,
-} from "openclaw/plugin-sdk/session-transcript-hit";
-import {
-  createAgentToAgentPolicy,
-  createSessionVisibilityGuard,
-  resolveEffectiveSessionToolsVisibility,
-} from "openclaw/plugin-sdk/session-visibility";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import type { OpenClawConfig } from "../api.js";
 import { assessClaimFreshness, isClaimContestedStatus } from "./claim-health.js";
-import type { ResolvedMemoryWikiConfig, WikiSearchBackend, WikiSearchCorpus } from "./config.js";
+import type { ResolvedMemoryWikiConfig, WikiPageGroup, WikiSearchBackend, WikiSearchCorpus } from "./config.js";
 import {
   parseWikiMarkdown,
   toWikiPageSummary,
@@ -26,7 +16,7 @@ import {
 } from "./markdown.js";
 import { initializeMemoryWikiVault } from "./vault.js";
 
-const QUERY_DIRS = ["entities", "concepts", "sources", "syntheses", "reports"] as const;
+
 const AGENT_DIGEST_PATH = ".openclaw-wiki/cache/agent-digest.json";
 const CLAIMS_DIGEST_PATH = ".openclaw-wiki/cache/claims.jsonl";
 const RELATED_BLOCK_PATTERN =
@@ -230,10 +220,14 @@ function mergeWikiSearchCorpusResults(params: {
   return sortWikiSearchResults(selected).slice(0, params.maxResults);
 }
 
-async function listWikiMarkdownFiles(rootDir: string): Promise<string[]> {
+async function listWikiMarkdownFiles(
+  rootDir: string,
+  pageGroupDirs: string[],
+): Promise<string[]> {
+  const dirs = pageGroupDirs;
   const files = (
     await Promise.all(
-      QUERY_DIRS.map(async (relativeDir) => {
+      dirs.map(async (relativeDir) => {
         const dirPath = path.join(rootDir, relativeDir);
         const entries = await fs.readdir(dirPath, { withFileTypes: true }).catch(() => []);
         return entries
@@ -247,20 +241,25 @@ async function listWikiMarkdownFiles(rootDir: string): Promise<string[]> {
   return files.toSorted((left, right) => left.localeCompare(right));
 }
 
-export async function readQueryableWikiPages(rootDir: string): Promise<QueryableWikiPage[]> {
-  const files = await listWikiMarkdownFiles(rootDir);
-  return readQueryableWikiPagesByPaths(rootDir, files);
+export async function readQueryableWikiPages(
+  rootDir: string,
+  config?: { pageGroups: WikiPageGroup[] },
+): Promise<QueryableWikiPage[]> {
+  const pageGroupDirs = config?.pageGroups?.map((g) => g.dir) ?? [];
+  const files = await listWikiMarkdownFiles(rootDir, pageGroupDirs);
+  return readQueryableWikiPagesByPaths(rootDir, files, config?.pageGroups);
 }
 
 async function readQueryableWikiPagesByPaths(
   rootDir: string,
   files: string[],
+  pageGroups?: WikiPageGroup[],
 ): Promise<QueryableWikiPage[]> {
   const pages = await Promise.all(
     files.map(async (relativePath) => {
       const absolutePath = path.join(rootDir, relativePath);
       const raw = await fs.readFile(absolutePath, "utf8");
-      const summary = toWikiPageSummary({ absolutePath, relativePath, raw });
+      const summary = toWikiPageSummary({ absolutePath, relativePath, raw, pageGroups });
       return summary ? { ...summary, raw } : null;
     }),
   );
@@ -962,51 +961,6 @@ function buildLookupCandidates(lookup: string): string[] {
   return [...new Set([normalized, withExtension])];
 }
 
-function shouldEnforceSessionVisibility(params: {
-  agentSessionKey?: string;
-  sandboxed?: boolean;
-}): boolean {
-  return params.sandboxed === true || Boolean(params.agentSessionKey?.trim());
-}
-
-function shouldSearchSharedMemoryCorpus(config: ResolvedMemoryWikiConfig): boolean {
-  return config.search.corpus === "memory" || config.search.corpus === "all";
-}
-
-function shouldUseSharedMemory(config: ResolvedMemoryWikiConfig): boolean {
-  return config.search.backend === "shared" && shouldSearchSharedMemoryCorpus(config);
-}
-
-function assertSessionVisibilityAppConfig(params: {
-  config: ResolvedMemoryWikiConfig;
-  appConfig?: OpenClawConfig;
-  agentSessionKey?: string;
-  sandboxed?: boolean;
-  operation: string;
-}): void {
-  if (
-    shouldUseSharedMemory(params.config) &&
-    shouldEnforceSessionVisibility(params) &&
-    !params.appConfig
-  ) {
-    throw new Error(
-      `${params.operation} requires appConfig to enforce session visibility for session-bound shared memory calls.`,
-    );
-  }
-}
-
-const SESSION_MEMORY_PATH_PREFIXES = ["sessions/", "qmd/sessions/", "qmd/sessions-"] as const;
-const SESSION_MEMORY_ROOT_PATHS = ["qmd/sessions"] as const;
-
-// Keep these path shapes aligned with source: "sessions" hits in session-search-visibility and session-transcript-hit.
-export function isSessionMemoryPath(relPath: string): boolean {
-  const normalized = relPath.replace(/\\/g, "/");
-  return (
-    SESSION_MEMORY_PATH_PREFIXES.some((prefix) => normalized.startsWith(prefix)) ||
-    SESSION_MEMORY_ROOT_PATHS.some((rootPath) => normalized === rootPath)
-  );
-}
-
 function shouldSearchWiki(config: ResolvedMemoryWikiConfig): boolean {
   return config.search.corpus === "wiki" || config.search.corpus === "all";
 }
@@ -1015,7 +969,11 @@ function shouldSearchSharedMemory(
   config: ResolvedMemoryWikiConfig,
   appConfig?: OpenClawConfig,
 ): boolean {
-  return shouldUseSharedMemory(config) && appConfig !== undefined;
+  return (
+    config.search.backend === "shared" &&
+    appConfig !== undefined &&
+    (config.search.corpus === "memory" || config.search.corpus === "all")
+  );
 }
 
 function resolveActiveMemoryAgentId(params: {
@@ -1203,110 +1161,16 @@ function toMemoryWikiSearchResult(
   };
 }
 
-async function filterMemoryWikiSearchHitsBySessionVisibility(params: {
-  cfg: OpenClawConfig;
-  requesterSessionKey: string | undefined;
-  sandboxed: boolean;
-  hits: MemorySearchResult[];
-}): Promise<MemorySearchResult[]> {
-  if (!params.hits.some((hit) => hit.source === "sessions")) {
-    return params.hits;
-  }
-
-  const canReadSessionPath = await createSessionMemoryPathVisibilityChecker({
-    cfg: params.cfg,
-    requesterSessionKey: params.requesterSessionKey,
-    sandboxed: params.sandboxed,
-  });
-  return filterMemoryWikiSearchHitsWithSessionVisibility({
-    canReadSessionPath,
-    hits: params.hits,
-  });
-}
-
-type SessionMemoryPathVisibilityChecker = (relPath: string) => boolean;
-
-async function createSessionMemoryPathVisibilityChecker(params: {
-  cfg: OpenClawConfig;
-  requesterSessionKey: string | undefined;
-  sandboxed: boolean;
-}): Promise<SessionMemoryPathVisibilityChecker> {
-  const visibility = resolveEffectiveSessionToolsVisibility({
-    cfg: params.cfg,
-    sandboxed: params.sandboxed,
-  });
-  const a2aPolicy = createAgentToAgentPolicy(params.cfg);
-  const guard = params.requesterSessionKey
-    ? await createSessionVisibilityGuard({
-        action: "history",
-        requesterSessionKey: params.requesterSessionKey,
-        visibility,
-        a2aPolicy,
-      })
-    : null;
-  if (!guard) {
-    return () => false;
-  }
-
-  const { store: combinedSessionStore } = loadCombinedSessionStoreForGateway(params.cfg);
-  return (relPath) => {
-    const stem = extractTranscriptStemFromSessionsMemoryHit(relPath);
-    if (!stem) {
-      return false;
-    }
-    const keys = resolveTranscriptStemToSessionKeys({
-      store: combinedSessionStore,
-      stem,
-    });
-    return keys.some((key) => guard.check(key).allowed);
-  };
-}
-
-function filterMemoryWikiSearchHitsWithSessionVisibility(params: {
-  canReadSessionPath: SessionMemoryPathVisibilityChecker;
-  hits: MemorySearchResult[];
-}): MemorySearchResult[] {
-  const next: MemorySearchResult[] = [];
-  for (const hit of params.hits) {
-    if (hit.source !== "sessions") {
-      next.push(hit);
-      continue;
-    }
-
-    if (params.canReadSessionPath(hit.path)) {
-      next.push(hit);
-    }
-  }
-  return next;
-}
-
-function canReadSessionMemoryPath(params: {
-  canReadSessionPath: SessionMemoryPathVisibilityChecker;
-  relPath: string;
-}): boolean {
-  // Reuses the search filter with a synthetic hit; update this if the filter needs more than path/source.
-  const filtered = filterMemoryWikiSearchHitsWithSessionVisibility({
-    canReadSessionPath: params.canReadSessionPath,
-    hits: [
-      {
-        path: params.relPath,
-        startLine: 1,
-        endLine: 1,
-        score: 0,
-        snippet: "",
-        source: "sessions",
-      },
-    ],
-  });
-  return filtered.length > 0;
-}
-
 async function searchWikiCorpus(params: {
   rootDir: string;
   query: string;
   maxResults: number;
   mode: WikiSearchMode;
+  pageGroups?: WikiPageGroup[];
 }): Promise<WikiSearchResult[]> {
+  const pageGroupDirs = params.pageGroups
+    ? params.pageGroups.map((g) => g.dir)
+    : [];
   const digest = await readQueryDigestBundle(params.rootDir);
   const candidatePaths = digest
     ? buildDigestCandidatePaths({
@@ -1319,8 +1183,10 @@ async function searchWikiCorpus(params: {
   const seenPaths = new Set<string>();
   const candidatePages =
     candidatePaths.length > 0
-      ? await readQueryableWikiPagesByPaths(params.rootDir, candidatePaths)
-      : await readQueryableWikiPages(params.rootDir);
+      ? await readQueryableWikiPagesByPaths(params.rootDir, candidatePaths, params.pageGroups)
+      : await readQueryableWikiPages(params.rootDir, params.pageGroups ? {
+          pageGroups: params.pageGroups,
+        } : undefined);
   for (const page of candidatePages) {
     seenPaths.add(page.relativePath);
   }
@@ -1332,10 +1198,10 @@ async function searchWikiCorpus(params: {
     return results;
   }
 
-  const remainingPaths = (await listWikiMarkdownFiles(params.rootDir)).filter(
+  const remainingPaths = (await listWikiMarkdownFiles(params.rootDir, pageGroupDirs)).filter(
     (relativePath) => !seenPaths.has(relativePath),
   );
-  const remainingPages = await readQueryableWikiPagesByPaths(params.rootDir, remainingPaths);
+  const remainingPages = await readQueryableWikiPagesByPaths(params.rootDir, remainingPaths, params.pageGroups);
   return [
     ...results,
     ...remainingPages
@@ -1372,7 +1238,6 @@ export async function searchMemoryWiki(params: {
   appConfig?: OpenClawConfig;
   agentId?: string;
   agentSessionKey?: string;
-  sandboxed?: boolean;
   query: string;
   maxResults?: number;
   searchBackend?: WikiSearchBackend;
@@ -1380,13 +1245,6 @@ export async function searchMemoryWiki(params: {
   mode?: WikiSearchMode;
 }): Promise<WikiSearchResult[]> {
   const effectiveConfig = applySearchOverrides(params.config, params);
-  assertSessionVisibilityAppConfig({
-    config: effectiveConfig,
-    appConfig: params.appConfig,
-    agentSessionKey: params.agentSessionKey,
-    sandboxed: params.sandboxed,
-    operation: "wiki_search",
-  });
   await initializeMemoryWikiVault(effectiveConfig);
   const maxResults = Math.max(1, params.maxResults ?? 10);
   const mode = params.mode ?? "auto";
@@ -1397,6 +1255,7 @@ export async function searchMemoryWiki(params: {
         query: params.query,
         maxResults,
         mode,
+        pageGroups: effectiveConfig.pageGroups,
       })
     : [];
 
@@ -1407,22 +1266,11 @@ export async function searchMemoryWiki(params: {
         agentSessionKey: params.agentSessionKey,
       })
     : null;
-  let rawMemoryResults = sharedMemoryManager
-    ? await sharedMemoryManager.search(params.query, { maxResults })
+  const memoryResults = sharedMemoryManager
+    ? (await sharedMemoryManager.search(params.query, { maxResults })).map((result) =>
+        toMemoryWikiSearchResult(result, mode),
+      )
     : [];
-  if (
-    params.appConfig &&
-    shouldEnforceSessionVisibility(params) &&
-    rawMemoryResults.some((hit) => hit.source === "sessions")
-  ) {
-    rawMemoryResults = await filterMemoryWikiSearchHitsBySessionVisibility({
-      cfg: params.appConfig,
-      requesterSessionKey: params.agentSessionKey,
-      sandboxed: params.sandboxed === true,
-      hits: rawMemoryResults,
-    });
-  }
-  const memoryResults = rawMemoryResults.map((result) => toMemoryWikiSearchResult(result, mode));
 
   return mergeWikiSearchCorpusResults({
     wikiResults,
@@ -1437,7 +1285,6 @@ export async function getMemoryWikiPage(params: {
   appConfig?: OpenClawConfig;
   agentId?: string;
   agentSessionKey?: string;
-  sandboxed?: boolean;
   lookup: string;
   fromLine?: number;
   lineCount?: number;
@@ -1445,13 +1292,6 @@ export async function getMemoryWikiPage(params: {
   searchCorpus?: WikiSearchCorpus;
 }): Promise<WikiGetResult | null> {
   const effectiveConfig = applySearchOverrides(params.config, params);
-  assertSessionVisibilityAppConfig({
-    config: effectiveConfig,
-    appConfig: params.appConfig,
-    agentSessionKey: params.agentSessionKey,
-    sandboxed: params.sandboxed,
-    operation: "wiki_get",
-  });
   await initializeMemoryWikiVault(effectiveConfig);
   const fromLine = Math.max(1, params.fromLine ?? 1);
   const lineCount = Math.max(1, params.lineCount ?? 200);
@@ -1461,12 +1301,12 @@ export async function getMemoryWikiPage(params: {
     const digestClaimPagePath = digest ? resolveDigestClaimLookup(digest, params.lookup) : null;
     const digestLookupPage = digestClaimPagePath
       ? ((
-          await readQueryableWikiPagesByPaths(effectiveConfig.vault.path, [digestClaimPagePath])
+          await readQueryableWikiPagesByPaths(effectiveConfig.vault.path, [digestClaimPagePath], effectiveConfig.pageGroups)
         )[0] ?? null)
       : null;
     const pages = digestLookupPage
       ? [digestLookupPage]
-      : await readQueryableWikiPages(effectiveConfig.vault.path);
+      : await readQueryableWikiPages(effectiveConfig.vault.path, effectiveConfig);
     const page = digestLookupPage ?? resolveQueryableWikiPageByLookup(pages, params.lookup);
     if (page) {
       const parsed = parseWikiMarkdown(page.raw);
@@ -1503,30 +1343,7 @@ export async function getMemoryWikiPage(params: {
     return null;
   }
 
-  const lookupCandidates = buildLookupCandidates(params.lookup);
-  const canReadSessionPath =
-    params.appConfig &&
-    shouldEnforceSessionVisibility(params) &&
-    lookupCandidates.some((relPath) => isSessionMemoryPath(relPath))
-      ? await createSessionMemoryPathVisibilityChecker({
-          cfg: params.appConfig,
-          requesterSessionKey: params.agentSessionKey,
-          sandboxed: params.sandboxed === true,
-        })
-      : null;
-
-  for (const relPath of lookupCandidates) {
-    if (
-      canReadSessionPath &&
-      isSessionMemoryPath(relPath) &&
-      !canReadSessionMemoryPath({
-        canReadSessionPath,
-        relPath,
-      })
-    ) {
-      continue;
-    }
-
+  for (const relPath of buildLookupCandidates(params.lookup)) {
     try {
       const result = await manager.readFile({
         relPath,

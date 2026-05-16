@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { pathExists } from "openclaw/plugin-sdk/security-runtime";
 import { compileMemoryWikiVault } from "./compile.js";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
+import { getDefaultDirForKind } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
 import { renderMarkdownFence, renderWikiMarkdown, slugifyWikiSegment } from "./markdown.js";
 import { initializeMemoryWikiVault } from "./vault.js";
@@ -16,6 +16,13 @@ type IngestMemoryWikiSourceResult = {
   created: boolean;
   indexUpdatedFiles: string[];
 };
+
+function pathExists(filePath: string): Promise<boolean> {
+  return fs
+    .access(filePath)
+    .then(() => true)
+    .catch(() => false);
+}
 
 function resolveSourceTitle(sourcePath: string, explicitTitle?: string): string {
   if (explicitTitle?.trim()) {
@@ -45,7 +52,8 @@ export async function ingestMemoryWikiSource(params: {
   const title = resolveSourceTitle(sourcePath, params.title);
   const slug = slugifyWikiSegment(title);
   const pageId = `source.${slug}`;
-  const pageRelativePath = path.join("sources", `${slug}.md`);
+  const sourceDir = getDefaultDirForKind(params.config.pageGroups, "source");
+  const pageRelativePath = path.join(sourceDir, `${slug}.md`);
   const pagePath = path.join(params.config.vault.path, pageRelativePath);
   const created = !(await pathExists(pagePath));
   const timestamp = new Date(params.nowMs ?? Date.now()).toISOString();

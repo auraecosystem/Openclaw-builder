@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { writeJsonFileAtomically } from "openclaw/plugin-sdk/json-store";
 import {
   replaceManagedMarkdownBlock,
   withTrailingNewline,
 } from "openclaw/plugin-sdk/memory-host-markdown";
 import { compileMemoryWikiVault } from "./compile.js";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
+import { getDefaultDirForKind } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
 import {
   parseWikiMarkdown,
@@ -447,7 +447,11 @@ function buildTranscript(messages: ChatGptMessage[]): string {
     .trim();
 }
 
-function resolveConversationPagePath(record: { conversationId: string; createdAt?: string }): {
+function resolveConversationPagePath(record: {
+  conversationId: string;
+  createdAt?: string;
+  sourceDir: string;
+}): {
   pageId: string;
   pagePath: string;
 } {
@@ -458,7 +462,7 @@ function resolveConversationPagePath(record: { conversationId: string; createdAt
   return {
     pageId,
     pagePath: path
-      .join("sources", `chatgpt-${datePrefix}-${conversationSlug || shortId}.md`)
+      .join(record.sourceDir, `chatgpt-${datePrefix}-${conversationSlug || shortId}.md`)
       .replace(/\\/g, "/"),
   };
 }
@@ -466,6 +470,7 @@ function resolveConversationPagePath(record: { conversationId: string; createdAt
 function toConversationRecord(
   conversation: Record<string, unknown>,
   sourcePath: string,
+  sourceDir: string,
 ): ChatGptConversationRecord | null {
   const conversationId =
     typeof conversation.conversation_id === "string" ? conversation.conversation_id.trim() : "";
@@ -485,6 +490,7 @@ function toConversationRecord(
   const { pageId, pagePath } = resolveConversationPagePath({
     conversationId,
     createdAt: isoFromUnix(conversation.create_time),
+    sourceDir,
   });
   return {
     conversationId,
@@ -680,7 +686,8 @@ async function writeImportRunRecord(
   record: ChatGptImportRunRecord,
 ): Promise<void> {
   const recordPath = resolveImportRunPath(vaultRoot, record.runId);
-  await writeJsonFileAtomically(recordPath, record);
+  await fs.mkdir(path.dirname(recordPath), { recursive: true });
+  await fs.writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
 }
 
 async function readImportRunRecord(
@@ -735,7 +742,7 @@ export async function importChatGptConversations(params: {
     params.exportPath,
   );
   const records = conversations
-    .map((conversation) => toConversationRecord(conversation, conversationsPath))
+    .map((conversation) => toConversationRecord(conversation, conversationsPath, getDefaultDirForKind(params.config.pageGroups, "source")))
     .filter((entry): entry is ChatGptConversationRecord => entry !== null)
     .toSorted((left, right) => left.pagePath.localeCompare(right.pagePath));
 

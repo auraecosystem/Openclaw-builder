@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import type { BridgeMemoryWikiResult } from "./bridge.js";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
+import { getDefaultDirForKind } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
 import {
   createWikiPageFilename,
@@ -101,7 +102,11 @@ async function collectUnsafeLocalArtifacts(
   return [...deduped.values()];
 }
 
-function resolveUnsafeLocalPagePath(params: { configuredPath: string; absolutePath: string }): {
+function resolveUnsafeLocalPagePath(params: {
+  configuredPath: string;
+  absolutePath: string;
+  sourceDir: string;
+}): {
   pageId: string;
   pagePath: string;
 } {
@@ -119,7 +124,7 @@ function resolveUnsafeLocalPagePath(params: { configuredPath: string; absolutePa
   return {
     pageId: `source.unsafe-local.${pageSlug}`,
     pagePath: path
-      .join("sources", createWikiPageFilename(`unsafe-local-${pageSlug}`))
+      .join(params.sourceDir, createWikiPageFilename(`unsafe-local-${pageSlug}`))
       .replace(/\\/g, "/"),
   };
 }
@@ -138,6 +143,7 @@ async function writeUnsafeLocalSourcePage(params: {
   const { pageId, pagePath } = resolveUnsafeLocalPagePath({
     configuredPath: params.artifact.configuredPath,
     absolutePath: params.artifact.absolutePath,
+    sourceDir: getDefaultDirForKind(params.config.pageGroups, "source"),
   });
   const title = resolveUnsafeLocalTitle(params.artifact);
   const renderFingerprint = createHash("sha1")
