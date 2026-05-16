@@ -435,9 +435,31 @@ export function loadSessionStore(
       const bakRaw = fs.readFileSync(bakPath, "utf-8");
       const bakParsed = JSON.parse(bakRaw);
       if (isSessionStoreRecord(bakParsed) && hasAtLeastOneSessionEntry(bakParsed)) {
-        store = bakParsed;
-        serializedFromDisk = JSON.stringify(store, null, 2);
-        log.info("self-healed session store from backup", { storePath, recoverySource: "bak" });
+        // Apply the same normalize pipeline that load() runs on primary-store
+        // entries so a recovered store cannot bypass current main's shape /
+        // plugin-extension validators (clawsweeper P2 2026-05-16).
+        for (const key of Object.keys(bakParsed)) {
+          const entry = bakParsed[key];
+          if (!isSessionEntryRecord(entry)) {
+            delete bakParsed[key];
+            continue;
+          }
+          const shaped = normalizePersistedSessionEntryShape(entry);
+          bakParsed[key] = stripPersistedSkillsCache(
+            normalizePluginExtensionSlotKeys(
+              normalizePluginExtensions(
+                normalizePendingFinalDeliveryFields(
+                  normalizeSessionEntryDelivery(normalizeSessionRuntimeModelFields(shaped)),
+                ),
+              ),
+            ),
+          );
+        }
+        if (hasAtLeastOneSessionEntry(bakParsed)) {
+          store = bakParsed;
+          serializedFromDisk = JSON.stringify(store, null, 2);
+          log.info("self-healed session store from backup", { storePath, recoverySource: "bak" });
+        }
       }
     } catch {
       // no .bak or invalid; continue to tmp.
@@ -485,6 +507,25 @@ export function loadSessionStore(
             const tmpRaw = fs.readFileSync(candidate.full, "utf-8");
             const tmpParsed = JSON.parse(tmpRaw);
             if (isSessionStoreRecord(tmpParsed) && hasAtLeastOneSessionEntry(tmpParsed)) {
+              // Same normalize pipeline as the .bak accept path (clawsweeper P2).
+              for (const key of Object.keys(tmpParsed)) {
+                const entry = tmpParsed[key];
+                if (!isSessionEntryRecord(entry)) {
+                  delete tmpParsed[key];
+                  continue;
+                }
+                const shaped = normalizePersistedSessionEntryShape(entry);
+                tmpParsed[key] = stripPersistedSkillsCache(
+                  normalizePluginExtensionSlotKeys(
+                    normalizePluginExtensions(
+                      normalizePendingFinalDeliveryFields(
+                        normalizeSessionEntryDelivery(normalizeSessionRuntimeModelFields(shaped)),
+                      ),
+                    ),
+                  ),
+                );
+              }
+              if (!hasAtLeastOneSessionEntry(tmpParsed)) continue;
               store = tmpParsed;
               serializedFromDisk = JSON.stringify(store, null, 2);
               log.info("self-healed session store from backup/tmp", {
