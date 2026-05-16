@@ -179,10 +179,7 @@ vi.mock("../agents/auth-profiles.js", () => ({
     agentDir?: string;
   }) => {
     seedTestAuthProfile(params);
-    return {
-      version: 1,
-      profiles: readTestAuthProfileStore(params.agentDir).profiles,
-    };
+    return { version: 1, profiles: readTestAuthProfileStore(params.agentDir).profiles };
   },
 }));
 
