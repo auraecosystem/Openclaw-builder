@@ -1730,6 +1730,60 @@ function extractPromotionMarkers(memoryText: string): Set<string> {
   return markers;
 }
 
+function filterPromotionSectionForMissingArchiveMarkers(
+  section: string,
+  archivedMarkers: Set<string>,
+): string | null {
+  const sectionMarkers = extractPromotionMarkers(section);
+  if (sectionMarkers.size === 0) {
+    return section;
+  }
+  if ([...sectionMarkers].every((key) => archivedMarkers.has(key))) {
+    return null;
+  }
+  if ([...sectionMarkers].every((key) => !archivedMarkers.has(key))) {
+    return section;
+  }
+
+  const keptLines: string[] = [];
+  let skippingArchivedMarkerBlock = false;
+  let keptMarker = false;
+  for (const line of section.split("\n")) {
+    const marker = line.match(/<!--\s*openclaw-memory-promotion:([^\n]+?)\s*-->/i)?.[1]?.trim();
+    if (marker) {
+      skippingArchivedMarkerBlock = archivedMarkers.has(marker);
+      if (!skippingArchivedMarkerBlock) {
+        keptMarker = true;
+        keptLines.push(line);
+      }
+      continue;
+    }
+    if (!skippingArchivedMarkerBlock) {
+      keptLines.push(line);
+    }
+  }
+
+  if (!keptMarker) {
+    return null;
+  }
+  const filtered = keptLines.join("\n").trim();
+  return filtered.length > 0 ? filtered : null;
+}
+
+function filterPromotionSectionsForMissingArchiveMarkers(
+  sections: string[],
+  archivedMarkers: Set<string>,
+): string[] {
+  const filtered: string[] = [];
+  for (const section of sections) {
+    const next = filterPromotionSectionForMissingArchiveMarkers(section, archivedMarkers);
+    if (next) {
+      filtered.push(next);
+    }
+  }
+  return filtered;
+}
+
 // Promotion is infrequent and lock-protected, so a bounded quarterly archive
 // scan is acceptable for now. If archives grow large, replace this with a
 // marker manifest instead of putting detailed excerpts back into MEMORY.md.
@@ -1777,17 +1831,6 @@ async function collectArchivedPromotionMarkers(workspaceDir: string): Promise<Se
         markers.add(key);
       }
     }
-  }
-  return markers;
-}
-
-async function collectExistingPromotionMarkers(
-  workspaceDir: string,
-  memoryText: string,
-): Promise<Set<string>> {
-  const markers = extractPromotionMarkers(memoryText);
-  for (const key of await collectArchivedPromotionMarkers(workspaceDir)) {
-    markers.add(key);
   }
   return markers;
 }
@@ -1870,7 +1913,11 @@ export async function applyShortTermPromotions(
     });
     const migrated = extractDetailedPromotionSections(existingMemory);
     const migratedMarkers = extractPromotionMarkers(migrated.sections.join("\n\n"));
-    const existingMarkers = await collectExistingPromotionMarkers(workspaceDir, existingMemory);
+    const archivedMarkers = await collectArchivedPromotionMarkers(workspaceDir);
+    const existingMarkers = new Set([
+      ...extractPromotionMarkers(existingMemory),
+      ...archivedMarkers,
+    ]);
 
     if (rehydratedSelected.length === 0 && migrated.sections.length === 0) {
       return {
@@ -1903,22 +1950,27 @@ export async function applyShortTermPromotions(
         }
         throw err;
       });
-      const sections = [...migrated.sections];
+      const sections = filterPromotionSectionsForMissingArchiveMarkers(
+        migrated.sections,
+        archivedMarkers,
+      );
       if (toAppend.length > 0) {
         sections.push(buildPromotionSection(toAppend, nowMs, options.timezone).trim());
       }
-      // Write the archive header only when the day's dump is first created;
-      // same-day promotions append additional dated sections under it.
-      const archiveHeader =
-        existingArchive.trim().length > 0
-          ? ""
-          : buildPromotionArchiveHeader(nowMs, options.timezone);
-      await fs.mkdir(path.dirname(archivePath), { recursive: true });
-      await fs.writeFile(
-        archivePath,
-        `${archiveHeader}${withTrailingNewline(existingArchive)}${sections.join("\n\n")}\n`,
-        "utf-8",
-      );
+      if (sections.length > 0) {
+        // Write the archive header only when the day's dump is first created;
+        // same-day promotions append additional dated sections under it.
+        const archiveHeader =
+          existingArchive.trim().length > 0
+            ? ""
+            : buildPromotionArchiveHeader(nowMs, options.timezone);
+        await fs.mkdir(path.dirname(archivePath), { recursive: true });
+        await fs.writeFile(
+          archivePath,
+          `${archiveHeader}${withTrailingNewline(existingArchive)}${sections.join("\n\n")}\n`,
+          "utf-8",
+        );
+      }
       await fs.writeFile(
         memoryPath,
         ensurePromotionPointerSection(migrated.memoryText, archiveRelativePath),

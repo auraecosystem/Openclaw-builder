@@ -1091,6 +1091,76 @@ describe("short-term promotion", () => {
     });
   });
 
+  it("does not append already archived migrated root sections during crash-window self-heal", async () => {
+    await withTempWorkspace(async (workspaceDir) => {
+      const nowMs = Date.parse("2026-04-29T10:00:00.000Z");
+      const key = "legacy-already-archived";
+      const legacySection = [
+        "## Promoted From Short-Term Memory (2026-04-01)",
+        "",
+        `<!-- openclaw-memory-promotion:${key} -->`,
+        "- The gateway should stay loopback-only on port 18789. [score=0.950 recalls=1 avg=0.950 source=memory/2026-04-01.md:1-1]",
+      ].join("\n");
+      const memoryPath = path.join(workspaceDir, "MEMORY.md");
+      const alreadyArchivedPath = path.join(
+        workspaceDir,
+        "memory",
+        "archived",
+        "2026-Q2",
+        "memory-promoted-short-term-dump-2026-04-28.md",
+      );
+      await fs.writeFile(
+        memoryPath,
+        ["# Long-Term Memory", "", legacySection, "", "## Other Section", "", "Keep me."].join(
+          "\n",
+        ),
+        "utf-8",
+      );
+      await fs.mkdir(path.dirname(alreadyArchivedPath), { recursive: true });
+      await fs.writeFile(
+        alreadyArchivedPath,
+        [
+          "# Promoted From Short-Term Memory Dump — 2026-04-28",
+          "",
+          "---",
+          "",
+          legacySection,
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+      const archiveBefore = await fs.readFile(alreadyArchivedPath, "utf-8");
+
+      const applied = await applyShortTermPromotions({
+        workspaceDir,
+        candidates: [],
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+        nowMs,
+      });
+
+      expect(applied.applied).toBe(0);
+      expect(applied.appended).toBe(0);
+      expect(applied.reconciledExisting).toBe(1);
+      expect(applied.compactedSections).toBe(1);
+      const memoryText = await fs.readFile(memoryPath, "utf-8");
+      const archiveText = await fs.readFile(alreadyArchivedPath, "utf-8");
+      expect(memoryText).toContain("Latest promotion archive:");
+      expect(memoryText).toContain("## Other Section");
+      expect(memoryText).not.toContain(`openclaw-memory-promotion:${key}`);
+      expect(memoryText).not.toContain("The gateway should stay loopback-only on port 18789.");
+      expect(archiveText).toBe(archiveBefore);
+      await expectEnoent(fs.readFile(applied.archivePath, "utf-8"));
+      expect(archiveText.match(new RegExp(`openclaw-memory-promotion:${key}`, "g"))?.length).toBe(
+        1,
+      );
+      expect(
+        archiveText.match(/The gateway should stay loopback-only on port 18789\./g)?.length,
+      ).toBe(1);
+    });
+  });
+
   it("inserts the compact promotion pointer before a final root section", async () => {
     await withTempWorkspace(async (workspaceDir) => {
       await writeDailyMemoryNote(workspaceDir, "2026-04-01", [
