@@ -254,7 +254,9 @@ stopped Ollama daemon do not all launch failing model requests. If a sleeping
 Ollama host needs more than the default single 2.5s probe to wake, configure
 `cron.modelPreflight.maxAttempts`, `cron.modelPreflight.retryDelayMs`, and/or
 `cron.modelPreflight.timeoutMs` to give it a short wake-up window before cron
-marks the run skipped.
+marks the run skipped. Keep the worst-case window at or below 55s; OpenClaw
+validates this so local-provider preflight stays below cron's isolated-agent
+setup watchdog.
 
 Live-verify the local text path, native stream path, and embeddings against
 local Ollama with:

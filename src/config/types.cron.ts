@@ -35,6 +35,10 @@ export type CronModelPreflightConfig = {
   maxAttempts?: number;
   /** Delay in ms between failed probe attempts. Default: 0. */
   retryDelayMs?: number;
+  /**
+   * The configured worst-case preflight window is bounded by validation to stay
+   * below cron's isolated-agent setup watchdog.
+   */
 };
 
 export type CronConfig = {
