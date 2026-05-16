@@ -1,5 +1,6 @@
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { loadConfig } from "../config/config.js";
+import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import { createSubsystemLogger } from "../logging.js";
 import { loadMoltbotPlugins } from "../plugins/loader.js";
 import type { PluginLogger } from "../plugins/types.js";
@@ -9,7 +10,7 @@ let pluginRegistryLoaded = false;
 
 export function ensurePluginRegistryLoaded(): void {
   if (pluginRegistryLoaded) return;
-  const config = loadConfig();
+  const config = applyPluginAutoEnable({ config: loadConfig(), env: process.env }).config;
   const workspaceDir = resolveAgentWorkspaceDir(config, resolveDefaultAgentId(config));
   const logger: PluginLogger = {
     info: (msg) => log.info(msg),

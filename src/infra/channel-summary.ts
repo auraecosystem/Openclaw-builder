@@ -138,6 +138,10 @@ export async function buildChannelSummary(
   const tint = (value: string, color?: (input: string) => string) =>
     resolved.colorize && color ? color(value) : value;
 
+  console.log(
+    "PLUGINS:",
+    listChannelPlugins().map((p) => p.id),
+  );
   for (const plugin of listChannelPlugins()) {
     const accountIds = plugin.config.listAccountIds(effective);
     const defaultAccountId =
