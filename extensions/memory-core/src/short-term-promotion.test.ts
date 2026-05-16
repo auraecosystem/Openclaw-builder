@@ -1109,6 +1109,13 @@ describe("short-term promotion", () => {
         "2026-Q2",
         "memory-promoted-short-term-dump-2026-04-28.md",
       );
+      const currentDayArchivePath = path.join(
+        workspaceDir,
+        "memory",
+        "archived",
+        "2026-Q2",
+        "memory-promoted-short-term-dump-2026-04-29.md",
+      );
       await fs.writeFile(
         memoryPath,
         ["# Long-Term Memory", "", legacySection, "", "## Other Section", "", "Keep me."].join(
@@ -1146,12 +1153,20 @@ describe("short-term promotion", () => {
       expect(applied.compactedSections).toBe(1);
       const memoryText = await fs.readFile(memoryPath, "utf-8");
       const archiveText = await fs.readFile(alreadyArchivedPath, "utf-8");
-      expect(memoryText).toContain("Latest promotion archive:");
+      const alreadyArchivedRelativePath = path
+        .relative(workspaceDir, alreadyArchivedPath)
+        .split(path.sep)
+        .join("/");
+      expect(memoryText).toContain(`Latest promotion archive: \`${alreadyArchivedRelativePath}\`.`);
+      expect(memoryText).not.toContain(
+        `Latest promotion archive: \`${applied.archiveRelativePath.replaceAll(path.sep, "/")}\`.`,
+      );
       expect(memoryText).toContain("## Other Section");
       expect(memoryText).not.toContain(`openclaw-memory-promotion:${key}`);
       expect(memoryText).not.toContain("The gateway should stay loopback-only on port 18789.");
       expect(archiveText).toBe(archiveBefore);
-      await expectEnoent(fs.readFile(applied.archivePath, "utf-8"));
+      expect(applied.archivePath).toBe(currentDayArchivePath);
+      await expectEnoent(fs.readFile(currentDayArchivePath, "utf-8"));
       expect(archiveText.match(new RegExp(`openclaw-memory-promotion:${key}`, "g"))?.length).toBe(
         1,
       );

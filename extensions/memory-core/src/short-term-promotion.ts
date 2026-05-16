@@ -1787,23 +1787,25 @@ function filterPromotionSectionsForMissingArchiveMarkers(
 // Promotion is infrequent and lock-protected, so a bounded quarterly archive
 // scan is acceptable for now. If archives grow large, replace this with a
 // marker manifest instead of putting detailed excerpts back into MEMORY.md.
-async function collectArchivedPromotionMarkers(workspaceDir: string): Promise<Set<string>> {
-  const markers = new Set<string>();
+async function collectArchivedPromotionMarkerLocations(
+  workspaceDir: string,
+): Promise<Map<string, string>> {
+  const markerLocations = new Map<string, string>();
   const archiveRoot = path.join(workspaceDir, "memory", "archived");
   let quarters: Dirent[];
   try {
     quarters = await fs.readdir(archiveRoot, { withFileTypes: true });
   } catch (err) {
     if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
-      return markers;
+      return markerLocations;
     }
     throw err;
   }
 
-  for (const quarter of quarters) {
-    if (!quarter.isDirectory() || !/^\d{4}-Q[1-4]$/.test(quarter.name)) {
-      continue;
-    }
+  const promotionArchivePattern = /^memory-promoted-short-term-dump-\d{4}-\d{2}-\d{2}\.md$/;
+  for (const quarter of quarters
+    .filter((entry) => entry.isDirectory() && /^\d{4}-Q[1-4]$/.test(entry.name))
+    .sort((a, b) => a.name.localeCompare(b.name))) {
     const quarterDir = path.join(archiveRoot, quarter.name);
     let files: Dirent[];
     try {
@@ -1814,13 +1816,10 @@ async function collectArchivedPromotionMarkers(workspaceDir: string): Promise<Se
       }
       throw err;
     }
-    for (const file of files) {
-      if (
-        !file.isFile() ||
-        !/^memory-promoted-short-term-dump-\d{4}-\d{2}-\d{2}\.md$/.test(file.name)
-      ) {
-        continue;
-      }
+    for (const file of files
+      .filter((entry) => entry.isFile() && promotionArchivePattern.test(entry.name))
+      .sort((a, b) => a.name.localeCompare(b.name))) {
+      const archiveRelativePath = path.join("memory", "archived", quarter.name, file.name);
       const text = await fs.readFile(path.join(quarterDir, file.name), "utf-8").catch((err) => {
         if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
           return "";
@@ -1828,11 +1827,32 @@ async function collectArchivedPromotionMarkers(workspaceDir: string): Promise<Se
         throw err;
       });
       for (const key of extractPromotionMarkers(text)) {
-        markers.add(key);
+        // Later sorted archives are closer to the visible "Latest promotion archive"
+        // pointer and are the safest self-heal target for duplicate legacy roots.
+        markerLocations.set(key, archiveRelativePath);
       }
     }
   }
-  return markers;
+  return markerLocations;
+}
+
+function latestArchivedPromotionPathForMarkers(
+  markers: Set<string>,
+  markerLocations: Map<string, string>,
+): string | null {
+  let latest: string | null = null;
+  for (const marker of markers) {
+    const archiveRelativePath = markerLocations.get(marker);
+    if (!archiveRelativePath) {
+      continue;
+    }
+    const normalizedArchivePath = archiveRelativePath.replaceAll(path.sep, "/");
+    const normalizedLatest = latest?.replaceAll(path.sep, "/");
+    if (!normalizedLatest || normalizedArchivePath.localeCompare(normalizedLatest) > 0) {
+      latest = archiveRelativePath;
+    }
+  }
+  return latest;
 }
 
 export async function applyShortTermPromotions(
@@ -1913,7 +1933,8 @@ export async function applyShortTermPromotions(
     });
     const migrated = extractDetailedPromotionSections(existingMemory);
     const migratedMarkers = extractPromotionMarkers(migrated.sections.join("\n\n"));
-    const archivedMarkers = await collectArchivedPromotionMarkers(workspaceDir);
+    const archivedMarkerLocations = await collectArchivedPromotionMarkerLocations(workspaceDir);
+    const archivedMarkers = new Set(archivedMarkerLocations.keys());
     const existingMarkers = new Set([
       ...extractPromotionMarkers(existingMemory),
       ...archivedMarkers,
@@ -1957,6 +1978,7 @@ export async function applyShortTermPromotions(
       if (toAppend.length > 0) {
         sections.push(buildPromotionSection(toAppend, nowMs, options.timezone).trim());
       }
+      let pointerArchiveRelativePath = archiveRelativePath;
       if (sections.length > 0) {
         // Write the archive header only when the day's dump is first created;
         // same-day promotions append additional dated sections under it.
@@ -1970,10 +1992,14 @@ export async function applyShortTermPromotions(
           `${archiveHeader}${withTrailingNewline(existingArchive)}${sections.join("\n\n")}\n`,
           "utf-8",
         );
+      } else {
+        pointerArchiveRelativePath =
+          latestArchivedPromotionPathForMarkers(migratedMarkers, archivedMarkerLocations) ??
+          archiveRelativePath;
       }
       await fs.writeFile(
         memoryPath,
-        ensurePromotionPointerSection(migrated.memoryText, archiveRelativePath),
+        ensurePromotionPointerSection(migrated.memoryText, pointerArchiveRelativePath),
         "utf-8",
       );
     }
