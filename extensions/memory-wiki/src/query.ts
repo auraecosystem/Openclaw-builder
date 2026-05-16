@@ -253,12 +253,13 @@ export async function readQueryableWikiPages(
 ): Promise<QueryableWikiPage[]> {
   const pageGroupDirs = config?.pageGroups?.map((g) => g.dir) ?? [];
   const files = await listWikiMarkdownFiles(rootDir, pageGroupDirs);
-  return readQueryableWikiPagesByPaths(rootDir, files);
+  return readQueryableWikiPagesByPaths(rootDir, files, config?.pageGroups);
 }
 
 async function readQueryableWikiPagesByPaths(
   rootDir: string,
   files: string[],
+  pageGroups?: WikiPageGroup[],
 ): Promise<QueryableWikiPage[]> {
   const pages = await Promise.all(
     files.map(async (relativePath) => {
@@ -1323,7 +1324,7 @@ async function searchWikiCorpus(params: {
   const seenPaths = new Set<string>();
   const candidatePages =
     candidatePaths.length > 0
-      ? await readQueryableWikiPagesByPaths(params.rootDir, candidatePaths)
+      ? await readQueryableWikiPagesByPaths(params.rootDir, candidatePaths, [])
       : await readQueryableWikiPages(params.rootDir);
   for (const page of candidatePages) {
     seenPaths.add(page.relativePath);
@@ -1339,7 +1340,7 @@ async function searchWikiCorpus(params: {
   const remainingPaths = (await listWikiMarkdownFiles(params.rootDir, [])).filter(
     (relativePath) => !seenPaths.has(relativePath),
   );
-  const remainingPages = await readQueryableWikiPagesByPaths(params.rootDir, remainingPaths);
+  const remainingPages = await readQueryableWikiPagesByPaths(params.rootDir, remainingPaths, []);
   return [
     ...results,
     ...remainingPages
@@ -1465,12 +1466,12 @@ export async function getMemoryWikiPage(params: {
     const digestClaimPagePath = digest ? resolveDigestClaimLookup(digest, params.lookup) : null;
     const digestLookupPage = digestClaimPagePath
       ? ((
-          await readQueryableWikiPagesByPaths(effectiveConfig.vault.path, [digestClaimPagePath])
+          await readQueryableWikiPagesByPaths(effectiveConfig.vault.path, [digestClaimPagePath], effectiveConfig.pageGroups)
         )[0] ?? null)
       : null;
     const pages = digestLookupPage
       ? [digestLookupPage]
-      : await readQueryableWikiPages(effectiveConfig.vault.path);
+      : await readQueryableWikiPages(effectiveConfig.vault.path, { pageGroups: effectiveConfig.pageGroups });
     const page = digestLookupPage ?? resolveQueryableWikiPageByLookup(pages, params.lookup);
     if (page) {
       const parsed = parseWikiMarkdown(page.raw);
