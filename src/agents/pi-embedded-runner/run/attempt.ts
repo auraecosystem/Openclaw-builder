@@ -275,6 +275,7 @@ import {
   shouldCreateBundleLspRuntimeForAttempt,
   shouldCreateBundleMcpRuntimeForAttempt,
 } from "./attempt-tool-construction-plan.js";
+import { installConsecutiveErrorGuard } from "./consecutive-error-guard.js";
 export { buildContextEnginePromptCacheInfo } from "./attempt.context-engine-helpers.js";
 import {
   rotateTranscriptAfterCompaction,
@@ -1716,6 +1717,7 @@ export async function runEmbeddedAttempt(
     let sessionManager: ReturnType<typeof guardSessionManager> | undefined;
     let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
     let removeToolResultContextGuard: (() => void) | undefined;
+    let removeConsecutiveErrorGuard: (() => void) | undefined;
     let trajectoryRecorder: ReturnType<typeof createTrajectoryRuntimeRecorder> | null = null;
     let trajectoryEndRecorded = false;
     let buildAbortSettlePromise: () => Promise<void> | null = () => null;
@@ -2151,6 +2153,15 @@ export async function runEmbeddedAttempt(
         removeHistoryImagePruneContextTransform();
         removeLoopContextGuard?.();
       };
+      removeConsecutiveErrorGuard = installConsecutiveErrorGuard({
+        agent: activeSession.agent,
+        onAbort: (reason) => {
+          runAbortController.abort(reason);
+        },
+        sessionKey: params.sessionKey,
+        sessionId: params.sessionId,
+        trigger: params.trigger,
+      });
       const cacheTrace = createCacheTrace({
         cfg: params.config,
         env: process.env,
@@ -4339,6 +4350,7 @@ export async function runEmbeddedAttempt(
           timedOutDuringCompaction;
         await cleanupEmbeddedAttemptResources({
           removeToolResultContextGuard,
+          removeConsecutiveErrorGuard,
           flushPendingToolResultsAfterIdle,
           session,
           sessionManager,
