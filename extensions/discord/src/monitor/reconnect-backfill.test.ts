@@ -16,6 +16,7 @@ import {
 } from "./message-handler.test-helpers.js";
 import {
   backfillRecentDiscordInboundMessages,
+  getRecentDiscordBackfillCooldownCountForTest,
   resetRecentDiscordBackfillsForTest,
 } from "./reconnect-backfill.js";
 
@@ -136,6 +137,57 @@ describe("backfillRecentDiscordInboundMessages", () => {
 
     expect(rest.calls).toHaveLength(1);
     expect(messageHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it("prunes expired cooldown entries for outbound anchors outside the backfill window", async () => {
+    const rest = createFakeRestClient([
+      [apiMessage({ id: "102" })],
+      [apiMessage({ id: "902002" })],
+    ]);
+    const client = {
+      rest,
+      fetchChannel: vi.fn(async () => ({ id: "thread-1", guildId: "guild-1" })),
+    } as never;
+    const messageHandler = vi.fn(async (_data: unknown, _client?: unknown) => {});
+
+    recordRecentDiscordOutboundMessage({
+      accountId: "default",
+      channelId: "thread-1",
+      messageId: "101",
+      at: 1_000,
+    });
+
+    await backfillRecentDiscordInboundMessages({
+      accountId: "default",
+      client,
+      messageHandler,
+      botUserId: "bot-1",
+      now: 2_000,
+    });
+
+    expect(getRecentDiscordBackfillCooldownCountForTest()).toBe(1);
+
+    recordRecentDiscordOutboundMessage({
+      accountId: "default",
+      channelId: "thread-1",
+      messageId: "902001",
+      at: 902_000,
+    });
+
+    await backfillRecentDiscordInboundMessages({
+      accountId: "default",
+      client,
+      messageHandler,
+      botUserId: "bot-1",
+      now: 903_000,
+    });
+
+    expect(rest.calls).toHaveLength(2);
+    expect(rest.calls[1]).toMatchObject({
+      method: "GET",
+      query: { after: "902001", limit: 50 },
+    });
+    expect(getRecentDiscordBackfillCooldownCountForTest()).toBe(1);
   });
 
   it("shares the replay guard between REST backfill and gateway delivery", async () => {

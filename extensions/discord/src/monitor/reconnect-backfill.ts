@@ -45,12 +45,21 @@ function backfillKey(params: { accountId: string; channelId: string; messageId: 
   return `${params.accountId || "default"}:${params.channelId}:${params.messageId}`;
 }
 
+function pruneExpiredRecentBackfillCooldowns(now: number) {
+  for (const [key, previous] of recentBackfillByKey) {
+    if (now - previous > RECENT_OUTBOUND_BACKFILL_COOLDOWN_MS) {
+      recentBackfillByKey.delete(key);
+    }
+  }
+}
+
 function shouldSkipRecentBackfill(params: {
   accountId: string;
   channelId: string;
   messageId: string;
   now: number;
 }) {
+  pruneExpiredRecentBackfillCooldowns(params.now);
   const key = backfillKey(params);
   const previous = recentBackfillByKey.get(key);
   if (previous !== undefined && params.now - previous <= RECENT_OUTBOUND_BACKFILL_COOLDOWN_MS) {
@@ -156,4 +165,8 @@ export async function backfillRecentDiscordInboundMessages(params: {
 
 export function resetRecentDiscordBackfillsForTest() {
   recentBackfillByKey.clear();
+}
+
+export function getRecentDiscordBackfillCooldownCountForTest() {
+  return recentBackfillByKey.size;
 }
