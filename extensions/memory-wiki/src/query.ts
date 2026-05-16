@@ -26,7 +26,6 @@ import {
 } from "./markdown.js";
 import { initializeMemoryWikiVault } from "./vault.js";
 
-const QUERY_DIRS = ["entities", "concepts", "sources", "syntheses", "reports"] as const;
 const AGENT_DIGEST_PATH = ".openclaw-wiki/cache/agent-digest.json";
 const CLAIMS_DIGEST_PATH = ".openclaw-wiki/cache/claims.jsonl";
 const RELATED_BLOCK_PATTERN =
@@ -230,10 +229,13 @@ function mergeWikiSearchCorpusResults(params: {
   return sortWikiSearchResults(selected).slice(0, params.maxResults);
 }
 
-async function listWikiMarkdownFiles(rootDir: string): Promise<string[]> {
+async function listWikiMarkdownFiles(
+  rootDir: string,
+  pageGroupDirs: string[],
+): Promise<string[]> {
   const files = (
     await Promise.all(
-      QUERY_DIRS.map(async (relativeDir) => {
+      pageGroupDirs.map(async (relativeDir) => {
         const dirPath = path.join(rootDir, relativeDir);
         const entries = await fs.readdir(dirPath, { withFileTypes: true }).catch(() => []);
         return entries
