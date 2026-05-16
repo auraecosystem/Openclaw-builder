@@ -292,6 +292,7 @@ describe("cron service store seam coverage", () => {
   });
 
   it("clears next run for a force-reloaded job when the persisted schedule is malformed", async () => {
+  it("keeps a force-reloaded legacy string schedule for runtime repair handling", async () => {
     const { storePath } = await makeStorePath();
     const staleNextRunAtMs = STORE_TEST_NOW + 3_600_000;
 
@@ -318,6 +319,9 @@ describe("cron service store seam coverage", () => {
 
     const reloadedJob = state.store?.jobs.find((job) => job.id === "reload-cron-expr-job");
     expect(reloadedJob?.state.nextRunAtMs).toBeUndefined();
+    const job = findJobOrThrow(state, "reload-cron-expr-job");
+    expect(job.schedule).toBe("0 17 * * *");
+    expect(job.state.nextRunAtMs).toBeUndefined();
   });
 
   it("preserves nextRunAtMs after force reload when scheduling inputs are unchanged", async () => {

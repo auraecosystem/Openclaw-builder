@@ -94,7 +94,8 @@ describe("CronService", () => {
     expect(requestHeartbeat).not.toHaveBeenCalled();
   });
 
-  it("marks persisted main jobs with empty systemEvent text skipped before they run", async () => {
+    it("marks persisted main jobs with empty systemEvent text skipped before they run", async () => {
+  it("disables persisted main jobs with empty systemEvent text after skipping them", async () => {
     await withCronService(true, async ({ cron, enqueueSystemEvent, requestHeartbeat }) => {
       const atMs = Date.parse("2025-12-13T00:00:01.000Z");
       await cron.add({
@@ -118,6 +119,10 @@ describe("CronService", () => {
       );
       expect(job?.enabled).toBe(false);
       expect(job?.state.lastError).toMatch(/non-empty systemEvent text/i);
+      const job = await waitForFirstJob(cron, (current) => current?.state.lastStatus === "skipped");
+      expect(job?.enabled).toBe(false);
+      expect(job?.state.lastStatus).toBe("skipped");
+      expect(job?.state.lastError).toMatch(/non-empty/i);
       expect(job?.state.nextRunAtMs).toBeUndefined();
     });
   });

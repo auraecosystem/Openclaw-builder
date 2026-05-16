@@ -665,6 +665,10 @@ async function processDiscordMessageInner(
             abortSignal,
             skillFilter: channelConfig?.skills,
             sourceReplyDeliveryMode,
+            allowProgressCallbacksWhenSourceDeliverySuppressed:
+              sourceRepliesAreToolOnly && draftPreview.draftStream && draftPreview.isProgressMode
+                ? true
+                : undefined,
             disableBlockStreaming: sourceRepliesAreToolOnly
               ? true
               : (draftPreview.disableBlockStreamingForDraft ??
