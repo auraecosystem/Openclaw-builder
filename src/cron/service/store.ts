@@ -44,6 +44,25 @@ function warnInvalidPersistedCronJob(params: {
   );
 }
 
+function shouldRetainInvalidReloadedJob(params: {
+  previousJobsById: ReadonlyMap<string, CronJob>;
+  raw: Record<string, unknown>;
+  reason: string;
+}): boolean {
+  if (params.reason !== "missing-schedule" && params.reason !== "invalid-schedule") {
+    return false;
+  }
+  const jobId = typeof params.raw.id === "string" ? params.raw.id : undefined;
+  return Boolean(jobId && params.previousJobsById.has(jobId));
+}
+
+function prepareRetainedInvalidReloadedJob(job: CronJob): CronJob {
+  job.state ??= {};
+  job.state.nextRunAtMs = undefined;
+  job.state.runningAtMs = undefined;
+  return job;
+}
+
 async function getFileMtimeMs(path: string): Promise<number | null> {
   try {
     const stats = await fs.promises.stat(path);
@@ -101,6 +120,9 @@ export async function ensureLoaded(
     );
     if (invalidReason) {
       warnInvalidPersistedCronJob({ state, raw, index, reason: invalidReason });
+      if (shouldRetainInvalidReloadedJob({ previousJobsById, raw, reason: invalidReason })) {
+        jobs.push(prepareRetainedInvalidReloadedJob(hydrated));
+      }
       continue;
     }
     jobs.push(hydrated);

@@ -298,7 +298,7 @@ function stripPersistedSkillsCache(entry: SessionEntry): SessionEntry {
 export function normalizeSessionStore(store: Record<string, SessionEntry>): boolean {
   let changed = false;
   for (const [key, entry] of Object.entries(store)) {
-    const shaped = normalizePersistedSessionEntryShape(entry);
+    const shaped = normalizePersistedSessionEntryShape(entry, { allowMissingSessionId: true });
     if (!shaped) {
       delete store[key];
       changed = true;
