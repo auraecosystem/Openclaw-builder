@@ -445,6 +445,10 @@ export function loadSessionStore(
             continue;
           }
           const shaped = normalizePersistedSessionEntryShape(entry);
+          if (!shaped) {
+            delete bakParsed[key];
+            continue;
+          }
           bakParsed[key] = stripPersistedSkillsCache(
             normalizePluginExtensionSlotKeys(
               normalizePluginExtensions(
@@ -515,6 +519,10 @@ export function loadSessionStore(
                   continue;
                 }
                 const shaped = normalizePersistedSessionEntryShape(entry);
+                if (!shaped) {
+                  delete tmpParsed[key];
+                  continue;
+                }
                 tmpParsed[key] = stripPersistedSkillsCache(
                   normalizePluginExtensionSlotKeys(
                     normalizePluginExtensions(
