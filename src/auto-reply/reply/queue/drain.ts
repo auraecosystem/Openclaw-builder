@@ -12,6 +12,7 @@ import {
   waitForQueueDebounce,
 } from "../../../utils/queue-helpers.js";
 import { isRoutableChannel } from "../route-reply.js";
+import { persistFollowupQueues } from "./persist.js";
 import { FOLLOWUP_QUEUES } from "./state.js";
 import { completeFollowupRunLifecycle, isFollowupRunAborted, type FollowupRun } from "./types.js";
 
@@ -468,7 +469,9 @@ export function scheduleFollowupDrain(
           FOLLOWUP_QUEUES.delete(key);
           clearFollowupDrainCallback(key);
         }
+        persistFollowupQueues();
       } else {
+        persistFollowupQueues();
         scheduleFollowupDrain(key, effectiveRunFollowup);
       }
     }
