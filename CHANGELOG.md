@@ -11,6 +11,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Channels/Discord: scope message-tool schema property groups to actions actually advertised by the active channel, so guild allowlist setups no longer leak unrelated `topic`/`rateLimitPerUser`/`activityName`/`clearParent`/`status` fields into `action="send"` payloads and trigger "message required" failures or repeated outbound retries. Fixes #81484.
 - Agents/skills: apply the full effective tool policy pipeline to inline `command-dispatch: tool` skill dispatch before owner-only filtering, preserving configured allow, deny, sandbox, sender, group, and subagent restrictions. (#78525)
 - Channel accounts: keep top-level default channel accounts visible when named accounts are added alongside default credential material, so mixed legacy/new account configs keep resolving `default` instead of silently dropping it.
 - Codex/Telegram: synthesize native Codex tool progress from final turn snapshots so Telegram `/verbose` stays visible when command events arrive only at completion.
