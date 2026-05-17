@@ -34,9 +34,11 @@ extension CronSettings {
                     }
                 })
         }
-        .alert("Delete cron job?", isPresented: Binding(
-            get: { self.confirmDelete != nil },
-            set: { if !$0 { self.confirmDelete = nil } }))
+        .alert(
+            "Delete cron job?",
+            isPresented: Binding(
+                get: { self.confirmDelete != nil },
+                set: { if !$0 { self.confirmDelete = nil } }))
         {
             Button("Cancel", role: .cancel) { self.confirmDelete = nil }
             Button("Delete", role: .destructive) {
