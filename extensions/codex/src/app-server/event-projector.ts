@@ -21,6 +21,7 @@ import {
   type ToolProgressDetailMode,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { emitTrustedDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
+import { resolveCodexLocalRuntimeAttribution } from "./local-runtime-attribution.js";
 import { CodexNativeSubagentTaskMirror } from "./native-subagent-task-mirror.js";
 import { readCodexTurn } from "./protocol-validators.js";
 import {
@@ -40,7 +41,7 @@ import {
   sanitizeCodexAgentEventRecord,
   sanitizeCodexToolArguments,
 } from "./tool-progress-normalization.js";
-import { attachCodexMirrorIdentity } from "./transcript-mirror.js";
+import { attachCodexMirrorIdentity, buildCodexUserPromptMessage } from "./transcript-mirror.js";
 
 export type CodexAppServerToolTelemetry = {
   didSendViaMessagingTool: boolean;
@@ -108,6 +109,8 @@ type ToolTranscriptResultInput = {
 export class CodexAppServerEventProjector {
   private readonly assistantTextByItem = new Map<string, string>();
   private readonly assistantItemOrder: string[] = [];
+  private readonly assistantPhaseByItem = new Map<string, string>();
+  private readonly lastCommentaryProgressTextByItem = new Map<string, string>();
   private readonly reasoningTextByItem = new Map<string, string>();
   private readonly planTextByItem = new Map<string, string>();
   private readonly activeItemIds = new Set<string>();
@@ -258,14 +261,7 @@ export class CodexAppServerEventProjector {
     //     distinct turnIds → distinct identities → both kept.
     const turnId = this.turnId;
     const messagesSnapshot: AgentMessage[] = [
-      attachCodexMirrorIdentity(
-        {
-          role: "user",
-          content: this.params.prompt,
-          timestamp: Date.now(),
-        },
-        `${turnId}:prompt`,
-      ),
+      attachCodexMirrorIdentity(buildCodexUserPromptMessage(this.params), `${turnId}:prompt`),
     ];
     // Codex owns the canonical thread. These mirror records keep enough local
     // context for OpenClaw history, search, and future harness switching.
@@ -395,6 +391,9 @@ export class CodexAppServerEventProjector {
     this.rememberAssistantItem(itemId);
     const text = `${this.assistantTextByItem.get(itemId) ?? ""}${delta}`;
     this.assistantTextByItem.set(itemId, text);
+    if (this.isCommentaryAssistantItem(itemId)) {
+      this.emitCommentaryProgress({ itemId, text });
+    }
     // Codex app-server can emit multiple agentMessage items per turn, including
     // intermediate coordination/progress prose. Keep those deltas internal until
     // turn completion chooses the last assistant item as the user-visible reply.
@@ -445,6 +444,7 @@ export class CodexAppServerEventProjector {
   private async handleItemStarted(params: JsonObject): Promise<void> {
     const item = readItem(params.item);
     const itemId = item?.id ?? readString(params, "itemId") ?? readString(params, "id");
+    this.rememberAssistantPhase(item);
     if (itemId) {
       this.activeItemIds.add(itemId);
     }
@@ -492,9 +492,13 @@ export class CodexAppServerEventProjector {
       this.activeItemIds.delete(itemId);
       this.completedItemIds.add(itemId);
     }
+    this.rememberAssistantPhase(item);
     if (item?.type === "agentMessage" && typeof item.text === "string" && item.text) {
       this.rememberAssistantItem(item.id);
       this.assistantTextByItem.set(item.id, item.text);
+      if (this.isCommentaryAssistantItem(item.id)) {
+        this.emitCommentaryProgress({ itemId: item.id, text: item.text });
+      }
     }
     this.recordNativeGeneratedMedia(item);
     if (item?.type === "plan" && typeof item.text === "string" && item.text) {
@@ -524,6 +528,7 @@ export class CodexAppServerEventProjector {
         data: {
           phase: "end",
           backend: "codex-app-server",
+          completed: true,
           threadId: this.threadId,
           turnId: this.turnId,
           itemId,
@@ -628,6 +633,7 @@ export class CodexAppServerEventProjector {
       this.promptErrorSource = "prompt";
     }
     for (const item of turn.items ?? []) {
+      this.rememberAssistantPhase(item);
       if (item.type === "agentMessage" && typeof item.text === "string" && item.text) {
         this.rememberAssistantItem(item.id);
         this.assistantTextByItem.set(item.id, item.text);
@@ -705,8 +711,15 @@ export class CodexAppServerEventProjector {
       return;
     }
     const itemId = readString(item, "id") ?? `raw-assistant-${this.assistantItemOrder.length + 1}`;
+    const phase = readString(item, "phase");
+    if (phase) {
+      this.assistantPhaseByItem.set(itemId, phase);
+    }
     this.rememberAssistantItem(itemId);
     this.assistantTextByItem.set(itemId, text);
+    if (phase === "commentary") {
+      this.emitCommentaryProgress({ itemId, text });
+    }
   }
 
   private recordNativeGeneratedMedia(item: CodexThreadItem | undefined): void {
@@ -751,6 +764,42 @@ export class CodexAppServerEventProjector {
         source: "codex-app-server",
         ...(params.explanation ? { explanation: params.explanation } : {}),
         ...(params.steps && params.steps.length > 0 ? { steps: params.steps } : {}),
+      },
+    });
+  }
+
+  private rememberAssistantPhase(item: CodexThreadItem | undefined): void {
+    if (item?.type !== "agentMessage") {
+      return;
+    }
+    const phase = readItemString(item, "phase");
+    if (phase) {
+      this.assistantPhaseByItem.set(item.id, phase);
+    }
+  }
+
+  private isCommentaryAssistantItem(itemId: string): boolean {
+    return this.assistantPhaseByItem.get(itemId) === "commentary";
+  }
+
+  private emitCommentaryProgress(params: { itemId: string; text: string }): void {
+    const progressText = params.text.replace(/\s+/g, " ").trim();
+    if (
+      !progressText ||
+      this.lastCommentaryProgressTextByItem.get(params.itemId) === progressText
+    ) {
+      return;
+    }
+    this.lastCommentaryProgressTextByItem.set(params.itemId, progressText);
+    this.emitAgentEvent({
+      stream: "item",
+      data: {
+        itemId: params.itemId,
+        kind: "preamble",
+        title: "Preamble",
+        phase: "update",
+        progressText,
+        source: "codex-app-server",
       },
     });
   }
@@ -1118,6 +1167,9 @@ export class CodexAppServerEventProjector {
         continue;
       }
       const text = this.assistantTextByItem.get(itemId)?.trim();
+      if (this.assistantPhaseByItem.get(itemId) === "commentary") {
+        continue;
+      }
       if (text && !this.toolProgressTexts.has(text)) {
         return text;
       }
@@ -1137,6 +1189,7 @@ export class CodexAppServerEventProjector {
   }
 
   private createAssistantMessage(text: string): AssistantMessage {
+    const attribution = resolveCodexLocalRuntimeAttribution(this.params);
     const usage: Usage = this.tokenUsage
       ? {
           input: this.tokenUsage.input ?? 0,
@@ -1155,8 +1208,8 @@ export class CodexAppServerEventProjector {
     return {
       role: "assistant",
       content: [{ type: "text", text }],
-      api: this.params.model.api ?? "openai-codex-responses",
-      provider: this.params.provider,
+      api: attribution.api ?? "openai-codex-responses",
+      provider: attribution.provider,
       model: this.params.modelId,
       usage,
       stopReason: this.aborted ? "aborted" : this.promptError ? "error" : "stop",
@@ -1166,11 +1219,12 @@ export class CodexAppServerEventProjector {
   }
 
   private createAssistantMirrorMessage(title: string, text: string): AssistantMessage {
+    const attribution = resolveCodexLocalRuntimeAttribution(this.params);
     return {
       role: "assistant",
       content: [{ type: "text", text: `${title}:\n${text}` }],
-      api: this.params.model.api ?? "openai-codex-responses",
-      provider: this.params.provider,
+      api: attribution.api ?? "openai-codex-responses",
+      provider: attribution.provider,
       model: this.params.modelId,
       usage: ZERO_USAGE,
       stopReason: "stop",
@@ -1180,6 +1234,7 @@ export class CodexAppServerEventProjector {
 
   private createToolCallMessage(params: ToolTranscriptCallInput): AgentMessage {
     const args = normalizeToolTranscriptArguments(params.arguments);
+    const attribution = resolveCodexLocalRuntimeAttribution(this.params);
     return {
       role: "assistant",
       content: [
@@ -1191,8 +1246,8 @@ export class CodexAppServerEventProjector {
           input: args,
         },
       ],
-      api: this.params.model.api ?? "openai-codex-responses",
-      provider: this.params.provider,
+      api: attribution.api ?? "openai-codex-responses",
+      provider: attribution.provider,
       model: this.params.modelId,
       usage: ZERO_USAGE,
       stopReason: "toolUse",
