@@ -256,6 +256,7 @@ async function resolveRuntimeModel(params: {
         agentId: params.agentId,
         sessionKey: params.sessionKey,
       }).runtime,
+      config: params.cfg,
     }),
     agentDir: params.agentDir,
     sessionEntry: params.sessionEntry,
@@ -287,6 +288,9 @@ type RunBtwSideQuestionParams = {
   resolvedBlockStreamingBreak?: "text_end" | "message_end";
   opts?: GetReplyOptions;
   isNewSession: boolean;
+  messageChannel?: string;
+  messageProvider?: string;
+  currentChannelId?: string;
 };
 
 export async function runBtwSideQuestion(
