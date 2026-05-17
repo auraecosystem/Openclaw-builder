@@ -1,7 +1,12 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { APIMessage } from "discord-api-types/v10";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakeRestClient } from "../internal/test-builders.test-support.js";
 import {
+  clearRecentDiscordOutboundPersistenceForTest,
+  listRecentDiscordOutboundMessages,
   recordRecentDiscordOutboundMessage,
   resetRecentDiscordOutboundMessagesForTest,
 } from "../recent-outbound.js";
@@ -51,12 +56,30 @@ function apiMessage(overrides: Partial<APIMessage> & Pick<APIMessage, "id">): AP
   } as APIMessage;
 }
 
+const previousRecentOutboundStorePath = process.env.OPENCLAW_DISCORD_RECENT_OUTBOUND_STORE_PATH;
+const recentOutboundStorePath = path.join(
+  os.tmpdir(),
+  `openclaw-discord-recent-outbound-${process.pid}.json`,
+);
+
 describe("backfillRecentDiscordInboundMessages", () => {
   beforeEach(() => {
+    process.env.OPENCLAW_DISCORD_RECENT_OUTBOUND_STORE_PATH = recentOutboundStorePath;
+    clearRecentDiscordOutboundPersistenceForTest();
     resetRecentDiscordOutboundMessagesForTest();
     resetRecentDiscordBackfillsForTest();
     preflightDiscordMessageMock.mockReset();
     processDiscordMessageMock.mockReset();
+  });
+
+  afterEach(() => {
+    clearRecentDiscordOutboundPersistenceForTest();
+    resetRecentDiscordOutboundMessagesForTest();
+    if (previousRecentOutboundStorePath === undefined) {
+      delete process.env.OPENCLAW_DISCORD_RECENT_OUTBOUND_STORE_PATH;
+    } else {
+      process.env.OPENCLAW_DISCORD_RECENT_OUTBOUND_STORE_PATH = previousRecentOutboundStorePath;
+    }
   });
 
   it("replays user messages after recent OpenClaw outbound messages in oldest-first order", async () => {
@@ -103,6 +126,90 @@ describe("backfillRecentDiscordInboundMessages", () => {
     expect(firstEvent.message.id).toBe("102");
     expect(firstEvent.guild_id).toBe("guild-1");
     expect(secondEvent.message.id).toBe("103");
+  });
+
+  it("persists recent outbound anchors across full process restarts", async () => {
+    const rest = createFakeRestClient([[apiMessage({ id: "202", content: "missed" })]]);
+    const client = {
+      rest,
+      fetchChannel: vi.fn(async () => ({ id: "thread-1", guildId: "guild-1" })),
+    } as never;
+    const messageHandler = vi.fn(async (_data: unknown, _client?: unknown) => {});
+
+    recordRecentDiscordOutboundMessage({
+      accountId: "default",
+      channelId: "thread-1",
+      messageId: "201",
+      at: 1_000,
+    });
+
+    expect(fs.existsSync(recentOutboundStorePath)).toBe(true);
+    resetRecentDiscordOutboundMessagesForTest();
+
+    expect(
+      listRecentDiscordOutboundMessages({ accountId: "default", maxAgeMs: 60_000, now: 2_000 }),
+    ).toEqual([
+      {
+        accountId: "default",
+        channelId: "thread-1",
+        messageId: "201",
+        at: 1_000,
+      },
+    ]);
+
+    resetRecentDiscordOutboundMessagesForTest();
+    await backfillRecentDiscordInboundMessages({
+      accountId: "default",
+      client,
+      messageHandler,
+      botUserId: "bot-1",
+      now: 2_000,
+    });
+
+    expect(rest.calls[0]).toMatchObject({
+      method: "GET",
+      query: { after: "201", limit: 50 },
+    });
+    expect(messageHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports reconnect backfill outcome stats", async () => {
+    const rest = createFakeRestClient([[apiMessage({ id: "302" })]]);
+    const client = {
+      rest,
+      fetchChannel: vi.fn(async () => ({ id: "thread-1", guildId: "guild-1" })),
+    } as never;
+    const messageHandler = vi.fn(async (_data: unknown, _client?: unknown) => {});
+    const logger = { info: vi.fn(), error: vi.fn() };
+
+    recordRecentDiscordOutboundMessage({
+      accountId: "default",
+      channelId: "thread-1",
+      messageId: "301",
+      at: 1_000,
+    });
+
+    const stats = await backfillRecentDiscordInboundMessages({
+      accountId: "default",
+      client,
+      messageHandler,
+      botUserId: "bot-1",
+      logger: logger as never,
+      now: 2_000,
+    });
+
+    expect(stats).toMatchObject({
+      anchorsAvailable: 1,
+      anchorsScanned: 1,
+      channelsScanned: 1,
+      candidates: 1,
+      replayed: 1,
+      errors: 0,
+    });
+    expect(logger.info).toHaveBeenCalledWith(
+      "Discord reconnect backfill complete",
+      expect.objectContaining({ anchorsAvailable: 1, replayed: 1 }),
+    );
   });
 
   it("does not rescan the same outbound anchor during the reconnect cooldown", async () => {

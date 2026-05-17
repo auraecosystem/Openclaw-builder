@@ -5,7 +5,7 @@ import { Guild, type Client, Message, User } from "../internal/discord.js";
 import { listRecentDiscordOutboundMessages } from "../recent-outbound.js";
 import type { DiscordMessageEvent, DiscordMessageHandler } from "./listeners.types.js";
 
-const RECENT_OUTBOUND_BACKFILL_WINDOW_MS = 15 * 60 * 1000;
+const RECENT_OUTBOUND_BACKFILL_WINDOW_MS = 2 * 60 * 60 * 1000;
 const RECENT_OUTBOUND_BACKFILL_LIMIT = 50;
 const RECENT_OUTBOUND_BACKFILL_COOLDOWN_MS = 30 * 1000;
 
@@ -14,6 +14,16 @@ type Logger = ReturnType<typeof import("openclaw/plugin-sdk/runtime-env").create
 type DiscordChannelLike = {
   guildId?: string;
   guild_id?: string;
+};
+
+type DiscordReconnectBackfillStats = {
+  anchorsAvailable: number;
+  anchorsScanned: number;
+  skippedCooldown: number;
+  channelsScanned: number;
+  candidates: number;
+  replayed: number;
+  errors: number;
 };
 
 const recentBackfillByKey = new Map<string, number>();
@@ -96,6 +106,26 @@ function toDispatchEvent(params: {
   } as DiscordMessageEvent;
 }
 
+function createEmptyStats(anchorsAvailable: number): DiscordReconnectBackfillStats {
+  return {
+    anchorsAvailable,
+    anchorsScanned: 0,
+    skippedCooldown: 0,
+    channelsScanned: 0,
+    candidates: 0,
+    replayed: 0,
+    errors: 0,
+  };
+}
+
+function logBackfillStats(params: { logger?: Logger; stats: DiscordReconnectBackfillStats }) {
+  const { stats } = params;
+  if (stats.anchorsAvailable === 0) {
+    return;
+  }
+  params.logger?.info("Discord reconnect backfill complete", stats);
+}
+
 export async function backfillRecentDiscordInboundMessages(params: {
   accountId: string;
   client: Client;
@@ -111,8 +141,9 @@ export async function backfillRecentDiscordInboundMessages(params: {
     maxAgeMs: RECENT_OUTBOUND_BACKFILL_WINDOW_MS,
     now,
   });
+  const stats = createEmptyStats(recent.length);
   if (recent.length === 0) {
-    return;
+    return stats;
   }
 
   for (const entry of recent) {
@@ -124,8 +155,10 @@ export async function backfillRecentDiscordInboundMessages(params: {
         now,
       })
     ) {
+      stats.skippedCooldown += 1;
       continue;
     }
+    stats.anchorsScanned += 1;
     try {
       const channel = await params.client.fetchChannel(entry.channelId);
       const guildId = resolveGuildId(channel);
@@ -133,14 +166,17 @@ export async function backfillRecentDiscordInboundMessages(params: {
         after: entry.messageId,
         limit: RECENT_OUTBOUND_BACKFILL_LIMIT,
       });
+      stats.channelsScanned += 1;
       const candidates = messages
         .filter((message) => message.id && !isFromBot(message, params.botUserId))
         .toSorted((a, b) => compareSnowflakesAscending(a.id, b.id));
+      stats.candidates += candidates.length;
       if (candidates.length === 0) {
         continue;
       }
       params.logger?.info("Discord reconnect backfill scanning recent channel messages", {
         channelId: entry.channelId,
+        after: entry.messageId,
         count: candidates.length,
       });
       for (const message of candidates) {
@@ -154,13 +190,17 @@ export async function backfillRecentDiscordInboundMessages(params: {
           }),
           params.client,
         );
+        stats.replayed += 1;
       }
     } catch (err) {
+      stats.errors += 1;
       params.logger?.error(
         danger(`discord reconnect backfill failed for channel ${entry.channelId}: ${String(err)}`),
       );
     }
   }
+  logBackfillStats({ logger: params.logger, stats });
+  return stats;
 }
 
 export function resetRecentDiscordBackfillsForTest() {
