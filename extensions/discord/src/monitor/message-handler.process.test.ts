@@ -1,3 +1,4 @@
+import { MessageFlags } from "discord-api-types/v10";
 import { DEFAULT_EMOJIS, DEFAULT_TIMING } from "openclaw/plugin-sdk/channel-feedback";
 import {
   recordChannelBotPairLoopAndCheckSuppression,
@@ -140,10 +141,13 @@ type DispatchInboundParams = {
     sourceReplyDeliveryMode?: "automatic" | "message_tool_only";
     disableBlockStreaming?: boolean;
     suppressDefaultToolProgressMessages?: boolean;
+    queuedDeliveryCorrelations?: Array<{ begin: () => () => void }>;
+    suppressTyping?: boolean;
     onCompactionStart?: () => Promise<void> | void;
     onCompactionEnd?: () => Promise<void> | void;
     onPartialReply?: (payload: { text?: string }) => Promise<void> | void;
     onAssistantMessageStart?: () => Promise<void> | void;
+    allowProgressCallbacksWhenSourceDeliverySuppressed?: boolean;
   };
 };
 const dispatchInboundMessage = vi.hoisted(() =>
@@ -187,6 +191,7 @@ let createDiscordDirectMessageContextOverrides: typeof import("./message-handler
 let threadBindingTesting: typeof import("./thread-bindings.js").__testing;
 let createThreadBindingManager: typeof import("./thread-bindings.js").createThreadBindingManager;
 let processDiscordMessage: typeof import("./message-handler.process.js").processDiscordMessage;
+let notifyDiscordInboundEventOutboundSuccess: typeof import("../inbound-event-delivery.js").notifyDiscordInboundEventOutboundSuccess;
 
 vi.mock("openclaw/plugin-sdk/reply-runtime", () => ({
   dispatchInboundMessage: (params: DispatchInboundParams) => dispatchInboundMessage(params),
@@ -204,27 +209,31 @@ vi.mock("openclaw/plugin-sdk/reply-runtime", () => ({
   createReplyDispatcherWithTyping: (opts: {
     deliver: (payload: unknown, info: { kind: string }) => Promise<void> | void;
     onReplyStart?: () => Promise<void> | void;
-  }) => ({
-    dispatcher: {
-      sendToolResult: vi.fn(() => true),
-      sendBlockReply: vi.fn((payload: unknown) => {
-        void opts.deliver(payload, { kind: "block" });
-        return true;
-      }),
-      sendFinalReply: vi.fn((payload: unknown) => {
-        void opts.deliver(payload, { kind: "final" });
-        return true;
-      }),
-      waitForIdle: vi.fn(async () => {}),
-      getQueuedCounts: vi.fn(() => ({ tool: 0, block: 0, final: 0 })),
-      markComplete: vi.fn(),
-    },
-    replyOptions: {
-      onReplyStart: opts.onReplyStart,
-    },
-    markDispatchIdle: vi.fn(),
-    markRunComplete: vi.fn(),
-  }),
+  }) => {
+    const pendingDeliveries: Promise<void>[] = [];
+    const queueDelivery = (payload: unknown, info: { kind: "block" | "final" }) => {
+      const delivery = Promise.resolve(opts.deliver(payload, info)).catch(() => undefined);
+      pendingDeliveries.push(delivery);
+      return true;
+    };
+    return {
+      dispatcher: {
+        sendToolResult: vi.fn(() => true),
+        sendBlockReply: vi.fn((payload: unknown) => queueDelivery(payload, { kind: "block" })),
+        sendFinalReply: vi.fn((payload: unknown) => queueDelivery(payload, { kind: "final" })),
+        waitForIdle: vi.fn(async () => {
+          await Promise.all(pendingDeliveries);
+        }),
+        getQueuedCounts: vi.fn(() => ({ tool: 0, block: 0, final: 0 })),
+        markComplete: vi.fn(),
+      },
+      replyOptions: {
+        onReplyStart: opts.onReplyStart,
+      },
+      markDispatchIdle: vi.fn(),
+      markRunComplete: vi.fn(),
+    };
+  },
 }));
 
 vi.mock("openclaw/plugin-sdk/conversation-runtime", () => ({
@@ -336,6 +345,7 @@ beforeAll(async () => {
   ({ __testing: threadBindingTesting, createThreadBindingManager } =
     await import("./thread-bindings.js"));
   ({ processDiscordMessage } = await import("./message-handler.process.js"));
+  ({ notifyDiscordInboundEventOutboundSuccess } = await import("../inbound-event-delivery.js"));
 });
 
 beforeEach(() => {
@@ -591,7 +601,7 @@ function expectPreviewEditContent(content: string) {
   const call = firstMockCall(editMessageDiscord, "preview edit");
   expect(call[0]).toBe("c1");
   expect(call[1]).toBe("preview-1");
-  expect(call[2]).toEqual({ content });
+  expect(call[2]).toEqual({ content, flags: MessageFlags.SuppressEmbeds });
   requireRecord(requireRecord(call[3], "preview edit options").rest, "preview edit REST client");
 }
 
@@ -1048,6 +1058,72 @@ describe("processDiscordMessage session routing", () => {
     });
   });
 
+  it("does not attach referenced reply media when reply context is hidden", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("hidden reply media should not be fetched");
+    });
+    const ctx = await createBaseContext({
+      cfg: {
+        channels: { discord: { contextVisibility: "allowlist" } },
+        messages: { ackReaction: "👀" },
+        session: { store: "/tmp/openclaw-discord-process-test-sessions.json" },
+      },
+      author: {
+        id: "U1",
+        username: "alice",
+        discriminator: "0",
+        globalName: "Alice",
+      },
+      channelConfig: {
+        allowed: true,
+        users: ["U1"],
+      },
+      discordRestFetch: fetchImpl,
+      message: {
+        id: "m-reply-hidden-media",
+        channelId: "c1",
+        content: "<@bot> what is this?",
+        timestamp: new Date().toISOString(),
+        attachments: [],
+        messageReference: {
+          type: 0,
+          message_id: "m-hidden",
+          channel_id: "c1",
+        },
+        referencedMessage: {
+          id: "m-hidden",
+          channelId: "c1",
+          content: "hidden image",
+          timestamp: new Date().toISOString(),
+          attachments: [
+            {
+              id: "att-hidden",
+              url: "https://cdn.discordapp.com/attachments/hidden.png",
+              content_type: "image/png",
+              filename: "hidden.png",
+            },
+          ],
+          author: {
+            id: "U2",
+            username: "mallory",
+            discriminator: "0",
+            globalName: "Mallory",
+          },
+        },
+      },
+      baseText: "<@bot> what is this?",
+      messageText: "<@bot> what is this?",
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    const dispatchCtx = requireRecord(getLastDispatchCtx(), "dispatch context");
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(dispatchCtx.ReplyToBody).toBeUndefined();
+    expect(dispatchCtx.MediaPath).toBeUndefined();
+    expect(dispatchCtx.MediaPaths).toBeUndefined();
+  });
+
   it("stores DM lastRoute with user target for direct-session continuity", async () => {
     const ctx = await createBaseContext({
       ...createDirectMessageContextOverrides(),
@@ -1220,6 +1296,151 @@ describe("processDiscordMessage session routing", () => {
     expect(emojis).toContain(DEFAULT_EMOJIS.done);
   });
 
+  it("suppresses Discord reactions for room events even when status reactions are explicit", async () => {
+    vi.useFakeTimers();
+    dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
+      await params?.replyOptions?.onReasoningStream?.();
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      return createNoQueuedDispatchResult();
+    });
+    const ctx = await createBaseContext({
+      shouldRequireMention: false,
+      effectiveWasMentioned: false,
+      inboundEventKind: "room_event",
+      ackReactionScope: "all",
+      cfg: {
+        messages: {
+          ackReaction: "👀",
+          ackReactionScope: "all",
+          statusReactions: {
+            enabled: true,
+            timing: { debounceMs: 0 },
+          },
+        },
+        session: { store: "/tmp/openclaw-discord-process-test-sessions.json" },
+      },
+      route: BASE_CHANNEL_ROUTE,
+    });
+
+    const runPromise = runProcessDiscordMessage(ctx);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.runAllTimersAsync();
+    await runPromise;
+
+    expect(getLastDispatchReplyOptions()?.sourceReplyDeliveryMode).toBe("message_tool_only");
+    expect(getReactionEmojis()).toEqual([]);
+    expect(sendMocks.removeReactionDiscord).not.toHaveBeenCalled();
+  });
+
+  it("records Discord room events in history while source replies are tool-only", async () => {
+    const guildHistories = new Map();
+    const ctx = await createBaseContext({
+      guildHistories,
+      historyLimit: 10,
+      shouldRequireMention: false,
+      effectiveWasMentioned: false,
+      inboundEventKind: "room_event",
+      baseSessionKey: BASE_CHANNEL_ROUTE.sessionKey,
+      route: BASE_CHANNEL_ROUTE,
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    expect(getLastDispatchReplyOptions()?.sourceReplyDeliveryMode).toBe("message_tool_only");
+    expect(getLastDispatchReplyOptions()?.suppressTyping).toBe(true);
+    expect(getLastDispatchReplyOptions()?.queuedDeliveryCorrelations).toHaveLength(1);
+    expect(guildHistories.get("c1")).toMatchObject([
+      {
+        body: "hi",
+        messageId: "m1",
+        sender: "Alice",
+      },
+    ]);
+  });
+
+  it("clears Discord room event history after a visible action send succeeds", async () => {
+    const guildHistories = new Map();
+    dispatchInboundMessage.mockImplementationOnce(async () => {
+      notifyDiscordInboundEventOutboundSuccess({
+        sessionKey: BASE_CHANNEL_ROUTE.sessionKey,
+        inboundEventKind: "room_event",
+        to: "channel:c1",
+        accountId: "default",
+      });
+      return createNoQueuedDispatchResult();
+    });
+    const ctx = await createBaseContext({
+      guildHistories,
+      historyLimit: 10,
+      shouldRequireMention: false,
+      effectiveWasMentioned: false,
+      inboundEventKind: "room_event",
+      baseSessionKey: BASE_CHANNEL_ROUTE.sessionKey,
+      route: BASE_CHANNEL_ROUTE,
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    expect(guildHistories.get("c1")).toEqual([]);
+  });
+
+  it("clears Discord group DM room event history after a visible action send succeeds", async () => {
+    const guildHistories = new Map();
+    dispatchInboundMessage.mockImplementationOnce(async () => {
+      notifyDiscordInboundEventOutboundSuccess({
+        sessionKey: BASE_CHANNEL_ROUTE.sessionKey,
+        inboundEventKind: "room_event",
+        to: "channel:c1",
+        accountId: "default",
+      });
+      return createNoQueuedDispatchResult();
+    });
+    const ctx = await createBaseContext({
+      guildHistories,
+      historyLimit: 10,
+      isGuildMessage: false,
+      isGroupDm: true,
+      isDirectMessage: false,
+      shouldRequireMention: false,
+      effectiveWasMentioned: false,
+      inboundEventKind: "room_event",
+      baseSessionKey: BASE_CHANNEL_ROUTE.sessionKey,
+      route: BASE_CHANNEL_ROUTE,
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    expect(guildHistories.get("c1")).toEqual([]);
+  });
+
+  it("clears Discord room event history after a queued core send succeeds", async () => {
+    const guildHistories = new Map();
+    const ctx = await createBaseContext({
+      guildHistories,
+      historyLimit: 10,
+      shouldRequireMention: false,
+      effectiveWasMentioned: false,
+      inboundEventKind: "room_event",
+      baseSessionKey: BASE_CHANNEL_ROUTE.sessionKey,
+      route: BASE_CHANNEL_ROUTE,
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    const begin = getLastDispatchReplyOptions()?.queuedDeliveryCorrelations?.[0]?.begin;
+    expect(begin).toBeTypeOf("function");
+    const end = begin?.();
+    notifyDiscordInboundEventOutboundSuccess({
+      sessionKey: BASE_CHANNEL_ROUTE.sessionKey,
+      inboundEventKind: "room_event",
+      to: "channel:c1",
+      accountId: "default",
+    });
+    end?.();
+
+    expect(guildHistories.get("c1")).toEqual([]);
+  });
+
   it("uses PluralKit original ids for inbound dedupe while preserving the Discord message id", async () => {
     const ctx = await createBaseContext({
       canonicalMessageId: "orig-123",
@@ -1266,6 +1487,25 @@ describe("processDiscordMessage session routing", () => {
       }),
     );
     expect(getLastDispatchReplyOptions()?.sourceReplyDeliveryMode).toBe("automatic");
+
+    dispatchInboundMessage.mockClear();
+    await runProcessDiscordMessage(
+      await createBaseContext({
+        shouldRequireMention: false,
+        effectiveWasMentioned: false,
+        inboundEventKind: "room_event",
+        cfg: {
+          messages: {
+            groupChat: {
+              visibleReplies: "automatic",
+            },
+          },
+          session: { store: "/tmp/openclaw-discord-process-test-sessions.json" },
+        },
+        route: BASE_CHANNEL_ROUTE,
+      }),
+    );
+    expect(getLastDispatchReplyOptions()?.sourceReplyDeliveryMode).toBe("message_tool_only");
 
     dispatchInboundMessage.mockClear();
     await runProcessDiscordMessage(
@@ -1459,6 +1699,32 @@ describe("processDiscordMessage draft streaming", () => {
     expect(deliverDiscordReply).not.toHaveBeenCalled();
   });
 
+  it("streams Discord tool progress for coding-profile message-tool-only guild replies", async () => {
+    const draftStream = createMockDraftStreamForTest();
+
+    dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
+      expect(params?.replyOptions?.sourceReplyDeliveryMode).toBe("message_tool_only");
+      expect(params?.replyOptions?.allowProgressCallbacksWhenSourceDeliverySuppressed).toBe(true);
+      await params?.replyOptions?.onToolStart?.({ name: "exec", phase: "start" });
+      await params?.replyOptions?.onItemEvent?.({ progressText: "exec done" });
+      return createNoQueuedDispatchResult();
+    });
+
+    const ctx = await createBaseContext({
+      cfg: {
+        tools: { profile: "coding" },
+        session: { store: "/tmp/openclaw-discord-process-test-sessions.json" },
+      },
+      route: BASE_CHANNEL_ROUTE,
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    expect(getLastDispatchReplyOptions()?.sourceReplyDeliveryMode).toBe("message_tool_only");
+    expect(draftStream.update).toHaveBeenCalledWith("Pinching...\n🛠️ Exec\n• exec done");
+    expect(deliverDiscordReply).not.toHaveBeenCalled();
+  });
+
   it("keeps Discord preview streaming off when explicitly disabled", async () => {
     await runSingleChunkFinalScenario({ streaming: { mode: "off" }, maxLinesPerMessage: 5 });
     expect(createDiscordDraftStream).not.toHaveBeenCalled();
@@ -1471,6 +1737,32 @@ describe("processDiscordMessage draft streaming", () => {
 
     expect(editMessageDiscord).not.toHaveBeenCalled();
     expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears partial drafts when fallback final delivery fails before completion", async () => {
+    const draftStream = createMockDraftStreamForTest();
+    deliverDiscordReply.mockRejectedValueOnce(new Error("send failed"));
+    dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
+      await params?.replyOptions?.onPartialReply?.({ text: "partial answer..." });
+      await params?.dispatcher.sendFinalReply({ text: "complete\nanswer" });
+      return {
+        queuedFinal: true,
+        counts: { final: 1, tool: 0, block: 0 },
+        failedCounts: { final: 1 },
+      };
+    });
+
+    const ctx = await createAutomaticSourceDeliveryContext({
+      discordConfig: { streamMode: "partial", maxLinesPerMessage: 1 },
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    expect(draftStream.update).toHaveBeenCalledWith("partial answer...");
+    expect(editMessageDiscord).not.toHaveBeenCalled();
+    expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
+    expect(draftStream.discardPending).toHaveBeenCalled();
+    expect(draftStream.clear).toHaveBeenCalledTimes(1);
   });
 
   it("uses root discord maxLinesPerMessage for preview finalization when runtime config omits it", async () => {

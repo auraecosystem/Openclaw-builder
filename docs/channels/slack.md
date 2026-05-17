@@ -41,6 +41,16 @@ Both transports are production-ready and reach feature parity for messaging, sla
 **Pick HTTP Request URLs** when running multiple Gateway replicas behind a load balancer, when outbound WSS is blocked but inbound HTTPS is allowed, or when you already terminate Slack webhooks at a reverse proxy.
 </Note>
 
+## Install
+
+Install Slack before configuring the channel:
+
+```bash
+openclaw plugins install @openclaw/slack
+```
+
+`plugins install` registers and enables the plugin. The plugin still does nothing until you configure the Slack app and channel settings below. See [Plugins](/tools/plugin) for general plugin behavior and install rules.
+
 ## Quick setup
 
 <Tabs>
@@ -63,6 +73,17 @@ Both transports are production-ready and reach feature parity for messaging, sla
       "home_tab_enabled": true,
       "messages_tab_enabled": true,
       "messages_tab_read_only_enabled": false
+    },
+    "assistant_view": {
+      "assistant_description": "OpenClaw connects Slack assistant threads to OpenClaw agents.",
+      "suggested_prompts": [
+        { "title": "What can you do?", "message": "What can you help me with?" },
+        {
+          "title": "Summarize this channel",
+          "message": "Summarize the recent activity in this channel."
+        },
+        { "title": "Draft a reply", "message": "Help me draft a reply." }
+      ]
     },
     "slash_commands": [
       {
@@ -107,6 +128,8 @@ Both transports are production-ready and reach feature parity for messaging, sla
       "bot_events": [
         "app_home_opened",
         "app_mention",
+        "assistant_thread_context_changed",
+        "assistant_thread_started",
         "channel_rename",
         "member_joined_channel",
         "member_left_channel",
@@ -136,6 +159,17 @@ Both transports are production-ready and reach feature parity for messaging, sla
       "home_tab_enabled": true,
       "messages_tab_enabled": true,
       "messages_tab_read_only_enabled": false
+    },
+    "assistant_view": {
+      "assistant_description": "OpenClaw connects Slack assistant threads to OpenClaw agents.",
+      "suggested_prompts": [
+        { "title": "What can you do?", "message": "What can you help me with?" },
+        {
+          "title": "Summarize this channel",
+          "message": "Summarize the recent activity in this channel."
+        },
+        { "title": "Draft a reply", "message": "Help me draft a reply." }
+      ]
     },
     "slash_commands": [
       {
@@ -169,6 +203,8 @@ Both transports are production-ready and reach feature parity for messaging, sla
       "bot_events": [
         "app_home_opened",
         "app_mention",
+        "assistant_thread_context_changed",
+        "assistant_thread_started",
         "message.channels",
         "message.groups",
         "message.im"
@@ -181,7 +217,7 @@ Both transports are production-ready and reach feature parity for messaging, sla
         </CodeGroup>
 
         <Note>
-          **Recommended** matches the bundled Slack plugin's full feature set: App Home, slash commands, files, reactions, pins, group DMs, and emoji/usergroup reads. Pick **Minimal** when workspace policy restricts scopes — it covers DMs, channel/group history, mentions, and slash commands but drops files, reactions, pins, group-DM (`mpim:*`), `emoji:read`, and `usergroups:read`. See [Manifest and scope checklist](#manifest-and-scope-checklist) for per-scope rationale and additive options like extra slash commands.
+          **Recommended** matches the Slack plugin's full feature set: App Home, slash commands, files, reactions, pins, group DMs, and emoji/usergroup reads. Pick **Minimal** when workspace policy restricts scopes — it covers DMs, channel/group history, mentions, and slash commands but drops files, reactions, pins, group-DM (`mpim:*`), `emoji:read`, and `usergroups:read`. See [Manifest and scope checklist](#manifest-and-scope-checklist) for per-scope rationale and additive options like extra slash commands.
         </Note>
 
         After Slack creates the app:
@@ -254,6 +290,17 @@ openclaw gateway
       "messages_tab_enabled": true,
       "messages_tab_read_only_enabled": false
     },
+    "assistant_view": {
+      "assistant_description": "OpenClaw connects Slack assistant threads to OpenClaw agents.",
+      "suggested_prompts": [
+        { "title": "What can you do?", "message": "What can you help me with?" },
+        {
+          "title": "Summarize this channel",
+          "message": "Summarize the recent activity in this channel."
+        },
+        { "title": "Draft a reply", "message": "Help me draft a reply." }
+      ]
+    },
     "slash_commands": [
       {
         "command": "/openclaw",
@@ -298,6 +345,8 @@ openclaw gateway
       "bot_events": [
         "app_home_opened",
         "app_mention",
+        "assistant_thread_context_changed",
+        "assistant_thread_started",
         "channel_rename",
         "member_joined_channel",
         "member_left_channel",
@@ -333,6 +382,17 @@ openclaw gateway
       "messages_tab_enabled": true,
       "messages_tab_read_only_enabled": false
     },
+    "assistant_view": {
+      "assistant_description": "OpenClaw connects Slack assistant threads to OpenClaw agents.",
+      "suggested_prompts": [
+        { "title": "What can you do?", "message": "What can you help me with?" },
+        {
+          "title": "Summarize this channel",
+          "message": "Summarize the recent activity in this channel."
+        },
+        { "title": "Draft a reply", "message": "Help me draft a reply." }
+      ]
+    },
     "slash_commands": [
       {
         "command": "/openclaw",
@@ -366,6 +426,8 @@ openclaw gateway
       "bot_events": [
         "app_home_opened",
         "app_mention",
+        "assistant_thread_context_changed",
+        "assistant_thread_started",
         "message.channels",
         "message.groups",
         "message.im"
@@ -383,7 +445,7 @@ openclaw gateway
         </CodeGroup>
 
         <Note>
-          **Recommended** matches the bundled Slack plugin's full feature set; **Minimal** drops files, reactions, pins, group-DM (`mpim:*`), `emoji:read`, and `usergroups:read` for restrictive workspaces. See [Manifest and scope checklist](#manifest-and-scope-checklist) for per-scope rationale.
+          **Recommended** matches the Slack plugin's full feature set; **Minimal** drops files, reactions, pins, group-DM (`mpim:*`), `emoji:read`, and `usergroups:read` for restrictive workspaces. See [Manifest and scope checklist](#manifest-and-scope-checklist) for per-scope rationale.
         </Note>
 
         <Info>
@@ -488,6 +550,17 @@ Base manifest (Socket Mode default):
       "messages_tab_enabled": true,
       "messages_tab_read_only_enabled": false
     },
+    "assistant_view": {
+      "assistant_description": "OpenClaw connects Slack assistant threads to OpenClaw agents.",
+      "suggested_prompts": [
+        { "title": "What can you do?", "message": "What can you help me with?" },
+        {
+          "title": "Summarize this channel",
+          "message": "Summarize the recent activity in this channel."
+        },
+        { "title": "Draft a reply", "message": "Help me draft a reply." }
+      ]
+    },
     "slash_commands": [
       {
         "command": "/openclaw",
@@ -531,6 +604,8 @@ Base manifest (Socket Mode default):
       "bot_events": [
         "app_home_opened",
         "app_mention",
+        "assistant_thread_context_changed",
+        "assistant_thread_started",
         "channel_rename",
         "member_joined_channel",
         "member_left_channel",
@@ -568,6 +643,8 @@ For **HTTP Request URLs mode**, replace `settings` with the HTTP variant and add
       "bot_events": [
         "app_home_opened",
         "app_mention",
+        "assistant_thread_context_changed",
+        "assistant_thread_started",
         "channel_rename",
         "member_joined_channel",
         "member_left_channel",
@@ -594,7 +671,7 @@ For **HTTP Request URLs mode**, replace `settings` with the HTTP variant and add
 
 Surface different features that extend the above defaults.
 
-The default manifest enables the Slack App Home **Home** tab and subscribes to `app_home_opened`. When a workspace member opens the Home tab, OpenClaw publishes a safe default Home view with `views.publish`; no conversation payload or private configuration is included. The **Messages** tab remains enabled for Slack DMs.
+The default manifest enables the Slack App Home **Home** tab and subscribes to `app_home_opened`. When a workspace member opens the Home tab, OpenClaw publishes a safe default Home view with `views.publish`; no conversation payload or private configuration is included. The **Messages** tab remains enabled for Slack DMs. The manifest also enables Slack assistant threads with `features.assistant_view`, `assistant:write`, `assistant_thread_started`, and `assistant_thread_context_changed`; assistant threads route to their own OpenClaw thread sessions and keep Slack-provided thread context available to the agent.
 
 <AccordionGroup>
   <Accordion title="Optional native slash commands">
@@ -1168,6 +1245,27 @@ Notes:
 - The interactive callback values are OpenClaw-generated opaque tokens, not raw agent-authored values.
 - If generated interactive blocks would exceed Slack Block Kit limits, OpenClaw falls back to the original text reply instead of sending an invalid blocks payload.
 
+### Plugin-owned modal submissions
+
+Slack plugins that register an interactive handler can also receive modal
+`view_submission` and `view_closed` lifecycle events before OpenClaw compacts
+the payload for the agent-visible system event. Use one of these routing
+patterns when opening a Slack modal:
+
+- Set `callback_id` to `openclaw:<namespace>:<payload>`.
+- Or keep an existing `callback_id` and put `pluginInteractiveData:
+"<namespace>:<payload>"` in the modal `private_metadata`.
+
+The handler receives `ctx.interaction.kind` as `view_submission` or
+`view_closed`, normalized `inputs`, and the full raw `stateValues` object from
+Slack. Callback-id-only routing is enough to invoke the plugin handler; include
+the existing modal `private_metadata` user/session routing fields when the
+modal should also produce an agent-visible system event. The agent receives a
+compact, redacted `Slack interaction: ...` system event. If the handler returns
+`systemEvent.summary`, `systemEvent.reference`, or `systemEvent.data`, those
+fields are included in that compact event so the agent can reference
+plugin-owned storage without seeing the complete form payload.
+
 ## Exec approvals in Slack
 
 Slack can act as a native approval client with interactive buttons and interactions, instead of falling back to the Web UI or terminal.
@@ -1251,7 +1349,7 @@ Primary reference: [Configuration reference - Slack](/gateway/config-channels#sl
 - channel access: `groupPolicy`, `channels.*`, `channels.*.users`, `channels.*.requireMention`
 - threading/history: `replyToMode`, `replyToModeByChatType`, `thread.*`, `historyLimit`, `dmHistoryLimit`, `dms.*.historyLimit`
 - delivery: `textChunkLimit`, `chunkMode`, `mediaMaxMb`, `streaming`, `streaming.nativeTransport`, `streaming.preview.toolProgress`
-- unfurls: `unfurlLinks`, `unfurlMedia` for `chat.postMessage` link/media preview control
+- unfurls: `unfurlLinks` (default: `false`), `unfurlMedia` for `chat.postMessage` link/media preview control; set `unfurlLinks: true` to opt back into link previews
 - ops/features: `configWrites`, `commands.native`, `slashCommand.*`, `actions.*`, `userToken`, `userTokenReadOnly`
 
 </Accordion>
@@ -1266,7 +1364,7 @@ Primary reference: [Configuration reference - Slack](/gateway/config-channels#sl
     - channel allowlist (`channels.slack.channels`) — **keys must be channel IDs** (`C12345678`), not names (`#channel-name`). Name-based keys silently fail under `groupPolicy: "allowlist"` because channel routing is ID-first by default. To find an ID: right-click the channel in Slack → **Copy link** — the `C...` value at the end of the URL is the channel ID.
     - `requireMention`
     - per-channel `users` allowlist
-    - `messages.groupChat.visibleReplies`: if it is `"message_tool"` and logs show assistant text with no `message(action=send)` call, the turn was processed but the final answer was kept private. Set it to `"automatic"` if you want normal assistant final replies posted back to Slack channels.
+    - `messages.groupChat.visibleReplies`: if it is `"message_tool"` and logs show assistant text with no `message(action=send)` call, the model missed the visible message-tool path. Final text stays private in this mode; inspect the gateway verbose log for suppressed payload metadata, or set it to `"automatic"` if you want every normal assistant final reply posted through the legacy path.
 
 ```json5
 {
