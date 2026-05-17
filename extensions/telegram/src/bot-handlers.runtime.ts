@@ -234,6 +234,30 @@ export const registerTelegramHandlers = ({
     const promptContextMinTimestampMs = normalizePromptContextMinTimestampMs(timestampMs);
     return promptContextMinTimestampMs === undefined ? {} : { promptContextMinTimestampMs };
   };
+  const sourceMessageIdOptions = (
+    messages: readonly Message[],
+  ): Pick<TelegramMessageContextOptions, "sourceMessageIds"> => {
+    const sourceMessageIds = messages
+      .map((msg) => (typeof msg.message_id === "number" ? String(msg.message_id) : undefined))
+      .filter((messageId): messageId is string => Boolean(messageId));
+    return sourceMessageIds.length > 0 ? { sourceMessageIds } : {};
+  };
+  const sessionBoundMessageIds = (
+    messageId: string,
+    sourceMessageIds?: readonly string[],
+  ): string[] => {
+    const seen = new Set<string>();
+    const ids: string[] = [];
+    for (const candidate of [...(sourceMessageIds ?? []), messageId]) {
+      const normalized = candidate.trim();
+      if (!normalized || seen.has(normalized)) {
+        continue;
+      }
+      seen.add(normalized);
+      ids.push(normalized);
+    }
+    return ids;
+  };
   const latestPromptContextMinTimestampMs = (
     ...timestamps: Array<number | undefined>
   ): number | undefined => {
@@ -445,6 +469,7 @@ export const registerTelegramHandlers = ({
       }
       if (entries.length === 1) {
         await processMessageWithReplyChain(last.ctx, last.msg, last.allMedia, last.storeAllowFrom, {
+          ...sourceMessageIdOptions([last.msg]),
           receivedAtMs: last.receivedAtMs,
           ingressBuffer: "inbound-debounce",
           ...promptContextBoundaryOptions(last.promptContextMinTimestampMs),
@@ -478,6 +503,7 @@ export const registerTelegramHandlers = ({
         first.storeAllowFrom,
         {
           ...(messageIdOverride ? { messageIdOverride } : {}),
+          ...sourceMessageIdOptions(entries.map(({ msg }) => msg)),
           receivedAtMs: first.receivedAtMs,
           ingressBuffer: "inbound-debounce",
           ...promptContextBoundaryOptions(promptContextMinTimestampMs),
@@ -736,10 +762,10 @@ export const registerTelegramHandlers = ({
 
   const processMediaGroup = async (entry: BufferedMediaGroupEntry) => {
     try {
-      entry.messages.sort((a, b) => a.msg.message_id - b.msg.message_id);
+      const messages = entry.messages.toSorted((a, b) => a.msg.message_id - b.msg.message_id);
 
-      const captionMsg = entry.messages.find((m) => m.msg.caption || m.msg.text);
-      const primaryEntry = captionMsg ?? entry.messages[0];
+      const captionMsg = messages.find((m) => m.msg.caption || m.msg.text);
+      const primaryEntry = captionMsg ?? messages[0];
       if (!primaryEntry) {
         return;
       }
@@ -764,7 +790,7 @@ export const registerTelegramHandlers = ({
       }
 
       const allMedia: TelegramMediaRef[] = [];
-      for (const { ctx } of entry.messages) {
+      for (const { ctx } of messages) {
         let media;
         try {
           media = await resolveMedia({
@@ -795,7 +821,10 @@ export const registerTelegramHandlers = ({
         primaryEntry.msg,
         allMedia,
         entry.storeAllowFrom,
-        promptContextBoundaryOptions(entry.promptContextMinTimestampMs),
+        {
+          ...sourceMessageIdOptions(messages.map(({ msg }) => msg)),
+          ...promptContextBoundaryOptions(entry.promptContextMinTimestampMs),
+        },
       );
     } catch (err) {
       runtime.error?.(danger(`media group handler failed: ${String(err)}`));
@@ -804,15 +833,15 @@ export const registerTelegramHandlers = ({
 
   const flushTextFragments = async (entry: TextFragmentEntry) => {
     try {
-      entry.messages.sort((a, b) => a.msg.message_id - b.msg.message_id);
+      const messages = entry.messages.toSorted((a, b) => a.msg.message_id - b.msg.message_id);
 
-      const first = entry.messages[0];
-      const last = entry.messages.at(-1);
+      const first = messages[0];
+      const last = messages.at(-1);
       if (!first || !last) {
         return;
       }
 
-      const combinedText = entry.messages.map((m) => m.msg.text ?? "").join("");
+      const combinedText = messages.map((m) => m.msg.text ?? "").join("");
       if (!combinedText.trim()) {
         return;
       }
@@ -829,6 +858,7 @@ export const registerTelegramHandlers = ({
       const syntheticCtx = buildSyntheticContext(baseCtx, syntheticMessage);
       await processMessageWithReplyChain(syntheticCtx, syntheticMessage, [], storeAllowFrom, {
         messageIdOverride: String(last.msg.message_id),
+        ...sourceMessageIdOptions(messages.map(({ msg }) => msg)),
         receivedAtMs: first.receivedAtMs,
         ingressBuffer: "text-fragment",
         ...promptContextBoundaryOptions(entry.promptContextMinTimestampMs),
@@ -911,6 +941,7 @@ export const registerTelegramHandlers = ({
     msg: Message,
     replyChainNodes: TelegramCachedMessageNode[],
     options?: TelegramMessageContextOptions,
+    dedupeSessionKey?: string,
   ): TelegramPromptContextEntry[] => {
     const messageId = typeof msg.message_id === "number" ? String(msg.message_id) : undefined;
     const currentNode = messageCache.get({
@@ -919,6 +950,7 @@ export const registerTelegramHandlers = ({
       messageId,
     });
     const threadId = currentNode?.threadId ? Number(currentNode.threadId) : undefined;
+    const shouldDedupeSessionContext = msg.chat.type !== "group" && msg.chat.type !== "supergroup";
     const conversationContext = buildTelegramConversationContext({
       cache: messageCache,
       messageId,
@@ -931,6 +963,7 @@ export const registerTelegramHandlers = ({
       ...(options?.promptContextMinTimestampMs !== undefined
         ? { minTimestampMs: options.promptContextMinTimestampMs }
         : {}),
+      ...(shouldDedupeSessionContext && dedupeSessionKey ? { dedupeSessionKey } : {}),
     });
     return conversationContext.length > 0
       ? [
@@ -1001,16 +1034,27 @@ export const registerTelegramHandlers = ({
   ) => {
     const replyChainNodes = buildReplyChainForMessage(msg);
     const { replyMedia, replyChain } = await resolveReplyMediaForChain(ctx, replyChainNodes);
-    const promptContext = buildPromptContextForMessage(msg, replyChainNodes, options);
-    await processMessage(
-      ctx,
-      allMedia,
-      storeAllowFrom,
-      options,
-      replyMedia,
-      replyChain,
-      promptContext,
-    );
+    const contextOptions: TelegramMessageContextOptions = {
+      ...options,
+      resolvePromptContext: (params) =>
+        options?.resolvePromptContext?.(params) ??
+        buildPromptContextForMessage(msg, replyChainNodes, options, params.sessionKey),
+      markSessionBoundMessage: (params) => {
+        for (const messageId of sessionBoundMessageIds(
+          params.messageId,
+          options?.sourceMessageIds,
+        )) {
+          messageCache.markSessionBound({
+            accountId,
+            chatId: msg.chat.id,
+            messageId,
+            sessionKey: params.sessionKey,
+          });
+        }
+        options?.markSessionBoundMessage?.(params);
+      },
+    };
+    await processMessage(ctx, allMedia, storeAllowFrom, contextOptions, replyMedia, replyChain);
   };
 
   const shouldSkipGroupMessage = (params: {
