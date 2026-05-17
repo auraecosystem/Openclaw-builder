@@ -53,36 +53,41 @@ import {
 
 const ACP_RUNTIME_CLEANUP_TIMEOUT_MS = 15_000;
 
-function extractGeneratedTranscriptSessionId(sessionFile?: string): string | undefined {
+function looksLikeForkedTranscriptPrefix(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}T[\w-]+(?:Z|[+-]\d{2}(?:-\d{2})?)?$/.test(value);
+}
+
+function rotateGeneratedSessionFile(
+  currentSessionId: string | undefined,
+  sessionFile: string | undefined,
+  nextSessionId: string,
+): string | undefined {
   const trimmed = sessionFile?.trim();
-  if (!trimmed) {
+  if (!currentSessionId || !trimmed) {
     return undefined;
   }
-  const base = path.basename(trimmed);
-  if (!base.endsWith(".jsonl")) {
+  const parsed = path.parse(trimmed);
+  if (parsed.ext !== ".jsonl") {
     return undefined;
   }
-  const withoutExt = base.slice(0, -".jsonl".length);
-  const topicIndex = withoutExt.indexOf("-topic-");
-  if (topicIndex > 0) {
-    const topicSessionId = withoutExt.slice(0, topicIndex);
-    return looksLikeGeneratedSessionId(topicSessionId) ? topicSessionId : undefined;
+  if (parsed.name === currentSessionId) {
+    return path.join(parsed.dir, `${nextSessionId}.jsonl`);
   }
-  const forkMatch = withoutExt.match(
-    /^(\d{4}-\d{2}-\d{2}T[\w-]+(?:Z|[+-]\d{2}(?:-\d{2})?)?)_(.+)$/,
-  );
-  if (forkMatch?.[2]) {
-    return looksLikeGeneratedSessionId(forkMatch[2]) ? forkMatch[2] : undefined;
+  const topicPrefix = `${currentSessionId}-topic-`;
+  if (parsed.name.startsWith(topicPrefix)) {
+    return path.join(
+      parsed.dir,
+      `${nextSessionId}-topic-${parsed.name.slice(topicPrefix.length)}.jsonl`,
+    );
   }
-  return looksLikeGeneratedSessionId(withoutExt) ? withoutExt : undefined;
-}
-
-function looksLikeGeneratedSessionId(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-function isGeneratedTranscriptPath(sessionFile: string): boolean {
-  return Boolean(extractGeneratedTranscriptSessionId(sessionFile));
+  const forkSuffix = `_${currentSessionId}`;
+  if (parsed.name.endsWith(forkSuffix)) {
+    const prefix = parsed.name.slice(0, -forkSuffix.length);
+    if (looksLikeForkedTranscriptPrefix(prefix)) {
+      return path.join(parsed.dir, `${prefix}_${nextSessionId}.jsonl`);
+    }
+  }
+  return undefined;
 }
 
 function stripRuntimeModelState(entry?: SessionEntry): SessionEntry | undefined {
@@ -599,9 +604,9 @@ export async function performGatewaySessionReset(params: {
       ? resolveSessionFilePath(nextSessionId, { sessionFile: currentEntry.sessionFile }, pathOpts)
       : undefined;
     const sessionFile =
-      explicitSessionFile && !isGeneratedTranscriptPath(explicitSessionFile)
-        ? explicitSessionFile
-        : defaultSessionFile;
+      rotateGeneratedSessionFile(currentEntry?.sessionId, explicitSessionFile, nextSessionId) ??
+      explicitSessionFile ??
+      defaultSessionFile;
     const nextEntry: SessionEntry = {
       sessionId: nextSessionId,
       sessionFile,

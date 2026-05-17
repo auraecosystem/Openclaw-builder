@@ -242,6 +242,63 @@ test("sessions.reset falls back from unsafe outside sessionFile paths", async ()
   await expect(fs.stat(unsafeSessionFile)).rejects.toThrow();
 });
 
+test("sessions.reset rotates generated topic transcript paths to the new session id", async () => {
+  const { storePath } = await createSessionStoreDir();
+  const sessionsDir = path.dirname(storePath);
+  const previousSessionId = "123e4567-e89b-12d3-a456-426614174000";
+
+  await writeSessionStore({
+    entries: {
+      main: sessionStoreEntry(previousSessionId, {
+        sessionFile: path.join(sessionsDir, `${previousSessionId}-topic-ops.jsonl`),
+      }),
+    },
+  });
+
+  const reset = await directSessionReq<{
+    ok: true;
+    entry: {
+      sessionId: string;
+      sessionFile?: string;
+    };
+  }>("sessions.reset", { key: "main" });
+
+  expect(reset.ok).toBe(true);
+  expect(reset.payload?.entry.sessionId).not.toBe(previousSessionId);
+  expect(reset.payload?.entry.sessionFile).toBe(
+    path.join(sessionsDir, `${reset.payload?.entry.sessionId}-topic-ops.jsonl`),
+  );
+});
+
+test("sessions.reset preserves forked transcript prefixes when rotating session ids", async () => {
+  const { storePath } = await createSessionStoreDir();
+  const sessionsDir = path.dirname(storePath);
+  const previousSessionId = "123e4567-e89b-12d3-a456-426614174000";
+  const forkPrefix = "2026-05-01T03-30-00Z";
+
+  await writeSessionStore({
+    entries: {
+      main: sessionStoreEntry(previousSessionId, {
+        sessionFile: path.join(sessionsDir, `${forkPrefix}_${previousSessionId}.jsonl`),
+      }),
+    },
+  });
+
+  const reset = await directSessionReq<{
+    ok: true;
+    entry: {
+      sessionId: string;
+      sessionFile?: string;
+    };
+  }>("sessions.reset", { key: "main" });
+
+  expect(reset.ok).toBe(true);
+  expect(reset.payload?.entry.sessionId).not.toBe(previousSessionId);
+  expect(reset.payload?.entry.sessionFile).toBe(
+    path.join(sessionsDir, `${forkPrefix}_${reset.payload?.entry.sessionId}.jsonl`),
+  );
+});
+
 test("sessions.reset preserves spawned session ownership metadata", async () => {
   const { storePath } = await createSessionStoreDir();
   const customSessionFile = path.join(
