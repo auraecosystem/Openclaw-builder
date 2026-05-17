@@ -23,6 +23,8 @@ function createLazyBrowserTool(opts?: {
   sandboxBridgeUrl?: string;
   allowHostControl?: boolean;
   agentSessionKey?: string;
+  agentDir?: string;
+  workspaceDir?: string;
 }): AnyAgentTool {
   const targetDefault = opts?.sandboxBridgeUrl ? "sandbox" : "host";
   const hostHint =
@@ -102,6 +104,8 @@ export function registerBrowserPlugin(api: OpenClawPluginApi) {
       sandboxBridgeUrl: ctx.browser?.sandboxBridgeUrl,
       allowHostControl: ctx.browser?.allowHostControl,
       agentSessionKey: ctx.sessionKey,
+      agentDir: ctx.agentDir,
+      workspaceDir: ctx.workspaceDir,
     })) as OpenClawPluginToolFactory);
   api.registerCli(
     async ({ program }) => {
