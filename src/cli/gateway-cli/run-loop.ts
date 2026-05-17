@@ -716,9 +716,9 @@ export async function runGatewayLoop(params: {
             "SIGUSR1 restart ignored (not authorized; commands.restart=false or use gateway tool).",
           );
           gatewayLog.warn(
-            "A config change required gateway restart, but unmanaged SIGUSR1 restart is disabled. " +
-              "Restart with `openclaw gateway restart` or your service manager to apply the new " +
-              "configuration.",
+            "An unauthorized SIGUSR1 restart signal was received and ignored. " +
+              "If a pending gateway restart needs to be applied, run `openclaw gateway restart` " +
+              "or restart the gateway through your service manager.",
           );
           return;
         }
