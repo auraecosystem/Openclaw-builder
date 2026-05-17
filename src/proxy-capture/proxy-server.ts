@@ -6,6 +6,7 @@ import net from "node:net";
 import { URL } from "node:url";
 import { ensureDebugProxyCa } from "./ca.js";
 import type { DebugProxySettings } from "./env.js";
+import { redactHeaders } from "./header-redaction.js";
 import { getDebugProxyCaptureStore } from "./store.sqlite.js";
 
 const TRUTHY_ENV = new Set(["1", "true", "yes", "on"]);
@@ -166,7 +167,7 @@ export async function startDebugProxyServer(params: {
       method: req.method,
       host: target.host,
       path: `${target.pathname}${target.search}`,
-      headersJson: JSON.stringify(req.headers),
+      headersJson: JSON.stringify(redactHeaders(req.headers)),
       dataText: body.subarray(0, 8192).toString("utf8"),
     });
     const upstream = (target.protocol === "https:" ? httpsRequest : httpRequest)(
@@ -197,7 +198,9 @@ export async function startDebugProxyServer(params: {
             host: target.host,
             path: `${target.pathname}${target.search}`,
             status: upstreamRes.statusCode ?? undefined,
-            headersJson: JSON.stringify(upstreamRes.headers),
+            headersJson: JSON.stringify(
+              redactHeaders(upstreamRes.headers as Record<string, string | string[] | undefined>),
+            ),
             dataText: responseBody.subarray(0, 8192).toString("utf8"),
           });
           res.end();
@@ -265,7 +268,7 @@ export async function startDebugProxyServer(params: {
       flowId,
       host: hostname,
       path: req.url ?? "",
-      headersJson: JSON.stringify(req.headers),
+      headersJson: JSON.stringify(redactHeaders(req.headers)),
     });
     try {
       assertDebugProxyDirectUpstreamAllowed();
