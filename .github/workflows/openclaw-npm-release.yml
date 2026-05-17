@@ -347,7 +347,7 @@ jobs:
 
       - name: Upload dependency release evidence tag alias
         if: ${{ steps.packed_tarball.outputs.release_tag != inputs.tag }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: openclaw-release-dependency-evidence-${{ steps.packed_tarball.outputs.release_tag }}
           path: ${{ steps.dependency_evidence.outputs.dir }}
@@ -362,7 +362,7 @@ jobs:
 
       - name: Upload prepared npm publish bundle tag alias
         if: ${{ steps.packed_tarball.outputs.release_tag != inputs.tag }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: openclaw-npm-preflight-${{ steps.packed_tarball.outputs.release_tag }}
           path: ${{ steps.packed_tarball.outputs.dir }}
