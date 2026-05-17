@@ -4,10 +4,8 @@ import { selectApplicableRuntimeConfig } from "../config/config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { callGateway } from "../gateway/call.js";
 import { isEmbeddedMode } from "../infra/embedded-mode.js";
-import {
-  getActiveRuntimeWebToolsMetadata,
-  getActiveSecretsRuntimeSnapshot,
-} from "../secrets/runtime.js";
+import { getActiveSecretsRuntimeSnapshot } from "../secrets/runtime-state.js";
+import { getActiveRuntimeWebToolsMetadata } from "../secrets/runtime-web-tools-state.js";
 import { normalizeDeliveryContext } from "../utils/delivery-context.js";
 import type { GatewayMessageChannel } from "../utils/message-channel.js";
 import { resolveAgentWorkspaceDir, resolveSessionAgentIds } from "./agent-scope.js";
@@ -430,6 +428,7 @@ export function createOpenClawTools(
       ? [
           createSessionsSpawnTool({
             agentSessionKey: options?.agentSessionKey,
+            completionOwnerKey: options?.runSessionKey,
             agentChannel: options?.agentChannel,
             agentAccountId: options?.agentAccountId,
             agentTo: options?.agentTo,

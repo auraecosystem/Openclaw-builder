@@ -51,6 +51,7 @@ async function runQaSuite(opts: {
   disk?: string;
   preflight?: boolean;
   runtimePair?: string;
+  runtimeParityTier?: string[];
 }) {
   const runtime = await loadQaLabCliRuntime();
   await runtime.runQaSuiteCommand(opts);
@@ -169,7 +170,6 @@ async function runQaUi(opts: {
   advertiseHost?: string;
   advertisePort?: number;
   controlUiUrl?: string;
-  controlUiToken?: string;
   controlUiProxyTarget?: string;
   uiDistDir?: string;
   autoKickoffTarget?: string;
@@ -287,6 +287,12 @@ export function registerQaLabCli(program: Command) {
     .option("--memory <size>", "Multipass memory size")
     .option("--disk <size>", "Multipass disk size")
     .option("--runtime-pair <pair>", "Run each scenario under both runtimes, e.g. pi,codex")
+    .option(
+      "--runtime-parity-tier <tier>",
+      "Add scenarios tagged with runtimeParityTier (standard, optional, live-only, soak; repeatable or comma-separated)",
+      collectString,
+      [],
+    )
     .action(
       async (opts: {
         repoRoot?: string;
@@ -311,6 +317,7 @@ export function registerQaLabCli(program: Command) {
         disk?: string;
         preflight?: boolean;
         runtimePair?: string;
+        runtimeParityTier?: string[];
       }) => {
         await runQaSuite({
           repoRoot: opts.repoRoot,
@@ -335,6 +342,7 @@ export function registerQaLabCli(program: Command) {
           disk: opts.disk,
           preflight: opts.preflight,
           runtimePair: opts.runtimePair,
+          runtimeParityTier: opts.runtimeParityTier,
         });
       },
     );
@@ -585,7 +593,6 @@ export function registerQaLabCli(program: Command) {
       Number(value),
     )
     .option("--control-ui-url <url>", "Optional Control UI URL to embed beside the QA panel")
-    .option("--control-ui-token <token>", "Optional Control UI token for embedded links")
     .option(
       "--control-ui-proxy-target <url>",
       "Optional upstream Control UI target for /control-ui proxying",
@@ -606,7 +613,6 @@ export function registerQaLabCli(program: Command) {
         advertiseHost?: string;
         advertisePort?: number;
         controlUiUrl?: string;
-        controlUiToken?: string;
         controlUiProxyTarget?: string;
         uiDistDir?: string;
         autoKickoffTarget?: string;
