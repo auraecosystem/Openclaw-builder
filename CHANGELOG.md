@@ -12,6 +12,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Memory flush: fix `memoryFlush` never triggering for sessions where both `compactionCount` and `memoryFlushCompactionCount` are `0` but no flush has actually run. The dedup guard now requires `memoryFlushAt` to be set before treating the ambiguous `0/0` counter state as already-flushed, so legacy rows and fresh sessions that grew past the token threshold can still flush. (#47143) Thanks @Bartok9.
 - Cron/Telegram: key isolated direct-delivery dedupe to each cron execution instead of the reused session id, so recurring Telegram announce runs no longer report delivered while silently skipping later sends. (#69000) Thanks @obviyus.
 - Models/Kimi: default bundled Kimi thinking to off and normalize Anthropic-compatible `thinking` payloads so stale session `/think` state no longer silently re-enables reasoning on Kimi runs. (#68907) Thanks @frankekn.
 - Control UI/cron: keep the runtime-only `last` delivery sentinel from being materialized into persisted cron delivery and failure-alert channel configs when jobs are created or edited. (#68829) Thanks @tianhaocui.
