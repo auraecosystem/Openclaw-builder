@@ -2191,6 +2191,7 @@ export async function runEmbeddedPiAgent(
                   lastTurnTotal,
                 }),
                 systemPromptReport: attempt.systemPromptReport,
+                prepStages: attempt.prepStages,
                 finalAssistantVisibleText: errorText,
                 finalAssistantRawText: errorText,
                 finalPromptText: undefined,
