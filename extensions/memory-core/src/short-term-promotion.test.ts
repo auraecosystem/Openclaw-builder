@@ -956,6 +956,102 @@ describe("short-term promotion", () => {
     });
   });
 
+  it("self-heals the compact pointer for already archived selected candidates", async () => {
+    await withTempWorkspace(async (workspaceDir) => {
+      const firstNowMs = Date.parse("2026-04-28T10:00:00.000Z");
+      const secondNowMs = Date.parse("2026-04-29T10:00:00.000Z");
+      await writeDailyMemoryNote(workspaceDir, "2026-04-01", [
+        "The gateway should stay loopback-only on port 18789.",
+      ]);
+      await recordShortTermRecalls({
+        workspaceDir,
+        query: "gateway loopback",
+        results: [
+          {
+            path: "memory/2026-04-01.md",
+            startLine: 1,
+            endLine: 1,
+            score: 0.95,
+            snippet: "The gateway should stay loopback-only on port 18789.",
+            source: "memory",
+          },
+        ],
+      });
+      const ranked = await rankShortTermPromotionCandidates({
+        workspaceDir,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+      });
+      const firstApply = await applyShortTermPromotions({
+        workspaceDir,
+        candidates: ranked,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+        nowMs: firstNowMs,
+      });
+      const archiveBefore = await fs.readFile(firstApply.archivePath, "utf-8");
+      const archivedRelativePath = firstApply.archiveRelativePath.replaceAll(path.sep, "/");
+
+      const storePath = resolveShortTermRecallStorePath(workspaceDir);
+      const rawStore = JSON.parse(await fs.readFile(storePath, "utf-8")) as {
+        entries: Record<string, { promotedAt?: string }>;
+      };
+      for (const entry of Object.values(rawStore.entries)) {
+        delete entry.promotedAt;
+      }
+      await fs.writeFile(storePath, `${JSON.stringify(rawStore, null, 2)}\n`, "utf-8");
+      await fs.writeFile(
+        path.join(workspaceDir, "MEMORY.md"),
+        ["# Long-Term Memory", "", "## Other Section", "", "Keep me."].join("\n"),
+        "utf-8",
+      );
+      memoryHostEventsMock.appendMemoryHostEvent.mockClear();
+
+      const secondApply = await applyShortTermPromotions({
+        workspaceDir,
+        candidates: ranked,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+        nowMs: secondNowMs,
+      });
+
+      expect(secondApply.applied).toBe(1);
+      expect(secondApply.appended).toBe(0);
+      expect(secondApply.reconciledExisting).toBe(1);
+      expect(secondApply.archivePath).toBe(firstApply.archivePath);
+      expect(secondApply.archiveRelativePath.replaceAll(path.sep, "/")).toBe(archivedRelativePath);
+      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      expect(memoryText).toContain(`Latest promotion archive: \`${archivedRelativePath}\`.`);
+      expect(memoryText).toContain("## Other Section");
+      expect(memoryText).not.toContain("openclaw-memory-promotion:");
+      expect(memoryText).not.toContain("The gateway should stay loopback-only on port 18789.");
+      expect(await fs.readFile(firstApply.archivePath, "utf-8")).toBe(archiveBefore);
+      const currentDayArchivePath = path.join(
+        workspaceDir,
+        "memory",
+        "archived",
+        "2026-Q2",
+        "memory-promoted-short-term-dump-2026-04-29.md",
+      );
+      await expectEnoent(fs.readFile(currentDayArchivePath, "utf-8"));
+      const appendEventCalls = memoryHostEventsMock.appendMemoryHostEvent.mock
+        .calls as unknown as Array<
+        [string, { type?: string; archivePath?: string; archiveRelativePath?: string }]
+      >;
+      const promotionEvent = appendEventCalls.at(-1)?.[1];
+      if (promotionEvent?.type !== "memory.promotion.applied") {
+        throw new Error("expected promotion event");
+      }
+      expect(promotionEvent.archivePath).toBe(firstApply.archivePath);
+      expect(promotionEvent.archiveRelativePath?.replaceAll(path.sep, "/")).toBe(
+        archivedRelativePath,
+      );
+    });
+  });
+
   it("migrates existing root promotion sections into the archive pointer flow", async () => {
     await withTempWorkspace(async (workspaceDir) => {
       await writeDailyMemoryNote(workspaceDir, "2026-04-01", [

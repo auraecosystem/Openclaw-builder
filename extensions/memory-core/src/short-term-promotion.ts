@@ -1962,11 +1962,15 @@ export async function applyShortTermPromotions(
     const migratedOnlyCount = [...migratedMarkers].filter(
       (key) => !alreadyWrittenKeys.has(key),
     ).length;
+    const selfHealArchiveRelativePath = latestArchivedPromotionPathForMarkers(
+      new Set([...migratedMarkers, ...alreadyWrittenKeys]),
+      archivedMarkerLocations,
+    );
 
     const compactedDates = extractPromotionSectionDates(migrated.sections);
     let effectiveArchiveRelativePath = archiveRelativePath;
     let effectiveArchivePath = archivePath;
-    if (toAppend.length > 0 || migrated.sections.length > 0) {
+    if (toAppend.length > 0 || migrated.sections.length > 0 || selfHealArchiveRelativePath) {
       const existingArchive = await fs.readFile(archivePath, "utf-8").catch((err: unknown) => {
         if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
           return "";
@@ -1994,9 +1998,7 @@ export async function applyShortTermPromotions(
           "utf-8",
         );
       } else {
-        effectiveArchiveRelativePath =
-          latestArchivedPromotionPathForMarkers(migratedMarkers, archivedMarkerLocations) ??
-          archiveRelativePath;
+        effectiveArchiveRelativePath = selfHealArchiveRelativePath ?? archiveRelativePath;
         effectiveArchivePath = path.join(workspaceDir, effectiveArchiveRelativePath);
       }
       await fs.writeFile(
