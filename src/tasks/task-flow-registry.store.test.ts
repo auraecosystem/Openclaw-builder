@@ -193,6 +193,31 @@ describe("task-flow-registry store runtime", () => {
     });
   });
 
+  it("hardens the sqlite flow store directory and file modes", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    await withFlowRegistryTempDir(async (root) => {
+      process.env.OPENCLAW_STATE_DIR = root;
+      resetTaskFlowRegistryForTests();
+
+      createManagedTaskFlow({
+        ownerKey: "agent:main:main",
+        controllerId: "tests/secured-flow",
+        goal: "Secured flow",
+        status: "blocked",
+        blockedTaskId: "task-secured",
+        blockedSummary: "Need auth.",
+        waitJson: { kind: "task", taskId: "task-secured" },
+      });
+
+      const registryDir = resolveTaskFlowRegistryDir(process.env);
+      const sqlitePath = resolveTaskFlowRegistrySqlitePath(process.env);
+      expect(statSync(registryDir).mode & 0o777).toBe(0o700);
+      expect(statSync(sqlitePath).mode & 0o777).toBe(0o600);
+    });
+  });
+
   it("rebuilds legacy flow_runs tables that still require owner_session_key", async () => {
     await withFlowRegistryTempDir(async (root) => {
       process.env.OPENCLAW_STATE_DIR = root;
@@ -406,31 +431,6 @@ describe("task-flow-registry store runtime", () => {
           status: "queued",
         },
       ]);
-    });
-  });
-
-  it("hardens the sqlite flow store directory and file modes", async () => {
-    if (process.platform === "win32") {
-      return;
-    }
-    await withFlowRegistryTempDir(async (root) => {
-      process.env.OPENCLAW_STATE_DIR = root;
-      resetTaskFlowRegistryForTests();
-
-      createManagedTaskFlow({
-        ownerKey: "agent:main:main",
-        controllerId: "tests/secured-flow",
-        goal: "Secured flow",
-        status: "blocked",
-        blockedTaskId: "task-secured",
-        blockedSummary: "Need auth.",
-        waitJson: { kind: "task", taskId: "task-secured" },
-      });
-
-      const registryDir = resolveTaskFlowRegistryDir(process.env);
-      const sqlitePath = resolveTaskFlowRegistrySqlitePath(process.env);
-      expect(statSync(registryDir).mode & 0o777).toBe(0o700);
-      expect(statSync(sqlitePath).mode & 0o777).toBe(0o600);
     });
   });
 });
