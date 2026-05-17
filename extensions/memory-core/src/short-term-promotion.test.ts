@@ -1167,7 +1167,11 @@ describe("short-term promotion", () => {
       expect(applied.archiveRelativePath.replaceAll(path.sep, "/")).toBe(
         alreadyArchivedRelativePath,
       );
-      const promotionEvent = memoryHostEventsMock.appendMemoryHostEvent.mock.calls.at(-1)?.[1];
+      const appendEventCalls = memoryHostEventsMock.appendMemoryHostEvent.mock
+        .calls as unknown as Array<
+        [string, { type?: string; archivePath?: string; archiveRelativePath?: string }]
+      >;
+      const promotionEvent = appendEventCalls.at(-1)?.[1];
       if (promotionEvent?.type !== "memory.promotion.applied") {
         throw new Error("expected promotion event");
       }
