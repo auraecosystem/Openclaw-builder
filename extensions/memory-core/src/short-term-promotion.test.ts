@@ -3,8 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-vi.mock("openclaw/plugin-sdk/memory-host-events", () => ({
+const memoryHostEventsMock = vi.hoisted(() => ({
   appendMemoryHostEvent: vi.fn(async () => {}),
+}));
+
+vi.mock("openclaw/plugin-sdk/memory-host-events", () => ({
+  appendMemoryHostEvent: memoryHostEventsMock.appendMemoryHostEvent,
 }));
 
 import {
@@ -1137,6 +1141,7 @@ describe("short-term promotion", () => {
         "utf-8",
       );
       const archiveBefore = await fs.readFile(alreadyArchivedPath, "utf-8");
+      memoryHostEventsMock.appendMemoryHostEvent.mockClear();
 
       const applied = await applyShortTermPromotions({
         workspaceDir,
@@ -1158,14 +1163,22 @@ describe("short-term promotion", () => {
         .split(path.sep)
         .join("/");
       expect(memoryText).toContain(`Latest promotion archive: \`${alreadyArchivedRelativePath}\`.`);
-      expect(memoryText).not.toContain(
-        `Latest promotion archive: \`${applied.archiveRelativePath.replaceAll(path.sep, "/")}\`.`,
+      expect(applied.archivePath).toBe(alreadyArchivedPath);
+      expect(applied.archiveRelativePath.replaceAll(path.sep, "/")).toBe(
+        alreadyArchivedRelativePath,
+      );
+      const promotionEvent = memoryHostEventsMock.appendMemoryHostEvent.mock.calls.at(-1)?.[1];
+      if (promotionEvent?.type !== "memory.promotion.applied") {
+        throw new Error("expected promotion event");
+      }
+      expect(promotionEvent.archivePath).toBe(alreadyArchivedPath);
+      expect(promotionEvent.archiveRelativePath?.replaceAll(path.sep, "/")).toBe(
+        alreadyArchivedRelativePath,
       );
       expect(memoryText).toContain("## Other Section");
       expect(memoryText).not.toContain(`openclaw-memory-promotion:${key}`);
       expect(memoryText).not.toContain("The gateway should stay loopback-only on port 18789.");
       expect(archiveText).toBe(archiveBefore);
-      expect(applied.archivePath).toBe(currentDayArchivePath);
       await expectEnoent(fs.readFile(currentDayArchivePath, "utf-8"));
       expect(archiveText.match(new RegExp(`openclaw-memory-promotion:${key}`, "g"))?.length).toBe(
         1,

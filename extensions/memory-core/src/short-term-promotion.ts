@@ -1805,7 +1805,7 @@ async function collectArchivedPromotionMarkerLocations(
   const promotionArchivePattern = /^memory-promoted-short-term-dump-\d{4}-\d{2}-\d{2}\.md$/;
   for (const quarter of quarters
     .filter((entry) => entry.isDirectory() && /^\d{4}-Q[1-4]$/.test(entry.name))
-    .sort((a, b) => a.name.localeCompare(b.name))) {
+    .toSorted((a, b) => a.name.localeCompare(b.name))) {
     const quarterDir = path.join(archiveRoot, quarter.name);
     let files: Dirent[];
     try {
@@ -1818,7 +1818,7 @@ async function collectArchivedPromotionMarkerLocations(
     }
     for (const file of files
       .filter((entry) => entry.isFile() && promotionArchivePattern.test(entry.name))
-      .sort((a, b) => a.name.localeCompare(b.name))) {
+      .toSorted((a, b) => a.name.localeCompare(b.name))) {
       const archiveRelativePath = path.join("memory", "archived", quarter.name, file.name);
       const text = await fs.readFile(path.join(quarterDir, file.name), "utf-8").catch((err) => {
         if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
@@ -1964,6 +1964,8 @@ export async function applyShortTermPromotions(
     ).length;
 
     const compactedDates = extractPromotionSectionDates(migrated.sections);
+    let effectiveArchiveRelativePath = archiveRelativePath;
+    let effectiveArchivePath = archivePath;
     if (toAppend.length > 0 || migrated.sections.length > 0) {
       const existingArchive = await fs.readFile(archivePath, "utf-8").catch((err: unknown) => {
         if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
@@ -1978,7 +1980,6 @@ export async function applyShortTermPromotions(
       if (toAppend.length > 0) {
         sections.push(buildPromotionSection(toAppend, nowMs, options.timezone).trim());
       }
-      let pointerArchiveRelativePath = archiveRelativePath;
       if (sections.length > 0) {
         // Write the archive header only when the day's dump is first created;
         // same-day promotions append additional dated sections under it.
@@ -1993,13 +1994,14 @@ export async function applyShortTermPromotions(
           "utf-8",
         );
       } else {
-        pointerArchiveRelativePath =
+        effectiveArchiveRelativePath =
           latestArchivedPromotionPathForMarkers(migratedMarkers, archivedMarkerLocations) ??
           archiveRelativePath;
+        effectiveArchivePath = path.join(workspaceDir, effectiveArchiveRelativePath);
       }
       await fs.writeFile(
         memoryPath,
-        ensurePromotionPointerSection(migrated.memoryText, pointerArchiveRelativePath),
+        ensurePromotionPointerSection(migrated.memoryText, effectiveArchiveRelativePath),
         "utf-8",
       );
     }
@@ -2020,8 +2022,8 @@ export async function applyShortTermPromotions(
       type: "memory.promotion.applied",
       timestamp: nowIso,
       memoryPath,
-      archivePath,
-      archiveRelativePath,
+      archivePath: effectiveArchivePath,
+      archiveRelativePath: effectiveArchiveRelativePath,
       applied: rehydratedSelected.length,
       candidates: rehydratedSelected.map((candidate) => ({
         key: candidate.key,
@@ -2035,8 +2037,8 @@ export async function applyShortTermPromotions(
 
     return {
       memoryPath,
-      archivePath,
-      archiveRelativePath,
+      archivePath: effectiveArchivePath,
+      archiveRelativePath: effectiveArchiveRelativePath,
       applied: rehydratedSelected.length,
       appended: toAppend.length,
       reconciledExisting: alreadyWritten.length + migratedOnlyCount,
