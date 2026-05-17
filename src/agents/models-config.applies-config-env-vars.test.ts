@@ -246,7 +246,7 @@ describe("models-config", () => {
     ]);
   });
 
-  it("strips plaintext apiKeys from persisted models.json while keeping auth markers", async () => {
+  it("strips new plaintext apiKeys from persisted models.json while preserving existing auth", async () => {
     const plan = await planOpenClawModelsJsonWithDeps(
       {
         cfg: {
@@ -305,7 +305,7 @@ describe("models-config", () => {
       providers?: Record<string, { apiKey?: string }>;
     };
     expect(parsed.providers?.custom?.apiKey).toBeUndefined();
-    expect(parsed.providers?.existing?.apiKey).toBeUndefined();
+    expect(parsed.providers?.existing?.apiKey).toBe("sk-existing-plaintext");
     expect(parsed.providers?.openai?.apiKey).toBe("OPENAI_API_KEY"); // pragma: allowlist secret
   });
 
