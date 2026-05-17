@@ -2645,6 +2645,56 @@ describe("runWithModelFallback", () => {
       expect(run).toHaveBeenCalledTimes(1);
     });
 
+    it("treats phase-suffixed cron timeout reason as terminal (covers `(last phase: ...)` variant)", async () => {
+      // Flagged by clawsweeper review on openclaw/openclaw#62682:
+      // `src/cron/service/timer.ts:367` emits `cron: job execution timed out
+      // (last phase: <name>)` when the watchdog has recorded the active phase.
+      // An exact-string Set match misses this variant; prefix matching catches
+      // both the bare and suffixed forms.
+      const cfg = makeCfg();
+      const run = vi.fn().mockRejectedValue(makeAbortError("aborted"));
+
+      const controller = new AbortController();
+      controller.abort("cron: job execution timed out (last phase: model_call_started)");
+
+      await expect(
+        runWithModelFallback({
+          cfg,
+          provider: "anthropic",
+          model: "claude-sonnet-4-6",
+          run,
+          abortSignal: controller.signal,
+        }),
+      ).rejects.toBeInstanceOf(Error);
+
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+
+    it("treats isolated-agent setup-timeout (and phase suffix) as terminal", async () => {
+      // `src/cron/service/timer.ts:373/375` emits two more prefixes for the
+      // setup-phase timeout (before the runner has started). Both variants
+      // must short-circuit fallback.
+      const cfg = makeCfg();
+      const run = vi.fn().mockRejectedValue(makeAbortError("aborted"));
+
+      const controller = new AbortController();
+      controller.abort(
+        "cron: isolated agent setup timed out before runner start (last phase: workspace_provision)",
+      );
+
+      await expect(
+        runWithModelFallback({
+          cfg,
+          provider: "anthropic",
+          model: "claude-sonnet-4-6",
+          run,
+          abortSignal: controller.signal,
+        }),
+      ).rejects.toBeInstanceOf(Error);
+
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+
     it("treats an Error whose .message matches a known terminal string as terminal", async () => {
       // Defensive: if a caller wraps `timeoutErrorMessage()` in `new Error(...)`
       // before passing it to `abort()`, the outer `name` will be generic

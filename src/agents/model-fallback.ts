@@ -131,18 +131,33 @@ function isFallbackAbortError(err: unknown): boolean {
 }
 
 /**
- * Known terminal-abort reason strings. Some call sites (notably
- * `src/cron/service/timer.ts:90` and `src/agents/pi-embedded-runner/run/attempt.ts:575`)
- * pass a plain string to `AbortController.abort()` rather than an Error, so
- * `isTerminalAbort` has to match against this explicit set instead of relying
- * on `reason.name`. Keep the set narrow — only known callsites where the run
- * is genuinely over regardless of which model handles it.
+ * Known terminal-abort reason string prefixes. Some call sites (notably
+ * `src/cron/service/timer.ts` `timeoutErrorMessage()` and the isolated-agent
+ * setup-timeout path) pass a plain string to `AbortController.abort()` rather
+ * than an Error, so `isTerminalAbort` has to match against this explicit set
+ * instead of relying on `reason.name`. Match by PREFIX so phase-suffixed
+ * variants (e.g. `"cron: job execution timed out (last phase: model_call_started)"`,
+ * produced by `timer.ts:367`) are recognized alongside the bare form. Keep the
+ * list narrow — only known callsites where the run is genuinely over regardless
+ * of which model handles it.
  */
-const TERMINAL_ABORT_REASON_STRINGS = new Set<string>([
-  // src/cron/service/timer.ts:109-111 `timeoutErrorMessage()` -- cron run budget
-  // exhausted; retrying with a fallback model would get ~0 ms remaining.
+const TERMINAL_ABORT_REASON_PREFIXES: readonly string[] = [
+  // src/cron/service/timer.ts `timeoutErrorMessage()` — cron run budget exhausted.
+  // Emits either bare "cron: job execution timed out" or with "(last phase: <name>)" suffix.
   "cron: job execution timed out",
-]);
+  // src/cron/service/timer.ts `setupTimeoutErrorMessage()` — isolated-agent setup
+  // budget exhausted before runner start. Same bare + "(last phase: <name>)" shape.
+  "cron: isolated agent setup timed out before runner start",
+];
+
+function isTerminalAbortReasonString(reason: string): boolean {
+  for (const prefix of TERMINAL_ABORT_REASON_PREFIXES) {
+    if (reason === prefix || reason.startsWith(prefix + " ")) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * "Terminal" aborts are aborts where retrying with another model is wasteful
@@ -179,7 +194,7 @@ function isTerminalAbort(signal: AbortSignal | undefined): boolean {
   // String-shaped reasons: some legacy call sites pass a plain string instead
   // of an Error. Match against a known set of terminal reason strings.
   if (typeof reason === "string") {
-    return TERMINAL_ABORT_REASON_STRINGS.has(reason);
+    return isTerminalAbortReasonString(reason);
   }
 
   // Error-shaped reasons: walk up to one cause level to catch wrapped aborts.
@@ -208,7 +223,7 @@ function isTerminalAbort(signal: AbortSignal | undefined): boolean {
       // abort reason.
       if (
         typeof candidate.message === "string" &&
-        TERMINAL_ABORT_REASON_STRINGS.has(candidate.message)
+        isTerminalAbortReasonString(candidate.message)
       ) {
         return true;
       }
@@ -239,7 +254,7 @@ function isTerminalAbortFromError(err: unknown): boolean {
   }
   for (const candidate of candidates) {
     if (typeof candidate === "string") {
-      if (TERMINAL_ABORT_REASON_STRINGS.has(candidate)) {
+      if (isTerminalAbortReasonString(candidate)) {
         return true;
       }
       continue;
@@ -255,7 +270,7 @@ function isTerminalAbortFromError(err: unknown): boolean {
     }
     if (
       typeof candidate.message === "string" &&
-      TERMINAL_ABORT_REASON_STRINGS.has(candidate.message)
+      isTerminalAbortReasonString(candidate.message)
     ) {
       return true;
     }
