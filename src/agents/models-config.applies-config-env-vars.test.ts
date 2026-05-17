@@ -246,6 +246,66 @@ describe("models-config", () => {
     ]);
   });
 
+  it("strips plaintext apiKeys from persisted models.json while keeping auth markers", async () => {
+    const plan = await planOpenClawModelsJsonWithDeps(
+      {
+        cfg: {
+          models: {
+            mode: "merge",
+            providers: {
+              custom: {
+                baseUrl: "https://config.example/v1",
+                api: "openai-completions",
+                apiKey: "sk-config-plaintext", // pragma: allowlist secret
+                models: [
+                  {
+                    id: "config-model",
+                    name: "Config model",
+                    input: ["text"],
+                    reasoning: false,
+                  },
+                ],
+              },
+              openai: {
+                baseUrl: "https://api.openai.com/v1",
+                api: "openai-responses",
+                apiKey: "OPENAI_API_KEY", // pragma: allowlist secret
+                models: [],
+              },
+            },
+          },
+        },
+        agentDir: "/tmp/openclaw-models-config-env-vars-test",
+        env: {},
+        existingRaw: "",
+        existingParsed: {
+          providers: {
+            existing: {
+              baseUrl: "https://existing.example/v1",
+              api: "openai-completions",
+              apiKey: "sk-existing-plaintext", // pragma: allowlist secret
+              models: [],
+            },
+          },
+        },
+      },
+      {
+        resolveImplicitProviders: async () => ({}),
+      },
+    );
+
+    expect(plan.action).toBe("write");
+    if (plan.action !== "write") {
+      throw new Error("Expected models.json write plan");
+    }
+    const parsed = JSON.parse(plan.contents) as {
+      providers?: Record<string, { apiKey?: string }>;
+    };
+    expect(parsed.providers?.custom?.apiKey).toBeUndefined();
+    expect(parsed.providers?.existing?.apiKey).toBeUndefined();
+    expect(parsed.providers?.openai?.apiKey).toBe("OPENAI_API_KEY"); // pragma: allowlist secret
+  });
+
   it("uses config env.vars entries for implicit provider discovery without mutating process.env", async () => {
     await withTempEnv(["OPENROUTER_API_KEY", TEST_ENV_VAR], async () => {
       unsetEnv(["OPENROUTER_API_KEY", TEST_ENV_VAR]);

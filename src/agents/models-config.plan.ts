@@ -1,6 +1,7 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
 import { isRecord } from "../utils.js";
+import { isNonSecretApiKeyMarker } from "./model-auth-markers.js";
 import {
   mergeProviders,
   mergeWithExistingProviderSecrets,
@@ -105,6 +106,36 @@ function resolveProvidersForMode(params: {
   });
 }
 
+function shouldPersistApiKeyMarker(value: unknown): value is string {
+  return typeof value === "string" && isNonSecretApiKeyMarker(value);
+}
+
+function stripPlaintextProviderApiKeys(
+  providers: Record<string, ProviderConfig>,
+): Record<string, ProviderConfig> {
+  let mutated = false;
+  const sanitized: Record<string, ProviderConfig> = {};
+
+  for (const [providerKey, provider] of Object.entries(providers)) {
+    if (!provider || typeof provider !== "object" || Array.isArray(provider)) {
+      sanitized[providerKey] = provider;
+      continue;
+    }
+    const apiKey = (provider as { apiKey?: unknown }).apiKey;
+    if (apiKey === undefined || shouldPersistApiKeyMarker(apiKey)) {
+      sanitized[providerKey] = provider;
+      continue;
+    }
+
+    const safeProvider = { ...provider } as { apiKey?: unknown };
+    delete safeProvider.apiKey;
+    sanitized[providerKey] = safeProvider as ProviderConfig;
+    mutated = true;
+  }
+
+  return mutated ? sanitized : providers;
+}
+
 export async function planOpenClawModelsJsonWithDeps(
   params: {
     cfg: OpenClawConfig;
@@ -178,7 +209,8 @@ export async function planOpenClawModelsJsonWithDeps(
       secretRefManagedProviders,
     }) ?? normalizedMergedProviders;
   const finalProviders = applyNativeStreamingUsageCompat(secretEnforcedProviders);
-  const nextContents = `${JSON.stringify({ providers: finalProviders }, null, 2)}\n`;
+  const persistedProviders = stripPlaintextProviderApiKeys(finalProviders);
+  const nextContents = `${JSON.stringify({ providers: persistedProviders }, null, 2)}\n`;
 
   if (params.existingRaw === nextContents) {
     return { action: "noop" };
