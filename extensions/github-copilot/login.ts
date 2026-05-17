@@ -124,6 +124,7 @@ async function requestDeviceCode(params: { scope: string }): Promise<DeviceCodeR
   if (!json.device_code || !json.user_code || !json.verification_uri) {
     throw new Error("GitHub device code response missing fields");
   }
+  return json;
 }
 
 async function pollForAccessToken(params: {

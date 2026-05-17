@@ -63,7 +63,6 @@ export type OcMatch =
 
 export type LeafType = "string" | "number" | "boolean" | "null";
 
-export type NodeDescriptor = "md-block" | "md-item" | "jsonc-object" | "jsonc-array" | "jsonl-line";
 export type NodeDescriptor =
   | "md-block"
   | "md-item"
