@@ -8,6 +8,8 @@ import {
   resolveCodexTrajectoryPointerFlags,
 } from "./trajectory.js";
 
+type CodexTrajectoryRecorder = NonNullable<ReturnType<typeof createCodexTrajectoryRecorder>>;
+
 const tempDirs: string[] = [];
 
 function makeTempDir(): string {
@@ -21,6 +23,17 @@ afterEach(() => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+function expectTrajectoryRecorder(
+  recorder: ReturnType<typeof createCodexTrajectoryRecorder>,
+): CodexTrajectoryRecorder {
+  if (recorder === null) {
+    throw new Error("Expected Codex trajectory recorder");
+  }
+  expect(typeof recorder.recordEvent).toBe("function");
+  return recorder;
+}
 
 describe("Codex trajectory recorder", () => {
   it("keeps write flags usable when O_NOFOLLOW is unavailable", () => {
