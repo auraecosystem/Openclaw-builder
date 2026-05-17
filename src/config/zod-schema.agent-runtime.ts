@@ -15,6 +15,7 @@ import {
   SecretInputSchema,
   ToolsLinksSchema,
   ToolsMediaSchema,
+  ToolsMediaUnderstandingSchema,
   TtsConfigSchema,
 } from "./zod-schema.core.js";
 import { sensitive } from "./zod-schema.sensitive.js";
@@ -1007,6 +1008,7 @@ export const ToolsSchema = z
     ...CommonToolPolicyFields,
     web: ToolsWebSchema,
     media: ToolsMediaSchema,
+    browser: ToolsMediaUnderstandingSchema,
     links: ToolsLinksSchema,
     sessions: z
       .object({

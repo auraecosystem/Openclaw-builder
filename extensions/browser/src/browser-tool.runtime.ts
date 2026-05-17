@@ -1,6 +1,7 @@
 export { getRuntimeConfig } from "./sdk-config.js";
 export {
   callGatewayTool,
+  describeImageFileWithModel,
   imageResultFromFile,
   jsonResult,
   listNodes,
