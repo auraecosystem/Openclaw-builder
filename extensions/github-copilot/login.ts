@@ -166,6 +166,7 @@ async function pollForAccessToken(params: {
     if (err === "access_denied") {
       throw new GitHubDeviceFlowError(GITHUB_DEVICE_ACCESS_DENIED, "GitHub login cancelled");
     }
+    throw new Error(`GitHub device flow error: ${err}`);
   }
 
   throw new GitHubDeviceFlowError(
