@@ -665,12 +665,20 @@ export function createOpenClawCodingTools(options?: {
   const allowWorkspaceWrites = sandbox?.workspaceAccess !== "ro";
   const workspaceRoot = resolveWorkspaceRoot(options?.workspaceDir);
   const includeCoreTools = options?.includeCoreTools !== false;
+  // Honor `disablePluginTools` end-to-end: when the caller (the HTTP raw
+  // factory at `createOpenClawCodingToolsRaw`) asks for a core-only tool set,
+  // suppress channel/OpenClaw/plugin construction in the default plan too.
+  // Flagged by clawsweeper review on #63919: the flag was propagated to
+  // `createOpenClawTools` (line ~980 below) but the default construction plan
+  // ignored it, so channel/OpenClaw/plugin-capable tools were still being
+  // materialized in the "core-only" HTTP path.
+  const pluginToolsDisabled = options?.disablePluginTools === true;
   const toolConstructionPlan = options?.toolConstructionPlan ?? {
     includeBaseCodingTools: includeCoreTools,
     includeShellTools: includeCoreTools,
-    includeChannelTools: includeCoreTools,
-    includeOpenClawTools: includeCoreTools,
-    includePluginTools: true,
+    includeChannelTools: includeCoreTools && !pluginToolsDisabled,
+    includeOpenClawTools: includeCoreTools && !pluginToolsDisabled,
+    includePluginTools: !pluginToolsDisabled,
   };
   const includeBaseCodingTools = includeCoreTools && toolConstructionPlan.includeBaseCodingTools;
   const includeShellTools = includeCoreTools && toolConstructionPlan.includeShellTools;

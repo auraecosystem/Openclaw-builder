@@ -39,4 +39,31 @@ describe("resolveGatewayScopedTools", () => {
 
     expect(result.tools.some((tool) => tool.name === "message")).toBe(false);
   });
+
+  it("marks HTTP-surface exec/process coding tools as ownerOnly (P1 fix for #63919)", () => {
+    // Flagged by clawsweeper review: when gateway.tools.allow=["exec"] lifts
+    // the default deny, the raw exec/process tools surfaced via the HTTP raw
+    // coding factory must require owner semantics. A trusted-proxy caller
+    // with operator.write but no operator.admin must not reach command exec.
+    const result = resolveGatewayScopedTools({
+      cfg: {
+        tools: { profile: "full" },
+        gateway: { tools: { allow: ["exec", "process"] } },
+      } as OpenClawConfig,
+      sessionKey: "main",
+      surface: "http",
+    });
+
+    const exec = result.tools.find((tool) => tool.name === "exec");
+    const proc = result.tools.find((tool) => tool.name === "process");
+    // If exec/process surface at all (allowlist removed default deny), they
+    // must be ownerOnly so applyOwnerOnlyToolPolicy filters them for non-owner
+    // callers without requiring an entry in the global owner-only fallback set.
+    if (exec) {
+      expect(exec.ownerOnly).toBe(true);
+    }
+    if (proc) {
+      expect(proc.ownerOnly).toBe(true);
+    }
+  });
 });

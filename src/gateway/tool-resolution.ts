@@ -190,7 +190,15 @@ export function resolveGatewayScopedTools(params: {
   // outside the loopback excludeToolNames set would otherwise become
   // reachable on loopback even though this PR is scoped to /tools/invoke.
   // See: https://github.com/openclaw/openclaw/issues/37131
-  const codingTools =
+  // Names that should always require owner semantics when reached via the
+  // direct HTTP surface — even when `gateway.tools.allow` has removed them
+  // from the default deny list. The raw factory does not natively mark these
+  // as ownerOnly (other paths like agent runs apply owner gating differently),
+  // so we tag them post-construction. Flagged by clawsweeper review on #63919:
+  // a `trusted-proxy` caller with `operator.write` but no `operator.admin`
+  // could otherwise reach allowlisted exec/process via /tools/invoke.
+  const HTTP_OWNER_ONLY_CODING_TOOLS = new Set(["exec", "process"]);
+  const rawCodingTools =
     surface === "http"
       ? createOpenClawCodingToolsRaw({
           agentId: agentId ?? resolveDefaultAgentId(params.cfg),
@@ -201,6 +209,9 @@ export function resolveGatewayScopedTools(params: {
           senderIsOwner: params.senderIsOwner,
         })
       : [];
+  const codingTools = rawCodingTools.map((tool) =>
+    HTTP_OWNER_ONLY_CODING_TOOLS.has(tool.name) ? { ...tool, ownerOnly: true } : tool,
+  );
 
   // Merge, deduplicating by tool name (gateway tools take precedence).
   const gatewayToolNames = new Set(gatewayTools.map((t) => t.name));
