@@ -39,6 +39,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Logs/follow: only emit `Log cursor reset (file rotated).` when the log file actually shrank below the previous cursor; fast-growth bursts that exceed `--max-bytes` now show only the existing `Log tail truncated` notice. (#74252) Thanks @BSG2000.
 - Telegram: deliver generated media completions back into forum topics by preserving topic IDs across requester-agent handoff. (#83556) Thanks @fuller-stack-dev.
 - Gateway: defer update-check startup until after readiness so package update checks no longer block sidecar-ready startup, while preserving update broadcasts and shutdown cleanup. (#83520) Thanks @samzong.
 - Agents/video: hide `video_generate` reference-audio parameters unless a registered video provider supports audio inputs.
