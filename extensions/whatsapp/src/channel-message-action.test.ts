@@ -177,8 +177,12 @@ describe("handleWhatsAppMessageAction", () => {
       forceDocument: true,
       accountId: "default",
     });
-    expect(result.content[0]?.type).toBe("text");
-    expect(JSON.parse(result.content[0]?.text ?? "{}")).toMatchObject({
+    const [content] = result.content;
+    expect(content?.type).toBe("text");
+    if (content?.type !== "text") {
+      throw new Error("expected text response");
+    }
+    expect(JSON.parse(content.text ?? "{}")).toMatchObject({
       ok: true,
       channel: "whatsapp",
       action: "upload-file",

@@ -154,8 +154,8 @@ describe("whatsapp channel action helpers", () => {
     expect(schema && !Array.isArray(schema) ? schema.actions : undefined).toEqual(["list-reply"]);
     const properties = schema && !Array.isArray(schema) ? schema.properties : {};
     const objectSchema = Type.Object(properties as TProperties);
-    expect(properties.selectedRowId?.type).toBe("string");
-    expect(properties.title?.type).toBe("string");
+    expect((properties.selectedRowId as { type?: string } | undefined)?.type).toBe("string");
+    expect((properties.title as { type?: string } | undefined)?.type).toBe("string");
     expect(objectSchema.required ?? []).not.toContain("selectedRowId");
     expect(objectSchema.required ?? []).not.toContain("title");
     expect(properties.rowId).toBeUndefined();

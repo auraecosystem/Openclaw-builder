@@ -356,30 +356,25 @@ function extractNativeFlowButtonRows(
   interactive: proto.Message.IInteractiveMessage | undefined | null,
 ): WhatsAppInteractiveListContext["rows"] {
   const nativeFlow = interactive?.nativeFlowMessage;
-  return (nativeFlow?.buttons ?? [])
-    .map((button) => {
-      const params = parseJsonObject(button?.buttonParamsJson);
-      if (!params || Array.isArray(params.sections)) {
-        return null;
-      }
-      const rowId =
-        nonEmptyString(params.id) ??
-        nonEmptyString(params.buttonId) ??
-        nonEmptyString(params.payload);
-      if (!rowId) {
-        return null;
-      }
-      const title =
-        nonEmptyString(params.display_text) ??
-        nonEmptyString(params.displayText) ??
-        nonEmptyString(params.title) ??
-        nonEmptyString(params.text);
-      return {
-        rowId,
-        ...(title ? { title } : {}),
-      };
-    })
-    .filter((row): row is WhatsAppInteractiveListContext["rows"][number] => row != null);
+  const rows: WhatsAppInteractiveListContext["rows"] = [];
+  for (const button of nativeFlow?.buttons ?? []) {
+    const params = parseJsonObject(button?.buttonParamsJson);
+    if (!params || Array.isArray(params.sections)) {
+      continue;
+    }
+    const rowId =
+      nonEmptyString(params.id) ?? nonEmptyString(params.buttonId) ?? nonEmptyString(params.payload);
+    if (!rowId) {
+      continue;
+    }
+    const title =
+      nonEmptyString(params.display_text) ??
+      nonEmptyString(params.displayText) ??
+      nonEmptyString(params.title) ??
+      nonEmptyString(params.text);
+    rows.push(title ? { rowId, title } : { rowId });
+  }
+  return rows;
 }
 
 function extractInteractiveListText(message: proto.IMessage): string | undefined {
@@ -478,25 +473,24 @@ export function extractInteractiveListContext(
   const message = unwrapMessage(rawMessage);
   const list = message?.listMessage;
   if (list) {
-    const rows = (list.sections ?? []).flatMap((section) => {
+    const rows: WhatsAppInteractiveListContext["rows"] = [];
+    for (const section of list.sections ?? []) {
       const sectionTitle = nonEmptyString(section?.title);
-      return (section?.rows ?? [])
-        .map((row) => {
-          const rowId = nonEmptyString(row?.rowId);
-          if (!rowId) {
-            return null;
-          }
-          const title = nonEmptyString(row?.title);
-          const description = nonEmptyString(row?.description);
-          return {
-            ...(sectionTitle ? { sectionTitle } : {}),
-            rowId,
-            ...(title ? { title } : {}),
-            ...(description ? { description } : {}),
-          };
-        })
-        .filter((row): row is NonNullable<typeof row> => row != null);
-    });
+      for (const row of section?.rows ?? []) {
+        const rowId = nonEmptyString(row?.rowId);
+        if (!rowId) {
+          continue;
+        }
+        const title = nonEmptyString(row?.title);
+        const description = nonEmptyString(row?.description);
+        rows.push({
+          ...(sectionTitle ? { sectionTitle } : {}),
+          rowId,
+          ...(title ? { title } : {}),
+          ...(description ? { description } : {}),
+        });
+      }
+    }
     if (rows.length === 0) {
       return undefined;
     }
@@ -517,19 +511,15 @@ export function extractInteractiveListContext(
 
   const buttons = message?.buttonsMessage;
   if (buttons) {
-    const rows = (buttons.buttons ?? [])
-      .map((button) => {
-        const rowId = nonEmptyString(button?.buttonId);
-        if (!rowId) {
-          return null;
-        }
-        const title = nonEmptyString(button?.buttonText?.displayText);
-        return {
-          rowId,
-          ...(title ? { title } : {}),
-        };
-      })
-      .filter((row): row is NonNullable<typeof row> => row != null);
+    const rows: WhatsAppInteractiveListContext["rows"] = [];
+    for (const button of buttons.buttons ?? []) {
+      const rowId = nonEmptyString(button?.buttonId);
+      if (!rowId) {
+        continue;
+      }
+      const title = nonEmptyString(button?.buttonText?.displayText);
+      rows.push(title ? { rowId, title } : { rowId });
+    }
     if (rows.length === 0) {
       return undefined;
     }
@@ -565,34 +555,33 @@ export function extractInteractiveListContext(
     return undefined;
   }
   const sections = Array.isArray(nativeFlowList.sections) ? nativeFlowList.sections : [];
-  const rows = sections.flatMap((section) => {
+  const rows: WhatsAppInteractiveListContext["rows"] = [];
+  for (const section of sections) {
     if (!section || typeof section !== "object") {
-      return [];
+      continue;
     }
     const sectionRecord = section as Record<string, unknown>;
     const sectionTitle = nonEmptyString(sectionRecord.title);
     const sectionRows = Array.isArray(sectionRecord.rows) ? sectionRecord.rows : [];
-    return sectionRows
-      .map((row) => {
-        if (!row || typeof row !== "object") {
-          return null;
-        }
-        const rowRecord = row as Record<string, unknown>;
-        const rowId = nonEmptyString(rowRecord.rowId) ?? nonEmptyString(rowRecord.id);
-        if (!rowId) {
-          return null;
-        }
-        const title = nonEmptyString(rowRecord.title);
-        const description = nonEmptyString(rowRecord.description);
-        return {
-          ...(sectionTitle ? { sectionTitle } : {}),
-          rowId,
-          ...(title ? { title } : {}),
-          ...(description ? { description } : {}),
-        };
-      })
-      .filter((row): row is NonNullable<typeof row> => row != null);
-  });
+    for (const row of sectionRows) {
+      if (!row || typeof row !== "object") {
+        continue;
+      }
+      const rowRecord = row as Record<string, unknown>;
+      const rowId = nonEmptyString(rowRecord.rowId) ?? nonEmptyString(rowRecord.id);
+      if (!rowId) {
+        continue;
+      }
+      const title = nonEmptyString(rowRecord.title);
+      const description = nonEmptyString(rowRecord.description);
+      rows.push({
+        ...(sectionTitle ? { sectionTitle } : {}),
+        rowId,
+        ...(title ? { title } : {}),
+        ...(description ? { description } : {}),
+      });
+    }
+  }
   if (rows.length === 0) {
     return undefined;
   }
