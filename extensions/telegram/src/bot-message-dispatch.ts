@@ -245,6 +245,10 @@ type DispatchTelegramMessageParams = {
   telegramCfg: TelegramAccountConfig;
   telegramDeps?: TelegramBotDeps;
   opts: Pick<TelegramBotOptions, "token" | "mediaMaxMb">;
+  sourceReplyDeliveryMode?: "automatic" | "message_tool_only";
+  guestDelivery?: {
+    answerText: (text: string) => Promise<boolean>;
+  };
 };
 
 type TelegramReasoningLevel = "off" | "on" | "stream";
@@ -676,6 +680,8 @@ export const dispatchTelegramMessage = async ({
   telegramCfg,
   telegramDeps: injectedTelegramDeps,
   opts,
+  sourceReplyDeliveryMode,
+  guestDelivery,
 }: DispatchTelegramMessageParams) => {
   const dispatchStartedAt = Date.now();
   const dispatchContext = resolveDispatchTelegramContext({ cfg, context });
@@ -1422,6 +1428,21 @@ export const dispatchTelegramMessage = async ({
       }
       const deliverablePayload = applyQuoteReplyTarget(payload);
       const silent = options?.silent ?? (silentErrorReplies && payload.isError === true);
+      if (guestDelivery) {
+        if (options?.durable !== true) {
+          return false;
+        }
+        const reply = resolveSendableOutboundReplyParts(deliverablePayload);
+        const text = (reply.text || deliverablePayload.text || "").trim();
+        if (!text || text.toUpperCase() === "NO_REPLY") {
+          return false;
+        }
+        const delivered = await guestDelivery.answerText(text);
+        if (delivered) {
+          deliveryState.markDelivered();
+        }
+        return delivered;
+      }
       const durableDelivery = telegramDeps.deliverInboundReplyWithMessageSendContext;
       if (options?.durable && durableDelivery) {
         const durable = await durableDelivery({
@@ -1892,7 +1913,8 @@ export const dispatchTelegramMessage = async ({
                   skillFilter,
                   disableBlockStreaming,
                   abortSignal: replyAbortController.signal,
-                  sourceReplyDeliveryMode: isRoomEvent ? "message_tool_only" : undefined,
+                  sourceReplyDeliveryMode:
+                    sourceReplyDeliveryMode ?? (isRoomEvent ? "message_tool_only" : undefined),
                   queuedDeliveryCorrelations: isRoomEvent
                     ? [{ begin: beginDeliveryCorrelation }]
                     : undefined,
@@ -2148,13 +2170,20 @@ export const dispatchTelegramMessage = async ({
     const fallbackText = dispatchError
       ? "Something went wrong while processing your request. Please try again."
       : EMPTY_RESPONSE_FALLBACK;
-    const result = await (telegramDeps.deliverReplies ?? deliverReplies)({
-      replies: [{ text: fallbackText }],
-      ...deliveryBaseOptions,
-      silent: silentErrorReplies && (dispatchError != null || hadErrorReplyFailureOrSkip),
-      mediaLoader: telegramDeps.loadWebMedia,
-    });
-    sentFallback = result.delivered;
+    if (guestDelivery) {
+      sentFallback = await guestDelivery.answerText(fallbackText);
+      if (sentFallback) {
+        deliveryState.markDelivered();
+      }
+    } else {
+      const result = await (telegramDeps.deliverReplies ?? deliverReplies)({
+        replies: [{ text: fallbackText }],
+        ...deliveryBaseOptions,
+        silent: silentErrorReplies && (dispatchError != null || hadErrorReplyFailureOrSkip),
+        mediaLoader: telegramDeps.loadWebMedia,
+      });
+      sentFallback = result.delivered;
+    }
   }
 
   if (
@@ -2163,7 +2192,8 @@ export const dispatchTelegramMessage = async ({
     !deliverySummary.delivered &&
     !suppressSilentReplyFallback &&
     !queuedFinal &&
-    isGroup
+    isGroup &&
+    !guestDelivery
   ) {
     const policySessionKey =
       ctxPayload.CommandSource === "native"

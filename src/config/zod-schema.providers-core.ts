@@ -221,6 +221,13 @@ const TelegramCustomCommandSchema = z
   })
   .strict();
 
+const TelegramGuestSchema = z
+  .object({
+    enabled: z.union([z.boolean(), z.literal("auto")]).optional(),
+    fallbackText: z.string().min(1).optional(),
+  })
+  .strict();
+
 const validateTelegramCustomCommands = (
   value: { customCommands?: Array<{ command?: string; description?: string }> },
   ctx: z.RefinementCtx,
@@ -257,6 +264,7 @@ export const TelegramAccountSchemaBase = z
       })
       .strict()
       .optional(),
+    guest: TelegramGuestSchema.optional(),
     markdown: MarkdownConfigSchema,
     enabled: z.boolean().optional(),
     commands: ProviderCommandsSchema,

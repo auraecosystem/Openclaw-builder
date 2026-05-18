@@ -87,6 +87,13 @@ export type TelegramExecApprovalConfig = {
   target?: TelegramExecApprovalTarget;
 };
 
+export type TelegramGuestModeConfig = {
+  /** Enable Telegram Guest Mode handling. Default false; "auto" enables it only when getMe advertises support. */
+  enabled?: boolean | "auto";
+  /** Text used when the agent produces no visible final answer. */
+  fallbackText?: string;
+};
+
 export type TelegramCapabilitiesConfig =
   | string[]
   | {
@@ -108,6 +115,8 @@ export type TelegramAccountConfig = {
   capabilities?: TelegramCapabilitiesConfig;
   /** Telegram-native exec approval delivery + approver authorization. */
   execApprovals?: TelegramExecApprovalConfig;
+  /** Telegram Guest Mode support for @bot queries in chats where the bot is not a member. */
+  guest?: TelegramGuestModeConfig;
   /** Markdown formatting overrides (tables). */
   markdown?: MarkdownConfig;
   /** Override native command registration for Telegram (bool or "auto"). */
