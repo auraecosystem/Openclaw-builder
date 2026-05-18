@@ -209,9 +209,15 @@ export function resolveGatewayScopedTools(params: {
           senderIsOwner: params.senderIsOwner,
         })
       : [];
-  const codingTools = rawCodingTools.map((tool) =>
-    HTTP_OWNER_ONLY_CODING_TOOLS.has(tool.name) ? { ...tool, ownerOnly: true } : tool,
-  );
+  // Mutate the fresh array in place — rawCodingTools is locally constructed by
+  // createOpenClawCodingToolsRaw and not shared with any caller, so an in-place
+  // tag avoids the lint warning against spread-in-map and is more efficient.
+  for (const tool of rawCodingTools) {
+    if (HTTP_OWNER_ONLY_CODING_TOOLS.has(tool.name)) {
+      tool.ownerOnly = true;
+    }
+  }
+  const codingTools = rawCodingTools;
 
   // Merge, deduplicating by tool name (gateway tools take precedence).
   const gatewayToolNames = new Set(gatewayTools.map((t) => t.name));
