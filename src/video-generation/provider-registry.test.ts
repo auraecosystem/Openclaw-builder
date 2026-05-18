@@ -41,6 +41,7 @@ async function loadProviderRegistry(): Promise<VideoProviderRegistry> {
 
 describe("video-generation provider registry", () => {
   beforeEach(() => {
+    vi.resetModules();
     resolvePluginCapabilityProvidersMock.mockReset();
     resolvePluginCapabilityProvidersMock.mockReturnValue([]);
   });

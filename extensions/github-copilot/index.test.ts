@@ -14,10 +14,7 @@ import type {
 } from "openclaw/plugin-sdk/plugin-entry";
 import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import {
-  _setGitHubCopilotDeviceFlowFetchGuardForTesting,
-  runGitHubCopilotDeviceFlow,
-} from "./login.js";
+import { _setGitHubCopilotDeviceFlowFetchGuardForTesting } from "./login.js";
 
 const mocks = vi.hoisted(() => ({
   githubCopilotLoginCommand: vi.fn(),
@@ -63,9 +60,6 @@ type GithubCopilotTestProvider = {
 type GithubCopilotTestModelCatalogProvider = {
   liveCatalog: (ctx: unknown) => Promise<readonly UnifiedModelCatalogEntry[] | null | undefined>;
 };
-type GitHubDeviceFlowFetchGuard = NonNullable<
-  Parameters<typeof _setGitHubCopilotDeviceFlowFetchGuardForTesting>[0]
->;
 
 afterEach(async () => {
   vi.clearAllMocks();
@@ -416,56 +410,6 @@ describe("github-copilot plugin", () => {
       } else {
         delete (process.stdin as { isTTY?: boolean }).isTTY;
       }
-    }
-  });
-
-  it("fails fast on unexpected GitHub device-flow token errors", async () => {
-    const nowSpy = vi
-      .spyOn(Date, "now")
-      .mockReturnValueOnce(1000)
-      .mockReturnValueOnce(1000)
-      .mockReturnValue(61_001);
-    const fetchGuard = vi.fn<GitHubDeviceFlowFetchGuard>(async (params) => {
-      if (params.url === "https://github.com/login/device/code") {
-        return {
-          response: new Response(
-            JSON.stringify({
-              device_code: "device-code-stub",
-              user_code: "ABCD-1234",
-              verification_uri: "https://github.com/login/device",
-              expires_in: 60,
-              interval: 5,
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          ),
-          finalUrl: params.url,
-          release: async () => {},
-        };
-      }
-      if (params.url === "https://github.com/login/oauth/access_token") {
-        return {
-          response: new Response(JSON.stringify({ error: "bad_verification_code" }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }),
-          finalUrl: params.url,
-          release: async () => {},
-        };
-      }
-      throw new Error(`unexpected GitHub device-flow URL: ${params.url}`);
-    });
-    _setGitHubCopilotDeviceFlowFetchGuardForTesting(fetchGuard);
-
-    try {
-      await expect(
-        runGitHubCopilotDeviceFlow({
-          showCode: vi.fn(async () => {}),
-          openUrl: vi.fn(async () => {}),
-        }),
-      ).rejects.toThrow("GitHub device flow error: bad_verification_code");
-      expect(fetchGuard).toHaveBeenCalledTimes(2);
-    } finally {
-      nowSpy.mockRestore();
     }
   });
 

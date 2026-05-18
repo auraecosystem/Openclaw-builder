@@ -27,12 +27,11 @@ describe("image-ops temp dir", () => {
     await getImageMetadata(Buffer.from("image"));
 
     expect(fs.mkdtemp).toHaveBeenCalledTimes(1);
-    const mkdtempCalls = vi.mocked(fs.mkdtemp).mock.calls as Array<[string]>;
-    const mkdtempCall = mkdtempCalls[0];
+    const [mkdtempCall] = vi.mocked(fs.mkdtemp).mock.calls;
     if (!mkdtempCall) {
       throw new Error("expected mkdtemp call");
     }
-    const prefix = mkdtempCall[0];
+    const [prefix] = mkdtempCall;
     expect(typeof prefix).toBe("string");
     const uuidPrefix = path.join(secureRoot, "openclaw-img-");
     expect(prefix?.startsWith(uuidPrefix)).toBe(true);

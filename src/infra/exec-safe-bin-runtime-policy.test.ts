@@ -102,7 +102,7 @@ describe("exec safe-bin runtime policy", () => {
       },
     });
 
-    expect(Array.from(policy.safeBins)).toEqual(["sort"]);
+    expect([...policy.safeBins]).toEqual(["sort"]);
   });
 
   it("merges explicit safe-bin trusted dirs from global and local config", () => {

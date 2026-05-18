@@ -191,11 +191,6 @@ extension ConfigSettings {
             Button(self.store.isSavingConfig ? "Saving…" : "Save") {
                 Task { await self.store.saveConfigDraft() }
             }
-            .disabled(
-                self.isNixMode ||
-                    self.store.isSavingConfig ||
-                    !self.store.configLoaded ||
-                    !self.store.configDirty)
             .disabled(self.isNixMode || self.store.isSavingConfig || !self.store.configLoaded || !self.store
                 .configDirty)
         }
