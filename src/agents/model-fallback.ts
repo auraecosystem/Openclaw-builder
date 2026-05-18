@@ -240,12 +240,26 @@ function isTerminalAbort(signal: AbortSignal | undefined): boolean {
  * embedded runner's run-budget timer aborts a private `runAbortController`,
  * not the caller signal — `abortable()` then wraps the rejection in an
  * outer AbortError whose `.cause` is the original TimeoutError. Closes #60388.
+ *
+ * IMPORTANT: only walks the `.cause` chain of an **AbortError wrapper**, never
+ * the top-level error itself. A bare provider `TimeoutError` (e.g. from an HTTP
+ * SDK that times out on its own) is NOT terminal — those must continue
+ * cascading through the configured fallback chain via the normal
+ * `coerceToFailoverError` path. Flagged by clawsweeper review on
+ * openclaw/openclaw#62682: seeding candidates with `err` itself broke
+ * pre-existing provider-timeout fallback semantics.
  */
 function isTerminalAbortFromError(err: unknown): boolean {
   if (!(err instanceof Error)) {
     return false;
   }
-  const candidates: unknown[] = [err];
+  // Only abort wrappers carry terminal context in their cause chain. Direct
+  // provider errors (e.g. a `TimeoutError` thrown by an HTTP SDK that timed out
+  // on its own) flow through the normal retryable-failover path.
+  if (err.name !== "AbortError") {
+    return false;
+  }
+  const candidates: unknown[] = [];
   if ("cause" in err && err.cause !== undefined) {
     candidates.push(err.cause);
     if (err.cause instanceof Error && "cause" in err.cause && err.cause.cause !== undefined) {

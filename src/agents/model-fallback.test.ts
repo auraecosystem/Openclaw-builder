@@ -2495,6 +2495,33 @@ describe("runWithModelFallback", () => {
       expect(run).toHaveBeenCalledTimes(1);
     });
 
+    it("falls back normally when a top-level provider TimeoutError is thrown (not an AbortError wrapper)", async () => {
+      // Regression: clawsweeper flagged that an earlier version of
+      // isTerminalAbortFromError treated the thrown error itself as a candidate.
+      // That meant a direct provider/SDK TimeoutError (top-level name="TimeoutError",
+      // not wrapped in an AbortError) was misclassified as terminal and rethrown,
+      // breaking pre-existing retryable-timeout fallback semantics. The fix
+      // restricts terminal-from-error detection to AbortError wrappers.
+      const cfg = makeCfg();
+      const directProviderTimeout = new Error("provider request timed out after 60s");
+      directProviderTimeout.name = "TimeoutError";
+      const run = vi
+        .fn()
+        .mockRejectedValueOnce(directProviderTimeout)
+        .mockResolvedValueOnce("ok");
+
+      const result = await runWithModelFallback({
+        cfg,
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        run,
+      });
+
+      // Cascaded successfully — the second candidate served the response.
+      expect(result.result).toBe("ok");
+      expect(run).toHaveBeenCalledTimes(2);
+    });
+
     it("falls back normally when thrown error is generic AbortError without terminal cause", async () => {
       // Sanity: a generic AbortError (e.g. user pressed Esc but signal not
       // tagged) should NOT trigger terminal-from-error detection — it falls
