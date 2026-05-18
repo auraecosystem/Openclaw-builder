@@ -607,21 +607,22 @@ async function estimatePromptTokensFromSessionTranscript(params: {
     if (typeof promptTokens === "number" && Number.isFinite(promptTokens) && promptTokens > 0) {
       const outputTokens = snapshot.usage?.outputTokens;
       const rawUsagePromptTokens = Math.ceil(promptTokens);
+      const hasPostUsageCompactionMarker = snapshot.usage?.hasPostUsageCompactionMarker === true;
       const hasStaleUsageSnapshot =
-        snapshot.usage?.hasPostUsageCompactionMarker === true &&
+        hasPostUsageCompactionMarker &&
         typeof estimatedMessageTokens === "number" &&
         rawUsagePromptTokens > estimatedMessageTokens * 2 + 10_000;
       const boundedUsagePromptTokens = hasStaleUsageSnapshot
         ? estimatedMessageTokens
         : rawUsagePromptTokens;
-      const tailTokens = hasStaleUsageSnapshot
+      const tailTokens = hasPostUsageCompactionMarker
         ? (postCompactionTrailingBytesTokens ?? 0)
         : (trailingBytesTokens ?? 0);
       const usagePromptTokens = boundedUsagePromptTokens + tailTokens;
       return {
         promptTokens: Math.max(usagePromptTokens, estimatedMessageTokens ?? 0),
         outputTokens:
-          !hasStaleUsageSnapshot &&
+          !hasPostUsageCompactionMarker &&
           typeof outputTokens === "number" &&
           Number.isFinite(outputTokens) &&
           outputTokens > 0
