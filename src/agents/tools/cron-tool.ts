@@ -812,8 +812,40 @@ Use jobId canonical; id accepted compat. contextMessages (0-10) adds previous me
             params.mode === "now" || params.mode === "next-heartbeat"
               ? params.mode
               : "next-heartbeat";
+          // Resolve the calling agent's session key into the internal form
+          // the cron service routes by (mirrors the `add` action at L569-583
+          // above). Without this, the wake gateway call goes through with no
+          // session key and the system event lands on the heartbeat / main
+          // default rather than the originating conversation lane. Closes
+          // the upstream half of openclaw/openclaw#46886 (#64556 — agentId/
+          // sessionKey silently ignored for `action: "wake"`). Explicit
+          // params on the tool call still take precedence over the inferred
+          // value, so call sites that want to wake a different session can
+          // pass `sessionKey` / `agentId` directly.
+          const cfg = getRuntimeConfig();
+          const { mainKey, alias } = resolveMainSessionAlias(cfg);
+          const explicitSessionKey = readStringParam(params, "sessionKey");
+          const explicitAgentId = readStringParam(params, "agentId");
+          const inferredSessionKey = opts?.agentSessionKey
+            ? resolveInternalSessionKey({ key: opts.agentSessionKey, alias, mainKey })
+            : undefined;
+          const inferredAgentId = opts?.agentSessionKey
+            ? resolveSessionAgentId({ sessionKey: opts.agentSessionKey, config: cfg })
+            : undefined;
+          const sessionKey = explicitSessionKey ?? inferredSessionKey;
+          const agentId = explicitAgentId ?? inferredAgentId;
           return jsonResult(
-            await callGateway("wake", gatewayOpts, { mode, text }, { expectFinal: false }),
+            await callGateway(
+              "wake",
+              gatewayOpts,
+              {
+                mode,
+                text,
+                ...(sessionKey ? { sessionKey } : {}),
+                ...(agentId ? { agentId } : {}),
+              },
+              { expectFinal: false },
+            ),
           );
         }
         default:

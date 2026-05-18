@@ -890,7 +890,7 @@ export async function enqueueRun(state: CronServiceState, id: string, mode?: "du
 
 export function wakeNow(
   state: CronServiceState,
-  opts: { mode: CronWakeMode; text: string; sessionKey?: string },
+  opts: { mode: CronWakeMode; text: string; sessionKey?: string; agentId?: string },
 ) {
   return wake(state, opts);
 }
