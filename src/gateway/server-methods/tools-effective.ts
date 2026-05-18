@@ -21,6 +21,7 @@ import {
   getActivePluginRegistryVersion,
   getOrCreateSessionMcpRuntime,
   listAgentIds,
+  resolveSessionMcpConfigFingerprint,
   loadSessionEntry,
   materializeBundleMcpToolsForRun,
   resolveAgentWorkspaceDir,
@@ -45,6 +46,7 @@ type TrustedToolsEffectiveContext = {
   sessionKey: string;
   sessionId: string;
   workspaceDir: string;
+  mcpConfigFingerprint: string;
   senderIsOwner: boolean;
   modelProvider?: string;
   modelId?: string;
@@ -56,6 +58,7 @@ type TrustedToolsEffectiveContext = {
   groupChannel?: string | null;
   groupSpace?: string | null;
   replyToMode?: "off" | "first" | "all" | "batched";
+  spawnedBy?: string | null;
 };
 
 type ToolsEffectiveCacheEntry = {
@@ -104,6 +107,7 @@ function buildToolsEffectiveCacheKey(params: {
     sessionKey: params.sessionKey,
     sessionId: context.sessionId,
     workspaceDir: optionalCacheString(context.workspaceDir),
+    mcpConfig: context.mcpConfigFingerprint,
     agentId: context.agentId,
     senderIsOwner: context.senderIsOwner,
     modelProvider: optionalCacheString(context.modelProvider),
@@ -116,6 +120,7 @@ function buildToolsEffectiveCacheKey(params: {
     groupChannel: optionalCacheString(context.groupChannel),
     groupSpace: optionalCacheString(context.groupSpace),
     replyToMode: optionalCacheString(context.replyToMode),
+    spawnedBy: optionalCacheString(context.spawnedBy),
   });
 }
 
@@ -199,6 +204,7 @@ async function resolveSessionScopedToolsEffectiveInventory(
       groupId: context.groupId,
       groupChannel: context.groupChannel,
       groupSpace: context.groupSpace,
+      spawnedBy: context.spawnedBy,
       senderIsOwner: context.senderIsOwner,
       warn: logWarn,
     });
@@ -312,14 +318,16 @@ function resolveTrustedToolsEffectiveContext(params: {
 
   const delivery = deliveryContextFromSession(loaded.entry);
   const resolvedModel = resolveSessionModelRef(loaded.cfg, loaded.entry, sessionAgentId);
+  const workspaceDir =
+    normalizeOptionalString(loaded.entry.spawnedWorkspaceDir) ??
+    resolveAgentWorkspaceDir(loaded.cfg, sessionAgentId);
   return {
     cfg: loaded.cfg,
     agentId: sessionAgentId,
     sessionKey: params.sessionKey,
     sessionId: loaded.entry.sessionId,
-    workspaceDir:
-      normalizeOptionalString(loaded.entry.spawnedWorkspaceDir) ??
-      resolveAgentWorkspaceDir(loaded.cfg, sessionAgentId),
+    workspaceDir,
+    mcpConfigFingerprint: resolveSessionMcpConfigFingerprint({ workspaceDir, cfg: loaded.cfg }),
     senderIsOwner: params.senderIsOwner,
     modelProvider: resolvedModel.provider,
     modelId: resolvedModel.model,
@@ -341,6 +349,7 @@ function resolveTrustedToolsEffectiveContext(params: {
     groupId: loaded.entry.groupId,
     groupChannel: loaded.entry.groupChannel,
     groupSpace: loaded.entry.space,
+    spawnedBy: normalizeOptionalString(loaded.entry.spawnedBy),
     replyToMode: resolveReplyToMode(
       loaded.cfg,
       delivery?.channel ??

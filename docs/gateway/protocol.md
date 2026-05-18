@@ -549,8 +549,11 @@ terminal summary, and sanitized error text.
   - `sessionKey` is required.
   - The gateway derives trusted runtime context from the session server-side instead of accepting
     caller-supplied auth or delivery context.
-  - The response is session-scoped and reflects what the active conversation can use right now,
-    including core, plugin, and channel tools.
+  - The response is a session-scoped server-derived projection of the active inventory,
+    including core, plugin, channel, and MCP server tools.
+  - Effective tool entries use `source="core"`, `source="plugin"`, `source="channel"`, or
+    `source="mcp"`; MCP entries are materialized from configured bundled MCP servers without
+    executing the tools.
 - Operators may call `tools.invoke` (`operator.write`) to invoke one available tool through the
   same gateway policy path as `/tools/invoke`.
   - `name` is required. `args`, `sessionKey`, `agentId`, `confirm`, and

@@ -382,6 +382,7 @@ export const tr: TranslationMap = {
     connected: "Bağlandı",
     channelSource: "Kanal: {id}",
     channel: "Kanal",
+    mcp: "MCP",
     builtIn: "Yerleşik",
   },
   nav: {

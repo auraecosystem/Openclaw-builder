@@ -7,6 +7,7 @@ export { resolveEffectiveToolInventory } from "../../agents/tools-effective-inve
 export {
   getOrCreateSessionMcpRuntime,
   materializeBundleMcpToolsForRun,
+  resolveSessionMcpConfigFingerprint,
 } from "../../agents/pi-bundle-mcp-tools.js";
 export { applyFinalEffectiveToolPolicy } from "../../agents/pi-embedded-runner/effective-tool-policy.js";
 export { resolveReplyToMode } from "../../auto-reply/reply/reply-threading.js";

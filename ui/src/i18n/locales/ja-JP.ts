@@ -383,6 +383,7 @@ export const ja_JP: TranslationMap = {
     connected: "接続済み",
     channelSource: "チャネル: {id}",
     channel: "チャンネル",
+    mcp: "MCP",
     builtIn: "組み込み",
   },
   nav: {

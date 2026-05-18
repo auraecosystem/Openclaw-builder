@@ -380,6 +380,7 @@ export const vi: TranslationMap = {
     connected: "Đã kết nối",
     channelSource: "Kênh: {id}",
     channel: "Kênh",
+    mcp: "MCP",
     builtIn: "Tích hợp sẵn",
   },
   nav: {

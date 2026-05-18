@@ -60,8 +60,9 @@ Normal agent-run final answers should be durable because Pi writes the assistant
 ## Control UI agents tools panel
 
 - The Control UI `/agents` Tools panel has two separate views:
-  - **Available Right Now** uses `tools.effective(sessionKey=...)` and shows what the current
-    session can actually use at runtime, including core, plugin, and channel-owned tools.
+  - **Available Right Now** uses `tools.effective(sessionKey=...)` and shows a server-derived
+    projection of the current session inventory, including core, plugin, channel-owned, and MCP
+    server tools.
   - **Tool Configuration** uses `tools.catalog` and stays focused on profiles, overrides, and
     catalog semantics.
 - Runtime availability is session-scoped. Switching sessions on the same agent can change the

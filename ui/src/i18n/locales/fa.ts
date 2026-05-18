@@ -381,6 +381,7 @@ export const fa: TranslationMap = {
     connected: "متصل",
     channelSource: "کانال: {id}",
     channel: "کانال",
+    mcp: "MCP",
     builtIn: "داخلی",
   },
   nav: {

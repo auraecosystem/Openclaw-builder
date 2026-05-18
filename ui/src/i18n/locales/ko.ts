@@ -379,6 +379,7 @@ export const ko: TranslationMap = {
     connected: "연결됨",
     channelSource: "채널: {id}",
     channel: "채널",
+    mcp: "MCP",
     builtIn: "내장",
   },
   nav: {

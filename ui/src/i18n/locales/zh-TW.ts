@@ -378,6 +378,7 @@ export const zh_TW: TranslationMap = {
     connected: "已連線",
     channelSource: "頻道：{id}",
     channel: "頻道",
+    mcp: "MCP",
     builtIn: "內建",
   },
   nav: {

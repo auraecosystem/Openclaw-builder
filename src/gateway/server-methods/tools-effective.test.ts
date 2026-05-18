@@ -10,7 +10,9 @@ const runtimeMocks = vi.hoisted(() => ({
     accountId: "acct-1",
     threadId: "thread-2",
   })),
-  applyFinalEffectiveToolPolicy: vi.fn((params: { bundledTools: unknown[] }) => params.bundledTools),
+  applyFinalEffectiveToolPolicy: vi.fn(
+    (params: { bundledTools: unknown[] }) => params.bundledTools,
+  ),
   getOrCreateSessionMcpRuntime: vi.fn(async () => ({ sessionId: "session-1" })),
   listAgentIds: vi.fn(() => ["main"]),
   getRuntimeConfig: vi.fn(() => ({})),
@@ -30,6 +32,7 @@ const runtimeMocks = vi.hoisted(() => ({
       chatType: "group",
       modelProvider: "openai",
       model: "gpt-4.1",
+      spawnedBy: "agent:main:telegram:group:parent-group",
     },
   })),
   getActivePluginChannelRegistryVersion: vi.fn(() => 1),
@@ -39,6 +42,7 @@ const runtimeMocks = vi.hoisted(() => ({
     dispose: vi.fn(async () => undefined),
   })),
   resolveRuntimeConfigCacheKey: vi.fn(() => "runtime:1:test"),
+  resolveSessionMcpConfigFingerprint: vi.fn(() => "mcp:1:test"),
   resolveAgentWorkspaceDir: vi.fn(() => "/tmp/workspace-main"),
   resolveEffectiveToolInventory: vi.fn(() => ({
     agentId: "main",
@@ -114,6 +118,7 @@ describe("tools.effective handler", () => {
     runtimeMocks.getActivePluginChannelRegistryVersion.mockReturnValue(1);
     runtimeMocks.getActivePluginRegistryVersion.mockReturnValue(1);
     runtimeMocks.resolveAgentWorkspaceDir.mockReturnValue("/tmp/workspace-main");
+    runtimeMocks.resolveSessionMcpConfigFingerprint.mockReturnValue("mcp:1:test");
     runtimeMocks.getOrCreateSessionMcpRuntime.mockResolvedValue({ sessionId: "session-1" });
     runtimeMocks.materializeBundleMcpToolsForRun.mockResolvedValue({
       tools: [] as unknown[],
@@ -205,8 +210,6 @@ describe("tools.effective handler", () => {
     expect(inventoryParams?.modelId).toBe("gpt-4.1");
   });
 
-
-
   it("includes materialized bundled MCP tools in a dedicated effective group", async () => {
     const dispose = vi.fn(async () => undefined);
     const mcpTool = {
@@ -267,6 +270,7 @@ describe("tools.effective handler", () => {
         groupId: "group-4",
         groupChannel: "#ops",
         groupSpace: "workspace-5",
+        spawnedBy: "agent:main:telegram:group:parent-group",
         senderIsOwner: false,
       }),
     );
@@ -313,6 +317,18 @@ describe("tools.effective handler", () => {
     await first.invoke();
 
     runtimeMocks.getActivePluginChannelRegistryVersion.mockReturnValue(2);
+    const second = createInvokeParams({ sessionKey: "main:abc" });
+    await second.invoke();
+
+    expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledTimes(2);
+    expect(firstRespondCall(second.respond)?.[0]).toBe(true);
+  });
+
+  it("invalidates the cache when only the MCP config fingerprint changes", async () => {
+    const first = createInvokeParams({ sessionKey: "main:abc" });
+    await first.invoke();
+
+    runtimeMocks.resolveSessionMcpConfigFingerprint.mockReturnValue("mcp:2:test");
     const second = createInvokeParams({ sessionKey: "main:abc" });
     await second.invoke();
 

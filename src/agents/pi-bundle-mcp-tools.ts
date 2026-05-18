@@ -14,6 +14,7 @@ export {
   disposeSessionMcpRuntime,
   getOrCreateSessionMcpRuntime,
   getSessionMcpRuntimeManager,
+  resolveSessionMcpConfigFingerprint,
   retireSessionMcpRuntime,
   retireSessionMcpRuntimeForSessionKey,
 } from "./pi-bundle-mcp-runtime.js";

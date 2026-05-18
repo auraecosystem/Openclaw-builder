@@ -380,6 +380,7 @@ export const id: TranslationMap = {
     connected: "Terhubung",
     channelSource: "Saluran: {id}",
     channel: "Saluran",
+    mcp: "MCP",
     builtIn: "Bawaan",
   },
   nav: {

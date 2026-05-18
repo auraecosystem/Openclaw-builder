@@ -378,6 +378,7 @@ export const th: TranslationMap = {
     connected: "เชื่อมต่อแล้ว",
     channelSource: "ช่องทาง: {id}",
     channel: "ช่องทาง",
+    mcp: "MCP",
     builtIn: "มีมาในระบบ",
   },
   nav: {

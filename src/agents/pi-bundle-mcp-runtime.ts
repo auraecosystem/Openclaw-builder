@@ -166,6 +166,17 @@ function loadSessionMcpConfig(params: {
   };
 }
 
+export function resolveSessionMcpConfigFingerprint(params: {
+  workspaceDir: string;
+  cfg?: OpenClawConfig;
+}): string {
+  return loadSessionMcpConfig({
+    workspaceDir: params.workspaceDir,
+    cfg: params.cfg,
+    logDiagnostics: false,
+  }).fingerprint;
+}
+
 function createDisposedError(sessionId: string): Error {
   return new Error(`bundle-mcp runtime disposed for session ${sessionId}`);
 }
