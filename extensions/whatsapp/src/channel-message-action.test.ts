@@ -5,17 +5,8 @@ import type { OpenClawConfig } from "./runtime-api.js";
 const hoisted = vi.hoisted(() => ({
   handleWhatsAppAction: vi.fn(async () => ({ content: [{ type: "text", text: '{"ok":true}' }] })),
   handleWhatsAppReactAction: vi.fn(async () => ({
-    content: [{ type: "text", text: '{"ok":true}' }],
+    content: [{ type: "text", text: '{"ok":true,"action":"upload-file"}' }],
   })),
-  resolveAuthorizedWhatsAppOutboundTarget: vi.fn(
-    ({ chatJid, accountId }: { chatJid: string; accountId?: string }) => ({
-      to: chatJid,
-      accountId: accountId ?? "default",
-    }),
-  ),
-  resolveWhatsAppAccount: vi.fn(() => ({})),
-  resolveWhatsAppMediaMaxBytes: vi.fn(() => 1024 * 1024),
-  sendMessageWhatsApp: vi.fn(async () => ({ messageId: "upload-1", toJid: "1555@s.whatsapp.net" })),
 }));
 
 vi.mock("./channel-message-action.runtime.js", async () => {
@@ -58,10 +49,6 @@ vi.mock("./channel-message-action.runtime.js", async () => {
       }
       return normalized;
     },
-    resolveAuthorizedWhatsAppOutboundTarget: hoisted.resolveAuthorizedWhatsAppOutboundTarget,
-    resolveWhatsAppAccount: hoisted.resolveWhatsAppAccount,
-    resolveWhatsAppMediaMaxBytes: hoisted.resolveWhatsAppMediaMaxBytes,
-    sendMessageWhatsApp: hoisted.sendMessageWhatsApp,
   };
 });
 
@@ -79,10 +66,6 @@ describe("handleWhatsAppMessageAction", () => {
   beforeEach(() => {
     hoisted.handleWhatsAppAction.mockClear();
     hoisted.handleWhatsAppReactAction.mockClear();
-    hoisted.resolveAuthorizedWhatsAppOutboundTarget.mockClear();
-    hoisted.resolveWhatsAppAccount.mockClear();
-    hoisted.resolveWhatsAppMediaMaxBytes.mockClear();
-    hoisted.sendMessageWhatsApp.mockClear();
   });
 
   it("delegates reactions to the existing reaction handler", async () => {
@@ -142,7 +125,7 @@ describe("handleWhatsAppMessageAction", () => {
     expect(hoisted.handleWhatsAppAction).not.toHaveBeenCalled();
   });
 
-  it("preserves upload-file routing through the WhatsApp action handler", async () => {
+  it("delegates upload-file to the existing WhatsApp upload handler", async () => {
     const mediaReadFile = vi.fn(async () => Buffer.from("image"));
 
     const result = await handleWhatsAppMessageAction({
@@ -159,24 +142,20 @@ describe("handleWhatsAppMessageAction", () => {
       mediaReadFile,
     });
 
-    expect(hoisted.resolveAuthorizedWhatsAppOutboundTarget).toHaveBeenCalledWith({
+    expect(hoisted.handleWhatsAppReactAction).toHaveBeenCalledWith({
+      action: "upload-file",
+      params: {
+        to: "+1555",
+        mediaUrl: "file:///tmp/photo.png",
+        caption: "receipt",
+        asDocument: "true",
+      },
       cfg: baseCfg,
-      chatJid: "+1555",
       accountId: "default",
-      actionLabel: "upload-file",
-    });
-    expect(hoisted.sendMessageWhatsApp).toHaveBeenCalledWith("+1555", "receipt", {
-      verbose: false,
-      cfg: baseCfg,
-      mediaUrl: "file:///tmp/photo.png",
-      mediaAccess: undefined,
       mediaLocalRoots: ["/tmp"],
       mediaReadFile,
-      gifPlayback: undefined,
-      audioAsVoice: undefined,
-      forceDocument: true,
-      accountId: "default",
     });
+    expect(hoisted.handleWhatsAppAction).not.toHaveBeenCalled();
     const [content] = result.content;
     expect(content?.type).toBe("text");
     if (content?.type !== "text") {
@@ -184,9 +163,7 @@ describe("handleWhatsAppMessageAction", () => {
     }
     expect(JSON.parse(content.text ?? "{}")).toMatchObject({
       ok: true,
-      channel: "whatsapp",
       action: "upload-file",
-      messageId: "upload-1",
     });
   });
 

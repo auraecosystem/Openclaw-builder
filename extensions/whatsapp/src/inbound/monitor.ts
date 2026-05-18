@@ -758,12 +758,15 @@ export async function attachWebInboxToSocket(
           ]
         : []),
     ];
+    const logBody = enriched.interactiveListContext
+      ? `WhatsApp ${enriched.interactiveListContext.kind} (${enriched.interactiveListContext.rows.length} options)`
+      : enriched.body;
 
     inboundLogger.info(
       {
         from: inbound.from,
         to: self.e164 ?? "me",
-        body: enriched.body,
+        body: logBody,
         mediaPath: enriched.mediaPath,
         mediaType: enriched.mediaType,
         mediaFileName: enriched.mediaFileName,
