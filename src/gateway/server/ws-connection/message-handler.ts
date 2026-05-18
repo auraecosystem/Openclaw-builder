@@ -995,6 +995,8 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           const clientAccessMetadata = {
             displayName: connectParams.client.displayName,
             remoteIp: reportedClientIp,
+            lastSeenAtMs: Date.now(),
+            lastSeenReason: "connect",
           };
           const requirePairing = async (
             reason: ConnectPairingRequiredReason,
@@ -1283,9 +1285,10 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
                 }
               }
             }
-
-            // Metadata pinning is approval-bound. Reconnects can update access metadata,
-            // but platform/device family must stay on the approved pairing record.
+          }
+          if (hasServerApprovedDeviceTokenBaseline) {
+            // Metadata pinning is approval-bound. Successful reconnects can update access
+            // metadata and last-seen fields, but platform/device family stay pinned.
             await updatePairedDeviceMetadata(device.id, clientAccessMetadata);
           }
         }
