@@ -7,6 +7,8 @@ import {
 } from "openclaw/plugin-sdk/channel-actions";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { resolveAuthorizedWhatsAppOutboundTarget } from "./action-runtime-target-auth.js";
+import type { ActiveWebSendOptions } from "./inbound/types.js";
+import { lookupInboundMessageMetaForTarget } from "./quoted-message.js";
 import { resolveWhatsAppReactionLevel } from "./reaction-level.js";
 import { sendListReplyWhatsApp, sendReactionWhatsApp } from "./send.js";
 import { toWhatsappJid } from "./text-runtime.js";
@@ -16,6 +18,29 @@ export const whatsAppActionRuntime = {
   sendListReplyWhatsApp,
   sendReactionWhatsApp,
 };
+
+function resolveListReplyQuotedMessageKey(params: {
+  accountId: string;
+  to: string;
+  messageId: string;
+  fromMe?: boolean;
+  participant?: string;
+}): NonNullable<ActiveWebSendOptions["quotedMessageKey"]> {
+  const targetJid = toWhatsappJid(params.to);
+  const cachedMeta = lookupInboundMessageMetaForTarget(
+    params.accountId,
+    targetJid,
+    params.messageId,
+  );
+  const participant = params.participant ?? cachedMeta?.participant;
+  return {
+    id: params.messageId,
+    remoteJid: cachedMeta?.remoteJid ?? targetJid,
+    fromMe: params.fromMe ?? cachedMeta?.fromMe ?? false,
+    ...(participant ? { participant } : {}),
+    ...(cachedMeta?.body ? { messageText: cachedMeta.body } : {}),
+  };
+}
 
 export async function handleWhatsAppAction(
   params: Record<string, unknown>,
@@ -96,11 +121,10 @@ export async function handleWhatsAppAction(
     }
     const title = readStringParam(params, "title") ?? selectedRowId;
     const description = readStringParam(params, "description");
-    const messageId =
-      readStringParam(params, "messageId") ?? readStringParam(params, "replyToId");
+    const messageId = readStringParam(params, "messageId") ?? readStringParam(params, "replyToId");
     const participant = readStringParam(params, "participant");
     const fromMeRaw = params.fromMe;
-    const fromMe = typeof fromMeRaw === "boolean" ? fromMeRaw : false;
+    const fromMe = typeof fromMeRaw === "boolean" ? fromMeRaw : undefined;
 
     const resolved = whatsAppActionRuntime.resolveAuthorizedWhatsAppOutboundTarget({
       cfg,
@@ -122,12 +146,13 @@ export async function handleWhatsAppAction(
         cfg,
         ...(messageId
           ? {
-              quotedMessageKey: {
-                id: messageId,
-                remoteJid: toWhatsappJid(resolved.to),
+              quotedMessageKey: resolveListReplyQuotedMessageKey({
+                accountId: resolved.accountId,
+                to: resolved.to,
+                messageId,
                 fromMe,
-                ...(participant ? { participant } : {}),
-              },
+                participant: participant ?? undefined,
+              }),
             }
           : {}),
       },

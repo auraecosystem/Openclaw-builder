@@ -2,6 +2,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk/routing";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handleWhatsAppAction, whatsAppActionRuntime } from "./action-runtime.js";
+import { cacheInboundMessageMeta } from "./quoted-message.js";
 
 const originalWhatsAppActionRuntime = { ...whatsAppActionRuntime };
 const sendReactionWhatsApp = vi.fn(async () => undefined);
@@ -358,6 +359,54 @@ describe("handleWhatsAppAction", () => {
           id: "list-msg",
           remoteJid: "123@s.whatsapp.net",
           fromMe: false,
+        },
+      },
+    );
+  });
+
+  it("uses cached inbound quote metadata for list replies", async () => {
+    const cfg = {
+      channels: {
+        whatsapp: {
+          allowFrom: ["5511976136970@s.whatsapp.net"],
+        },
+      },
+    } as OpenClawConfig;
+
+    cacheInboundMessageMeta(DEFAULT_ACCOUNT_ID, "277038292303944@lid", "list-msg-lid", {
+      participant: "5511976136970@s.whatsapp.net",
+      participantE164: "+5511976136970",
+      body: "Pick an appointment slot",
+      fromMe: false,
+    });
+
+    await handleWhatsAppAction(
+      {
+        action: "list-reply",
+        chatJid: "5511976136970@s.whatsapp.net",
+        messageId: "list-msg-lid",
+        rowId: "slot-morning",
+        title: "Morning slot",
+      },
+      cfg,
+    );
+
+    expect(sendListReplyWhatsApp).toHaveBeenCalledWith(
+      "+5511976136970",
+      {
+        title: "Morning slot",
+        selectedRowId: "slot-morning",
+      },
+      {
+        verbose: false,
+        accountId: DEFAULT_ACCOUNT_ID,
+        cfg,
+        quotedMessageKey: {
+          id: "list-msg-lid",
+          remoteJid: "277038292303944@lid",
+          fromMe: false,
+          participant: "5511976136970@s.whatsapp.net",
+          messageText: "Pick an appointment slot",
         },
       },
     );
