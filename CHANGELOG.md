@@ -4,6 +4,10 @@ Docs: https://docs.openclaw.ai
 
 ## Unreleased
 
+### Fixes
+
+- CLI/TUI: handle deleted working directory (uv_cwd ENOENT) during startup — dotenv probing, PATH bootstrap, TUI workspace inference, autocomplete setup, and local auth spawn no longer crash when cwd is removed; falls back to `os.tmpdir()` as a last resort. (#73676) Thanks @sumaiazaman.
+
 ### Changes
 
 - Agents: clarify that fixes should default to clean bounded refactors, lean internals, and explicit plugin SDK/API deprecation paths.
