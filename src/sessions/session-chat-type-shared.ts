@@ -9,6 +9,9 @@ function deriveBuiltInLegacySessionChatType(
   if (/^group:[^:]+$/.test(scopedSessionKey)) {
     return "group";
   }
+  if (/^(?:whatsapp:)?[^:]+@g\.us$/.test(scopedSessionKey)) {
+    return "group";
+  }
   if (/^discord:(?:[^:]+:)?guild-[^:]+:channel-[^:]+$/.test(scopedSessionKey)) {
     return "channel";
   }
