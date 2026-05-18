@@ -475,6 +475,7 @@ export function createAgentEventHandler({
     seq: number,
     text: string,
     delta?: unknown,
+    replacement?: boolean,
   ) => {
     const cleaned = normalizeLiveAssistantEventText({ text, delta });
     const previousRawText = chatRunState.rawBuffers.get(clientRunId) ?? "";
@@ -482,6 +483,7 @@ export function createAgentEventHandler({
       previousText: previousRawText,
       nextText: cleaned.text,
       nextDelta: cleaned.delta,
+      replacement,
     });
     if (!mergedRawText) {
       return;
@@ -956,7 +958,15 @@ export function createAgentEventHandler({
         typeof evt.data?.text === "string" &&
         !shouldSuppressAssistantEventForLiveChat(evt.data)
       ) {
-        emitChatDelta(sessionKey, clientRunId, evt.runId, evt.seq, evt.data.text, evt.data.delta);
+        emitChatDelta(
+          sessionKey,
+          clientRunId,
+          evt.runId,
+          evt.seq,
+          evt.data.text,
+          evt.data.delta,
+          evt.data.replacement === true,
+        );
       }
     }
 

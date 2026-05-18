@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  type ClaudeToolEvent,
   createCliJsonlStreamingParser,
   extractCliErrorMessage,
   parseCliJson,
@@ -446,5 +447,217 @@ describe("createCliJsonlStreamingParser", () => {
     expect(deltas).toEqual([
       { text: "hello", delta: "hello", sessionId: "session-stream", usage: undefined },
     ]);
+  });
+
+  describe("Claude tool-use tracker", () => {
+    // Build a parser wired to the claude-stream-json dialect with capturing
+    // arrays for the two emission paths (assistant deltas + structured tool
+    // events). Each test calls `parser.push(...)` with a canned `stream_event`
+    // sequence drawn from a real claude-cli-interactive turn and asserts the
+    // tracker's contract: partial-JSON reassembly, sanitization, inline
+    // marker shape, and verbose gating.
+    const makeParser = (overrides: {
+      shouldInjectToolInlineMarkers?: () => boolean;
+      onToolEvent?: (evt: ClaudeToolEvent) => void;
+      providerId?: string;
+      jsonlDialect?: string;
+    } = {}) => {
+      const deltas: Array<{ text: string; delta: string; replacement?: boolean }> = [];
+      const tools: ClaudeToolEvent[] = [];
+      const parser = createCliJsonlStreamingParser({
+        backend: {
+          command: "local-cli",
+          output: "jsonl",
+          // CliBackendConfig narrows this field to the literal "claude-stream-json".
+          // The dialect-gate test deliberately passes "json" at runtime to negate
+          // the gate (jsonlDialect === "claude-stream-json"); cast at the boundary
+          // so that negative case still compiles.
+          jsonlDialect: (overrides.jsonlDialect ?? "claude-stream-json") as "claude-stream-json",
+          sessionIdFields: ["session_id"],
+        },
+        providerId: overrides.providerId ?? "claude-cli",
+        onAssistantDelta: (d) => deltas.push({ text: d.text, delta: d.delta, replacement: d.replacement }),
+        onToolEvent: overrides.onToolEvent ?? ((evt) => tools.push(evt)),
+        ...(overrides.shouldInjectToolInlineMarkers
+          ? { shouldInjectToolInlineMarkers: overrides.shouldInjectToolInlineMarkers }
+          : {}),
+      });
+      return { parser, deltas, tools };
+    };
+
+    const toolUseSequence = (params: { id: string; name: string; partials: string[] }): string =>
+      [
+        JSON.stringify({ type: "init", session_id: "session-tools" }),
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "tool_use", id: params.id, name: params.name, input: {} },
+          },
+        }),
+        ...params.partials.map((partial) =>
+          JSON.stringify({
+            type: "stream_event",
+            event: {
+              type: "content_block_delta",
+              index: 0,
+              delta: { type: "input_json_delta", partial_json: partial },
+            },
+          }),
+        ),
+        JSON.stringify({
+          type: "stream_event",
+          event: { type: "content_block_stop", index: 0 },
+        }),
+        // Trailing newline so parser.push flushes the content_block_stop
+        // record without waiting for parser.finish() — tests that assert
+        // on emit timing within a single push call need this.
+        "",
+      ].join("\n");
+
+    it("reassembles partial input_json_delta chunks into a single onToolEvent on content_block_stop", () => {
+      const { parser, tools } = makeParser();
+      parser.push(
+        toolUseSequence({
+          id: "toolu_01",
+          name: "Read",
+          partials: ['{"file_pa', 'th":"/tm', 'p/example.md"}'],
+        }),
+      );
+      parser.finish();
+      expect(tools).toHaveLength(1);
+      expect(tools[0]).toMatchObject({
+        phase: "start",
+        name: "Read",
+        itemId: "toolu_01",
+        args: { file_path: "/tmp/example.md" },
+        sessionId: "session-tools",
+      });
+    });
+
+    it("does not inject inline markers by default; shouldInjectToolInlineMarkers is required to opt in", () => {
+      const { parser, deltas, tools } = makeParser();
+      parser.push(
+        toolUseSequence({
+          id: "toolu_02",
+          name: "Bash",
+          partials: ['{"command":"echo hello"}'],
+        }),
+      );
+      parser.finish();
+      // Structured event fires regardless — but no inline marker reaches the
+      // assistant delta stream because shouldInjectToolInlineMarkers was not
+      // provided (default false).
+      expect(tools).toHaveLength(1);
+      expect(deltas).toEqual([]);
+    });
+
+    it("emits an inline marker with `\\n\\n[HH:MM:SS] 🛠️ Name: detail\\n` when shouldInjectToolInlineMarkers returns true", () => {
+      const { parser, deltas } = makeParser({ shouldInjectToolInlineMarkers: () => true });
+      parser.push(
+        toolUseSequence({
+          id: "toolu_03",
+          name: "Bash",
+          partials: ['{"command":"ls -la /tmp"}'],
+        }),
+      );
+      parser.finish();
+      // First delta is the marker; subsequent deltas may be timer
+      // replacements (asserted separately below). Match the marker shape
+      // without locking the time portion — the timestamp is wall-clock.
+      expect(deltas.length).toBeGreaterThanOrEqual(1);
+      const markerDelta = deltas[0]?.delta ?? "";
+      expect(markerDelta).toMatch(/^\n\n\[\d{2}:\d{2}:\d{2}\] 🛠️ Bash: ls -la \/tmp\n$/u);
+    });
+
+    it("re-evaluates shouldInjectToolInlineMarkers per tool emission so a session-verbose flip mid-run is honoured", () => {
+      let enabled = true;
+      const { parser, deltas } = makeParser({ shouldInjectToolInlineMarkers: () => enabled });
+      parser.push(
+        toolUseSequence({
+          id: "toolu_a",
+          name: "Read",
+          partials: ['{"file_path":"/a"}'],
+        }),
+      );
+      // First tool fired with enabled=true → at least one inline-marker
+      // delta landed (timestamp suffix is wall-clock so just match shape).
+      const firstMarker = deltas.find((d) => d.delta.includes("🛠️ Read"));
+      expect(firstMarker).toBeDefined();
+      // Flip mid-run: subsequent tools must NOT inject markers because
+      // the resolver returned false at THEIR emit point (per-tool re-eval,
+      // not captured-once at parser construction).
+      enabled = false;
+      parser.push(
+        [
+          JSON.stringify({
+            type: "stream_event",
+            event: {
+              type: "content_block_start",
+              index: 1,
+              content_block: { type: "tool_use", id: "toolu_b", name: "Bash", input: {} },
+            },
+          }),
+          JSON.stringify({
+            type: "stream_event",
+            event: {
+              type: "content_block_delta",
+              index: 1,
+              delta: { type: "input_json_delta", partial_json: '{"command":"true"}' },
+            },
+          }),
+          JSON.stringify({
+            type: "stream_event",
+            event: { type: "content_block_stop", index: 1 },
+          }),
+        ].join("\n"),
+      );
+      parser.finish();
+      // No second 🛠️ marker was emitted for the Bash tool.
+      const bashMarker = deltas.find((d) => d.delta.includes("🛠️ Bash"));
+      expect(bashMarker).toBeUndefined();
+    });
+
+    it("strips the rolling-timer line on the next text_delta and emits a replacement delta on finish()", () => {
+      const { parser, deltas } = makeParser({ shouldInjectToolInlineMarkers: () => true });
+      parser.push(
+        toolUseSequence({
+          id: "toolu_04",
+          name: "Bash",
+          partials: ['{"command":"echo done"}'],
+        }),
+      );
+      parser.finish();
+      // The terminal replacement delta is emitted with `replacement: true` so
+      // the live-chat merger replaces the painted tick line instead of
+      // appending — the merger's default rollback branch would otherwise
+      // keep the longer previousText and leave the timer visible.
+      const replacement = deltas.find((d) => d.replacement === true);
+      expect(replacement).toBeDefined();
+      expect(replacement?.delta).toBe("");
+    });
+
+    it("does not emit tool events on non-Claude backends (dialect gate)", () => {
+      // The dialect gate is `backend.jsonlDialect === "claude-stream-json" ||
+      // providerId is claude-cli`. To exercise the short-circuit we must
+      // negate BOTH sides — a non-Claude provider AND a different dialect.
+      const { parser, tools, deltas } = makeParser({
+        providerId: "openai",
+        jsonlDialect: "json",
+      });
+      parser.push(
+        toolUseSequence({
+          id: "toolu_05",
+          name: "Read",
+          partials: ['{"file_path":"/etc/passwd"}'],
+        }),
+      );
+      parser.finish();
+      expect(tools).toEqual([]);
+      // And no inline marker either — the tracker bails before onToolText
+      // fires.
+      expect(deltas.find((d) => d.delta.includes("🛠️"))).toBeUndefined();
+    });
   });
 });
