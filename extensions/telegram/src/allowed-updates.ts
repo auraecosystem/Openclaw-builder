@@ -1,5 +1,4 @@
 import { API_CONSTANTS } from "grammy";
-import type { TelegramBotInfo } from "./bot-info.js";
 
 export type TelegramUpdateType = (typeof API_CONSTANTS.ALL_UPDATE_TYPES)[number];
 
@@ -9,27 +8,21 @@ export const DEFAULT_TELEGRAM_UPDATE_TYPES: ReadonlyArray<TelegramUpdateType> =
 const TELEGRAM_GUEST_MESSAGE_UPDATE = "guest_message" as TelegramUpdateType;
 
 export type TelegramGuestModeConfig = {
-  enabled?: boolean | "auto";
+  enabled?: boolean;
 };
 
 export function shouldRequestTelegramGuestUpdates(params: {
   guest?: TelegramGuestModeConfig;
-  botInfo?: Pick<TelegramBotInfo, "supports_guest_queries">;
   includeGuest?: boolean;
 }): boolean {
   if (typeof params.includeGuest === "boolean") {
     return params.includeGuest;
   }
-  const enabled = params.guest?.enabled ?? false;
-  if (enabled === true) {
-    return true;
-  }
-  return enabled === "auto" && params.botInfo?.supports_guest_queries === true;
+  return params.guest?.enabled === true;
 }
 
 export function resolveTelegramAllowedUpdates(params?: {
   guest?: TelegramGuestModeConfig;
-  botInfo?: Pick<TelegramBotInfo, "supports_guest_queries">;
   includeGuest?: boolean;
 }): ReadonlyArray<TelegramUpdateType> {
   const updates = [...DEFAULT_TELEGRAM_UPDATE_TYPES] as TelegramUpdateType[];

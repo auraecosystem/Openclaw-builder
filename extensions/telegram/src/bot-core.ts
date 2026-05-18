@@ -401,7 +401,6 @@ export function createTelegramBotCore(
     groupHistories,
     dmPolicy,
     allowFrom,
-    groupAllowFrom,
     logger,
     resolveGroupActivation,
     loadFreshConfig: () => telegramDeps.getRuntimeConfig(),

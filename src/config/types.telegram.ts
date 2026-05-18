@@ -88,8 +88,8 @@ export type TelegramExecApprovalConfig = {
 };
 
 export type TelegramGuestModeConfig = {
-  /** Enable Telegram Guest Mode handling. Default false; "auto" enables it only when getMe advertises support. */
-  enabled?: boolean | "auto";
+  /** Enable Telegram Guest Mode handling. Default false. */
+  enabled?: boolean;
   /** Text used when the agent produces no visible final answer. */
   fallbackText?: string;
 };

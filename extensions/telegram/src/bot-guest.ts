@@ -15,7 +15,6 @@ import type { ResolvedTelegramAccount } from "./accounts.js";
 import { shouldRequestTelegramGuestUpdates } from "./allowed-updates.js";
 import { isSenderAllowed, normalizeAllowFrom } from "./bot-access.js";
 import type { TelegramBotDeps } from "./bot-deps.js";
-import type { TelegramBotInfo } from "./bot-info.js";
 import {
   buildTelegramMessageContext,
   type BuildTelegramMessageContextParams,
@@ -71,24 +70,19 @@ type RegisterTelegramGuestHandlersParams = {
   groupHistories: BuildTelegramMessageContextParams["groupHistories"];
   dmPolicy: DmPolicy;
   allowFrom?: Array<string | number>;
-  groupAllowFrom?: Array<string | number>;
   logger: BuildTelegramMessageContextParams["logger"];
   resolveGroupActivation: BuildTelegramMessageContextParams["resolveGroupActivation"];
   loadFreshConfig: () => OpenClawConfig;
   runtime: RuntimeEnv;
   replyToMode: ReplyToMode;
   textLimit: number;
-  opts: Pick<TelegramBotOptions, "token" | "botInfo">;
+  opts: Pick<TelegramBotOptions, "token">;
   telegramDeps: TelegramBotDeps;
 };
 
-function isGuestModeEnabled(params: {
-  telegramCfg: TelegramAccountConfig;
-  botInfo?: TelegramBotInfo;
-}): boolean {
+function isGuestModeEnabled(params: { telegramCfg: TelegramAccountConfig }): boolean {
   return shouldRequestTelegramGuestUpdates({
     guest: params.telegramCfg.guest,
-    botInfo: params.botInfo,
   });
 }
 
@@ -180,7 +174,7 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
       await next();
       return;
     }
-    if (!isGuestModeEnabled({ telegramCfg: params.telegramCfg, botInfo: params.opts.botInfo })) {
+    if (!isGuestModeEnabled({ telegramCfg: params.telegramCfg })) {
       logVerbose("telegram guest: skipped guest_message because guest mode is disabled");
       return;
     }

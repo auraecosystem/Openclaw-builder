@@ -179,7 +179,7 @@ curl "https://api.telegram.org/bot<bot_token>/getUpdates"
     Runtime note: if `channels.telegram` is completely missing, runtime defaults to fail-closed `groupPolicy="allowlist"` unless `channels.defaults.groupPolicy` is explicitly set.
 
     Guest Mode is inline-like, not normal group membership. It is disabled unless you explicitly set
-    `channels.telegram.guest.enabled` to `true` or `"auto"` (`"auto"` follows Telegram bot metadata).
+    `channels.telegram.guest.enabled` to `true`.
     When Telegram sends a `guest_message`, OpenClaw treats the triggering user as having the same
     privilege as a Telegram direct-message sender allowed by `channels.telegram.allowFrom`. This adds
     a Telegram ingress path, but does not grant broader access than DM access: the bot is not a member

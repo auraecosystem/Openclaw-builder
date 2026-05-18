@@ -7,7 +7,6 @@ import {
   writeCachedTelegramBotInfo,
 } from "./bot-info-cache.js";
 import type { TelegramBotInfo } from "./bot-info.js";
-import { fingerprintTelegramBotToken } from "./token-fingerprint.js";
 
 const botInfo: TelegramBotInfo = {
   id: 123456,
@@ -95,27 +94,6 @@ describe("Telegram bot info cache", () => {
         botToken: "123456:secret",
         now: new Date(Date.now() + TELEGRAM_BOT_INFO_CACHE_MAX_AGE_MS + 1),
       }),
-    ).resolves.toBeNull();
-  });
-
-  it("treats previous cache versions as a cache miss", async () => {
-    const env = await useTempStateDir();
-    const filePath = resolveTelegramBotInfoCachePath("ops", env);
-    const botToken = "123456:secret";
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(
-      filePath,
-      JSON.stringify({
-        version: 1,
-        tokenFingerprint: fingerprintTelegramBotToken(botToken),
-        fetchedAt: new Date().toISOString(),
-        botInfo,
-      }),
-      "utf8",
-    );
-
-    await expect(
-      readCachedTelegramBotInfo({ accountId: "ops", botToken, env }),
     ).resolves.toBeNull();
   });
 

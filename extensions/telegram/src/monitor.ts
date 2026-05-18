@@ -17,7 +17,6 @@ import {
   shouldRequestTelegramGuestUpdates,
   type TelegramGuestModeConfig,
 } from "./allowed-updates.js";
-import type { TelegramBotInfo } from "./bot-info.js";
 import { isTelegramExecApprovalHandlerConfigured } from "./exec-approvals.js";
 import { resolveTelegramTransport } from "./fetch.js";
 import type { MonitorTelegramOpts } from "./monitor.types.js";
@@ -38,7 +37,6 @@ export function createTelegramRunnerOptions(
   cfg: OpenClawConfig,
   params?: {
     guest?: TelegramGuestModeConfig;
-    botInfo?: Pick<TelegramBotInfo, "supports_guest_queries">;
   },
 ): RunOptions<unknown> {
   return {
@@ -193,7 +191,6 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
         abortSignal: opts.abortSignal,
         publicUrl: opts.webhookUrl,
         webhookCertPath: opts.webhookCertPath,
-        botInfo: opts.botInfo,
         setStatus: opts.setStatus,
       });
       await waitForAbortSignal(opts.abortSignal);
@@ -297,7 +294,6 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
         abortSignal: opts.abortSignal,
         runnerOptions: createTelegramRunnerOptions(cfg, {
           guest: account.config.guest,
-          botInfo: opts.botInfo,
         }),
         getLastUpdateId: () => lastUpdateId,
         persistUpdateId,
@@ -313,7 +309,6 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
           proxy: account.config.proxy,
           includeGuestUpdates: shouldRequestTelegramGuestUpdates({
             guest: account.config.guest,
-            botInfo: opts.botInfo,
           }),
           network: account.config.network,
         },

@@ -223,7 +223,7 @@ const TelegramCustomCommandSchema = z
 
 const TelegramGuestSchema = z
   .object({
-    enabled: z.union([z.boolean(), z.literal("auto")]).optional(),
+    enabled: z.boolean().optional(),
     fallbackText: z.string().min(1).optional(),
   })
   .strict();
