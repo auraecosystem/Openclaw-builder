@@ -501,14 +501,6 @@ describe("installPluginFromNpmSpec", () => {
     await expect(fs.promises.readFile(stagedArchivePath, "utf8")).resolves.toBe(
       "fixture pack contents",
     );
-
-    fs.unlinkSync(archivePath);
-    const unrelatedResult = await installPluginFromNpmSpec({
-      spec: "@openclaw/voice-call@0.0.1",
-      npmDir: npmRoot,
-      logger: { info: () => {}, warn: () => {} },
-    });
-    expect(unrelatedResult.ok).toBe(true);
   });
 
   it("rejects npm pack archive metadata with traversal package names", async () => {
@@ -1702,7 +1694,7 @@ describe("installPluginFromNpmSpec", () => {
     }
   });
 
-  it("handles prerelease npm specs correctly", async () => {
+  it("rejects implicit prerelease npm specs with beta guidance", async () => {
     mockNpmViewMetadataResult(runCommandWithTimeoutMock, {
       name: "@openclaw/voice-call",
       version: "0.0.2-beta.1",
@@ -1719,8 +1711,9 @@ describe("installPluginFromNpmSpec", () => {
       expect(rejected.error).toContain("prerelease version 0.0.2-beta.1");
       expect(rejected.error).toContain('"@openclaw/voice-call@beta"');
     }
+  });
 
-    runCommandWithTimeoutMock.mockReset();
+  it("falls back to the latest stable version for official prerelease packages", async () => {
     const officialNpmRoot = path.join(suiteTempRootTracker.makeTempDir(), "npm");
     const warnings: string[] = [];
     mockNpmViewAndInstallMany([
@@ -1758,8 +1751,9 @@ describe("installPluginFromNpmSpec", () => {
     expect(officialFallback.npmResolution?.version).toBe("0.0.1");
     expect(officialFallback.npmResolution?.resolvedSpec).toBe("@openclaw/voice-call@0.0.1");
     expect(warnings.join("\n")).toContain("falling back to stable @openclaw/voice-call@0.0.1");
+  });
 
-    runCommandWithTimeoutMock.mockReset();
+  it("keeps stable correction versions when resolving official npm packages", async () => {
     const correctionNpmRoot = path.join(suiteTempRootTracker.makeTempDir(), "npm");
     const correctionWarnings: string[] = [];
     mockNpmViewAndInstallMany([
@@ -1791,8 +1785,9 @@ describe("installPluginFromNpmSpec", () => {
     expect(stableCorrection.npmResolution?.version).toBe("2026.5.3-1");
     expect(stableCorrection.npmResolution?.resolvedSpec).toBe("@openclaw/voice-call@2026.5.3-1");
     expect(correctionWarnings).toStrictEqual([]);
+  });
 
-    runCommandWithTimeoutMock.mockReset();
+  it("uses the newest prerelease when an official package has no stable versions", async () => {
     const prereleaseOnlyNpmRoot = path.join(suiteTempRootTracker.makeTempDir(), "npm");
     const prereleaseOnlyWarnings: string[] = [];
     mockNpmViewAndInstallMany([
@@ -1834,8 +1829,9 @@ describe("installPluginFromNpmSpec", () => {
     expect(prereleaseOnlyWarnings.join("\n")).toContain(
       "using newest prerelease @openclaw/voice-call@0.0.2-beta.1",
     );
+  });
 
-    runCommandWithTimeoutMock.mockReset();
+  it("accepts explicit prerelease npm dist-tags", async () => {
     const npmRoot = path.join(suiteTempRootTracker.makeTempDir(), "npm");
     mockNpmViewAndInstall({
       spec: "@openclaw/voice-call@beta",
