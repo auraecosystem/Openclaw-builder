@@ -34,6 +34,7 @@ import { isCronSessionKey, isSubagentSessionKey } from "../../routing/session-ke
 import { resolveUserPath } from "../../utils.js";
 import { normalizeMessageChannel } from "../../utils/message-channel.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
+import { resolveAgentConfig } from "../agent-scope-config.js";
 import {
   resolveAgentDir,
   resolveRunModelFallbacksOverride,
@@ -357,8 +358,22 @@ function containsRealConversationMessages(messages: AgentMessage[]): boolean {
   );
 }
 
-function hasExplicitCompactionModel(params: CompactEmbeddedPiSessionParams): boolean {
-  return Boolean(params.config?.agents?.defaults?.compaction?.model?.trim());
+function resolveCompactionAgentId(params: CompactEmbeddedPiSessionParams): string | undefined {
+  return resolveSessionAgentIds({
+    sessionKey: params.sandboxSessionKey ?? params.sessionKey,
+    config: params.config,
+  }).sessionAgentId;
+}
+
+function hasExplicitCompactionModel(
+  params: CompactEmbeddedPiSessionParams,
+  agentId?: string,
+): boolean {
+  const scopedModel =
+    params.config && agentId
+      ? resolveAgentConfig(params.config, agentId)?.compaction?.model
+      : undefined;
+  return Boolean(scopedModel ?? params.config?.agents?.defaults?.compaction?.model);
 }
 
 function resolveCompactionFallbacksOverride(
@@ -415,13 +430,13 @@ function fallbackFailureToCompactionResult(err: unknown): EmbeddedPiCompactResul
 export async function compactEmbeddedPiSessionDirect(
   params: CompactEmbeddedPiSessionParams,
 ): Promise<EmbeddedPiCompactResult> {
-  if (hasExplicitCompactionModel(params) || !hasCompactionModelFallbackCandidates(params)) {
+  const fallbackAgentId = resolveCompactionAgentId(params);
+  if (
+    hasExplicitCompactionModel(params, fallbackAgentId) ||
+    !hasCompactionModelFallbackCandidates(params)
+  ) {
     return await compactEmbeddedPiSessionDirectOnce(params);
   }
-  const fallbackAgentId = resolveSessionAgentIds({
-    sessionKey: params.sandboxSessionKey ?? params.sessionKey,
-    config: params.config,
-  }).sessionAgentId;
   const resolvedCompactionTarget = resolveEmbeddedCompactionTarget({
     config: params.config,
     agentId: fallbackAgentId,
