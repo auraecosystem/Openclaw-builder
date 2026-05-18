@@ -350,6 +350,12 @@ export const tr: TranslationMap = {
     eventLogSubtitle: "Latest gateway events.",
     noEvents: "No events yet.",
   },
+  quickSettings: {
+    security: {
+      browserEnabled: "Browser enabled",
+      toolProfile: "Tool profile",
+    },
+  },
   execApproval: {
     expiresIn: "expires in {time}",
     expired: "expired",
@@ -698,10 +704,6 @@ export const tr: TranslationMap = {
     },
   },
   usage: {
-    page: {
-      subtitle:
-        "Token'ların nereye gittiğini, oturumların ne zaman arttığını ve maliyeti neyin belirlediğini görün.",
-    },
     common: {
       emptyValue: "—",
       unknown: "bilinmiyor",
@@ -1049,6 +1051,10 @@ export const tr: TranslationMap = {
     settings: "Sohbet ayarları",
     thinkingToggle: "Asistanın düşünme/çalışma çıktısını aç/kapat",
     toolCallsToggle: "Araç çağrılarını ve araç sonuçlarını aç/kapat",
+    autoScrollMode: "Otomatik kaydırma modu",
+    autoScrollAlways: "Her zaman",
+    autoScrollNearBottom: "Alta yakın",
+    autoScrollOff: "Kapalı",
     focusToggle: "Odak modunu aç/kapat (kenar çubuğunu + sayfa başlığını gizle)",
     hideCronSessions: "Cron oturumlarını gizle",
     showCronSessions: "Cron oturumlarını göster",
@@ -1208,6 +1214,9 @@ export const tr: TranslationMap = {
       ascending: "Artan",
       descending: "Azalan",
       reset: "Sıfırla",
+      emptyTitle: "No scheduled jobs yet.",
+      emptyHint: "Create one from a plain-language prompt; advanced fields can wait.",
+      emptyFilteredHint: "Clear or change filters to see scheduled jobs.",
       noMatching: "Eşleşen iş yok.",
       loading: "Yükleniyor...",
       loadMore: "Daha fazla iş yükle",
@@ -1243,6 +1252,7 @@ export const tr: TranslationMap = {
     form: {
       editJob: "İşi Düzenle",
       newJob: "Yeni İş",
+      advancedJob: "Advanced job",
       updateSubtitle: "Seçili zamanlanmış işi güncelleyin.",
       createSubtitle: "Zamanlanmış bir uyandırma veya aracı çalıştırması oluşturun.",
       required: "Gerekli",

@@ -75,6 +75,7 @@ import {
   type RealtimeTalkLaunchOptions,
   type RealtimeTalkStatus,
 } from "./chat/realtime-talk.ts";
+import type { ChatRunUiStatus } from "./chat/run-lifecycle.ts";
 import type { ChatSideResult } from "./chat/side-result.ts";
 import {
   loadToolsEffective as loadToolsEffectiveInternal,
@@ -340,6 +341,8 @@ export class OpenClawApp extends LitElement {
   @state() chatSideResult: ChatSideResult | null = null;
   @state() compactionStatus: CompactionStatus | null = null;
   @state() fallbackStatus: FallbackStatus | null = null;
+  @state() chatRunStatus: ChatRunUiStatus | null = null;
+  chatRunStatusClearTimer: ReturnType<typeof globalThis.setTimeout> | number | null = null;
   @state() chatAvatarUrl: string | null = null;
   @state() chatAvatarSource: string | null = null;
   @state() chatAvatarStatus: "none" | "local" | "remote" | "data" | null = null;
@@ -622,7 +625,7 @@ export class OpenClawApp extends LitElement {
   @state() cronStatus: CronStatus | null = null;
   @state() cronError: string | null = null;
   @state() cronForm: CronFormState = { ...DEFAULT_CRON_FORM };
-  @state() cronFormCollapsed = false;
+  @state() cronFormCollapsed = true;
   @state() cronFieldErrors: import("./controllers/cron.js").CronFieldErrors = {};
   @state() cronEditingJobId: string | null = null;
   @state() cronRunsJobId: string | null = null;
@@ -983,6 +986,7 @@ export class OpenClawApp extends LitElement {
       this as unknown as Parameters<typeof scheduleChatScrollInternal>[0],
       true,
       Boolean(opts?.smooth),
+      { source: "manual" },
     );
   }
 
@@ -1115,6 +1119,14 @@ export class OpenClawApp extends LitElement {
     applySettingsInternal(this as unknown as Parameters<typeof applySettingsInternal>[0], {
       ...this.settings,
       borderRadius: value,
+    });
+    this.requestUpdate();
+  }
+
+  setTextScale(value: number) {
+    applySettingsInternal(this as unknown as Parameters<typeof applySettingsInternal>[0], {
+      ...this.settings,
+      textScale: value as typeof this.settings.textScale,
     });
     this.requestUpdate();
   }

@@ -351,6 +351,12 @@ export const de: TranslationMap = {
     eventLogSubtitle: "Latest gateway events.",
     noEvents: "No events yet.",
   },
+  quickSettings: {
+    security: {
+      browserEnabled: "Browser enabled",
+      toolProfile: "Tool profile",
+    },
+  },
   execApproval: {
     expiresIn: "expires in {time}",
     expired: "expired",
@@ -700,9 +706,6 @@ export const de: TranslationMap = {
     },
   },
   usage: {
-    page: {
-      subtitle: "Sieh, wohin Tokens gehen, wann Sitzungen zunehmen und was die Kosten antreibt.",
-    },
     common: {
       emptyValue: "—",
       unknown: "unbekannt",
@@ -1051,6 +1054,10 @@ export const de: TranslationMap = {
     settings: "Chat-Einstellungen",
     thinkingToggle: "Ausgabe des Assistenten ein-/ausblenden",
     toolCallsToggle: "Tool-Aufrufe und Tool-Ergebnisse umschalten",
+    autoScrollMode: "Automatischer Scrollmodus",
+    autoScrollAlways: "Immer",
+    autoScrollNearBottom: "Nahe am unteren Rand",
+    autoScrollOff: "Aus",
     focusToggle: "Fokusmodus ein-/ausschalten (Seitenleiste + Kopfzeile ausblenden)",
     hideCronSessions: "Cron-Sitzungen ausblenden",
     showCronSessions: "Cron-Sitzungen anzeigen",
@@ -1212,6 +1219,9 @@ export const de: TranslationMap = {
       ascending: "Aufsteigend",
       descending: "Absteigend",
       reset: "Zurücksetzen",
+      emptyTitle: "No scheduled jobs yet.",
+      emptyHint: "Create one from a plain-language prompt; advanced fields can wait.",
+      emptyFilteredHint: "Clear or change filters to see scheduled jobs.",
       noMatching: "Keine passenden Jobs.",
       loading: "Wird geladen...",
       loadMore: "Weitere Jobs laden",
@@ -1247,6 +1257,7 @@ export const de: TranslationMap = {
     form: {
       editJob: "Job bearbeiten",
       newJob: "Neuer Job",
+      advancedJob: "Advanced job",
       updateSubtitle: "Aktualisiere den ausgewählten geplanten Job.",
       createSubtitle: "Erstelle ein geplantes Aufwachen oder einen Agentenlauf.",
       required: "Erforderlich",

@@ -6,21 +6,12 @@ export const TAB_GROUPS = [
   { label: "chat", tabs: ["chat"] },
   {
     label: "control",
-    tabs: ["overview", "channels", "instances", "sessions", "usage", "cron"],
+    tabs: ["overview", "instances", "sessions", "usage", "cron"],
   },
   { label: "agent", tabs: ["agents", "skills", "nodes", "dreams"] },
   {
     label: "settings",
-    tabs: [
-      "config",
-      "communications",
-      "appearance",
-      "automation",
-      "infrastructure",
-      "aiAgents",
-      "debug",
-      "logs",
-    ],
+    tabs: ["config"],
   },
 ] as const;
 
@@ -44,6 +35,18 @@ export type Tab =
   | "debug"
   | "logs"
   | "dreams";
+
+export const SETTINGS_TABS = [
+  "config",
+  "channels",
+  "communications",
+  "appearance",
+  "automation",
+  "infrastructure",
+  "aiAgents",
+  "debug",
+  "logs",
+] as const satisfies readonly Tab[];
 
 const TAB_PATHS: Record<Tab, string> = {
   agents: "/agents",
@@ -151,6 +154,17 @@ export function pathForPluginUiEntryPoint(params: {
   return path;
 }
 
+export function isSettingsTab(tab: Tab): boolean {
+  return (SETTINGS_TABS as readonly Tab[]).includes(tab);
+}
+
+export function isTabInGroup(group: (typeof TAB_GROUPS)[number], tab: Tab): boolean {
+  if (group.label === "settings") {
+    return isSettingsTab(tab);
+  }
+  return (group.tabs as readonly Tab[]).includes(tab);
+}
+
 export function tabFromPath(pathname: string, basePath = ""): Tab | null {
   const base = normalizeBasePath(basePath);
   let path = pathname || "/";
@@ -239,6 +253,9 @@ export function iconForTab(tab: Tab): IconName {
 }
 
 export function titleForTab(tab: Tab) {
+  if (tab === "config") {
+    return t("nav.settings");
+  }
   return t(`tabs.${tab}`);
 }
 

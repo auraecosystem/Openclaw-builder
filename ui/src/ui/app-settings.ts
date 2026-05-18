@@ -65,6 +65,7 @@ import {
   type Tab,
 } from "./navigation.ts";
 import {
+  normalizeTextScale,
   saveLocalUserIdentity,
   saveSettings,
   type LocalUserIdentity,
@@ -155,6 +156,7 @@ type SettingsAppHost = SettingsHost &
 export function applySettings(host: SettingsHost, next: UiSettings) {
   const normalized = {
     ...next,
+    textScale: normalizeTextScale(next.textScale),
     lastActiveSessionKey:
       normalizeOptionalString(next.lastActiveSessionKey) ??
       normalizeOptionalString(next.sessionKey) ??
@@ -168,7 +170,8 @@ export function applySettings(host: SettingsHost, next: UiSettings) {
     host.themeMode = next.themeMode;
     applyResolvedTheme(host, resolveTheme(next.theme, next.themeMode));
   }
-  applyBorderRadius(next.borderRadius);
+  applyBorderRadius(normalized.borderRadius);
+  applyTextScale(normalized.textScale);
   host.applySessionKey = host.settings.lastActiveSessionKey;
 }
 
@@ -198,7 +201,45 @@ function applySessionSelection(host: SettingsHost, session: string) {
 /** Set to true when the token is read from a query string (?token=) instead of a URL fragment. */
 export let warnQueryToken = false;
 
+declare global {
+  interface Window {
+    __OPENCLAW_NATIVE_CONTROL_AUTH__?: {
+      gatewayUrl?: string | null;
+      token?: string | null;
+      password?: string | null;
+    };
+  }
+}
+
+function applyNativeControlAuth(host: SettingsHost) {
+  const nativeAuth = window.__OPENCLAW_NATIVE_CONTROL_AUTH__;
+  if (!nativeAuth) {
+    return;
+  }
+  try {
+    delete window.__OPENCLAW_NATIVE_CONTROL_AUTH__;
+  } catch {
+    window.__OPENCLAW_NATIVE_CONTROL_AUTH__ = undefined;
+  }
+
+  const gatewayUrl = normalizeOptionalString(nativeAuth.gatewayUrl);
+  const token = normalizeOptionalString(nativeAuth.token);
+  const password = normalizeOptionalString(nativeAuth.password);
+  const nextSettings = {
+    ...host.settings,
+    ...(gatewayUrl ? { gatewayUrl } : {}),
+    ...(token ? { token } : {}),
+  };
+  if (gatewayUrl || (token && token !== host.settings.token)) {
+    applySettings(host, nextSettings);
+  }
+  if (password && password !== host.password) {
+    host.password = password;
+  }
+}
+
 export function applySettingsFromUrl(host: SettingsHost) {
+  applyNativeControlAuth(host);
   if (!window.location.search && !window.location.hash) {
     return;
   }
@@ -352,6 +393,19 @@ async function refreshAgentsTab(host: SettingsHost, app: SettingsAppHost) {
   }
 }
 
+function loadConfigSchemaAfterPrimary(
+  host: SettingsHost,
+  app: SettingsAppHost,
+  primaryRefresh: Promise<unknown>,
+) {
+  void primaryRefresh.then(
+    () => {
+      void loadConfigSchema(app).finally(() => host.requestUpdate?.());
+    },
+    () => undefined,
+  );
+}
+
 export async function refreshActiveTab(host: SettingsHost) {
   const app = host as unknown as SettingsAppHost;
   const refreshRun = beginControlUiRefresh(host, host.tab);
@@ -363,8 +417,11 @@ export async function refreshActiveTab(host: SettingsHost) {
       case "automation":
       case "infrastructure":
       case "aiAgents":
-        void loadConfigSchema(app).finally(() => host.requestUpdate?.());
-        await loadConfig(app);
+        {
+          const primaryRefresh = loadConfig(app);
+          loadConfigSchemaAfterPrimary(host, app, primaryRefresh);
+          await primaryRefresh;
+        }
         break;
       case "overview":
         await loadOverview(host);
@@ -403,13 +460,16 @@ export async function refreshActiveTab(host: SettingsHost) {
           loadWikiMemoryPalace(app),
         ]);
         break;
-      case "chat":
+      case "chat": {
+        const modelAuthRefresh = loadModelAuthStatusState(app).catch(() => undefined);
         await refreshChat(host as unknown as Parameters<typeof refreshChat>[0]);
         scheduleChatScroll(
           host as unknown as Parameters<typeof scheduleChatScroll>[0],
           !host.chatHasAutoScrolled,
         );
+        void modelAuthRefresh;
         break;
+      }
       case "debug":
         await loadDebug(app);
         host.eventLog = host.eventLogBuffer;
@@ -453,6 +513,7 @@ export function syncThemeWithSettings(host: SettingsHost) {
   }
   applyResolvedTheme(host, resolveTheme(host.theme, host.themeMode));
   applyBorderRadius(host.settings.borderRadius ?? 50);
+  applyTextScale(host.settings.textScale);
   syncSystemThemeListener(host);
 }
 
@@ -475,6 +536,15 @@ export function applyBorderRadius(value: number) {
   root.style.setProperty("--radius-xl", `${Math.round(BASE_RADII.xl * scale)}px`);
   root.style.setProperty("--radius-full", `${Math.round(BASE_RADII.full * scale)}px`);
   root.style.setProperty("--radius", `${Math.round(BASE_RADII.default * scale)}px`);
+}
+
+export function applyTextScale(value: unknown) {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const root = document.documentElement;
+  const scale = normalizeTextScale(value) / 100;
+  root.style.setProperty("--control-ui-text-scale", scale.toFixed(2));
 }
 
 export function applyResolvedTheme(host: SettingsHost, resolved: ResolvedTheme) {
@@ -857,8 +927,9 @@ function buildAttentionItems(host: SettingsAppHost) {
 
 export async function loadChannelsTab(host: SettingsHost) {
   const app = host as unknown as SettingsAppHost;
-  void loadConfigSchema(app).finally(() => host.requestUpdate?.());
-  await Promise.all([loadChannels(app, false), loadConfig(app)]);
+  const primaryRefresh = Promise.all([loadChannels(app, false), loadConfig(app)]);
+  loadConfigSchemaAfterPrimary(host, app, primaryRefresh);
+  await primaryRefresh;
 }
 
 export async function loadCron(host: SettingsHost) {

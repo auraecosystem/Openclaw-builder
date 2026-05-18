@@ -1,6 +1,6 @@
 import type { AgentHarness } from "../agents/harness/types.js";
 import type { ChannelPlugin } from "../channels/plugins/types.plugin.js";
-import type { OperatorScope } from "../gateway/operator-scopes.js";
+import type { GatewayMethodDescriptor } from "../gateway/methods/descriptor.js";
 import type { GatewayRequestHandlers } from "../gateway/server-methods/types.js";
 import type { HookEntry } from "../hooks/types.js";
 import type { JsonSchemaObject } from "../shared/json-schema.types.js";
@@ -99,6 +99,7 @@ export type PluginHttpRouteRegistration = {
   auth: OpenClawPluginHttpRouteAuth;
   match: OpenClawPluginHttpRouteMatch;
   gatewayRuntimeScopeSurface?: OpenClawPluginGatewayRuntimeScopeSurface;
+  gatewayMethodDispatchAllowed?: boolean;
   nodeCapability?: {
     surface: string;
     ttlMs?: number;
@@ -412,7 +413,6 @@ export type PluginRecord = {
   contextEngineIds?: string[];
   memoryEmbeddingProviderIds: string[];
   agentHarnessIds: string[];
-  gatewayMethods: string[];
   cliCommands: string[];
   services: string[];
   gatewayDiscoveryServiceIds: string[];
@@ -453,8 +453,8 @@ export type PluginRegistry = {
   memoryEmbeddingProviders: PluginMemoryEmbeddingProviderRegistration[];
   agentHarnesses: PluginAgentHarnessRegistration[];
   gatewayHandlers: GatewayRequestHandlers;
+  gatewayMethodDescriptors: GatewayMethodDescriptor[];
   coreGatewayMethodNames?: string[];
-  gatewayMethodScopes?: Partial<Record<string, OperatorScope>>;
   httpRoutes: PluginHttpRouteRegistration[];
   hostedMediaResolvers?: PluginHostedMediaResolverRegistration[];
   cliRegistrars: PluginCliRegistration[];
