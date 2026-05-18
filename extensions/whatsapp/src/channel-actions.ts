@@ -90,12 +90,16 @@ export function describeWhatsAppMessageActions(params: {
     ? {
         actions: ["list-reply"] as const,
         properties: {
-          selectedRowId: Type.String({
-            description: "WhatsApp list row id captured from inbound list context.",
-          }),
-          title: Type.String({
-            description: "Visible title for the selected WhatsApp list row.",
-          }),
+          selectedRowId: Type.Optional(
+            Type.String({
+              description: "WhatsApp list row id captured from inbound list context.",
+            }),
+          ),
+          title: Type.Optional(
+            Type.String({
+              description: "Visible title for the selected WhatsApp list row.",
+            }),
+          ),
           description: Type.Optional(
             Type.String({
               description: "Visible description for the selected WhatsApp list row.",

@@ -1,3 +1,4 @@
+import { Type, type TProperties } from "typebox";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   describeWhatsAppMessageActions,
@@ -152,8 +153,11 @@ describe("whatsapp channel action helpers", () => {
     const schema = describeWhatsAppMessageActions({ cfg, accountId: "default" })?.schema;
     expect(schema && !Array.isArray(schema) ? schema.actions : undefined).toEqual(["list-reply"]);
     const properties = schema && !Array.isArray(schema) ? schema.properties : {};
+    const objectSchema = Type.Object(properties as TProperties);
     expect(properties.selectedRowId?.type).toBe("string");
     expect(properties.title?.type).toBe("string");
+    expect(objectSchema.required ?? []).not.toContain("selectedRowId");
+    expect(objectSchema.required ?? []).not.toContain("title");
     expect(properties.rowId).toBeUndefined();
   });
 
