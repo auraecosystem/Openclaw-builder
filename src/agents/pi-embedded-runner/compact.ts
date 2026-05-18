@@ -489,6 +489,10 @@ async function compactEmbeddedPiSessionDirectOnce(
     workspaceDir: resolvedWorkspace,
     allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,
   });
+  const earlyAgentIds = resolveSessionAgentIds({
+    sessionKey: params.sessionKey,
+    config: params.config,
+  });
   const resolvedCompactionTarget = resolveEmbeddedCompactionTarget({
     config: params.config,
     agentId: earlyAgentIds.sessionAgentId,
@@ -529,10 +533,6 @@ async function compactEmbeddedPiSessionDirectOnce(
         : undefined,
     };
   };
-  const earlyAgentIds = resolveSessionAgentIds({
-    sessionKey: params.sessionKey,
-    config: params.config,
-  });
   const agentDir =
     params.agentDir ?? resolveAgentDir(params.config ?? {}, earlyAgentIds.sessionAgentId);
   await ensureOpenClawModelsJson(params.config, agentDir, {
