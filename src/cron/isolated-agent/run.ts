@@ -74,6 +74,7 @@ import {
   resolveThinkingDefault,
   setSessionRuntimeModel,
 } from "./run.runtime.js";
+import { resolveCronRunTimeoutOverrideMs } from "./run-timeout.js";
 import type { RunCronAgentTurnResult } from "./run.types.js";
 import { resolveCronAgentSessionKey } from "./session-key.js";
 import { resolveCronSession } from "./session.js";
@@ -675,12 +676,7 @@ async function prepareCronRunContext(params: {
   // explicit-vs-default distinction without this companion field, which would
   // otherwise force the implicit 120 s cap whenever the cron payload's
   // `timeoutSeconds` happens to numerically equal `agents.defaults.timeoutSeconds`.
-  const runTimeoutOverrideMs =
-    typeof explicitTimeoutSeconds === "number" &&
-    Number.isFinite(explicitTimeoutSeconds) &&
-    explicitTimeoutSeconds > 0
-      ? explicitTimeoutSeconds * 1000
-      : undefined;
+  const runTimeoutOverrideMs = resolveCronRunTimeoutOverrideMs(explicitTimeoutSeconds);
   const agentPayload = input.job.payload.kind === "agentTurn" ? input.job.payload : null;
   const { deliveryPlan, deliveryRequested, resolvedDelivery, sourceDelivery } =
     await resolveCronDeliveryContext({
