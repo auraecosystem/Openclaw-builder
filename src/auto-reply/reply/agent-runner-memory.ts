@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { resolveAgentConfig } from "../../agents/agent-scope-config.js";
 import { resolveBootstrapWarningSignaturesSeen } from "../../agents/bootstrap-budget.js";
 import { estimateMessagesTokens } from "../../agents/compaction.js";
 import { resolveAgentHarnessPolicy } from "../../agents/harness/policy.js";
@@ -626,9 +627,11 @@ export async function runPreflightCompactionIfNeeded(params: {
     modelId: params.followupRun.run.model ?? params.defaultModel,
     agentCfgContextTokens: params.agentCfgContextTokens,
   });
-  const memoryFlushPlan = resolveMemoryFlushPlan({ cfg: params.cfg });
+  const activeAgentId = params.followupRun.run.agentId;
+  const memoryFlushPlan = resolveMemoryFlushPlan({ cfg: params.cfg, agentId: activeAgentId });
   const reserveTokensFloor =
     memoryFlushPlan?.reserveTokensFloor ??
+    resolveAgentConfig(params.cfg, activeAgentId)?.compaction?.reserveTokensFloor ??
     params.cfg.agents?.defaults?.compaction?.reserveTokensFloor ??
     20_000;
   const softThresholdTokens = memoryFlushPlan?.softThresholdTokens ?? 4_000;
@@ -638,7 +641,7 @@ export async function runPreflightCompactionIfNeeded(params: {
     typeof persistedTotalTokens === "number" &&
     Number.isFinite(persistedTotalTokens) &&
     persistedTotalTokens > 0;
-  const maxActiveTranscriptBytes = resolveMaxActiveTranscriptBytes(params.cfg);
+  const maxActiveTranscriptBytes = resolveMaxActiveTranscriptBytes(params.cfg, activeAgentId);
   const shouldCheckActiveTranscriptBytes = typeof maxActiveTranscriptBytes === "number";
   const transcriptSizeSnapshot = shouldCheckActiveTranscriptBytes
     ? await readSessionLogSnapshot({
@@ -824,7 +827,8 @@ export async function runMemoryFlushIfNeeded(params: {
   replyOperation: ReplyOperation;
   onVisibleErrorPayloads?: (payloads: ReplyPayload[]) => void;
 }): Promise<SessionEntry | undefined> {
-  const memoryFlushPlan = resolveMemoryFlushPlan({ cfg: params.cfg });
+  const activeAgentId = params.followupRun.run.agentId;
+  const memoryFlushPlan = resolveMemoryFlushPlan({ cfg: params.cfg, agentId: activeAgentId });
   if (!memoryFlushPlan) {
     return params.sessionEntry;
   }
@@ -1037,6 +1041,7 @@ export async function runMemoryFlushIfNeeded(params: {
   const activeMemoryFlushPlan =
     resolveMemoryFlushPlan({
       cfg: params.cfg,
+      agentId: activeAgentId,
       nowMs: memoryFlushNowMs,
     }) ?? memoryFlushPlan;
   const memoryFlushWritePath = activeMemoryFlushPlan.relativePath;
