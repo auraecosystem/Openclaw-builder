@@ -64,7 +64,7 @@ export function checkBrowserOrigin(params: {
   if (
     requestHost &&
     parsedOrigin.host === requestHost &&
-    isTrustedSameOriginHost(requestHost, params.isLocalClient)
+    isTrustedSameOriginHost(requestHost, params.isLocalClient === true)
   ) {
     return { ok: true, matchedBy: "private-same-origin" };
   }
@@ -77,13 +77,13 @@ export function checkBrowserOrigin(params: {
   return { ok: false, reason: "origin not allowed" };
 }
 
-function isTrustedSameOriginHost(hostHeader: string, isLocalClient?: boolean): boolean {
+function isTrustedSameOriginHost(hostHeader: string, allowLoopback: boolean): boolean {
   const hostname = resolveHostName(hostHeader);
   if (!hostname) {
     return false;
   }
   if (isLoopbackHost(hostname)) {
-    return isLocalClient !== false;
+    return allowLoopback;
   }
   if (net.isIP(hostname) !== 0) {
     return isPrivateOrLoopbackIpAddress(hostname);
