@@ -30,6 +30,9 @@ Docs: https://docs.openclaw.ai
 
 - Mac app: keep app-level menu commands and Dashboard failure states reachable when the remote Gateway is disconnected, and keep the Settings sidebar toggle in the leading titlebar area.
 - Gateway/webchat: hide internal runtime-context and other `display: false` transcript messages from Chat history and live message events. Fixes #83216. Thanks @EmpireCreator.
+- CLI/help: keep `gateway`, `doctor`, `status`, and `health` help registration out of action/runtime imports so subcommand `--help` stays lightweight in constrained terminals. Fixes #83228. Thanks @dfguerrerom.
+- Cron/Discord: keep explicit announce runs in message-tool-only source-reply mode so scheduled agent turns post once instead of also echoing through automatic visible replies. Fixes #83261. Thanks @Theralley.
+- Telegram: preserve forum-topic origin targets in inbound, audio-preflight, and skipped-message hook contexts so follow-up delivery stays bound to the originating topic. Fixes #83302. Thanks @M00zyx.
 - Mac app: align the Sessions settings pane with the standard Settings page gutter and row spacing.
 - OpenAI/Codex: stop rejecting available `openai-codex` GPT-5.1, GPT-5.2, and GPT-5.3 model refs during config validation, while keeping removed Spark aliases suppressed. Fixes #83303.
 - Codex app-server: preserve streamed native command output in mirrored transcripts and trajectory exports when final snapshots omit aggregated output. (#83200) Thanks @rozmiarD.
@@ -59,6 +62,7 @@ Docs: https://docs.openclaw.ai
 - CLI/completion: resolve concrete PowerShell profile paths and reload commands during setup and doctor completion installation. Fixes #44296. (#83059) Thanks @yu-xin-c.
 - Telegram: keep isolated long polling below the hard `getUpdates` request guard so idle bot accounts with high `timeoutSeconds` do not false-disconnect and restart-loop. Fixes #83264. Thanks @riccodecarvalho.
 - Providers/Google: preserve and recover Gemini 3 tool-call thought signatures during native replay so function-calling turns no longer fail with missing `thought_signature` 400s. Fixes #72879. (#80358) Thanks @abnershang.
+- Telegram: skip transcript-only delivery mirrors and gateway-injected rows when resolving latest assistant text, preventing retained previews from replacing final replies with stale fragments. Fixes #83159. (#83362) Thanks @joshavant.
 - Memory/QMD: keep lexical search on raw hyphenated queries while normalizing semantic QMD sub-searches, avoiding fallback to the builtin index for dashed identifiers and dates. Fixes #81328.
 - Memory-core: distinguish sqlite-vec load failures from missing semantic vector embeddings in degraded `memory index` warnings, so vector recall diagnostics point at unresolved dimensions instead of blaming sqlite-vec when the store is ready. Fixes #75624. (#83056) Thanks @xuruiray and @Noah3521.
 - Agents/subagents: preserve sandbox-peer controller ownership while routing completion announcements back to the originating run session, keeping subagent control and completion delivery scoped correctly. Fixes #80201. (#80242) Thanks @Jerry-Xin.
