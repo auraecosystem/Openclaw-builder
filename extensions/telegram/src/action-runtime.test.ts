@@ -613,6 +613,52 @@ describe("handleTelegramAction", () => {
     );
   });
 
+  it("records public poll topic targets from shorthand destinations", async () => {
+    await handleTelegramAction(
+      {
+        action: "poll",
+        to: "-100123:topic:77",
+        question: "Ready?",
+        answers: ["Yes", "No"],
+        isAnonymous: false,
+      },
+      telegramConfig(),
+    );
+
+    const registryPath = path.join(stateDir, "telegram", "poll-registry-default.json");
+    const registry = JSON.parse(fs.readFileSync(registryPath, "utf-8")) as {
+      polls: Array<{ pollId: string; messageThreadId?: number }>;
+    };
+    expect(registry.polls).toContainEqual(
+      expect.objectContaining({
+        pollId: "poll-1",
+        messageThreadId: 77,
+      }),
+    );
+  });
+
+  it("keeps successful public poll sends successful when registry persistence fails", async () => {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(path.join(stateDir, "telegram"), "not a directory", "utf-8");
+
+    const result = await handleTelegramAction(
+      {
+        action: "poll",
+        to: "@testchannel",
+        question: "Ready?",
+        answers: ["Yes", "No"],
+        isAnonymous: false,
+      },
+      telegramConfig(),
+    );
+
+    const details = resultDetails(result);
+    expect(details.ok).toBe(true);
+    expect(details.messageId).toBe("790");
+    expect(details.pollId).toBe("poll-1");
+  });
+
   it("accepts shared poll action aliases", async () => {
     await handleTelegramAction(
       {

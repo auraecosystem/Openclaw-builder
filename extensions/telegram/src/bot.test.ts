@@ -1686,7 +1686,9 @@ describe("createTelegramBot", () => {
         'Telegram poll vote: "Ready?" — Ada Lovelace (@ada) voted: No',
         expect.objectContaining({
           contextKey: "telegram:poll_answer:poll-1:9:1",
+          forceSenderIsOwnerFalse: true,
           sessionKey: expect.stringContaining("telegram:group:-1001234567890:topic:99"),
+          trusted: false,
         }),
       );
       expect(getChatSpy).toHaveBeenCalledWith(-1001234567890);

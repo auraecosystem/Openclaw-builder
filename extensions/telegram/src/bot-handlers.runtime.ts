@@ -1584,6 +1584,8 @@ export const registerTelegramHandlers = ({
       telegramDeps.enqueueSystemEvent(text, {
         sessionKey: route.sessionKey,
         contextKey: `telegram:poll_answer:${pollId}:${user?.id ?? "anon"}:${optionIds.join("-")}`,
+        forceSenderIsOwnerFalse: true,
+        trusted: false,
       });
       logVerbose(`telegram: poll_answer event enqueued for poll ${pollId} by ${senderLabel}`);
     } catch (err) {

@@ -116,7 +116,7 @@ export async function recordTelegramPollRegistryEntry(params: {
     messageThreadId:
       typeof params.messageThreadId === "number" ? Math.floor(params.messageThreadId) : undefined,
     question: params.question,
-    options: [...params.options],
+    options: params.options.slice(),
     createdAt: Date.now(),
   };
   const polls = registry.polls.filter((entry) => entry.pollId !== params.pollId);
