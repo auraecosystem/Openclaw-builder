@@ -3,7 +3,7 @@ import {
   formatEnvelopeTimestamp,
   stripAnsi,
 } from "openclaw/plugin-sdk/channel-test-helpers";
-import type { TelegramGroupConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig, TelegramGroupConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { GetReplyOptions, MsgContext } from "openclaw/plugin-sdk/reply-runtime";
 import { sanitizeTerminalText } from "openclaw/plugin-sdk/test-fixtures";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -427,6 +427,37 @@ describe("createTelegramBot", () => {
     });
 
     expect(finalHandler).not.toHaveBeenCalled();
+    expect(replySpy).not.toHaveBeenCalled();
+    expect(answerGuestQuerySpy).not.toHaveBeenCalled();
+    expect(sendMessageSpy).not.toHaveBeenCalled();
+  });
+
+  it("stops handling Telegram guest messages when fresh config disables guest mode", async () => {
+    const startupConfig = {
+      channels: {
+        telegram: {
+          dmPolicy: "open",
+          allowFrom: ["*"],
+          guest: { enabled: true },
+        },
+      },
+    } satisfies OpenClawConfig;
+    loadConfig.mockReturnValue({
+      channels: {
+        telegram: {
+          dmPolicy: "open",
+          allowFrom: ["*"],
+          guest: { enabled: false },
+        },
+      },
+    });
+    createTelegramBot({ token: "tok", config: startupConfig });
+
+    await runTelegramMiddlewareChain({
+      ctx: makeGuestMessageCtx({ guestQueryId: "guest-query-fresh-disabled" }),
+      finalHandler: vi.fn(async () => undefined),
+    });
+
     expect(replySpy).not.toHaveBeenCalled();
     expect(answerGuestQuerySpy).not.toHaveBeenCalled();
     expect(sendMessageSpy).not.toHaveBeenCalled();

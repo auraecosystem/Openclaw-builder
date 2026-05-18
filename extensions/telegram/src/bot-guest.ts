@@ -11,7 +11,7 @@ import { createSubsystemLogger, danger, logVerbose } from "openclaw/plugin-sdk/r
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { expandTelegramAllowFromWithAccessGroups } from "./access-groups.js";
-import type { ResolvedTelegramAccount } from "./accounts.js";
+import { resolveTelegramAccount, type ResolvedTelegramAccount } from "./accounts.js";
 import { shouldRequestTelegramGuestUpdates } from "./allowed-updates.js";
 import { isSenderAllowed, normalizeAllowFrom } from "./bot-access.js";
 import type { TelegramBotDeps } from "./bot-deps.js";
@@ -57,7 +57,7 @@ type TelegramAnswerGuestQueryPayload = {
 
 type TelegramGuestApi = {
   raw?: {
-    answerGuestQuery?: (payload: TelegramAnswerGuestQueryPayload) => Promise<boolean>;
+    answerGuestQuery?: (payload: TelegramAnswerGuestQueryPayload) => Promise<unknown>;
   };
 };
 
@@ -84,6 +84,24 @@ function isGuestModeEnabled(params: { telegramCfg: TelegramAccountConfig }): boo
   return shouldRequestTelegramGuestUpdates({
     guest: params.telegramCfg.guest,
   });
+}
+
+function resolveFreshTelegramConfig(params: {
+  cfg: OpenClawConfig;
+  account: ResolvedTelegramAccount;
+  fallback: TelegramAccountConfig;
+}): TelegramAccountConfig {
+  try {
+    return resolveTelegramAccount({
+      cfg: params.cfg,
+      accountId: params.account.accountId,
+    }).config;
+  } catch (error) {
+    logVerbose(
+      `telegram guest: failed to load fresh config for account ${params.account.accountId}; using startup snapshot: ${String(error)}`,
+    );
+    return params.fallback;
+  }
 }
 
 function buildGuestSessionKey(params: {
@@ -137,7 +155,8 @@ async function answerGuestQuery(params: {
   if (typeof answer !== "function") {
     throw new Error("Telegram API client does not expose raw.answerGuestQuery");
   }
-  return await answer(buildGuestAnswerPayload(params.guestQueryId, params.text));
+  await answer(buildGuestAnswerPayload(params.guestQueryId, params.text));
+  return true;
 }
 
 export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandlersParams): void {
@@ -174,7 +193,13 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
       await next();
       return;
     }
-    if (!isGuestModeEnabled({ telegramCfg: params.telegramCfg })) {
+    const freshCfg = params.loadFreshConfig();
+    const freshTelegramCfg = resolveFreshTelegramConfig({
+      cfg: freshCfg,
+      account: params.account,
+      fallback: params.telegramCfg,
+    });
+    if (!isGuestModeEnabled({ telegramCfg: freshTelegramCfg })) {
       logVerbose("telegram guest: skipped guest_message because guest mode is disabled");
       return;
     }
@@ -184,7 +209,7 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
       return;
     }
 
-    const fallbackText = params.telegramCfg.guest?.fallbackText ?? DEFAULT_GUEST_FALLBACK_TEXT;
+    const fallbackText = freshTelegramCfg.guest?.fallbackText ?? DEFAULT_GUEST_FALLBACK_TEXT;
     let answered = false;
     const answerText = async (text: string) => {
       if (answered) {
@@ -202,7 +227,6 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
       const chatId = msg.chat.id;
       const senderId = msg.from?.id != null ? String(msg.from.id) : "";
       const senderUsername = msg.from?.username ?? "";
-      const freshCfg = params.loadFreshConfig();
       const effectiveGuestAllow = normalizeAllowFrom(
         await expandTelegramAllowFromWithAccessGroups({
           cfg: freshCfg,
