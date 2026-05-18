@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadModelCatalog } from "../agents/model-catalog.js";
 import { runEmbeddedPiAgent } from "../agents/pi-embedded.js";
 import { BASE_THINKING_LEVELS } from "../auto-reply/thinking.shared.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { PluginProviderRegistration } from "../plugins/registry.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../plugins/runtime.js";
 import { createTestRegistry } from "../test-utils/channel-plugins.js";
@@ -53,6 +54,18 @@ function mockDeterministicModelCatalog() {
   ]);
 }
 
+const OPENAI_PI_RUNTIME_CONFIG: Partial<OpenClawConfig> = {
+  models: {
+    providers: {
+      openai: {
+        baseUrl: "https://api.openai.com/v1",
+        agentRuntime: { id: "pi" },
+        models: [],
+      },
+    },
+  },
+};
+
 describe("runCronIsolatedAgentTurn model overrides", () => {
   beforeEach(() => {
     resetPluginRuntimeStateForTest();
@@ -78,6 +91,7 @@ describe("runCronIsolatedAgentTurn model overrides", () => {
       mockDeterministicModelCatalog();
       const res = (
         await runCronTurn(home, {
+          cfgOverrides: OPENAI_PI_RUNTIME_CONFIG,
           jobPayload: {
             kind: "agentTurn",
             message: DEFAULT_MESSAGE,
@@ -97,7 +111,15 @@ describe("runCronIsolatedAgentTurn model overrides", () => {
   it("uses stored model overrides when cron payload omits a model", async () => {
     await withTempHome(async (home) => {
       mockDeterministicModelCatalog();
-      const res = (await runTurnWithStoredModelOverride(home, DEFAULT_AGENT_TURN_PAYLOAD)).res;
+      const res = (
+        await runTurnWithStoredModelOverride(
+          home,
+          DEFAULT_AGENT_TURN_PAYLOAD,
+          "gpt-4.1-mini",
+          "openai",
+          OPENAI_PI_RUNTIME_CONFIG,
+        )
+      ).res;
       expect(res.status).toBe("ok");
       const storedOverride = expectEmbeddedProviderModel({
         provider: "openai",
