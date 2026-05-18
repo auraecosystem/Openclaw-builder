@@ -35,7 +35,7 @@ const runtimeMocks = vi.hoisted(() => ({
   getActivePluginChannelRegistryVersion: vi.fn(() => 1),
   getActivePluginRegistryVersion: vi.fn(() => 1),
   materializeBundleMcpToolsForRun: vi.fn(async () => ({
-    tools: [],
+    tools: [] as unknown[],
     dispose: vi.fn(async () => undefined),
   })),
   resolveRuntimeConfigCacheKey: vi.fn(() => "runtime:1:test"),
@@ -116,7 +116,7 @@ describe("tools.effective handler", () => {
     runtimeMocks.resolveAgentWorkspaceDir.mockReturnValue("/tmp/workspace-main");
     runtimeMocks.getOrCreateSessionMcpRuntime.mockResolvedValue({ sessionId: "session-1" });
     runtimeMocks.materializeBundleMcpToolsForRun.mockResolvedValue({
-      tools: [],
+      tools: [] as unknown[],
       dispose: vi.fn(async () => undefined),
     });
     runtimeMocks.applyFinalEffectiveToolPolicy.mockImplementation(
