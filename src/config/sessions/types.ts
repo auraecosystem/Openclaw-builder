@@ -259,6 +259,7 @@ export type SessionEntry = {
   /** Timestamp (ms) when `/tts latest` last sent audio for this session. */
   lastTtsReadLatestAt?: number;
   execHost?: string;
+  execMode?: string;
   execSecurity?: string;
   execAsk?: string;
   execNode?: string;

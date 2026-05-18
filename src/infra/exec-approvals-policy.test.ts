@@ -18,9 +18,13 @@ import {
   type ExecApprovalsFile,
   normalizeExecAsk,
   normalizeExecHost,
+  normalizeExecMode,
   normalizeExecTarget,
   normalizeExecSecurity,
   requiresExecApproval,
+  resolveExecModeFromPolicy,
+  resolveExecModePolicy,
+  resolveExecPolicyForMode,
 } from "./exec-approvals.js";
 
 function expectFields(value: unknown, expected: Record<string, unknown>): void {
@@ -110,6 +114,72 @@ describe("exec approvals policy helpers", () => {
     { raw: "maybe", expected: null },
   ])("normalizes exec ask value %j", ({ raw, expected }) => {
     expect(normalizeExecAsk(raw)).toBe(expected);
+  });
+
+  it.each([
+    { raw: " auto ", expected: "auto" },
+    { raw: "ASK", expected: "ask" },
+    { raw: "allowlist", expected: "allowlist" },
+    { raw: "maybe", expected: null },
+  ])("normalizes exec mode value %j", ({ raw, expected }) => {
+    expect(normalizeExecMode(raw)).toBe(expected);
+  });
+
+  it.each([
+    { security: "deny" as const, ask: "off" as const, expected: "deny" as const },
+    {
+      security: "allowlist" as const,
+      ask: "off" as const,
+      expected: "allowlist" as const,
+    },
+    {
+      security: "allowlist" as const,
+      ask: "on-miss" as const,
+      expected: "ask" as const,
+    },
+    { security: "full" as const, ask: "off" as const, expected: "full" as const },
+    { security: "full" as const, ask: "always" as const, expected: "ask" as const },
+  ])("derives normalized exec mode from legacy policy %j", ({ security, ask, expected }) => {
+    expect(resolveExecModeFromPolicy({ security, ask })).toBe(expected);
+  });
+
+  it.each([
+    {
+      mode: "deny" as const,
+      expected: { security: "deny" as const, ask: "off" as const, autoReview: false },
+    },
+    {
+      mode: "allowlist" as const,
+      expected: { security: "allowlist" as const, ask: "off" as const, autoReview: false },
+    },
+    {
+      mode: "ask" as const,
+      expected: { security: "allowlist" as const, ask: "on-miss" as const, autoReview: false },
+    },
+    {
+      mode: "auto" as const,
+      expected: { security: "allowlist" as const, ask: "on-miss" as const, autoReview: true },
+    },
+    {
+      mode: "full" as const,
+      expected: { security: "full" as const, ask: "off" as const, autoReview: false },
+    },
+  ])("maps explicit exec mode to effective policy %j", ({ mode, expected }) => {
+    expect(resolveExecPolicyForMode(mode)).toEqual(expected);
+  });
+
+  it("preserves legacy security and ask when no explicit mode is set", () => {
+    expect(
+      resolveExecModePolicy({
+        security: "full",
+        ask: "always",
+      }),
+    ).toEqual({
+      mode: "ask",
+      security: "full",
+      ask: "always",
+      autoReview: false,
+    });
   });
 
   it.each([
@@ -298,6 +368,96 @@ describe("exec approvals policy helpers", () => {
     expect(summary.askFallback).toEqual({
       effective: "deny",
       source: "~/.openclaw/exec-approvals.json defaults.askFallback",
+    });
+  });
+
+  it("maps normalized requested mode into policy snapshots", () => {
+    const summary = resolveExecPolicyScopeSummary({
+      approvals: {
+        version: 1,
+      },
+      scopeExecConfig: {
+        mode: "auto",
+      },
+      configPath: "tools.exec",
+      scopeLabel: "tools.exec",
+    });
+
+    expectFields(summary.mode, {
+      requested: "auto",
+      requestedSource: "tools.exec.mode",
+      effective: "auto",
+      note: "requested mode applies",
+    });
+    expectFields(summary.security, {
+      requested: "allowlist",
+      requestedSource: "tools.exec.mode",
+      effective: "allowlist",
+    });
+    expectFields(summary.ask, {
+      requested: "on-miss",
+      requestedSource: "tools.exec.mode",
+      effective: "on-miss",
+    });
+  });
+
+  it("lets narrower legacy policy override a global normalized mode in snapshots", () => {
+    const summary = resolveExecPolicyScopeSummary({
+      approvals: {
+        version: 1,
+      },
+      globalExecConfig: {
+        mode: "deny",
+      },
+      scopeExecConfig: {
+        security: "full",
+        ask: "off",
+      },
+      configPath: "agents.list.runner.tools.exec",
+      scopeLabel: "agent:runner",
+      agentId: "runner",
+    });
+
+    expectFields(summary.mode, {
+      requested: "full",
+      requestedSource:
+        "derived from agents.list.runner.tools.exec.security and agents.list.runner.tools.exec.ask",
+      effective: "full",
+    });
+    expectFields(summary.security, {
+      requested: "full",
+      requestedSource: "agents.list.runner.tools.exec.security",
+      effective: "full",
+    });
+  });
+
+  it("preserves mode-derived siblings for partial narrower legacy policy snapshots", () => {
+    const summary = resolveExecPolicyScopeSummary({
+      approvals: {
+        version: 1,
+      },
+      globalExecConfig: {
+        mode: "auto",
+      },
+      scopeExecConfig: {
+        ask: "off",
+      },
+      configPath: "agents.list.runner.tools.exec",
+      scopeLabel: "agent:runner",
+      agentId: "runner",
+    });
+
+    expectFields(summary.security, {
+      requested: "allowlist",
+      requestedSource: "tools.exec.mode",
+    });
+    expectFields(summary.ask, {
+      requested: "off",
+      requestedSource: "agents.list.runner.tools.exec.ask",
+    });
+    expectFields(summary.mode, {
+      requested: "allowlist",
+      effective: "allowlist",
     });
   });
 

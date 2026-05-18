@@ -290,6 +290,14 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
     };
   }
 
+  function resolveProductionExecSecurity(value?: string): "deny" | "allowlist" | "full" {
+    return value === "deny" || value === "allowlist" || value === "full" ? value : "allowlist";
+  }
+
+  function resolveProductionExecAsk(value?: string): "off" | "on-miss" | "always" {
+    return value === "off" || value === "on-miss" || value === "always" ? value : "on-miss";
+  }
+
   function createInvokeSpies(params?: { runCommand?: MockedRunCommand }): {
     runCommand: MockedRunCommand;
     sendInvokeResult: MockedSendInvokeResult;
@@ -450,6 +458,8 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
     skillBinsCurrent?: () => Promise<Array<{ name: string; resolvedPath: string }>>;
     isCmdExeInvocation?: HandleSystemRunInvokeOptions["isCmdExeInvocation"];
     sanitizeEnv?: HandleSystemRunInvokeOptions["sanitizeEnv"];
+    resolveExecSecurity?: HandleSystemRunInvokeOptions["resolveExecSecurity"];
+    resolveExecAsk?: HandleSystemRunInvokeOptions["resolveExecAsk"];
   }): Promise<{
     runCommand: MockedRunCommand;
     runViaMacAppExecHost: MockedRunViaMacAppExecHost;
@@ -506,8 +516,8 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
       },
       execHostEnforced: false,
       execHostFallbackAllowed: true,
-      resolveExecSecurity: () => params.security ?? "full",
-      resolveExecAsk: () => params.ask ?? "off",
+      resolveExecSecurity: params.resolveExecSecurity ?? (() => params.security ?? "full"),
+      resolveExecAsk: params.resolveExecAsk ?? (() => params.ask ?? "off"),
       isCmdExeInvocation: params.isCmdExeInvocation ?? (() => false),
       sanitizeEnv: params.sanitizeEnv ?? (() => undefined),
       runCommand,
@@ -570,6 +580,48 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
     expect(shellWrapperCall.request?.rawCommand).toBe(
       '/bin/sh -lc "$0 \\"$1\\"" /usr/bin/touch /tmp/marker',
     );
+  });
+
+  it("preserves global mode-derived security when an agent only overrides legacy ask", async () => {
+    setRuntimeConfigSnapshot({
+      tools: {
+        exec: {
+          mode: "full",
+        },
+      },
+      agents: {
+        list: [
+          {
+            id: "main",
+            tools: {
+              exec: {
+                ask: "off",
+              },
+            },
+          },
+        ],
+      },
+    });
+    try {
+      const runCommand = vi.fn(async () => createLocalRunResult("mode-ok"));
+      const invoke = await runSystemInvoke({
+        preferMacAppExecHost: false,
+        command: ["node", "-e", "console.log('mode-ok')"],
+        runCommand,
+        resolveExecSecurity: resolveProductionExecSecurity,
+        resolveExecAsk: resolveProductionExecAsk,
+      });
+
+      expect(runCommand).toHaveBeenCalledTimes(1);
+      expect(requireFirstRunCommandArgs(runCommand)).toEqual([
+        "node",
+        "-e",
+        "console.log('mode-ok')",
+      ]);
+      expectInvokeOk(invoke.sendInvokeResult, { payloadContains: "mode-ok" });
+    } finally {
+      clearRuntimeConfigSnapshot();
+    }
   });
 
   const approvedEnvShellWrapperCases = [

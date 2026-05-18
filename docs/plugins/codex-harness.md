@@ -347,30 +347,32 @@ When an OpenClaw sandbox is active for the session, OpenClaw narrows Codex
 `danger-full-access` to Codex `workspace-write` so native Codex code-mode turns
 stay inside the sandboxed workspace.
 
-Use guardian mode when you want Codex native auto-review before sandbox escapes
-or extra permissions:
+Use normalized OpenClaw exec mode when you want Codex native auto-review before
+sandbox escapes or extra permissions:
 
 ```json5
 {
+  tools: {
+    exec: {
+      mode: "auto",
+    },
+  },
   plugins: {
     entries: {
       codex: {
         enabled: true,
-        config: {
-          appServer: {
-            mode: "guardian",
-            serviceTier: "priority",
-          },
-        },
       },
     },
   },
 }
 ```
 
-Guardian mode expands to Codex app-server approvals, usually
+For Codex app-server sessions, OpenClaw maps `tools.exec.mode: "auto"` to Codex
+Guardian-reviewed approvals, usually
 `approvalPolicy: "on-request"`, `approvalsReviewer: "auto_review"`, and
 `sandbox: "workspace-write"` when the local requirements allow those values.
+The legacy `plugins.entries.codex.config.appServer.mode: "guardian"` preset
+still works, but `tools.exec.mode: "auto"` is the normalized OpenClaw surface.
 
 For every app-server field, auth order, environment isolation, discovery, and
 timeout behavior, see [Codex harness reference](/plugins/codex-harness-reference).

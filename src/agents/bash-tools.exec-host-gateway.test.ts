@@ -59,11 +59,15 @@ const analyzeShellCommandMock = vi.hoisted(() =>
   })),
 );
 const hasDurableExecApprovalMock = vi.hoisted(() => vi.fn(() => true));
+const requiresExecApprovalMock = vi.hoisted(() => vi.fn(() => false));
 const buildEnforcedShellCommandMock = vi.hoisted(() =>
   vi.fn((): { ok: boolean; reason?: string; command?: string } => ({
     ok: false,
     reason: "segment execution plan unavailable",
   })),
+);
+const defaultExecAutoReviewerMock = vi.hoisted(() =>
+  vi.fn(async () => ({ decision: "allow-once" as const })),
 );
 const recordAllowlistMatchesUseMock = vi.hoisted(() => vi.fn());
 const resolveApprovalDecisionOrUndefinedMock = vi.hoisted(() =>
@@ -103,7 +107,7 @@ vi.mock("../infra/exec-approvals.js", () => ({
   analyzeShellCommand: analyzeShellCommandMock,
   hasDurableExecApproval: hasDurableExecApprovalMock,
   buildEnforcedShellCommand: buildEnforcedShellCommandMock,
-  requiresExecApproval: vi.fn(() => false),
+  requiresExecApproval: requiresExecApprovalMock,
   recordAllowlistUse: vi.fn(),
   recordAllowlistMatchesUse: recordAllowlistMatchesUseMock,
   resolveApprovalAuditTrustPath: vi.fn(() => null),
@@ -117,6 +121,10 @@ vi.mock("./bash-tools.exec-approval-request.js", () => ({
   buildExecApprovalRequesterContext: vi.fn(() => ({})),
   buildExecApprovalTurnSourceContext: vi.fn(() => ({})),
   registerExecApprovalRequestForHostOrThrow: vi.fn(async () => undefined),
+}));
+
+vi.mock("../infra/exec-auto-review.js", () => ({
+  defaultExecAutoReviewer: defaultExecAutoReviewerMock,
 }));
 
 vi.mock("./bash-tools.exec-host-shared.js", () => ({
@@ -228,11 +236,15 @@ describe("processGatewayAllowlist", () => {
     }));
     hasDurableExecApprovalMock.mockReset();
     hasDurableExecApprovalMock.mockReturnValue(true);
+    requiresExecApprovalMock.mockReset();
+    requiresExecApprovalMock.mockReturnValue(false);
     buildEnforcedShellCommandMock.mockReset();
     buildEnforcedShellCommandMock.mockReturnValue({
       ok: false,
       reason: "segment execution plan unavailable",
     });
+    defaultExecAutoReviewerMock.mockReset();
+    defaultExecAutoReviewerMock.mockResolvedValue({ decision: "allow-once" });
     recordAllowlistMatchesUseMock.mockReset();
     resolveApprovalDecisionOrUndefinedMock.mockReset();
     resolveApprovalDecisionOrUndefinedMock.mockResolvedValue(undefined);
@@ -334,7 +346,7 @@ describe("processGatewayAllowlist", () => {
   it("allows durable exact-command trust to bypass the synchronous allowlist miss", async () => {
     evaluateShellAllowlistMock.mockReturnValue({
       allowlistMatches: [],
-      analysisOk: false,
+      analysisOk: true,
       allowlistSatisfied: false,
       segments: [{ resolution: null, argv: ["node", "--version"] }],
       segmentAllowlistEntries: [],
@@ -553,7 +565,7 @@ EOF`,
   it("keeps denying allowlist misses when durable trust does not match", async () => {
     evaluateShellAllowlistMock.mockReturnValue({
       allowlistMatches: [],
-      analysisOk: false,
+      analysisOk: true,
       allowlistSatisfied: false,
       segments: [{ resolution: null, argv: ["node", "--version"] }],
       segmentAllowlistEntries: [],
@@ -565,6 +577,55 @@ EOF`,
         command: "node --version",
       }),
     ).rejects.toThrow("exec denied: allowlist miss");
+  });
+
+  it("auto-reviews simple read-only approval misses without prompting", async () => {
+    evaluateShellAllowlistMock.mockReturnValue({
+      allowlistMatches: [],
+      analysisOk: true,
+      allowlistSatisfied: false,
+      segments: [{ resolution: null, argv: ["pwd"] }],
+      segmentAllowlistEntries: [],
+    });
+    hasDurableExecApprovalMock.mockReturnValue(false);
+    requiresExecApprovalMock.mockReturnValue(true);
+
+    const result = await runGatewayAllowlist({
+      command: "pwd",
+      ask: "on-miss",
+      autoReview: true,
+    });
+
+    expect(createAndRegisterDefaultExecApprovalRequestMock).not.toHaveBeenCalled();
+    expect(result).toEqual({ execCommandOverride: undefined, allowWithoutEnforcedCommand: true });
+  });
+
+  it("does not auto-review when host policy requires every command to ask", async () => {
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: { allowlist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "allowlist",
+      hostAsk: "always",
+      askFallback: "deny",
+    });
+    evaluateShellAllowlistMock.mockReturnValue({
+      allowlistMatches: [],
+      analysisOk: true,
+      allowlistSatisfied: false,
+      segments: [{ resolution: null, argv: ["pwd"] }],
+      segmentAllowlistEntries: [],
+    });
+    hasDurableExecApprovalMock.mockReturnValue(false);
+    requiresExecApprovalMock.mockReturnValue(true);
+
+    const result = await runGatewayAllowlist({
+      command: "pwd",
+      ask: "on-miss",
+      autoReview: true,
+    });
+
+    expect(defaultExecAutoReviewerMock).not.toHaveBeenCalled();
+    expect(createAndRegisterDefaultExecApprovalRequestMock).toHaveBeenCalledTimes(1);
+    expect(result.pendingResult?.details.status).toBe("approval-pending");
   });
 
   it("uses sessionKey for followups when notifySessionKey is absent", async () => {

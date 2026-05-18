@@ -15,6 +15,7 @@ import {
   resolveApprovalAuditTrustPath,
   requiresExecApproval,
 } from "../infra/exec-approvals.js";
+import { defaultExecAutoReviewer } from "../infra/exec-auto-review.js";
 import type { SafeBinProfile } from "../infra/exec-safe-bin-policy.js";
 import { markBackgrounded, tail } from "./bash-process-registry.js";
 import {
@@ -58,6 +59,7 @@ export type ProcessGatewayAllowlistParams = {
   defaultTimeoutSec: number;
   security: ExecSecurity;
   ask: ExecAsk;
+  autoReview?: boolean;
   safeBins: Set<string>;
   safeBinProfiles: Readonly<Record<string, SafeBinProfile>>;
   strictInlineEval?: boolean;
@@ -477,6 +479,39 @@ export async function processGatewayAllowlist(
   }
 
   if (requiresAsk) {
+    if (params.autoReview === true && hostAsk !== "always") {
+      const decision = await defaultExecAutoReviewer({
+        command: params.command,
+        argv: allowlistEval.segments[0]?.argv,
+        cwd: params.workdir,
+        envKeys: Object.keys(params.requestedEnv ?? {}).toSorted(),
+        host: "gateway",
+        reason: requiresInlineEvalApproval ? "strict-inline-eval" : "approval-required",
+        analysis: {
+          parsed: analysisOk,
+          allowlistMatched: allowlistSatisfied,
+          durableApprovalMatched: durableApprovalSatisfied,
+          inlineEval: requiresInlineEvalApproval,
+        },
+        agent: {
+          id: params.agentId,
+          sessionKey: params.sessionKey,
+        },
+      });
+      if (decision.decision === "allow-once") {
+        recordMatchedAllowlistUse(
+          resolveApprovalAuditTrustPath(
+            allowlistEval.segments[0]?.resolution ?? null,
+            params.workdir,
+          ),
+        );
+        return {
+          execCommandOverride: enforcedCommand,
+          allowWithoutEnforcedCommand: enforcedCommand === undefined,
+        };
+      }
+    }
+
     const requestArgs = buildDefaultExecApprovalRequestArgs({
       warnings: params.warnings,
       approvalRunningNoticeMs: params.approvalRunningNoticeMs,

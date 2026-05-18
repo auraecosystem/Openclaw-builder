@@ -4,8 +4,11 @@ import {
   loadExecApprovals,
   type ExecAsk,
   type ExecHost,
+  type ExecMode,
   type ExecSecurity,
   type ExecTarget,
+  resolveExecModePolicy,
+  resolveExecPolicyForMode,
 } from "../infra/exec-approvals.js";
 import { resolveAgentConfig, resolveSessionAgentId } from "./agent-scope.js";
 import { isRequestedExecTargetAllowed, resolveExecTarget } from "./bash-tools.exec-runtime.js";
@@ -13,10 +16,63 @@ import { resolveSandboxRuntimeStatus } from "./sandbox/runtime-status.js";
 
 type ResolvedExecConfig = {
   host?: ExecTarget;
+  mode?: ExecMode;
   security?: ExecSecurity;
   ask?: ExecAsk;
   node?: string;
 };
+
+function hasLegacyExecPolicyOverride(exec?: ResolvedExecConfig): boolean {
+  return exec?.security !== undefined || exec?.ask !== undefined;
+}
+
+type LayeredExecPolicy = {
+  mode?: ExecMode;
+  security: ExecSecurity;
+  ask: ExecAsk;
+};
+
+function applyExecPolicyLayer(
+  base: LayeredExecPolicy,
+  layer?: ResolvedExecConfig,
+): LayeredExecPolicy {
+  if (!layer) {
+    return base;
+  }
+  if (layer.mode) {
+    return {
+      mode: layer.mode,
+      ...resolveExecPolicyForMode(layer.mode),
+    };
+  }
+  if (hasLegacyExecPolicyOverride(layer)) {
+    return {
+      security: layer.security ?? base.security,
+      ask: layer.ask ?? base.ask,
+    };
+  }
+  return base;
+}
+
+function applySessionExecPolicyLayer(
+  base: LayeredExecPolicy,
+  sessionEntry?: SessionEntry,
+): LayeredExecPolicy {
+  if (sessionEntry?.execMode) {
+    const mode = sessionEntry.execMode as ExecMode;
+    return {
+      mode,
+      ...resolveExecPolicyForMode(mode),
+    };
+  }
+  if (sessionEntry?.execSecurity !== undefined || sessionEntry?.execAsk !== undefined) {
+    return {
+      security: (sessionEntry.execSecurity as ExecSecurity | undefined) ?? base.security,
+      ask: (sessionEntry.execAsk as ExecAsk | undefined) ?? base.ask,
+    };
+  }
+  return base;
+}
 
 function resolveExecConfigState(params: {
   cfg?: OpenClawConfig;
@@ -97,6 +153,7 @@ export function resolveExecDefaults(params: {
 }): {
   host: ExecTarget;
   effectiveHost: ExecHost;
+  mode: ExecMode;
   security: ExecSecurity;
   ask: ExecAsk;
   node?: string;
@@ -115,21 +172,21 @@ export function resolveExecDefaults(params: {
   });
   const approvalDefaults = loadExecApprovals().defaults;
   const defaultSecurity = resolved.effectiveHost === "sandbox" ? "deny" : "full";
+  const basePolicy: LayeredExecPolicy = {
+    security: approvalDefaults?.security ?? defaultSecurity,
+    ask: approvalDefaults?.ask ?? "off",
+  };
+  const layeredPolicy = applySessionExecPolicyLayer(
+    applyExecPolicyLayer(applyExecPolicyLayer(basePolicy, globalExec), agentExec),
+    params.sessionEntry,
+  );
+  const modePolicy = resolveExecModePolicy(layeredPolicy);
   return {
     host,
     effectiveHost: resolved.effectiveHost,
-    security:
-      (params.sessionEntry?.execSecurity as ExecSecurity | undefined) ??
-      agentExec?.security ??
-      globalExec?.security ??
-      approvalDefaults?.security ??
-      defaultSecurity,
-    ask:
-      (params.sessionEntry?.execAsk as ExecAsk | undefined) ??
-      agentExec?.ask ??
-      globalExec?.ask ??
-      approvalDefaults?.ask ??
-      "off",
+    mode: modePolicy.mode,
+    security: modePolicy.security,
+    ask: modePolicy.ask,
     node: params.sessionEntry?.execNode ?? agentExec?.node ?? globalExec?.node,
     canRequestNode: isRequestedExecTargetAllowed({
       configuredTarget: host,

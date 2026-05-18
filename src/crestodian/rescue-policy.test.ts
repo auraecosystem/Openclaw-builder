@@ -39,6 +39,23 @@ describe("resolveCrestodianRescuePolicy", () => {
     expect(decision.reason).toBe("disabled");
   });
 
+  it("keeps auto rescue closed for non-yolo normalized exec modes", () => {
+    for (const mode of ["deny", "ask", "auto"] as const) {
+      const decision = decide({
+        tools: { exec: { mode } },
+      });
+      expect(decision.allowed, mode).toBe(false);
+      if (decision.allowed) {
+        throw new Error(`expected ${mode} rescue to be denied`);
+      }
+      expect(decision.reason, mode).toBe("disabled");
+    }
+  });
+
+  it("allows auto rescue for normalized full exec mode", () => {
+    expect(decide({ tools: { exec: { mode: "full" } } }).allowed).toBe(true);
+  });
+
   it("requires owner identity and direct messages by default", () => {
     const notOwnerDecision = decide({}, { senderIsOwner: false });
     expect(notOwnerDecision.allowed).toBe(false);

@@ -23,7 +23,7 @@ import {
 } from "../auto-reply/thinking.js";
 import type { SessionEntry } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { normalizeExecTarget } from "../infra/exec-approvals.js";
+import { normalizeExecMode, normalizeExecTarget } from "../infra/exec-approvals.js";
 import {
   isAcpSessionKey,
   isSubagentSessionKey,
@@ -412,6 +412,9 @@ export async function applySessionsPatchToStore(params: {
     }
   }
 
+  const patchSetsExecMode =
+    "execMode" in patch && patch.execMode !== null && patch.execMode !== undefined;
+
   if ("execSecurity" in patch) {
     const raw = patch.execSecurity;
     if (raw === null) {
@@ -421,7 +424,25 @@ export async function applySessionsPatchToStore(params: {
       if (!normalized) {
         return invalid('invalid execSecurity (use "deny"|"allowlist"|"full")');
       }
-      next.execSecurity = normalized;
+      if (!patchSetsExecMode) {
+        next.execSecurity = normalized;
+        delete next.execMode;
+      }
+    }
+  }
+
+  if ("execMode" in patch) {
+    const raw = patch.execMode;
+    if (raw === null) {
+      delete next.execMode;
+    } else if (raw !== undefined) {
+      const normalized = normalizeExecMode(raw);
+      if (!normalized) {
+        return invalid('invalid execMode (use "deny"|"allowlist"|"ask"|"auto"|"full")');
+      }
+      next.execMode = normalized;
+      delete next.execSecurity;
+      delete next.execAsk;
     }
   }
 
@@ -434,7 +455,10 @@ export async function applySessionsPatchToStore(params: {
       if (!normalized) {
         return invalid('invalid execAsk (use "off"|"on-miss"|"always")');
       }
-      next.execAsk = normalized;
+      if (!patchSetsExecMode) {
+        next.execAsk = normalized;
+        delete next.execMode;
+      }
     }
   }
 
