@@ -75,6 +75,20 @@ vi.mock("openclaw/plugin-sdk/agent-runtime", async (importOriginal) => {
         return null;
       }
       let oauthCredential = credential;
+      const legacyOAuthCredential = oauthCredential as typeof oauthCredential & {
+        oauthRef?: { source?: string };
+      };
+      if (
+        !legacyOAuthCredential.access?.trim() &&
+        legacyOAuthCredential.oauthRef?.source === "openclaw-credentials" &&
+        (params.agentDir || process.env.OPENCLAW_STATE_DIR)
+      ) {
+        const runtimeCredential = actual.loadAuthProfileStoreForSecretsRuntime(params.agentDir)
+          .profiles[params.profileId];
+        if (runtimeCredential?.type === "oauth") {
+          oauthCredential = runtimeCredential;
+        }
+      }
       if (params.forceRefresh || (oauthCredential.expires ?? 0) <= Date.now()) {
         const refreshed = await providerRuntimeMocks.refreshProviderOAuthCredentialWithPlugin({
           provider: oauthCredential.provider,
@@ -693,6 +707,23 @@ describe("bridgeCodexAppServerStartOptions", () => {
           email: "codex@example.test",
         },
       });
+      const persisted = JSON.parse(
+        await fs.readFile(path.join(agentDir, "auth-profiles.json"), "utf8"),
+      ) as {
+        profiles?: Record<
+          string,
+          {
+            access?: string;
+            refresh?: string;
+            oauthRef?: { source?: string; provider?: string; id?: string };
+          }
+        >;
+      };
+      const persistedCredential = persisted.profiles?.["openai-codex:default"];
+      expect(persistedCredential?.access).toBe("ref-backed-access-token");
+      expect(persistedCredential?.refresh).toBe("ref-backed-refresh-token");
+      expect(persistedCredential?.oauthRef).toBeUndefined();
+      clearRuntimeAuthProfileStoreSnapshots();
 
       await expect(refreshCodexAppServerAuthTokens({ agentDir })).resolves.toEqual({
         accessToken: "refreshed-ref-backed-access-token",
