@@ -102,14 +102,22 @@ export function createDiscordMessageRunQueue(
 
   return {
     enqueue(job) {
-      runQueue.enqueue(job.queueKey, async ({ lifecycleSignal }) => {
-        await processDiscordQueuedMessage({
-          job,
-          lifecycleSignal,
-          replayGuard,
-          testing: params.testing,
-        });
-      });
+      runQueue.enqueue(
+        job.queueKey,
+        async ({ lifecycleSignal }) => {
+          await processDiscordQueuedMessage({
+            job,
+            lifecycleSignal,
+            replayGuard,
+            testing: params.testing,
+          });
+        },
+        {
+          onSkip: () => {
+            cleanupSkippedDiscordQueuedMessage({ job, replayGuard });
+          },
+        },
+      );
     },
     deactivate: runQueue.deactivate,
   };

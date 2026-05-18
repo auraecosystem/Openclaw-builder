@@ -212,7 +212,7 @@ describe("createDiscordMessageHandler queue behavior", () => {
 
     const handler = createDiscordMessageHandler({
       ...createDiscordHandlerParams(),
-      __testing: { createReplyTypingFeedback },
+      testing: { createReplyTypingFeedback },
     });
     await expect(
       handler(createMessageData("m-typing", "dm-1") as never, {} as never),
@@ -248,7 +248,7 @@ describe("createDiscordMessageHandler queue behavior", () => {
 
     const handler = createDiscordMessageHandler({
       ...createDiscordHandlerParams(),
-      __testing: { createReplyTypingFeedback },
+      testing: { createReplyTypingFeedback },
     });
     await expect(
       handler(createMessageData("m-typing-fails", "dm-1") as never, {} as never),
@@ -271,7 +271,7 @@ describe("createDiscordMessageHandler queue behavior", () => {
 
     const handler = createDiscordMessageHandler({
       ...createDiscordHandlerParams(),
-      __testing: { createReplyTypingFeedback },
+      testing: { createReplyTypingFeedback },
     });
     await expect(
       handler(createMessageData("m-rejected", "dm-1") as never, {} as never),
@@ -303,7 +303,7 @@ describe("createDiscordMessageHandler queue behavior", () => {
 
     const handler = createDiscordMessageHandler({
       ...createDiscordHandlerParams(),
-      __testing: { createReplyTypingFeedback },
+      testing: { createReplyTypingFeedback },
     });
     await expect(
       handler(createMessageData("m-never-mode", "dm-1") as never, {} as never),
@@ -338,7 +338,7 @@ describe("createDiscordMessageHandler queue behavior", () => {
 
       const handler = createDiscordMessageHandler({
         ...createDiscordHandlerParams(),
-        __testing: { createReplyTypingFeedback },
+        testing: { createReplyTypingFeedback },
       });
       await expect(
         handler(createMessageData(`m-${typingMode}-mode`, "dm-1") as never, {} as never),
@@ -373,7 +373,7 @@ describe("createDiscordMessageHandler queue behavior", () => {
 
     const handler = createDiscordMessageHandler({
       ...createDiscordHandlerParams(),
-      __testing: { createReplyTypingFeedback },
+      testing: { createReplyTypingFeedback },
     });
     await expect(
       handler(createMessageData("m-guild", "guild-channel") as never, {} as never),
@@ -422,7 +422,7 @@ describe("createDiscordMessageHandler queue behavior", () => {
 
     const handler = createDiscordMessageHandler({
       ...createDiscordHandlerParams(),
-      __testing: { createReplyTypingFeedback },
+      testing: { createReplyTypingFeedback },
     });
     await expect(
       handler(createMessageData("m-guild-instant", "guild-channel") as never, {} as never),
@@ -465,7 +465,7 @@ describe("createDiscordMessageHandler queue behavior", () => {
     });
     const handler = createDiscordMessageHandler({
       ...createDiscordHandlerParams(),
-      __testing: { createReplyTypingFeedback },
+      testing: { createReplyTypingFeedback },
     });
 
     await expect(handler(createMessageData("m-1") as never, {} as never)).resolves.toBeUndefined();
@@ -793,7 +793,7 @@ describe("createDiscordMessageHandler queue behavior", () => {
 
     const handler = createDiscordMessageHandler({
       ...createDiscordHandlerParams(),
-      __testing: { createReplyTypingFeedback },
+      testing: { createReplyTypingFeedback },
     });
     await expect(handler(createMessageData("m-1") as never, {} as never)).resolves.toBeUndefined();
     await flushQueueWork();

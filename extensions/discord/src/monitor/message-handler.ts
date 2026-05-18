@@ -210,7 +210,7 @@ export function createDiscordMessageHandler(
           }
           startAcceptedTypingFeedback({
             ctx,
-            createFeedback: params.__testing?.createReplyTypingFeedback,
+            createFeedback: params.testing?.createReplyTypingFeedback,
           });
           applyImplicitReplyBatchGate(ctx, params.replyToMode, false);
           messageRunQueue.enqueue(buildDiscordInboundJob(ctx, { replayKeys }));
@@ -263,7 +263,7 @@ export function createDiscordMessageHandler(
         }
         startAcceptedTypingFeedback({
           ctx,
-          createFeedback: params.__testing?.createReplyTypingFeedback,
+          createFeedback: params.testing?.createReplyTypingFeedback,
         });
         applyImplicitReplyBatchGate(ctx, params.replyToMode, true);
         if (entries.length > 1) {
