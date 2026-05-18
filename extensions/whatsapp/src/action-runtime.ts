@@ -39,6 +39,9 @@ function resolveListReplyQuotedMessageKey(params: {
     fromMe: params.fromMe ?? cachedMeta?.fromMe ?? false,
     ...(participant ? { participant } : {}),
     ...(cachedMeta?.body ? { messageText: cachedMeta.body } : {}),
+    ...(cachedMeta?.interactiveListType != null
+      ? { interactiveListType: cachedMeta.interactiveListType }
+      : {}),
   };
 }
 

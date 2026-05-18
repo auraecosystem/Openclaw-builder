@@ -807,8 +807,7 @@ export async function attachWebInboxToSocket(
       selfE164: self.e164 ?? undefined,
       fromMe: Boolean(msg.key?.fromMe),
       location: enriched.location ?? undefined,
-      untrustedStructuredContext:
-        structuredContext.length > 0 ? structuredContext : undefined,
+      untrustedStructuredContext: structuredContext.length > 0 ? structuredContext : undefined,
       sendComposing,
       reply,
       sendMedia,
@@ -831,6 +830,7 @@ export async function attachWebInboxToSocket(
           inboundMessage.chatType === "direct" ? inboundMessage.senderE164 : undefined,
         body: inboundMessage.body,
         fromMe: inboundMessage.fromMe,
+        interactiveListType: enriched.interactiveListContext?.listType,
       });
     }
     try {

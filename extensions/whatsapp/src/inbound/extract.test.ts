@@ -450,6 +450,175 @@ describe("extractInteractiveListContext", () => {
     expect(extractText(message)).toContain("rowId: delivery-evening");
   });
 
+  it("extracts rows from WhatsApp native flow single-select messages", () => {
+    const message = {
+      viewOnceMessage: {
+        message: {
+          interactiveMessage: {
+            header: { title: "Jasper's Market" },
+            body: { text: "Welcome to Jasper's Market! What can we help you with today?" },
+            footer: { text: "Fresh picks daily" },
+            nativeFlowMessage: {
+              buttons: [
+                {
+                  name: "single_select",
+                  buttonParamsJson: JSON.stringify({
+                    title: "Choose option",
+                    sections: [
+                      {
+                        title: "Menu",
+                        rows: [
+                          {
+                            id: "shop-online",
+                            title: "Shop online",
+                          },
+                          {
+                            id: "get-recipe-ideas",
+                            title: "Get Recipe Ideas",
+                            description: "Find dinner inspiration",
+                          },
+                          {
+                            id: "current-promo",
+                            title: "Current promo",
+                          },
+                        ],
+                      },
+                    ],
+                  }),
+                },
+              ],
+            },
+          },
+        },
+      },
+    } as proto.IMessage;
+
+    expect(hasInboundUserContent(message)).toBe(true);
+    expect(extractInteractiveListContext(message)).toEqual({
+      kind: "list",
+      title: "Jasper's Market",
+      description: "Welcome to Jasper's Market! What can we help you with today?",
+      buttonText: "Choose option",
+      footerText: "Fresh picks daily",
+      listType: "native_flow",
+      rows: [
+        {
+          sectionTitle: "Menu",
+          rowId: "shop-online",
+          title: "Shop online",
+        },
+        {
+          sectionTitle: "Menu",
+          rowId: "get-recipe-ideas",
+          title: "Get Recipe Ideas",
+          description: "Find dinner inspiration",
+        },
+        {
+          sectionTitle: "Menu",
+          rowId: "current-promo",
+          title: "Current promo",
+        },
+      ],
+    });
+    expect(extractText(message)).toContain("Get Recipe Ideas - Find dinner inspiration");
+    expect(extractText(message)).toContain("rowId: get-recipe-ideas");
+  });
+
+  it("extracts rows from WhatsApp buttons messages", () => {
+    const message = {
+      buttonsMessage: {
+        contentText: "Welcome to Jasper's Market! What can we help you with today?",
+        headerType: 1,
+        buttons: [
+          {
+            buttonId: "reply-interactive-with-media",
+            buttonText: { displayText: "Shop online" },
+            type: 1,
+          },
+          {
+            buttonId: "reply-media-card-carousel",
+            buttonText: { displayText: "Get recipe ideas" },
+            type: 1,
+          },
+          {
+            buttonId: "reply-offer",
+            buttonText: { displayText: "Current promo" },
+            type: 1,
+          },
+        ],
+      },
+    } as proto.IMessage;
+
+    expect(hasInboundUserContent(message)).toBe(true);
+    expect(extractInteractiveListContext(message)).toEqual({
+      kind: "list",
+      description: "Welcome to Jasper's Market! What can we help you with today?",
+      listType: "buttons",
+      rows: [
+        {
+          rowId: "reply-interactive-with-media",
+          title: "Shop online",
+        },
+        {
+          rowId: "reply-media-card-carousel",
+          title: "Get recipe ideas",
+        },
+        {
+          rowId: "reply-offer",
+          title: "Current promo",
+        },
+      ],
+    });
+    expect(extractText(message)).toContain("Get recipe ideas");
+    expect(extractText(message)).toContain("rowId: reply-media-card-carousel");
+  });
+
+  it("extracts rows from WhatsApp native flow reply button messages", () => {
+    const message = {
+      interactiveMessage: {
+        header: { title: "Jasper's Market" },
+        body: { text: "What can we help you with today?" },
+        nativeFlowMessage: {
+          buttons: [
+            {
+              name: "quick_reply",
+              buttonParamsJson: JSON.stringify({
+                id: "shop-online",
+                display_text: "Shop online",
+              }),
+            },
+            {
+              name: "quick_reply",
+              buttonParamsJson: JSON.stringify({
+                id: "get-recipe-ideas",
+                display_text: "Get recipe ideas",
+              }),
+            },
+          ],
+        },
+      },
+    } as proto.IMessage;
+
+    expect(hasInboundUserContent(message)).toBe(true);
+    expect(extractInteractiveListContext(message)).toEqual({
+      kind: "list",
+      title: "Jasper's Market",
+      description: "What can we help you with today?",
+      listType: "buttons",
+      rows: [
+        {
+          rowId: "shop-online",
+          title: "Shop online",
+        },
+        {
+          rowId: "get-recipe-ideas",
+          title: "Get recipe ideas",
+        },
+      ],
+    });
+    expect(extractText(message)).toContain("rowId: get-recipe-ideas");
+  });
+
   it("returns selected row text for list response messages", () => {
     expect(
       extractText({

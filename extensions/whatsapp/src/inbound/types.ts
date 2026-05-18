@@ -17,6 +17,7 @@ export type ActiveWebSendOptions = {
     fromMe: boolean;
     participant?: string;
     messageText?: string;
+    interactiveListType?: number | string;
   };
   gifPlayback?: boolean;
   accountId?: string;

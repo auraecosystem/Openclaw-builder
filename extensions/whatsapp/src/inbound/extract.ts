@@ -5,10 +5,7 @@ import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { resolveComparableIdentity, type WhatsAppReplyContext } from "../identity.js";
 import { jidToE164 } from "../text-runtime.js";
 import { parseVcard } from "../vcard.js";
-import type {
-  WhatsAppInteractiveListContext,
-  WhatsAppStructuredContactContext,
-} from "./types.js";
+import type { WhatsAppInteractiveListContext, WhatsAppStructuredContactContext } from "./types.js";
 
 const MESSAGE_WRAPPER_KEYS = [
   "botInvokeMessage",
@@ -36,6 +33,7 @@ const MESSAGE_CONTENT_KEYS = [
   "listResponseMessage",
   "templateButtonReplyMessage",
   "interactiveResponseMessage",
+  "interactiveMessage",
   "buttonsMessage",
   "listMessage",
 ] as const;
@@ -167,6 +165,7 @@ function extractContextInfoFromMessage(message: proto.IMessage): proto.IContextI
     message.listResponseMessage?.contextInfo ??
     message.templateButtonReplyMessage?.contextInfo ??
     message.interactiveResponseMessage?.contextInfo ??
+    message.interactiveMessage?.contextInfo ??
     message.buttonsMessage?.contextInfo ??
     message.listMessage?.contextInfo;
   if (fallback) {
@@ -324,6 +323,65 @@ function extractInteractiveResponseText(message: proto.IMessage): string | undef
   return undefined;
 }
 
+function parseJsonObject(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== "string" || !value.trim()) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function findNativeFlowListParams(
+  interactive: proto.Message.IInteractiveMessage | undefined | null,
+): Record<string, unknown> | undefined {
+  const nativeFlow = interactive?.nativeFlowMessage;
+  for (const button of nativeFlow?.buttons ?? []) {
+    const params = parseJsonObject(button?.buttonParamsJson);
+    const sections = params?.sections;
+    if (Array.isArray(sections)) {
+      return params;
+    }
+  }
+  const messageParams = parseJsonObject(nativeFlow?.messageParamsJson);
+  return Array.isArray(messageParams?.sections) ? messageParams : undefined;
+}
+
+function extractNativeFlowButtonRows(
+  interactive: proto.Message.IInteractiveMessage | undefined | null,
+): WhatsAppInteractiveListContext["rows"] {
+  const nativeFlow = interactive?.nativeFlowMessage;
+  return (nativeFlow?.buttons ?? [])
+    .map((button) => {
+      const params = parseJsonObject(button?.buttonParamsJson);
+      if (!params || Array.isArray(params.sections)) {
+        return null;
+      }
+      const rowId =
+        nonEmptyString(params.id) ??
+        nonEmptyString(params.buttonId) ??
+        nonEmptyString(params.payload);
+      if (!rowId) {
+        return null;
+      }
+      const title =
+        nonEmptyString(params.display_text) ??
+        nonEmptyString(params.displayText) ??
+        nonEmptyString(params.title) ??
+        nonEmptyString(params.text);
+      return {
+        rowId,
+        ...(title ? { title } : {}),
+      };
+    })
+    .filter((row): row is WhatsAppInteractiveListContext["rows"][number] => row != null);
+}
+
 function extractInteractiveListText(message: proto.IMessage): string | undefined {
   const context = extractInteractiveListContext(message);
   if (!context) {
@@ -419,19 +477,113 @@ export function extractInteractiveListContext(
 ): WhatsAppInteractiveListContext | undefined {
   const message = unwrapMessage(rawMessage);
   const list = message?.listMessage;
-  if (!list) {
-    return undefined;
+  if (list) {
+    const rows = (list.sections ?? []).flatMap((section) => {
+      const sectionTitle = nonEmptyString(section?.title);
+      return (section?.rows ?? [])
+        .map((row) => {
+          const rowId = nonEmptyString(row?.rowId);
+          if (!rowId) {
+            return null;
+          }
+          const title = nonEmptyString(row?.title);
+          const description = nonEmptyString(row?.description);
+          return {
+            ...(sectionTitle ? { sectionTitle } : {}),
+            rowId,
+            ...(title ? { title } : {}),
+            ...(description ? { description } : {}),
+          };
+        })
+        .filter((row): row is NonNullable<typeof row> => row != null);
+    });
+    if (rows.length === 0) {
+      return undefined;
+    }
+    const title = nonEmptyString(list.title);
+    const description = nonEmptyString(list.description);
+    const buttonText = nonEmptyString(list.buttonText);
+    const footerText = nonEmptyString(list.footerText);
+    return {
+      kind: "list",
+      ...(title ? { title } : {}),
+      ...(description ? { description } : {}),
+      ...(buttonText ? { buttonText } : {}),
+      ...(footerText ? { footerText } : {}),
+      ...(list.listType != null ? { listType: list.listType } : {}),
+      rows,
+    };
   }
-  const rows = (list.sections ?? []).flatMap((section) => {
-    const sectionTitle = nonEmptyString(section?.title);
-    return (section?.rows ?? [])
-      .map((row) => {
-        const rowId = nonEmptyString(row?.rowId);
+
+  const buttons = message?.buttonsMessage;
+  if (buttons) {
+    const rows = (buttons.buttons ?? [])
+      .map((button) => {
+        const rowId = nonEmptyString(button?.buttonId);
         if (!rowId) {
           return null;
         }
-        const title = nonEmptyString(row?.title);
-        const description = nonEmptyString(row?.description);
+        const title = nonEmptyString(button?.buttonText?.displayText);
+        return {
+          rowId,
+          ...(title ? { title } : {}),
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => row != null);
+    if (rows.length === 0) {
+      return undefined;
+    }
+    const description = nonEmptyString(buttons.contentText);
+    const footerText = nonEmptyString(buttons.footerText);
+    return {
+      kind: "list",
+      ...(description ? { description } : {}),
+      ...(footerText ? { footerText } : {}),
+      listType: "buttons",
+      rows,
+    };
+  }
+
+  const interactive = message?.interactiveMessage;
+  const nativeFlowButtonRows = extractNativeFlowButtonRows(interactive);
+  if (nativeFlowButtonRows.length > 0) {
+    const title = nonEmptyString(interactive?.header?.title);
+    const description = nonEmptyString(interactive?.body?.text);
+    const footerText = nonEmptyString(interactive?.footer?.text);
+    return {
+      kind: "list",
+      ...(title ? { title } : {}),
+      ...(description ? { description } : {}),
+      ...(footerText ? { footerText } : {}),
+      listType: "buttons",
+      rows: nativeFlowButtonRows,
+    };
+  }
+
+  const nativeFlowList = findNativeFlowListParams(interactive);
+  if (!nativeFlowList) {
+    return undefined;
+  }
+  const sections = Array.isArray(nativeFlowList.sections) ? nativeFlowList.sections : [];
+  const rows = sections.flatMap((section) => {
+    if (!section || typeof section !== "object") {
+      return [];
+    }
+    const sectionRecord = section as Record<string, unknown>;
+    const sectionTitle = nonEmptyString(sectionRecord.title);
+    const sectionRows = Array.isArray(sectionRecord.rows) ? sectionRecord.rows : [];
+    return sectionRows
+      .map((row) => {
+        if (!row || typeof row !== "object") {
+          return null;
+        }
+        const rowRecord = row as Record<string, unknown>;
+        const rowId = nonEmptyString(rowRecord.rowId) ?? nonEmptyString(rowRecord.id);
+        if (!rowId) {
+          return null;
+        }
+        const title = nonEmptyString(rowRecord.title);
+        const description = nonEmptyString(rowRecord.description);
         return {
           ...(sectionTitle ? { sectionTitle } : {}),
           rowId,
@@ -444,17 +596,20 @@ export function extractInteractiveListContext(
   if (rows.length === 0) {
     return undefined;
   }
-  const title = nonEmptyString(list.title);
-  const description = nonEmptyString(list.description);
-  const buttonText = nonEmptyString(list.buttonText);
-  const footerText = nonEmptyString(list.footerText);
+  const title = nonEmptyString(interactive?.header?.title);
+  const description = nonEmptyString(interactive?.body?.text);
+  const buttonText =
+    nonEmptyString(nativeFlowList.title) ??
+    nonEmptyString(nativeFlowList.button) ??
+    nonEmptyString(nativeFlowList.buttonText);
+  const footerText = nonEmptyString(interactive?.footer?.text);
   return {
     kind: "list",
     ...(title ? { title } : {}),
     ...(description ? { description } : {}),
     ...(buttonText ? { buttonText } : {}),
     ...(footerText ? { footerText } : {}),
-    ...(list.listType != null ? { listType: list.listType } : {}),
+    listType: "native_flow",
     rows,
   };
 }
