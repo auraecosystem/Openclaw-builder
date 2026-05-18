@@ -4,6 +4,7 @@ import type { ExtensionFactory, SessionManager } from "@earendil-works/pi-coding
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { ProviderRuntimeModel } from "../../plugins/provider-runtime-model.types.js";
 import { normalizeOptionalLowercaseString } from "../../shared/string-coerce.js";
+import { resolveAgentConfig } from "../agent-scope-config.js";
 import { resolveContextWindowInfo } from "../context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../defaults.js";
 import { createAgentToolResultMiddlewareRunner } from "../harness/tool-result-middleware.js";
@@ -16,6 +17,13 @@ import { makeToolPrunablePredicate } from "../pi-hooks/context-pruning/tools.js"
 import { ensurePiCompactionReserveTokens, resolveEffectiveCompactionMode } from "../pi-settings.js";
 import { resolveTranscriptPolicy } from "../transcript-policy.js";
 import { isCacheTtlEligibleProvider, readLastCacheTtlTimestamp } from "./cache-ttl.js";
+
+function resolveScopedAgentConfig(cfg: OpenClawConfig | undefined, agentId?: string | null) {
+  if (!cfg || !agentId) {
+    return undefined;
+  }
+  return resolveAgentConfig(cfg, agentId);
+}
 
 type PiToolResultEvent = {
   threadId?: string;
@@ -102,11 +110,14 @@ function resolveContextWindowTokens(params: {
 function buildContextPruningFactory(params: {
   cfg: OpenClawConfig | undefined;
   sessionManager: SessionManager;
+  agentId?: string | null;
   provider: string;
   modelId: string;
   model: ProviderRuntimeModel | undefined;
 }): ExtensionFactory | undefined {
-  const raw = params.cfg?.agents?.defaults?.contextPruning;
+  const raw =
+    resolveScopedAgentConfig(params.cfg, params.agentId)?.contextPruning ??
+    params.cfg?.agents?.defaults?.contextPruning;
   if (raw?.mode !== "cache-ttl") {
     return undefined;
   }
@@ -141,13 +152,16 @@ function buildContextPruningFactory(params: {
 export function buildEmbeddedExtensionFactories(params: {
   cfg: OpenClawConfig | undefined;
   sessionManager: SessionManager;
+  agentId?: string | null;
   provider: string;
   modelId: string;
   model: ProviderRuntimeModel | undefined;
 }): ExtensionFactory[] {
   const factories: ExtensionFactory[] = [];
-  if (resolveEffectiveCompactionMode(params.cfg) === "safeguard") {
-    const compactionCfg = params.cfg?.agents?.defaults?.compaction;
+  const compactionCfg =
+    resolveScopedAgentConfig(params.cfg, params.agentId)?.compaction ??
+    params.cfg?.agents?.defaults?.compaction;
+  if (resolveEffectiveCompactionMode(params.cfg, params.agentId) === "safeguard") {
     const qualityGuardCfg = compactionCfg?.qualityGuard;
     const contextWindowInfo = resolveContextWindowInfo({
       cfg: params.cfg,

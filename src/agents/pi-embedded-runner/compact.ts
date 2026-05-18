@@ -418,8 +418,13 @@ export async function compactEmbeddedPiSessionDirect(
   if (hasExplicitCompactionModel(params) || !hasCompactionModelFallbackCandidates(params)) {
     return await compactEmbeddedPiSessionDirectOnce(params);
   }
+  const fallbackAgentId = resolveSessionAgentIds({
+    sessionKey: params.sandboxSessionKey ?? params.sessionKey,
+    config: params.config,
+  }).sessionAgentId;
   const resolvedCompactionTarget = resolveEmbeddedCompactionTarget({
     config: params.config,
+    agentId: fallbackAgentId,
     provider: params.provider,
     modelId: params.model,
     authProfileId: params.authProfileId,
@@ -429,10 +434,6 @@ export async function compactEmbeddedPiSessionDirect(
   const primaryProvider = resolvedCompactionTarget.provider ?? DEFAULT_PROVIDER;
   const primaryModel = resolvedCompactionTarget.model ?? DEFAULT_MODEL;
   const fallbacksOverride = resolveCompactionFallbacksOverride(params);
-  const fallbackAgentId = resolveSessionAgentIds({
-    sessionKey: params.sandboxSessionKey ?? params.sessionKey,
-    config: params.config,
-  }).sessionAgentId;
   const fallbackSessionKey = params.sandboxSessionKey ?? params.sessionKey ?? params.sessionId;
   try {
     const fallbackResult = await runWithModelFallback<EmbeddedPiCompactResult>({
@@ -490,6 +491,7 @@ async function compactEmbeddedPiSessionDirectOnce(
   });
   const resolvedCompactionTarget = resolveEmbeddedCompactionTarget({
     config: params.config,
+    agentId: earlyAgentIds.sessionAgentId,
     provider: params.provider,
     modelId: params.model,
     authProfileId: params.authProfileId,
@@ -1023,6 +1025,7 @@ async function compactEmbeddedPiSessionDirectOnce(
         cwd: effectiveWorkspace,
         agentDir,
         cfg: params.config,
+        agentId: sessionAgentId,
         pluginMetadataSnapshot: getCurrentPluginMetadataSnapshot({
           config: params.config,
           env: process.env,
@@ -1035,6 +1038,7 @@ async function compactEmbeddedPiSessionDirectOnce(
       const extensionFactories = buildEmbeddedExtensionFactories({
         cfg: params.config,
         sessionManager,
+        agentId: sessionAgentId,
         provider,
         modelId,
         model,
@@ -1054,6 +1058,7 @@ async function compactEmbeddedPiSessionDirectOnce(
       applyPiCompactionSettingsFromConfig({
         settingsManager,
         cfg: params.config,
+        agentId: sessionAgentId,
         contextTokenBudget: ctxInfo.tokens,
       });
       // contextEngineInfo is intentionally omitted: this guard runs inside the

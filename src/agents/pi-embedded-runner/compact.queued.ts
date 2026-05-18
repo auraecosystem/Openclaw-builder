@@ -86,6 +86,7 @@ export async function compactEmbeddedPiSession(
   if (!contextTokenBudget || !Number.isFinite(contextTokenBudget) || contextTokenBudget <= 0) {
     const resolvedCompactionTarget = resolveEmbeddedCompactionTarget({
       config: params.config,
+      agentId: agentIds.sessionAgentId,
       provider: params.provider,
       modelId: params.model,
       authProfileId: params.authProfileId,
@@ -378,6 +379,7 @@ function buildCompactionContextEngineRuntimeContext(params: {
       messageChannel: params.params.messageChannel,
       messageProvider: params.params.messageProvider,
       agentAccountId: params.params.agentAccountId,
+      agentId: sessionAgentId,
       currentChannelId: params.params.currentChannelId,
       currentThreadTs: params.params.currentThreadTs,
       currentMessageId: params.params.currentMessageId,

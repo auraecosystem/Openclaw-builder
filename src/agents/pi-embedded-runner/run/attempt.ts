@@ -2197,6 +2197,7 @@ export async function runEmbeddedAttempt(
         cwd: effectiveWorkspace,
         agentDir,
         cfg: params.config,
+        agentId: sessionAgentId,
         pluginMetadataSnapshot: getCurrentPluginMetadataSnapshot({
           config: params.config,
           env: process.env,
@@ -2207,7 +2208,7 @@ export async function runEmbeddedAttempt(
       const piAutoCompactionGuardArgs = {
         settingsManager,
         contextEngineInfo: activeContextEngine?.info,
-        compactionMode: resolveEffectiveCompactionMode(params.config),
+        compactionMode: resolveEffectiveCompactionMode(params.config, sessionAgentId),
         silentOverflowProneProvider: isSilentOverflowProneModel({
           provider: params.provider,
           modelId: params.modelId,
@@ -2221,6 +2222,7 @@ export async function runEmbeddedAttempt(
       const extensionFactories = buildEmbeddedExtensionFactories({
         cfg: params.config,
         sessionManager,
+        agentId: sessionAgentId,
         provider: params.provider,
         modelId: params.modelId,
         model: params.model,
@@ -2239,6 +2241,7 @@ export async function runEmbeddedAttempt(
       applyPiCompactionSettingsFromConfig({
         settingsManager,
         cfg: params.config,
+        agentId: sessionAgentId,
         contextTokenBudget: params.contextTokenBudget,
       });
       applyPiAutoCompactionGuard(piAutoCompactionGuardArgs);
