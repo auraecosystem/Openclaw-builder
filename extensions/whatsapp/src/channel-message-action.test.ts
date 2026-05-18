@@ -7,6 +7,15 @@ const hoisted = vi.hoisted(() => ({
   handleWhatsAppReactAction: vi.fn(async () => ({
     content: [{ type: "text", text: '{"ok":true}' }],
   })),
+  resolveAuthorizedWhatsAppOutboundTarget: vi.fn(
+    ({ chatJid, accountId }: { chatJid: string; accountId?: string }) => ({
+      to: chatJid,
+      accountId: accountId ?? "default",
+    }),
+  ),
+  resolveWhatsAppAccount: vi.fn(() => ({})),
+  resolveWhatsAppMediaMaxBytes: vi.fn(() => 1024 * 1024),
+  sendMessageWhatsApp: vi.fn(async () => ({ messageId: "upload-1", toJid: "1555@s.whatsapp.net" })),
 }));
 
 vi.mock("./channel-message-action.runtime.js", async () => {
@@ -23,10 +32,36 @@ vi.mock("./channel-message-action.runtime.js", async () => {
       }
       return stripped.startsWith("+") ? stripped : `+${stripped.replace(/^\+/, "")}`;
     },
-    readStringParam: (params: Record<string, unknown>, key: string) => {
+    readStringParam: (
+      params: Record<string, unknown>,
+      key: string,
+      options?: { required?: boolean; allowEmpty?: boolean; trim?: boolean },
+    ) => {
       const value = params[key];
-      return typeof value === "string" && value.trim() ? value : undefined;
+      if (value == null) {
+        if (options?.required) {
+          const err = new Error(`${key} required`);
+          err.name = "ToolInputError";
+          throw err;
+        }
+        return undefined;
+      }
+      const text = typeof value === "string" ? value : "";
+      const normalized = options?.trim === false ? text : text.trim();
+      if (!options?.allowEmpty && !normalized) {
+        if (options?.required) {
+          const err = new Error(`${key} required`);
+          err.name = "ToolInputError";
+          throw err;
+        }
+        return undefined;
+      }
+      return normalized;
     },
+    resolveAuthorizedWhatsAppOutboundTarget: hoisted.resolveAuthorizedWhatsAppOutboundTarget,
+    resolveWhatsAppAccount: hoisted.resolveWhatsAppAccount,
+    resolveWhatsAppMediaMaxBytes: hoisted.resolveWhatsAppMediaMaxBytes,
+    sendMessageWhatsApp: hoisted.sendMessageWhatsApp,
   };
 });
 
@@ -44,6 +79,10 @@ describe("handleWhatsAppMessageAction", () => {
   beforeEach(() => {
     hoisted.handleWhatsAppAction.mockClear();
     hoisted.handleWhatsAppReactAction.mockClear();
+    hoisted.resolveAuthorizedWhatsAppOutboundTarget.mockClear();
+    hoisted.resolveWhatsAppAccount.mockClear();
+    hoisted.resolveWhatsAppMediaMaxBytes.mockClear();
+    hoisted.sendMessageWhatsApp.mockClear();
   });
 
   it("delegates reactions to the existing reaction handler", async () => {
@@ -101,6 +140,50 @@ describe("handleWhatsAppMessageAction", () => {
       }),
     ).rejects.toThrow(/Action listReply is not supported/);
     expect(hoisted.handleWhatsAppAction).not.toHaveBeenCalled();
+  });
+
+  it("preserves upload-file routing through the WhatsApp action handler", async () => {
+    const mediaReadFile = vi.fn(async () => Buffer.from("image"));
+
+    const result = await handleWhatsAppMessageAction({
+      action: "upload-file",
+      params: {
+        to: "+1555",
+        mediaUrl: "file:///tmp/photo.png",
+        caption: "receipt",
+        asDocument: "true",
+      },
+      cfg: baseCfg,
+      accountId: "default",
+      mediaLocalRoots: ["/tmp"],
+      mediaReadFile,
+    });
+
+    expect(hoisted.resolveAuthorizedWhatsAppOutboundTarget).toHaveBeenCalledWith({
+      cfg: baseCfg,
+      chatJid: "+1555",
+      accountId: "default",
+      actionLabel: "upload-file",
+    });
+    expect(hoisted.sendMessageWhatsApp).toHaveBeenCalledWith("+1555", "receipt", {
+      verbose: false,
+      cfg: baseCfg,
+      mediaUrl: "file:///tmp/photo.png",
+      mediaAccess: undefined,
+      mediaLocalRoots: ["/tmp"],
+      mediaReadFile,
+      gifPlayback: undefined,
+      audioAsVoice: undefined,
+      forceDocument: true,
+      accountId: "default",
+    });
+    expect(result.content[0]?.type).toBe("text");
+    expect(JSON.parse(result.content[0]?.text ?? "{}")).toMatchObject({
+      ok: true,
+      channel: "whatsapp",
+      action: "upload-file",
+      messageId: "upload-1",
+    });
   });
 
   it("quotes the current inbound list message when replying in the same chat", async () => {

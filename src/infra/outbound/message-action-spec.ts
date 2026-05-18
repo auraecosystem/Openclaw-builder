@@ -76,7 +76,6 @@ type ActionTargetAliasSpec = {
 const ACTION_TARGET_ALIASES: Partial<Record<ChannelMessageActionName, ActionTargetAliasSpec>> = {
   unsend: { aliases: ["messageId"] },
   edit: { aliases: ["messageId"] },
-  "list-reply": { aliases: ["chatJid", "chatId"] },
   react: { aliases: ["chatGuid", "chatIdentifier", "chatId"] },
   renameGroup: { aliases: ["chatGuid", "chatIdentifier", "chatId"] },
   setGroupIcon: { aliases: ["chatGuid", "chatIdentifier", "chatId"] },

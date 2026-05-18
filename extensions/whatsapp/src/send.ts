@@ -328,11 +328,8 @@ export async function sendListReplyWhatsApp(
   try {
     const jid = toWhatsappJid(to);
     const redactedJid = redactIdentifier(jid);
-    outboundLog.info(`Sending list reply "${reply.title}" -> ${redactedJid}`);
-    logger.info(
-      { jid: redactedJid, selectedRowId: reply.selectedRowId },
-      "sending list reply",
-    );
+    outboundLog.info(`Sending list reply -> ${redactedJid}`);
+    logger.info({ jid: redactedJid }, "sending list reply");
     const sendOptions: ActiveWebSendOptions | undefined =
       options.accountId || options.quotedMessageKey
         ? {
@@ -350,7 +347,7 @@ export async function sendListReplyWhatsApp(
     return { messageId, toJid: jid };
   } catch (err) {
     logger.error(
-      { err: String(err), to: redactedTo, selectedRowId: reply.selectedRowId },
+      { err: String(err), to: redactedTo },
       "failed to send list reply via web session",
     );
     throw err;

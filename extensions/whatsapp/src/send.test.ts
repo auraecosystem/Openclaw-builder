@@ -209,6 +209,35 @@ describe("web outbound", () => {
     );
   });
 
+  it("redacts list reply row details in outbound logs", async () => {
+    const logPath = path.join(os.tmpdir(), `openclaw-list-reply-${crypto.randomUUID()}.log`);
+    setLoggerOverride({ level: "trace", file: logPath });
+
+    await sendListReplyWhatsApp(
+      "+1555",
+      {
+        title: "Private billing appointment",
+        selectedRowId: "acct-123-slot-morning",
+        description: "10:30 AM with billing",
+      },
+      { verbose: false, cfg: WHATSAPP_TEST_CFG },
+    );
+
+    await vi.waitFor(
+      () => {
+        expect(fsSync.existsSync(logPath)).toBe(true);
+      },
+      { timeout: 2_000, interval: 5 },
+    );
+
+    const content = fsSync.readFileSync(logPath, "utf-8");
+    expect(content).toContain(redactIdentifier("+1555"));
+    expect(content).toContain(redactIdentifier("1555@s.whatsapp.net"));
+    expect(content).not.toContain("Private billing appointment");
+    expect(content).not.toContain("acct-123-slot-morning");
+    expect(content).not.toContain("10:30 AM with billing");
+  });
+
   it("uses configured defaultAccount when outbound accountId is omitted", async () => {
     hoisted.controllerListeners.clear();
     hoisted.controllerListeners.set("work", {
