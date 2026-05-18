@@ -5,7 +5,10 @@ import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { resolveComparableIdentity, type WhatsAppReplyContext } from "../identity.js";
 import { jidToE164 } from "../text-runtime.js";
 import { parseVcard } from "../vcard.js";
-import type { WhatsAppStructuredContactContext } from "./types.js";
+import type {
+  WhatsAppInteractiveListContext,
+  WhatsAppStructuredContactContext,
+} from "./types.js";
 
 const MESSAGE_WRAPPER_KEYS = [
   "botInvokeMessage",
@@ -254,6 +257,14 @@ export function extractText(rawMessage: proto.IMessage | undefined): string | un
     if (caption?.trim()) {
       return caption.trim();
     }
+    const interactiveResponse = extractInteractiveResponseText(candidate);
+    if (interactiveResponse) {
+      return interactiveResponse;
+    }
+    const interactiveList = extractInteractiveListText(candidate);
+    if (interactiveList) {
+      return interactiveList;
+    }
   }
   const contactPlaceholder =
     extractContactPlaceholder(message) ??
@@ -264,6 +275,74 @@ export function extractText(rawMessage: proto.IMessage | undefined): string | un
     return contactPlaceholder;
   }
   return undefined;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function extractInteractiveResponseText(message: proto.IMessage): string | undefined {
+  const button = message.buttonsResponseMessage;
+  const buttonText = nonEmptyString(button?.selectedDisplayText);
+  if (buttonText) {
+    return buttonText;
+  }
+  const buttonId = nonEmptyString(button?.selectedButtonId);
+  if (buttonId) {
+    return `<whatsapp-button-response id="${buttonId}">`;
+  }
+
+  const list = message.listResponseMessage;
+  const listTitle = nonEmptyString(list?.title);
+  const listDescription = nonEmptyString(list?.description);
+  const selectedRowId = nonEmptyString(list?.singleSelectReply?.selectedRowId);
+  if (listTitle || listDescription || selectedRowId) {
+    return [listTitle, listDescription, selectedRowId ? `rowId: ${selectedRowId}` : undefined]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  const template = message.templateButtonReplyMessage;
+  const templateText = nonEmptyString(template?.selectedDisplayText);
+  if (templateText) {
+    return templateText;
+  }
+  const templateId = nonEmptyString(template?.selectedId);
+  if (templateId) {
+    return `<whatsapp-template-button-response id="${templateId}">`;
+  }
+
+  const interactive = message.interactiveResponseMessage;
+  const interactiveBody = nonEmptyString(interactive?.body?.text);
+  if (interactiveBody) {
+    return interactiveBody;
+  }
+  const nativeFlowName = nonEmptyString(interactive?.nativeFlowResponseMessage?.name);
+  if (nativeFlowName) {
+    return `<whatsapp-interactive-response name="${nativeFlowName}">`;
+  }
+  return undefined;
+}
+
+function extractInteractiveListText(message: proto.IMessage): string | undefined {
+  const context = extractInteractiveListContext(message);
+  if (!context) {
+    return undefined;
+  }
+  const header = [context.title, context.description, context.buttonText]
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  const rows = context.rows.map((row, index) => {
+    const label = row.title ?? `Option ${index + 1}`;
+    const description = row.description ? ` - ${row.description}` : "";
+    const section = row.sectionTitle ? ` [${row.sectionTitle}]` : "";
+    return `${index + 1}. ${label}${description}${section} (rowId: ${row.rowId})`;
+  });
+  return [header || "WhatsApp list", rows.length > 0 ? "Options:" : undefined, ...rows]
+    .filter(Boolean)
+    .join("\n")
+    .trim();
 }
 
 export function extractMediaPlaceholder(
@@ -332,6 +411,51 @@ export function extractContactContext(
     contacts: contactsArray.map((entry) =>
       describeContact({ displayName: entry.displayName, vcard: entry.vcard }),
     ),
+  };
+}
+
+export function extractInteractiveListContext(
+  rawMessage: proto.IMessage | undefined,
+): WhatsAppInteractiveListContext | undefined {
+  const message = unwrapMessage(rawMessage);
+  const list = message?.listMessage;
+  if (!list) {
+    return undefined;
+  }
+  const rows = (list.sections ?? []).flatMap((section) => {
+    const sectionTitle = nonEmptyString(section?.title);
+    return (section?.rows ?? [])
+      .map((row) => {
+        const rowId = nonEmptyString(row?.rowId);
+        if (!rowId) {
+          return null;
+        }
+        const title = nonEmptyString(row?.title);
+        const description = nonEmptyString(row?.description);
+        return {
+          ...(sectionTitle ? { sectionTitle } : {}),
+          rowId,
+          ...(title ? { title } : {}),
+          ...(description ? { description } : {}),
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => row != null);
+  });
+  if (rows.length === 0) {
+    return undefined;
+  }
+  const title = nonEmptyString(list.title);
+  const description = nonEmptyString(list.description);
+  const buttonText = nonEmptyString(list.buttonText);
+  const footerText = nonEmptyString(list.footerText);
+  return {
+    kind: "list",
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
+    ...(buttonText ? { buttonText } : {}),
+    ...(footerText ? { footerText } : {}),
+    ...(list.listType != null ? { listType: list.listType } : {}),
+    rows,
   };
 }
 

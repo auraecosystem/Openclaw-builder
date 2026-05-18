@@ -5,6 +5,7 @@ import { handleWhatsAppAction, whatsAppActionRuntime } from "./action-runtime.js
 
 const originalWhatsAppActionRuntime = { ...whatsAppActionRuntime };
 const sendReactionWhatsApp = vi.fn(async () => undefined);
+const sendListReplyWhatsApp = vi.fn(async () => ({ messageId: "list-reply-1", toJid: "" }));
 
 const enabledConfig = {
   channels: { whatsapp: { actions: { reactions: true } } },
@@ -48,6 +49,7 @@ describe("handleWhatsAppAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.assign(whatsAppActionRuntime, originalWhatsAppActionRuntime, {
+      sendListReplyWhatsApp,
       sendReactionWhatsApp,
     });
   });
@@ -318,5 +320,75 @@ describe("handleWhatsAppAction", () => {
       emoji: "✅",
       accountId: "work",
     });
+  });
+
+  it("sends list replies using the captured selected row id", async () => {
+    const cfg = {
+      channels: {
+        whatsapp: {
+          allowFrom: ["123@s.whatsapp.net"],
+        },
+      },
+    } as OpenClawConfig;
+
+    await handleWhatsAppAction(
+      {
+        action: "list-reply",
+        chatJid: "123@s.whatsapp.net",
+        messageId: "list-msg",
+        rowId: "slot-morning",
+        title: "Morning slot",
+        description: "10:30 AM with Dr. Lee",
+      },
+      cfg,
+    );
+
+    expect(sendListReplyWhatsApp).toHaveBeenCalledWith(
+      "+123",
+      {
+        title: "Morning slot",
+        selectedRowId: "slot-morning",
+        description: "10:30 AM with Dr. Lee",
+      },
+      {
+        verbose: false,
+        accountId: DEFAULT_ACCOUNT_ID,
+        cfg,
+        quotedMessageKey: {
+          id: "list-msg",
+          remoteJid: "123@s.whatsapp.net",
+          fromMe: false,
+        },
+      },
+    );
+  });
+
+  it("requires a selected row id for list replies", async () => {
+    await expect(
+      handleWhatsAppAction(
+        {
+          action: "list-reply",
+          to: "123@s.whatsapp.net",
+          title: "Morning slot",
+        },
+        { channels: { whatsapp: {} } } as OpenClawConfig,
+      ),
+    ).rejects.toThrow(/requires selectedRowId or rowId/);
+    expect(sendListReplyWhatsApp).not.toHaveBeenCalled();
+  });
+
+  it("respects sendMessage gating for list replies", async () => {
+    await expect(
+      handleWhatsAppAction(
+        {
+          action: "list-reply",
+          to: "123@s.whatsapp.net",
+          rowId: "slot-morning",
+          title: "Morning slot",
+        },
+        { channels: { whatsapp: { actions: { sendMessage: false } } } } as OpenClawConfig,
+      ),
+    ).rejects.toThrow(/WhatsApp list replies are disabled/);
+    expect(sendListReplyWhatsApp).not.toHaveBeenCalled();
   });
 });

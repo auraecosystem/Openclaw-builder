@@ -1,6 +1,11 @@
 import type { proto } from "baileys";
 import { describe, expect, it } from "vitest";
-import { extractMentionedJids, hasInboundUserContent } from "./extract.js";
+import {
+  extractInteractiveListContext,
+  extractMentionedJids,
+  extractText,
+  hasInboundUserContent,
+} from "./extract.js";
 
 describe("extractMentionedJids", () => {
   const botJid = "5511999999999@s.whatsapp.net";
@@ -223,6 +228,29 @@ describe("hasInboundUserContent", () => {
     ).toBe(true);
   });
 
+  it("returns true for inbound list messages with selectable rows", () => {
+    expect(
+      hasInboundUserContent({
+        listMessage: {
+          title: "Choose an appointment",
+          buttonText: "View times",
+          sections: [
+            {
+              title: "Available times",
+              rows: [
+                {
+                  rowId: "slot-morning",
+                  title: "Morning slot",
+                  description: "10:30 AM with Dr. Lee",
+                },
+              ],
+            },
+          ],
+        },
+      } as proto.IMessage),
+    ).toBe(true);
+  });
+
   it("returns true for buttons response wrapped in ephemeralMessage (regression for #73797 + greptile review)", () => {
     expect(
       hasInboundUserContent({
@@ -278,5 +306,127 @@ describe("hasInboundUserContent", () => {
     expect(hasInboundUserContent({ extendedTextMessage: { text: "  " } } as proto.IMessage)).toBe(
       false,
     );
+  });
+});
+
+describe("extractInteractiveListContext", () => {
+  it("extracts list rows and row ids from WhatsApp list messages", () => {
+    const message = {
+      listMessage: {
+        title: "Choose an appointment",
+        description: "I found 2 available appointment times.",
+        buttonText: "View times",
+        footerText: "Clinic",
+        listType: 1,
+        sections: [
+          {
+            title: "Available times",
+            rows: [
+              {
+                rowId: "slot-morning",
+                title: "Morning slot",
+                description: "10:30 AM with Dr. Lee",
+              },
+              {
+                rowId: "slot-afternoon",
+                title: "Afternoon slot",
+                description: "2:00 PM with Dr. Patel",
+              },
+            ],
+          },
+        ],
+      },
+    } as proto.IMessage;
+
+    expect(extractInteractiveListContext(message)).toEqual({
+      kind: "list",
+      title: "Choose an appointment",
+      description: "I found 2 available appointment times.",
+      buttonText: "View times",
+      footerText: "Clinic",
+      listType: 1,
+      rows: [
+        {
+          sectionTitle: "Available times",
+          rowId: "slot-morning",
+          title: "Morning slot",
+          description: "10:30 AM with Dr. Lee",
+        },
+        {
+          sectionTitle: "Available times",
+          rowId: "slot-afternoon",
+          title: "Afternoon slot",
+          description: "2:00 PM with Dr. Patel",
+        },
+      ],
+    });
+    expect(extractText(message)).toContain("Morning slot - 10:30 AM");
+    expect(extractText(message)).toContain("rowId: slot-afternoon");
+  });
+
+  it("extracts list rows from wrapped WhatsApp list messages", () => {
+    const message = {
+      ephemeralMessage: {
+        message: {
+          listMessage: {
+            title: "Choose a delivery window",
+            description: "I found 2 available delivery windows.",
+            buttonText: "View windows",
+            sections: [
+              {
+                title: "Available windows",
+                rows: [
+                  {
+                    rowId: "delivery-morning",
+                    title: "Morning delivery",
+                    description: "9:00 AM to 12:00 PM",
+                  },
+                  {
+                    rowId: "delivery-evening",
+                    title: "Evening delivery",
+                    description: "6:00 PM to 8:00 PM",
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    } as proto.IMessage;
+
+    expect(hasInboundUserContent(message)).toBe(true);
+    expect(extractInteractiveListContext(message)).toEqual({
+      kind: "list",
+      title: "Choose a delivery window",
+      description: "I found 2 available delivery windows.",
+      buttonText: "View windows",
+      rows: [
+        {
+          sectionTitle: "Available windows",
+          rowId: "delivery-morning",
+          title: "Morning delivery",
+          description: "9:00 AM to 12:00 PM",
+        },
+        {
+          sectionTitle: "Available windows",
+          rowId: "delivery-evening",
+          title: "Evening delivery",
+          description: "6:00 PM to 8:00 PM",
+        },
+      ],
+    });
+    expect(extractText(message)).toContain("rowId: delivery-evening");
+  });
+
+  it("returns selected row text for list response messages", () => {
+    expect(
+      extractText({
+        listResponseMessage: {
+          title: "Morning slot",
+          description: "10:30 AM with Dr. Lee",
+          singleSelectReply: { selectedRowId: "slot-morning" },
+        } as unknown as proto.Message.IListResponseMessage,
+      } as proto.IMessage),
+    ).toBe("Morning slot\n10:30 AM with Dr. Lee\nrowId: slot-morning");
   });
 });

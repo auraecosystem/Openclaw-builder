@@ -22,12 +22,19 @@ vi.mock("./channel-actions.runtime.js", async () => {
   return {
     listWhatsAppAccountIds: hoisted.listWhatsAppAccountIds,
     resolveWhatsAppAccount: hoisted.resolveWhatsAppAccount,
-    createActionGate: (actions?: { reactions?: boolean; polls?: boolean }) => (name: string) => {
+    createActionGate: (actions?: {
+      reactions?: boolean;
+      polls?: boolean;
+      sendMessage?: boolean;
+    }) => (name: string) => {
       if (name === "reactions") {
         return actions?.reactions !== false;
       }
       if (name === "polls") {
         return actions?.polls !== false;
+      }
+      if (name === "sendMessage") {
+        return actions?.sendMessage !== false;
       }
       return true;
     },
@@ -130,6 +137,7 @@ describe("whatsapp channel action helpers", () => {
     expect(describeWhatsAppMessageActions({ cfg, accountId: "default" })?.actions).toEqual([
       "react",
       "poll",
+      "list-reply",
       "upload-file",
     ]);
   });
@@ -138,6 +146,23 @@ describe("whatsapp channel action helpers", () => {
     expect(
       describeWhatsAppMessageActions({ cfg: {} as OpenClawConfig, accountId: "default" }),
     ).toBeNull();
+  });
+
+  it("omits list replies when sendMessage actions are disabled", () => {
+    const cfg = {
+      channels: {
+        whatsapp: {
+          actions: { sendMessage: false },
+          allowFrom: ["*"],
+        },
+      },
+    } as OpenClawConfig;
+
+    expect(describeWhatsAppMessageActions({ cfg, accountId: "default" })?.actions).toEqual([
+      "react",
+      "poll",
+      "upload-file",
+    ]);
   });
 
   it("omits react when reactionLevel disables agent reactions", () => {
@@ -152,6 +177,7 @@ describe("whatsapp channel action helpers", () => {
 
     expect(describeWhatsAppMessageActions({ cfg, accountId: "default" })?.actions).toEqual([
       "poll",
+      "list-reply",
       "upload-file",
     ]);
   });
@@ -174,6 +200,7 @@ describe("whatsapp channel action helpers", () => {
     expect(describeWhatsAppMessageActions({ cfg, accountId: "work" })?.actions).toEqual([
       "react",
       "poll",
+      "list-reply",
       "upload-file",
     ]);
   });
@@ -197,6 +224,7 @@ describe("whatsapp channel action helpers", () => {
     expect(describeWhatsAppMessageActions({ cfg })?.actions).toEqual([
       "react",
       "poll",
+      "list-reply",
       "upload-file",
     ]);
   });
@@ -218,6 +246,10 @@ describe("whatsapp channel action helpers", () => {
     } as OpenClawConfig;
     hoisted.listWhatsAppAccountIds.mockReturnValue(["default", "work"]);
 
-    expect(describeWhatsAppMessageActions({ cfg })?.actions).toEqual(["poll", "upload-file"]);
+    expect(describeWhatsAppMessageActions({ cfg })?.actions).toEqual([
+      "poll",
+      "list-reply",
+      "upload-file",
+    ]);
   });
 });

@@ -168,6 +168,39 @@ export function createWebSendApi(params: {
       recordWhatsAppOutbound(params.defaultAccountId);
       return normalizeWhatsAppSendResult(result, "poll");
     },
+    sendListReply: async (
+      to: string,
+      reply: {
+        title: string;
+        selectedRowId: string;
+        description?: string;
+      },
+      sendOptions?: ActiveWebSendOptions,
+    ): Promise<WhatsAppSendResult> => {
+      const jid = resolveOutboundJid(to);
+      const payload = {
+        listReply: {
+          title: reply.title,
+          description: reply.description,
+          listType: 1,
+          singleSelectReply: {
+            selectedRowId: reply.selectedRowId,
+          },
+        },
+      } as AnyMessageContent;
+      const quotedOpts = buildQuotedMessageOptions({
+        messageId: sendOptions?.quotedMessageKey?.id,
+        remoteJid: sendOptions?.quotedMessageKey?.remoteJid,
+        fromMe: sendOptions?.quotedMessageKey?.fromMe,
+        participant: sendOptions?.quotedMessageKey?.participant,
+        messageText: sendOptions?.quotedMessageKey?.messageText,
+      });
+      const result = quotedOpts
+        ? await params.sock.sendMessage(jid, payload, quotedOpts)
+        : await params.sock.sendMessage(jid, payload);
+      recordWhatsAppOutbound(sendOptions?.accountId ?? params.defaultAccountId);
+      return normalizeWhatsAppSendResult(result, "text");
+    },
     sendReaction: async (
       chatJid: string,
       messageId: string,
