@@ -19,7 +19,7 @@ type DiscordMessageRunQueueParams = {
   setStatus?: DiscordMonitorStatusSink;
   abortSignal?: AbortSignal;
   replayGuard?: ClaimableDedupe;
-  __testing?: DiscordMessageRunQueueTestingHooks;
+  testing?: DiscordMessageRunQueueTestingHooks;
 };
 
 type DiscordMessageRunQueue = {
@@ -102,20 +102,14 @@ export function createDiscordMessageRunQueue(
 
   return {
     enqueue(job) {
-      runQueue.enqueue(
-        job.queueKey,
-        async ({ lifecycleSignal }) => {
-          await processDiscordQueuedMessage({
-            job,
-            lifecycleSignal,
-            replayGuard,
-            testing: params.__testing,
-          });
-        },
-        {
-          onSkip: () => cleanupSkippedDiscordQueuedMessage({ job, replayGuard }),
-        },
-      );
+      runQueue.enqueue(job.queueKey, async ({ lifecycleSignal }) => {
+        await processDiscordQueuedMessage({
+          job,
+          lifecycleSignal,
+          replayGuard,
+          testing: params.testing,
+        });
+      });
     },
     deactivate: runQueue.deactivate,
   };

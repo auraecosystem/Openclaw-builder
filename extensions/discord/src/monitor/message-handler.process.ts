@@ -817,9 +817,10 @@ async function processDiscordMessageInner(
                 (typeof resolvedBlockStreamingEnabled === "boolean"
                   ? !resolvedBlockStreamingEnabled
                   : undefined)),
-            onPartialReply: draftPreview.draftStream
-              ? (payload) => draftPreview.updateFromPartial(payload.text)
-              : undefined,
+            onPartialReply:
+              draftPreview.draftStream && !draftPreview.isProgressMode
+                ? (payload) => draftPreview.updateFromPartial(payload.text)
+                : undefined,
             onAssistantMessageStart: draftPreview.draftStream
               ? () => draftPreview.handleAssistantMessageBoundary()
               : undefined,
