@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { isValidNonNegativeByteSizeString } from "./byte-size.js";
 import {
   HeartbeatSchema,
   AgentCompactionSchema,
@@ -22,11 +21,6 @@ import {
 } from "./zod-schema.core.js";
 
 const SilentReplyPolicySchema = z.union([z.literal("allow"), z.literal("disallow")]);
-
-const NonNegativeByteSizeSchema = z.union([
-  z.number().int().nonnegative(),
-  z.string().refine(isValidNonNegativeByteSizeString, "Expected byte size string like 2mb"),
-]);
 
 const OptionalBootstrapFileNameSchema = z.enum([
   "SOUL.md",

@@ -519,7 +519,6 @@ export async function runCliTurnCompactionLifecycle(params: {
       messageChannel: params.messageChannel,
       agentAccountId: params.agentAccountId,
       senderIsOwner: params.senderIsOwner,
-      sessionAgentId: params.sessionAgentId,
       thinkLevel: params.thinkLevel,
       extraSystemPrompt: params.extraSystemPrompt,
     });
@@ -563,6 +562,7 @@ export async function runCliTurnCompactionLifecycle(params: {
       messageChannel: params.messageChannel,
       agentAccountId: params.agentAccountId,
       senderIsOwner: params.senderIsOwner,
+      sessionAgentId: params.sessionAgentId,
       thinkLevel: params.thinkLevel,
       extraSystemPrompt: params.extraSystemPrompt,
       bestEffortMaintenance: nativeFallbackToContextEngine,
