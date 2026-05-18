@@ -240,7 +240,10 @@ export async function compactEmbeddedPiSession(
         let postCompactionSessionFile = delegatedSessionFile ?? params.sessionFile;
         let postCompactionLeafId: string | undefined;
         if (result.ok && result.compacted) {
-          if (shouldRotateCompactionTranscript(params.config) && !delegatedRotatedTranscript) {
+          if (
+            shouldRotateCompactionTranscript(params.config, agentIds.sessionAgentId) &&
+            !delegatedRotatedTranscript
+          ) {
             try {
               const rotation = await rotateTranscriptFileAfterCompaction({
                 sessionFile: params.sessionFile,
@@ -304,6 +307,7 @@ export async function compactEmbeddedPiSession(
             config: params.config,
             sessionKey: params.sessionKey,
             sessionFile: postCompactionSessionFile,
+            agentId: agentIds.sessionAgentId,
           });
         }
         if (

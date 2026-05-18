@@ -8,6 +8,7 @@ import {
   ensureRuntimePluginsLoaded,
   estimateTokensMock,
   getMemorySearchManagerMock,
+  hardenManualCompactionBoundaryMock,
   hookRunner,
   listRegisteredPluginAgentPromptGuidanceMock,
   loadCompactHooksHarness,
@@ -853,6 +854,61 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
     }
   });
 
+  it("honors per-agent transcript rotation and post-index sync overrides", async () => {
+    const listener = vi.fn();
+    const cleanup = onSessionTranscriptUpdate(listener);
+    const sync = vi.fn(async () => {});
+    getMemorySearchManagerMock.mockResolvedValue({ manager: { sync } });
+    rotateTranscriptAfterCompactionMock.mockResolvedValueOnce({
+      rotated: true,
+      sessionId: "agent-rotated-session",
+      sessionFile: "/tmp/agent-rotated-session.jsonl",
+      leafId: "agent-rotated-leaf",
+    });
+
+    try {
+      const result = await compactEmbeddedPiSessionDirect({
+        sessionId: "session-1",
+        sessionKey: TEST_SESSION_KEY,
+        sessionFile: "/tmp/session.jsonl",
+        workspaceDir: "/tmp/workspace",
+        config: {
+          agents: {
+            defaults: {
+              compaction: {
+                truncateAfterCompaction: false,
+                postIndexSync: "off",
+              },
+            },
+            list: [
+              {
+                id: "main",
+                compaction: {
+                  truncateAfterCompaction: true,
+                  postIndexSync: "await",
+                },
+              },
+            ],
+          },
+        } as never,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenCalledWith({
+        sessionFile: "/tmp/agent-rotated-session.jsonl",
+        sessionKey: TEST_SESSION_KEY,
+      });
+      expect(sync).toHaveBeenCalledTimes(1);
+      expect(sync).toHaveBeenCalledWith({
+        reason: "post-compaction",
+        sessionFiles: ["/tmp/agent-rotated-session.jsonl"],
+      });
+    } finally {
+      cleanup();
+    }
+  });
+
   it("preserves tokensAfter when full-session context exceeds result.tokensBefore", () => {
     estimateTokensMock.mockImplementation((message: unknown) => {
       const role = (message as { role?: string }).role;
@@ -964,7 +1020,7 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
       sessionFile: TEST_SESSION_FILE,
     });
 
-    expect(resolveSessionAgentIdMock).not.toHaveBeenCalled();
+    expect(resolveSessionAgentIdMock).toHaveBeenCalledTimes(1);
     expect(getMemorySearchManagerMock).not.toHaveBeenCalled();
     expect(sync).not.toHaveBeenCalled();
   });
@@ -1001,6 +1057,39 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
     await expect(syncStarted.promise).resolves.toEqual({
       reason: "post-compaction",
       sessionFiles: [TEST_SESSION_FILE],
+    });
+  });
+
+  it("preserves the manual compaction tail when keepRecentTokens is configured per-agent", async () => {
+    await compactEmbeddedPiSessionDirect({
+      sessionId: TEST_SESSION_ID,
+      sessionKey: TEST_SESSION_KEY,
+      sessionFile: TEST_SESSION_FILE,
+      workspaceDir: TEST_WORKSPACE_DIR,
+      trigger: "manual",
+      config: {
+        agents: {
+          defaults: {
+            compaction: {
+              keepRecentTokens: undefined,
+            },
+          },
+          list: [
+            {
+              id: "main",
+              compaction: {
+                keepRecentTokens: 12_000,
+              },
+            },
+          ],
+        },
+      } as never,
+    });
+
+    expect(hardenManualCompactionBoundaryMock).toHaveBeenCalledTimes(1);
+    expect(hardenManualCompactionBoundaryMock).toHaveBeenCalledWith({
+      sessionFile: TEST_SESSION_FILE,
+      preserveRecentTail: true,
     });
   });
 

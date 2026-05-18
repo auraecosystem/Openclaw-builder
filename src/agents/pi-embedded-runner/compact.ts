@@ -999,7 +999,7 @@ async function compactEmbeddedPiSessionDirectOnce(
       );
     };
 
-    const compactionTimeoutMs = resolveCompactionTimeoutMs(params.config);
+    const compactionTimeoutMs = resolveCompactionTimeoutMs(params.config, sessionAgentId);
     const sessionLock = await acquireSessionWriteLock({
       sessionFile: params.sessionFile,
       ...resolveSessionWriteLockOptions(params.config, {
@@ -1295,7 +1295,10 @@ async function compactEmbeddedPiSessionDirectOnce(
               const hardenedBoundary = await hardenManualCompactionBoundary({
                 sessionFile: params.sessionFile,
                 preserveRecentTail:
-                  typeof params.config?.agents?.defaults?.compaction?.keepRecentTokens === "number",
+                  typeof (
+                    resolveAgentConfig(params.config ?? {}, sessionAgentId)?.compaction ??
+                    params.config?.agents?.defaults?.compaction
+                  )?.keepRecentTokens === "number",
               });
               if (hardenedBoundary.applied) {
                 effectiveFirstKeptEntryId =
@@ -1322,7 +1325,7 @@ async function compactEmbeddedPiSessionDirectOnce(
           const messageCountAfter = session.messages.length;
           const compactedCount = Math.max(0, messageCountCompactionInput - messageCountAfter);
           let transcriptRotation: CompactionTranscriptRotation = { rotated: false };
-          if (shouldRotateCompactionTranscript(params.config)) {
+          if (shouldRotateCompactionTranscript(params.config, sessionAgentId)) {
             try {
               transcriptRotation = await rotateTranscriptAfterCompaction({
                 sessionManager: transcriptRotationSessionManager,
@@ -1348,6 +1351,7 @@ async function compactEmbeddedPiSessionDirectOnce(
             config: params.config,
             sessionKey: params.sessionKey,
             sessionFile: activeSessionFile,
+            agentId: sessionAgentId,
           });
           if (params.config && params.sessionKey && checkpointSnapshot) {
             try {

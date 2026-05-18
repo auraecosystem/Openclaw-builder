@@ -7,6 +7,7 @@ import {
   type SessionHeader,
 } from "@earendil-works/pi-coding-agent";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { resolveAgentConfig } from "../agent-scope-config.js";
 import { collectDuplicateUserMessageEntryIdsForCompaction } from "./compaction-duplicate-user-messages.js";
 import {
   readTranscriptFileState,
@@ -29,8 +30,16 @@ export type CompactionTranscriptRotation = {
   entriesWritten?: number;
 };
 
-export function shouldRotateCompactionTranscript(config?: OpenClawConfig): boolean {
-  return config?.agents?.defaults?.compaction?.truncateAfterCompaction === true;
+export function shouldRotateCompactionTranscript(
+  config?: OpenClawConfig,
+  agentId?: string | null,
+): boolean {
+  return (
+    (
+      (config && agentId ? resolveAgentConfig(config, agentId)?.compaction : undefined) ??
+      config?.agents?.defaults?.compaction
+    )?.truncateAfterCompaction === true
+  );
 }
 
 export async function rotateTranscriptAfterCompaction(params: {
