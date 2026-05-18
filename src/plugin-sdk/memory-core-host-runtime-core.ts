@@ -1,5 +1,6 @@
 export * from "../../packages/memory-host-sdk/src/runtime-core.js";
 export { DEFAULT_PI_COMPACTION_RESERVE_TOKENS_FLOOR } from "../agents/pi-settings.js";
+export { resolveAgentConfig } from "../agents/agent-scope-config.js";
 export {
   asToolParamsRecord,
   jsonResult,
