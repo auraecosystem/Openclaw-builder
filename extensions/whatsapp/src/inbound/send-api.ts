@@ -182,6 +182,7 @@ export function createWebSendApi(params: {
         listReply: {
           title: reply.title,
           description: reply.description,
+          // Baileys uses 1 for WhatsApp's single-select list replies.
           listType: 1,
           singleSelectReply: {
             selectedRowId: reply.selectedRowId,

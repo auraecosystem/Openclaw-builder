@@ -99,7 +99,7 @@ export async function handleWhatsAppAction(
     return jsonResult({ ok: true, removed: true });
   }
 
-  if (action === "list-reply" || action === "listReply") {
+  if (action === "list-reply") {
     const accountId = readStringParam(params, "accountId");
     if (!whatsAppConfig) {
       throw new Error("WhatsApp list replies are disabled.");
@@ -112,14 +112,17 @@ export async function handleWhatsAppAction(
       readStringParam(params, "chatJid") ??
       readStringParam(params, "chatId");
     if (!to) {
-      throw new Error("WhatsApp list reply requires to or chatJid.");
+      throw new Error("WhatsApp list reply requires to, chatJid, or chatId.");
     }
     const selectedRowId =
       readStringParam(params, "selectedRowId") ?? readStringParam(params, "rowId");
     if (!selectedRowId) {
       throw new Error("WhatsApp list reply requires selectedRowId or rowId.");
     }
-    const title = readStringParam(params, "title") ?? selectedRowId;
+    const title = readStringParam(params, "title");
+    if (!title) {
+      throw new Error("WhatsApp list reply requires title.");
+    }
     const description = readStringParam(params, "description");
     const messageId = readStringParam(params, "messageId") ?? readStringParam(params, "replyToId");
     const participant = readStringParam(params, "participant");

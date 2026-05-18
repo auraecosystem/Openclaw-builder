@@ -309,6 +309,38 @@ describe("hasInboundUserContent", () => {
   });
 });
 
+describe("extractText", () => {
+  it("returns a synthetic button response when only the button id is present", () => {
+    expect(
+      extractText({
+        buttonsResponseMessage: {
+          selectedButtonId: "confirm",
+        },
+      } as proto.IMessage),
+    ).toBe('<whatsapp-button-response id="confirm">');
+  });
+
+  it("returns a synthetic template button response when only the selected id is present", () => {
+    expect(
+      extractText({
+        templateButtonReplyMessage: {
+          selectedId: "start-over",
+        } as unknown as proto.Message.ITemplateButtonReplyMessage,
+      } as proto.IMessage),
+    ).toBe('<whatsapp-template-button-response id="start-over">');
+  });
+
+  it("returns a synthetic interactive response when only the native flow name is present", () => {
+    expect(
+      extractText({
+        interactiveResponseMessage: {
+          nativeFlowResponseMessage: { name: "schedule_flow" },
+        } as unknown as proto.Message.IInteractiveResponseMessage,
+      } as proto.IMessage),
+    ).toBe('<whatsapp-interactive-response name="schedule_flow">');
+  });
+});
+
 describe("extractInteractiveListContext", () => {
   it("extracts list rows and row ids from WhatsApp list messages", () => {
     const message = {

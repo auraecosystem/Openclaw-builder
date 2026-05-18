@@ -87,6 +87,22 @@ describe("handleWhatsAppMessageAction", () => {
     );
   });
 
+  it("rejects the internal camelCase list reply alias", async () => {
+    await expect(
+      handleWhatsAppMessageAction({
+        action: "listReply",
+        params: {
+          to: "+1555",
+          selectedRowId: "2ª via",
+          title: "2ª via",
+        },
+        cfg: baseCfg,
+        accountId: "default",
+      }),
+    ).rejects.toThrow(/Action listReply is not supported/);
+    expect(hoisted.handleWhatsAppAction).not.toHaveBeenCalled();
+  });
+
   it("quotes the current inbound list message when replying in the same chat", async () => {
     await handleWhatsAppMessageAction({
       action: "list-reply",

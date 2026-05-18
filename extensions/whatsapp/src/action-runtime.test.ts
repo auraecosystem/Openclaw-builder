@@ -426,6 +426,34 @@ describe("handleWhatsAppAction", () => {
     expect(sendListReplyWhatsApp).not.toHaveBeenCalled();
   });
 
+  it("requires a title for list replies", async () => {
+    await expect(
+      handleWhatsAppAction(
+        {
+          action: "list-reply",
+          to: "123@s.whatsapp.net",
+          selectedRowId: "slot-morning",
+        },
+        { channels: { whatsapp: {} } } as OpenClawConfig,
+      ),
+    ).rejects.toThrow(/requires title/);
+    expect(sendListReplyWhatsApp).not.toHaveBeenCalled();
+  });
+
+  it("lists all accepted target params when list reply target is missing", async () => {
+    await expect(
+      handleWhatsAppAction(
+        {
+          action: "list-reply",
+          selectedRowId: "slot-morning",
+          title: "Morning slot",
+        },
+        { channels: { whatsapp: {} } } as OpenClawConfig,
+      ),
+    ).rejects.toThrow(/requires to, chatJid, or chatId/);
+    expect(sendListReplyWhatsApp).not.toHaveBeenCalled();
+  });
+
   it("respects sendMessage gating for list replies", async () => {
     await expect(
       handleWhatsAppAction(

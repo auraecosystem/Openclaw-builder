@@ -22,22 +22,20 @@ vi.mock("./channel-actions.runtime.js", async () => {
   return {
     listWhatsAppAccountIds: hoisted.listWhatsAppAccountIds,
     resolveWhatsAppAccount: hoisted.resolveWhatsAppAccount,
-    createActionGate: (actions?: {
-      reactions?: boolean;
-      polls?: boolean;
-      sendMessage?: boolean;
-    }) => (name: string) => {
-      if (name === "reactions") {
-        return actions?.reactions !== false;
-      }
-      if (name === "polls") {
-        return actions?.polls !== false;
-      }
-      if (name === "sendMessage") {
-        return actions?.sendMessage !== false;
-      }
-      return true;
-    },
+    createActionGate:
+      (actions?: { reactions?: boolean; polls?: boolean; sendMessage?: boolean }) =>
+      (name: string) => {
+        if (name === "reactions") {
+          return actions?.reactions !== false;
+        }
+        if (name === "polls") {
+          return actions?.polls !== false;
+        }
+        if (name === "sendMessage") {
+          return actions?.sendMessage !== false;
+        }
+        return true;
+      },
     resolveWhatsAppReactionLevel: ({
       cfg,
       accountId,
@@ -140,6 +138,23 @@ describe("whatsapp channel action helpers", () => {
       "list-reply",
       "upload-file",
     ]);
+  });
+
+  it("advertises the canonical list reply schema fields", () => {
+    const cfg = {
+      channels: {
+        whatsapp: {
+          allowFrom: ["*"],
+        },
+      },
+    } as OpenClawConfig;
+
+    const schema = describeWhatsAppMessageActions({ cfg, accountId: "default" })?.schema;
+    expect(schema && !Array.isArray(schema) ? schema.actions : undefined).toEqual(["list-reply"]);
+    const properties = schema && !Array.isArray(schema) ? schema.properties : {};
+    expect(properties.selectedRowId?.type).toBe("string");
+    expect(properties.title?.type).toBe("string");
+    expect(properties.rowId).toBeUndefined();
   });
 
   it("returns null when WhatsApp is not configured", () => {

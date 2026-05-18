@@ -1,4 +1,8 @@
-import { handleWhatsAppAction, normalizeWhatsAppTarget, readStringParam } from "./channel-message-action.runtime.js";
+import {
+  handleWhatsAppAction,
+  normalizeWhatsAppTarget,
+  readStringParam,
+} from "./channel-message-action.runtime.js";
 import { handleWhatsAppReactAction } from "./channel-react-action.js";
 
 const WHATSAPP_CHANNEL = "whatsapp" as const;
@@ -18,7 +22,7 @@ export async function handleWhatsAppMessageAction(params: {
   if (params.action === "react") {
     return await handleWhatsAppReactAction(params);
   }
-  if (params.action !== "list-reply" && params.action !== "listReply") {
+  if (params.action !== "list-reply") {
     throw new Error(`Action ${params.action} is not supported for provider ${WHATSAPP_CHANNEL}.`);
   }
 

@@ -109,7 +109,7 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> =
       commands: whatsappCommandPolicy,
       agentPrompt: {
         messageToolHints: () => [
-          "- WhatsApp list prompts include `Options:` rows with `rowId:` values. To select one, call `message` with `action=\"list-reply\"`, `selectedRowId` or `rowId`, and the visible row `title`; do not send the row title as plain text.",
+          '- WhatsApp list prompts include `Options:` rows with `rowId:` values. To select one, call `message` with `action="list-reply"`, `selectedRowId` set to that rowId value, and the visible row `title`; do not send the row title as plain text.',
         ],
         reactionGuidance: ({ cfg, accountId }) => {
           const level = resolveWhatsAppAgentReactionGuidance({
