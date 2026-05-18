@@ -176,7 +176,7 @@ function handleRuntimeToolJump(event: Event, anchorId: string) {
 }
 
 function renderEffectiveToolBadge(tool: {
-  source: "core" | "plugin" | "channel";
+  source: "core" | "plugin" | "channel" | "mcp";
   pluginId?: string;
   channelId?: string;
 }) {
@@ -189,6 +189,9 @@ function renderEffectiveToolBadge(tool: {
     return tool.channelId
       ? t("agentTools.channelSource", { id: tool.channelId })
       : t("agentTools.channel");
+  }
+  if (tool.source === "mcp") {
+    return "MCP";
   }
   return t("agentTools.builtIn");
 }

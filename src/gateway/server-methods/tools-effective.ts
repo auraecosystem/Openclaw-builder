@@ -1,3 +1,7 @@
+import {
+  buildEffectiveToolInventoryEntries,
+  buildEffectiveToolInventoryGroups,
+} from "../../agents/tools-effective-inventory.js";
 import type { EffectiveToolInventoryResult } from "../../agents/tools-effective-inventory.types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logDebug, logWarn } from "../../logger.js";
@@ -11,11 +15,15 @@ import {
   validateToolsEffectiveParams,
 } from "../protocol/index.js";
 import {
+  applyFinalEffectiveToolPolicy,
   deliveryContextFromSession,
   getActivePluginChannelRegistryVersion,
   getActivePluginRegistryVersion,
+  getOrCreateSessionMcpRuntime,
   listAgentIds,
   loadSessionEntry,
+  materializeBundleMcpToolsForRun,
+  resolveAgentWorkspaceDir,
   resolveEffectiveToolInventory,
   resolveReplyToMode,
   resolveRuntimeConfigCacheKey,
@@ -35,6 +43,8 @@ type TrustedToolsEffectiveContext = {
   cfg: OpenClawConfig;
   agentId: string;
   sessionKey: string;
+  sessionId: string;
+  workspaceDir: string;
   senderIsOwner: boolean;
   modelProvider?: string;
   modelId?: string;
@@ -92,6 +102,8 @@ function buildToolsEffectiveCacheKey(params: {
     pluginRegistry: getActivePluginRegistryVersion(),
     channelRegistry: getActivePluginChannelRegistryVersion(),
     sessionKey: params.sessionKey,
+    sessionId: context.sessionId,
+    workspaceDir: optionalCacheString(context.workspaceDir),
     agentId: context.agentId,
     senderIsOwner: context.senderIsOwner,
     modelProvider: optionalCacheString(context.modelProvider),
@@ -123,6 +135,86 @@ function cacheToolsEffectiveResult(key: string, value: EffectiveToolInventoryRes
   trimToolsEffectiveCache();
 }
 
+function appendMcpInventoryGroups(params: {
+  base: EffectiveToolInventoryResult;
+  mcpTools: Parameters<typeof buildEffectiveToolInventoryEntries>[0];
+}): EffectiveToolInventoryResult {
+  if (params.mcpTools.length === 0) {
+    return params.base;
+  }
+  const mcpEntries = buildEffectiveToolInventoryEntries(params.mcpTools).filter(
+    (entry) => entry.source === "mcp",
+  );
+  if (mcpEntries.length === 0) {
+    return params.base;
+  }
+  const mcpGroups = buildEffectiveToolInventoryGroups(mcpEntries);
+  return {
+    ...params.base,
+    groups: [...params.base.groups, ...mcpGroups],
+  };
+}
+
+async function resolveSessionScopedToolsEffectiveInventory(
+  context: TrustedToolsEffectiveContext,
+): Promise<EffectiveToolInventoryResult> {
+  const base = resolveEffectiveToolInventory({
+    cfg: context.cfg,
+    agentId: context.agentId,
+    sessionKey: context.sessionKey,
+    workspaceDir: context.workspaceDir,
+    messageProvider: context.messageProvider,
+    modelProvider: context.modelProvider,
+    modelId: context.modelId,
+    senderIsOwner: context.senderIsOwner,
+    currentChannelId: context.currentChannelId,
+    currentThreadTs: context.currentThreadTs,
+    accountId: context.accountId,
+    groupId: context.groupId,
+    groupChannel: context.groupChannel,
+    groupSpace: context.groupSpace,
+    replyToMode: context.replyToMode,
+  });
+  let materialized: Awaited<ReturnType<typeof materializeBundleMcpToolsForRun>> | undefined;
+  try {
+    const runtime = await getOrCreateSessionMcpRuntime({
+      sessionId: context.sessionId,
+      sessionKey: context.sessionKey,
+      workspaceDir: context.workspaceDir,
+      cfg: context.cfg,
+    });
+    materialized = await materializeBundleMcpToolsForRun({
+      runtime,
+      reservedToolNames: base.groups.flatMap((group) => group.tools.map((tool) => tool.id)),
+    });
+    const filteredMcpTools = applyFinalEffectiveToolPolicy({
+      bundledTools: materialized.tools,
+      config: context.cfg,
+      sessionKey: context.sessionKey,
+      agentId: context.agentId,
+      modelProvider: context.modelProvider,
+      modelId: context.modelId,
+      messageProvider: context.messageProvider,
+      agentAccountId: context.accountId,
+      groupId: context.groupId,
+      groupChannel: context.groupChannel,
+      groupSpace: context.groupSpace,
+      senderIsOwner: context.senderIsOwner,
+      warn: logWarn,
+    });
+    return appendMcpInventoryGroups({ base, mcpTools: filteredMcpTools });
+  } catch (err) {
+    logWarn(`tools-effective: MCP inventory materialization failed: ${String(err)}`);
+    return base;
+  } finally {
+    try {
+      await materialized?.dispose();
+    } catch {
+      /* best-effort lease release */
+    }
+  }
+}
+
 function scheduleToolsEffectiveRefresh(
   key: string,
   context: TrustedToolsEffectiveContext,
@@ -134,36 +226,23 @@ function scheduleToolsEffectiveRefresh(
   const startedAt = nowForToolsEffectiveCache();
   const task = new Promise<EffectiveToolInventoryResult>((resolve, reject) => {
     setImmediate(() => {
-      try {
-        const value = resolveEffectiveToolInventory({
-          cfg: context.cfg,
-          agentId: context.agentId,
-          sessionKey: context.sessionKey,
-          messageProvider: context.messageProvider,
-          modelProvider: context.modelProvider,
-          modelId: context.modelId,
-          senderIsOwner: context.senderIsOwner,
-          currentChannelId: context.currentChannelId,
-          currentThreadTs: context.currentThreadTs,
-          accountId: context.accountId,
-          groupId: context.groupId,
-          groupChannel: context.groupChannel,
-          groupSpace: context.groupSpace,
-          replyToMode: context.replyToMode,
-        });
-        cacheToolsEffectiveResult(key, value);
-        const durationMs = nowForToolsEffectiveCache() - startedAt;
-        if (durationMs >= TOOLS_EFFECTIVE_SLOW_LOG_MS) {
-          logDebug(
-            `tools-effective: refresh durationMs=${durationMs} agent=${context.agentId} session=${context.sessionKey} tools=${value.groups.reduce((sum, group) => sum + group.tools.length, 0)}`,
-          );
+      void (async () => {
+        try {
+          const value = await resolveSessionScopedToolsEffectiveInventory(context);
+          cacheToolsEffectiveResult(key, value);
+          const durationMs = nowForToolsEffectiveCache() - startedAt;
+          if (durationMs >= TOOLS_EFFECTIVE_SLOW_LOG_MS) {
+            logDebug(
+              `tools-effective: refresh durationMs=${durationMs} agent=${context.agentId} session=${context.sessionKey} tools=${value.groups.reduce((sum, group) => sum + group.tools.length, 0)}`,
+            );
+          }
+          resolve(value);
+        } catch (err) {
+          reject(err);
+        } finally {
+          toolsEffectiveInflight.delete(key);
         }
-        resolve(value);
-      } catch (err) {
-        reject(err);
-      } finally {
-        toolsEffectiveInflight.delete(key);
-      }
+      })();
     });
   });
   toolsEffectiveInflight.set(key, task);
@@ -237,6 +316,10 @@ function resolveTrustedToolsEffectiveContext(params: {
     cfg: loaded.cfg,
     agentId: sessionAgentId,
     sessionKey: params.sessionKey,
+    sessionId: loaded.entry.sessionId,
+    workspaceDir:
+      normalizeOptionalString(loaded.entry.spawnedWorkspaceDir) ??
+      resolveAgentWorkspaceDir(loaded.cfg, sessionAgentId),
     senderIsOwner: params.senderIsOwner,
     modelProvider: resolvedModel.provider,
     modelId: resolvedModel.model,

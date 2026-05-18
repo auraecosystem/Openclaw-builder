@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setPluginToolMeta } from "../../plugins/tools.js";
 import { ErrorCodes } from "../protocol/index.js";
 import { testing, toolsEffectiveHandlers } from "./tools-effective.js";
 
@@ -9,6 +10,8 @@ const runtimeMocks = vi.hoisted(() => ({
     accountId: "acct-1",
     threadId: "thread-2",
   })),
+  applyFinalEffectiveToolPolicy: vi.fn((params: { bundledTools: unknown[] }) => params.bundledTools),
+  getOrCreateSessionMcpRuntime: vi.fn(async () => ({ sessionId: "session-1" })),
   listAgentIds: vi.fn(() => ["main"]),
   getRuntimeConfig: vi.fn(() => ({})),
   loadSessionEntry: vi.fn(() => ({
@@ -31,7 +34,12 @@ const runtimeMocks = vi.hoisted(() => ({
   })),
   getActivePluginChannelRegistryVersion: vi.fn(() => 1),
   getActivePluginRegistryVersion: vi.fn(() => 1),
+  materializeBundleMcpToolsForRun: vi.fn(async () => ({
+    tools: [],
+    dispose: vi.fn(async () => undefined),
+  })),
   resolveRuntimeConfigCacheKey: vi.fn(() => "runtime:1:test"),
+  resolveAgentWorkspaceDir: vi.fn(() => "/tmp/workspace-main"),
   resolveEffectiveToolInventory: vi.fn(() => ({
     agentId: "main",
     profile: "coding",
@@ -65,8 +73,9 @@ type ToolsEffectivePayload = {
   profile?: string;
   groups?: Array<{
     id?: string;
+    label?: string;
     source?: string;
-    tools?: Array<{ id?: string; source?: string }>;
+    tools?: Array<{ id?: string; label?: string; source?: string; pluginId?: string }>;
   }>;
 };
 
@@ -104,6 +113,15 @@ describe("tools.effective handler", () => {
     testing.resetToolsEffectiveNowForTest();
     runtimeMocks.getActivePluginChannelRegistryVersion.mockReturnValue(1);
     runtimeMocks.getActivePluginRegistryVersion.mockReturnValue(1);
+    runtimeMocks.resolveAgentWorkspaceDir.mockReturnValue("/tmp/workspace-main");
+    runtimeMocks.getOrCreateSessionMcpRuntime.mockResolvedValue({ sessionId: "session-1" });
+    runtimeMocks.materializeBundleMcpToolsForRun.mockResolvedValue({
+      tools: [],
+      dispose: vi.fn(async () => undefined),
+    });
+    runtimeMocks.applyFinalEffectiveToolPolicy.mockImplementation(
+      (params: { bundledTools: unknown[] }) => params.bundledTools,
+    );
   });
 
   it("rejects invalid params", async () => {
@@ -185,6 +203,98 @@ describe("tools.effective handler", () => {
     expect(inventoryParams?.messageProvider).toBe("telegram");
     expect(inventoryParams?.modelProvider).toBe("openai");
     expect(inventoryParams?.modelId).toBe("gpt-4.1");
+  });
+
+
+
+  it("includes materialized bundled MCP tools in a dedicated effective group", async () => {
+    const dispose = vi.fn(async () => undefined);
+    const mcpTool = {
+      name: "reproProbe__probe_tool",
+      label: "Probe Tool",
+      description: "Probe from MCP",
+      parameters: { type: "object", properties: {} },
+      execute: vi.fn(),
+    };
+    setPluginToolMeta(mcpTool as never, { pluginId: "bundle-mcp", optional: false });
+    const runtime = { sessionId: "session-1" };
+    runtimeMocks.getOrCreateSessionMcpRuntime.mockResolvedValueOnce(runtime);
+    runtimeMocks.materializeBundleMcpToolsForRun.mockResolvedValueOnce({
+      tools: [mcpTool],
+      dispose,
+    });
+
+    const { respond, invoke } = createInvokeParams({ sessionKey: "main:abc" });
+    await invoke();
+
+    const payload = firstRespondCall(respond)?.[1] as ToolsEffectivePayload | undefined;
+    expect(payload?.groups?.map((group) => group.id)).toEqual(["core", "mcp"]);
+    expect(payload?.groups?.[1]).toEqual({
+      id: "mcp",
+      label: "MCP server tools",
+      source: "mcp",
+      tools: [
+        {
+          id: "reproProbe__probe_tool",
+          label: "Probe Tool",
+          description: "Probe from MCP",
+          rawDescription: "Probe from MCP",
+          source: "mcp",
+          pluginId: "bundle-mcp",
+        },
+      ],
+    });
+    expect(runtimeMocks.getOrCreateSessionMcpRuntime).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      sessionKey: "main:abc",
+      workspaceDir: "/tmp/workspace-main",
+      cfg: {},
+    });
+    expect(runtimeMocks.materializeBundleMcpToolsForRun).toHaveBeenCalledWith({
+      runtime,
+      reservedToolNames: ["exec"],
+    });
+    expect(runtimeMocks.applyFinalEffectiveToolPolicy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bundledTools: [mcpTool],
+        config: {},
+        sessionKey: "main:abc",
+        agentId: "main",
+        modelProvider: "openai",
+        modelId: "gpt-4.1",
+        messageProvider: "telegram",
+        agentAccountId: "acct-1",
+        groupId: "group-4",
+        groupChannel: "#ops",
+        groupSpace: "workspace-5",
+        senderIsOwner: false,
+      }),
+    );
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report bundled MCP tools filtered out by final policy", async () => {
+    const dispose = vi.fn(async () => undefined);
+    const mcpTool = {
+      name: "reproProbe__probe_tool",
+      label: "Probe Tool",
+      description: "Probe from MCP",
+      parameters: { type: "object", properties: {} },
+      execute: vi.fn(),
+    };
+    setPluginToolMeta(mcpTool as never, { pluginId: "bundle-mcp", optional: false });
+    runtimeMocks.materializeBundleMcpToolsForRun.mockResolvedValueOnce({
+      tools: [mcpTool],
+      dispose,
+    });
+    runtimeMocks.applyFinalEffectiveToolPolicy.mockReturnValueOnce([]);
+
+    const { respond, invoke } = createInvokeParams({ sessionKey: "main:abc" });
+    await invoke();
+
+    const payload = firstRespondCall(respond)?.[1] as ToolsEffectivePayload | undefined;
+    expect(payload?.groups?.map((group) => group.id)).toEqual(["core"]);
+    expect(dispose).toHaveBeenCalledTimes(1);
   });
 
   it("serves repeated requests from the fresh inventory cache", async () => {
