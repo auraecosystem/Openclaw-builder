@@ -30,7 +30,7 @@ function expectPolicyFields(
 }
 
 describe("resolveSourceReplyDeliveryMode", () => {
-  it("defaults groups and channels to message-tool-only delivery", () => {
+  it("defaults groups and channels to message-tool-only delivery when not @mentioned", () => {
     expect(resolveSourceReplyDeliveryMode({ cfg: emptyConfig, ctx: { ChatType: "channel" } })).toBe(
       "message_tool_only",
     );
@@ -40,6 +40,72 @@ describe("resolveSourceReplyDeliveryMode", () => {
     expect(resolveSourceReplyDeliveryMode({ cfg: emptyConfig, ctx: { ChatType: "direct" } })).toBe(
       "automatic",
     );
+  });
+
+  it("returns automatic when bot is @mentioned in group or channel", () => {
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: emptyConfig,
+        ctx: { ChatType: "group", WasMentioned: true },
+      }),
+    ).toBe("automatic");
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: emptyConfig,
+        ctx: { ChatType: "channel", WasMentioned: true },
+      }),
+    ).toBe("automatic");
+  });
+
+  it("returns message_tool_only when not mentioned even with explicit false", () => {
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: emptyConfig,
+        ctx: { ChatType: "group", WasMentioned: false },
+      }),
+    ).toBe("message_tool_only");
+  });
+
+  it("preserves requested message_tool_only when bot is @mentioned", () => {
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: emptyConfig,
+        ctx: { ChatType: "group", WasMentioned: true },
+        requested: "message_tool_only",
+      }),
+    ).toBe("message_tool_only");
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: emptyConfig,
+        ctx: { ChatType: "channel", WasMentioned: false },
+        requested: "message_tool_only",
+      }),
+    ).toBe("message_tool_only");
+  });
+
+  it("preserves explicitly configured tool-only delivery when bot is @mentioned", () => {
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: globalToolOnlyReplyConfig,
+        ctx: { ChatType: "group", WasMentioned: true },
+      }),
+    ).toBe("message_tool_only");
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: { messages: { groupChat: { visibleReplies: "message_tool" } } },
+        ctx: { ChatType: "channel", WasMentioned: true },
+      }),
+    ).toBe("message_tool_only");
+  });
+
+  it("does not use WasMentioned to override direct chat tool-only delivery", () => {
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: emptyConfig,
+        ctx: { ChatType: "direct", WasMentioned: true },
+        defaultVisibleReplies: "message_tool",
+      }),
+    ).toBe("message_tool_only");
   });
 
   it("honors config and explicit requested mode", () => {
@@ -293,6 +359,26 @@ describe("resolveSourceReplyVisibilityPolicy", () => {
         suppressHookReplyLifecycle: false,
         suppressTyping: false,
         deliverySuppressionReason: "sourceReplyDeliveryMode: message_tool_only",
+      },
+    );
+  });
+
+  it("does not suppress delivery when bot is @mentioned in group", () => {
+    expectPolicyFields(
+      resolveSourceReplyVisibilityPolicy({
+        cfg: emptyConfig,
+        ctx: { ChatType: "group", WasMentioned: true },
+        sendPolicy: "allow",
+      }),
+      {
+        sourceReplyDeliveryMode: "automatic",
+        sendPolicyDenied: false,
+        suppressAutomaticSourceDelivery: false,
+        suppressDelivery: false,
+        suppressHookUserDelivery: false,
+        suppressHookReplyLifecycle: false,
+        suppressTyping: false,
+        deliverySuppressionReason: "",
       },
     );
   });

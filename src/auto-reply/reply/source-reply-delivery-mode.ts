@@ -15,6 +15,8 @@ export type SourceReplyDeliveryModeContext = {
   CommandAuthorized?: boolean;
   CommandBody?: string;
   CommandSource?: "text" | "native";
+  /** Whether the bot was directly @mentioned (set by channel monitors for group/channel messages). */
+  WasMentioned?: boolean;
   CommandTurn?: CommandTurnContext;
 };
 
@@ -48,9 +50,13 @@ export function resolveSourceReplyDeliveryMode(params: {
   const chatType = normalizeChatType(params.ctx.ChatType);
   let mode: SourceReplyDeliveryMode;
   if (chatType === "group" || chatType === "channel") {
-    const configuredMode =
-      params.cfg.messages?.groupChat?.visibleReplies ?? params.cfg.messages?.visibleReplies;
+    const groupVisibleReplies = params.cfg.messages?.groupChat?.visibleReplies;
+    const globalVisibleReplies = params.cfg.messages?.visibleReplies;
+    const configuredMode = groupVisibleReplies ?? globalVisibleReplies;
     mode = configuredMode === "automatic" ? "automatic" : "message_tool_only";
+    if (params.ctx.WasMentioned === true && configuredMode === undefined) {
+      mode = "automatic";
+    }
   } else {
     const configuredMode = params.cfg.messages?.visibleReplies ?? params.defaultVisibleReplies;
     mode = configuredMode === "message_tool" ? "message_tool_only" : "automatic";
