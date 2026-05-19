@@ -463,6 +463,7 @@ export async function prepareCliRunContext(
           rawTranscriptReseedReason,
         }),
         prompt: preparedPrompt,
+        maxHistoryChars: backendResolved.config.maxReseedHistoryChars,
       })
     : undefined;
   systemPrompt = appendModelIdentitySystemPrompt({
