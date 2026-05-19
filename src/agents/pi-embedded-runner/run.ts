@@ -129,7 +129,11 @@ import { createEmbeddedRunAuthController } from "./run/auth-controller.js";
 import { resolveAuthProfileFailureReason } from "./run/auth-profile-failure-policy.js";
 import { runEmbeddedAttemptWithBackend } from "./run/backend.js";
 import { createFailoverDecisionLogger } from "./run/failover-observation.js";
-import { mergeRetryFailoverReason, resolveRunFailoverDecision } from "./run/failover-policy.js";
+import {
+  isTransientFailoverReason,
+  mergeRetryFailoverReason,
+  resolveRunFailoverDecision,
+} from "./run/failover-policy.js";
 import { hasEmbeddedRunConfiguredModelFallbacks } from "./run/fallbacks.js";
 import {
   buildErrorAgentMeta,
@@ -2362,6 +2366,29 @@ export async function runEmbeddedPiAgent(
                 failoverReason: promptFailoverReason,
                 profileRotated: true,
               });
+              // When profile rotation fails for a transient reason without
+              // fallback, retry the same provider with backoff instead of
+              // giving up.
+              if (
+                promptFailoverDecision.action === "surface_error" &&
+                !fallbackConfigured &&
+                isTransientFailoverReason(promptFailoverReason)
+              ) {
+                traceAttempts.push({
+                  provider,
+                  model: modelId,
+                  result: "rotate_profile",
+                  ...(promptFailoverReason ? { reason: promptFailoverReason } : {}),
+                  stage: "prompt",
+                });
+                lastRetryFailoverReason = mergeRetryFailoverReason({
+                  previous: lastRetryFailoverReason,
+                  failoverReason: promptFailoverReason,
+                });
+                logPromptFailoverDecision("rotate_profile");
+                await maybeBackoffBeforeOverloadFailover(promptFailoverReason);
+                continue;
+              }
             }
             if (failedPromptProfileId && promptProfileFailureReason) {
               try {
