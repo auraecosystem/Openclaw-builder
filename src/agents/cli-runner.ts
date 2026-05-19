@@ -4,7 +4,6 @@ import type { ReplyPayload } from "../auto-reply/reply-payload.js";
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
-import { isClaudeCliProvider } from "../plugin-sdk/anthropic-cli.js";
 import { buildAgentHookContextChannelFields } from "../plugins/hook-agent-context.js";
 import { resolveBlockMessage } from "../plugins/hook-decision-types.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
@@ -32,6 +31,16 @@ import { classifyFailoverReason, isFailoverErrorMessage } from "./pi-embedded-he
 import type { EmbeddedPiRunResult } from "./pi-embedded-runner.js";
 
 const log = createSubsystemLogger("agents/cli-runner");
+
+// Local literal-string check, mirroring `cli-output.ts`, `cli-session.ts`,
+// `cli-runner/helpers.ts`, and `command/attempt-execution.ts`. Avoids dragging
+// the eager `plugin-sdk/anthropic-cli.js` facade into this hot agent module —
+// `anthropic-cli.js` calls `loadBundledPluginPublicSurfaceModuleSync` at top
+// level, which fails to resolve `anthropic/api.js` in some test environments
+// and breaks every test that transitively imports through cli-runner.
+function isClaudeCliProvider(providerId: string): boolean {
+  return providerId.trim().toLowerCase() === "claude-cli";
+}
 
 // Injectable deps so tests can stub the on-disk Claude CLI transcript probe
 // without touching ~/.claude/projects. Mirrors the pattern in
