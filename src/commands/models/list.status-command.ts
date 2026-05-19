@@ -496,7 +496,7 @@ export async function modelsStatusCommand(
       provider: string,
     ): ProviderAuthOverview["effective"] => {
       const direct = providerAuthMap.get(provider)?.effective;
-      if (direct && direct.kind !== "missing") {
+      if (direct && direct.kind !== "missing" && hasUsableProviderAuth(provider)) {
         return direct;
       }
       const orderedProfiles = resolveAuthProfileOrder({
@@ -516,7 +516,9 @@ export async function modelsStatusCommand(
               detail: `${profileId} (${credential.provider})`,
             };
       }
-      return direct ?? missingProviderAuthEffective;
+      return direct?.kind === "profiles"
+        ? missingProviderAuthEffective
+        : (direct ?? missingProviderAuthEffective);
     };
     const hasUsableNonProfileAuth = (provider: string): boolean => {
       const authProvider = resolveProviderAuthHealthId(provider);

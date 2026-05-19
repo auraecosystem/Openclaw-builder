@@ -178,6 +178,22 @@ function buildProfileHealth(params: {
     };
   }
 
+  const eligibility = evaluateStoredCredentialEligibility({
+    credential: healthCredential,
+    now,
+  });
+  if (!eligibility.eligible) {
+    return {
+      profileId,
+      provider,
+      type: "oauth",
+      status: eligibility.reasonCode === "expired" ? "expired" : "missing",
+      reasonCode: eligibility.reasonCode,
+      source,
+      label,
+    };
+  }
+
   const effectiveCredential = resolveEffectiveOAuthCredential({
     profileId,
     credential: healthCredential,
@@ -313,7 +329,8 @@ export function buildAuthHealthSummary(params: {
 
     let hasApiKeyProfile = false;
     let hasExpirableProfile = false;
-    let hasExpiredOrMissing = false;
+    let hasExpired = false;
+    let hasMissing = false;
     let hasExpiring = false;
     let earliestExpiry: number | undefined;
     for (const profile of effectiveProfiles) {
@@ -331,8 +348,10 @@ export function buildAuthHealthSummary(params: {
             ? profile.expiresAt
             : Math.min(earliestExpiry, profile.expiresAt);
       }
-      if (profile.status === "expired" || profile.status === "missing") {
-        hasExpiredOrMissing = true;
+      if (profile.status === "expired") {
+        hasExpired = true;
+      } else if (profile.status === "missing") {
+        hasMissing = true;
       } else if (profile.status === "expiring") {
         hasExpiring = true;
       }
@@ -348,8 +367,10 @@ export function buildAuthHealthSummary(params: {
       provider.remainingMs = provider.expiresAt - now;
     }
 
-    if (hasExpiredOrMissing) {
+    if (hasExpired) {
       provider.status = "expired";
+    } else if (hasMissing) {
+      provider.status = "missing";
     } else if (hasExpiring) {
       provider.status = "expiring";
     } else {

@@ -194,6 +194,9 @@ function normalizeRawCredentialEntry(raw: Record<string, unknown>): Partial<Auth
       type: "oauth",
       ...normalizeCommonCredentialFields(entry),
     };
+    if (isLegacyOAuthRef(entry.oauthRef)) {
+      normalized.oauthRef = entry.oauthRef;
+    }
     for (const field of [
       "access",
       "refresh",
@@ -292,6 +295,7 @@ function resolveLegacyOAuthSidecarCredential(params: {
   }
   const credential = {
     ...params.credential,
+    oauthRef: undefined,
     ...(material.access ? { access: material.access } : {}),
     ...(material.refresh ? { refresh: material.refresh } : {}),
     ...(material.idToken ? { idToken: material.idToken } : {}),
