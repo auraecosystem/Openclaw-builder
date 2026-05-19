@@ -2193,6 +2193,26 @@ export const chatHandlers: GatewayRequestHandlers = {
     const explicitOriginTargetsPlugin = explicitOriginTargetsPluginBinding(
       explicitOriginResult.value,
     );
+    const activeRunAbort = registerChatAbortController({
+      chatAbortControllers: context.chatAbortControllers,
+      runId: clientRunId,
+      sessionId: backingSessionId ?? clientRunId,
+      sessionKey: rawSessionKey,
+      timeoutMs,
+      now,
+      ownerConnId: normalizeOptionalText(client?.connId),
+      ownerDeviceId: normalizeOptionalText(client?.connect?.device?.id),
+      providerId: resolvedSessionModel.provider,
+      authProviderId: resolvedSessionAuthProvider,
+      kind: "chat-send",
+    });
+    if (!activeRunAbort.registered) {
+      respond(true, { runId: clientRunId, status: "in_flight" as const }, undefined, {
+        cached: true,
+        runId: clientRunId,
+      });
+      return;
+    }
     let modelOverride: string | undefined;
     let modelOverrideFallbacks: string[] | undefined;
     if (normalizedAttachments.length > 0) {
@@ -2281,6 +2301,7 @@ export const chatHandlers: GatewayRequestHandlers = {
           },
         );
       } catch (err) {
+        activeRunAbort.cleanup();
         logAttachmentFailure(context.logGateway, "chat.send attachment parse/stage failed", err);
         respond(
           false,
@@ -2294,27 +2315,17 @@ export const chatHandlers: GatewayRequestHandlers = {
       }
     }
 
+    const ackPayload = {
+      runId: clientRunId,
+      status: "started" as const,
+    };
+    if (activeRunAbort.controller.signal.aborted) {
+      activeRunAbort.cleanup();
+      respond(true, ackPayload, undefined, { runId: clientRunId });
+      return;
+    }
+
     try {
-      const activeRunAbort = registerChatAbortController({
-        chatAbortControllers: context.chatAbortControllers,
-        runId: clientRunId,
-        sessionId: backingSessionId ?? clientRunId,
-        sessionKey: rawSessionKey,
-        timeoutMs,
-        now,
-        ownerConnId: normalizeOptionalText(client?.connId),
-        ownerDeviceId: normalizeOptionalText(client?.connect?.device?.id),
-        providerId: resolvedSessionModel.provider,
-        authProviderId: resolvedSessionAuthProvider,
-        kind: "chat-send",
-      });
-      if (!activeRunAbort.registered) {
-        respond(true, { runId: clientRunId, status: "in_flight" as const }, undefined, {
-          cached: true,
-          runId: clientRunId,
-        });
-        return;
-      }
       if (activeChatSendDedupeKey) {
         context.dedupe.set(activeChatSendDedupeKey, {
           ts: now,
@@ -2326,10 +2337,6 @@ export const chatHandlers: GatewayRequestHandlers = {
         sessionKey,
         clientRunId,
       });
-      const ackPayload = {
-        runId: clientRunId,
-        status: "started" as const,
-      };
       respond(true, ackPayload, undefined, { runId: clientRunId });
       const persistedImagesPromise = persistChatSendImages({
         images: parsedImages,
@@ -2946,7 +2953,7 @@ export const chatHandlers: GatewayRequestHandlers = {
           context.removeChatRun(clientRunId, clientRunId, sessionKey);
         });
     } catch (err) {
-      context.chatAbortControllers.delete(clientRunId);
+      activeRunAbort.cleanup();
       context.removeChatRun(clientRunId, clientRunId, sessionKey);
       const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));
       const payload = {
