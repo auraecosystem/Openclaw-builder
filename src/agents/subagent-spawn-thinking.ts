@@ -14,13 +14,15 @@ export function resolveSubagentThinkingOverride(params: {
   cfg: OpenClawConfig;
   targetAgentConfig?: unknown;
   thinkingOverrideRaw?: string;
+  callerThinkingRaw?: string;
 }) {
   const targetSubagents = asRecord(asRecord(params.targetAgentConfig)?.subagents);
   const defaultSubagents = asRecord(params.cfg.agents?.defaults?.subagents);
   const resolvedThinkingDefaultRaw =
     readString(targetSubagents ?? {}, "thinking") ?? readString(defaultSubagents ?? {}, "thinking");
 
-  const thinkingCandidateRaw = params.thinkingOverrideRaw || resolvedThinkingDefaultRaw;
+  const thinkingCandidateRaw =
+    params.thinkingOverrideRaw || resolvedThinkingDefaultRaw || params.callerThinkingRaw;
   if (!thinkingCandidateRaw) {
     return {
       status: "ok" as const,

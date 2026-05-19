@@ -59,6 +59,7 @@ import {
   forkSessionFromParent,
   getGlobalHookRunner,
   getRuntimeConfig,
+  loadSessionStore,
   mergeSessionEntry,
   mergeDeliveryContext,
   normalizeDeliveryContext,
@@ -322,6 +323,25 @@ function resolveStoreEntryByKeys(
     }
   }
   return undefined;
+}
+
+function readRequesterThinkingLevel(params: {
+  cfg: OpenClawConfig;
+  requesterInternalKey: string;
+}): string | undefined {
+  try {
+    const target = resolveGatewaySessionStoreTarget({
+      cfg: params.cfg,
+      key: params.requesterInternalKey,
+    });
+    const store = loadSessionStore(target.storePath, { clone: false });
+    const entry = resolveStoreEntryByKeys(store, target.storeKeys);
+    return typeof entry?.thinkingLevel === "string" && entry.thinkingLevel.trim()
+      ? entry.thinkingLevel.trim()
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 type PreparedSpawnContext =
@@ -877,12 +897,17 @@ export async function spawnSubagentDirect(
   });
   const targetAgentDir = resolveAgentDir(cfg, targetAgentId);
   const targetAgentConfig = resolveAgentConfig(cfg, targetAgentId);
+  const callerThinkingRaw = readRequesterThinkingLevel({
+    cfg,
+    requesterInternalKey,
+  });
   const plan = resolveSubagentModelAndThinkingPlan({
     cfg,
     targetAgentId,
     targetAgentConfig,
     modelOverride,
     thinkingOverrideRaw,
+    callerThinkingRaw,
   });
   if (plan.status === "error") {
     return {
