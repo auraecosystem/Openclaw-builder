@@ -951,6 +951,38 @@ function stripTrailingOffloadedMediaMarkers(message: string, refs: OffloadedRef[
 // Returned paths are absolute media-store paths when no sandbox is active, or
 // sandbox-relative paths plus `workspaceDir` when sandboxing is active. Host-side
 // media-understanding uses MediaWorkspaceDir to resolve those relative paths.
+async function cleanupChatSendPreDispatchMedia(params: {
+  offloadedRefs: OffloadedRef[];
+  mediaPathOffloadPaths: string[];
+  mediaPathOffloadWorkspaceDir?: string;
+  logGateway: GatewayRequestContext["logGateway"];
+}) {
+  const cleanupTasks: Promise<unknown>[] = params.offloadedRefs.map((ref) =>
+    deleteMediaBuffer(ref.id, "inbound"),
+  );
+  if (params.mediaPathOffloadWorkspaceDir) {
+    const workspaceRoot = path.resolve(params.mediaPathOffloadWorkspaceDir);
+    for (const stagedPath of new Set(params.mediaPathOffloadPaths)) {
+      if (!stagedPath || path.isAbsolute(stagedPath)) {
+        continue;
+      }
+      const target = path.resolve(workspaceRoot, stagedPath);
+      if (target === workspaceRoot || !target.startsWith(`${workspaceRoot}${path.sep}`)) {
+        continue;
+      }
+      cleanupTasks.push(fs.promises.rm(target, { force: true }));
+    }
+  }
+  const results = await Promise.allSettled(cleanupTasks);
+  for (const result of results) {
+    if (result.status === "rejected") {
+      params.logGateway.warn(
+        `chat.send aborted attachment cleanup failed: ${formatForLog(result.reason)}`,
+      );
+    }
+  }
+}
+
 async function prestageMediaPathOffloads(params: {
   offloadedRefs: OffloadedRef[];
   includeImageRefs?: boolean;
@@ -2193,6 +2225,12 @@ export const chatHandlers: GatewayRequestHandlers = {
     const explicitOriginTargetsPlugin = explicitOriginTargetsPluginBinding(
       explicitOriginResult.value,
     );
+    const ackPayload = {
+      runId: clientRunId,
+      status: "started" as const,
+    };
+    // Register before awaited attachment/model preprocessing so an immediate
+    // chat.abort can find and cancel the run (issue #84176).
     const activeRunAbort = registerChatAbortController({
       chatAbortControllers: context.chatAbortControllers,
       runId: clientRunId,
@@ -2301,6 +2339,11 @@ export const chatHandlers: GatewayRequestHandlers = {
           },
         );
       } catch (err) {
+        if (activeRunAbort.controller.signal.aborted) {
+          activeRunAbort.cleanup();
+          respond(true, ackPayload, undefined, { runId: clientRunId });
+          return;
+        }
         activeRunAbort.cleanup();
         logAttachmentFailure(context.logGateway, "chat.send attachment parse/stage failed", err);
         respond(
@@ -2315,11 +2358,13 @@ export const chatHandlers: GatewayRequestHandlers = {
       }
     }
 
-    const ackPayload = {
-      runId: clientRunId,
-      status: "started" as const,
-    };
     if (activeRunAbort.controller.signal.aborted) {
+      await cleanupChatSendPreDispatchMedia({
+        offloadedRefs,
+        mediaPathOffloadPaths,
+        mediaPathOffloadWorkspaceDir,
+        logGateway: context.logGateway,
+      });
       activeRunAbort.cleanup();
       respond(true, ackPayload, undefined, { runId: clientRunId });
       return;
