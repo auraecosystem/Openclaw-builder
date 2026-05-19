@@ -371,6 +371,7 @@ async function rollbackManagedNpmPluginInstall(params: {
         timeoutMs: Math.max(params.timeoutMs, 300_000),
         env: createSafeNpmInstallEnv(process.env, {
           legacyPeerDeps: true,
+          npmConfigCwd: params.npmRoot,
           packageLock: true,
           quiet: true,
         }),
@@ -431,6 +432,7 @@ async function rollbackManagedNpmPluginInstall(params: {
           timeoutMs: Math.max(params.timeoutMs, 300_000),
           env: createSafeNpmInstallEnv(process.env, {
             legacyPeerDeps: true,
+            npmConfigCwd: params.npmRoot,
             packageLock: true,
             quiet: true,
           }),
@@ -924,15 +926,81 @@ async function installPluginFromManagedNpmRoot(
           "npm install could not settle managed peer dependencies after 10 sync passes; refusing to leave a partially reconciled plugin dependency tree.",
       };
     }
-    if (params.packageName !== "openclaw") {
-      const repairedOpenClawPeer = await repairManagedNpmRootOpenClawPeer({
-        npmRoot,
-        timeoutMs,
-        logger,
-      });
-      if (repairedOpenClawPeer) {
-        logger.info?.(`Repaired stale openclaw peer dependency in ${npmRoot} after npm install`);
-      }
+  };
+  await upsertManagedNpmRootDependency({
+    npmRoot,
+    packageName: params.packageName,
+    dependencySpec: params.dependencySpec,
+    managedOverrides,
+  });
+  const initialPeerSync = await syncManagedPeerDependenciesForInstall();
+  if (!initialPeerSync.ok) {
+    return await rollbackFailedManagedNpmInstall(initialPeerSync.error);
+  }
+  const npmInstallArgs = [
+    "npm",
+    ...createSafeNpmInstallArgs({
+      omitDev: true,
+      omitPeer: true,
+      loglevel: "error",
+      legacyPeerDeps: true,
+      noAudit: true,
+      noFund: true,
+    }),
+  ];
+  const npmInstallOptions = {
+    cwd: npmRoot,
+    timeoutMs: Math.max(timeoutMs, 300_000),
+    env: createSafeNpmInstallEnv(process.env, {
+      legacyPeerDeps: true,
+      npmConfigCwd: npmRoot,
+      packageLock: true,
+      quiet: true,
+    }),
+  };
+  let install = await runCommandWithTimeout(npmInstallArgs, npmInstallOptions);
+  let omitUnsupportedManagedOverrides = false;
+  if (install.code !== 0 && isNpmAliasOverrideComparatorError(install)) {
+    logger.warn?.(
+      "npm rejected managed npm alias overrides; retrying plugin install without alias overrides for this npm version.",
+    );
+    omitUnsupportedManagedOverrides = true;
+    await upsertManagedNpmRootDependency({
+      npmRoot,
+      packageName: params.packageName,
+      dependencySpec: params.dependencySpec,
+      managedOverrides,
+      omitUnsupportedManagedOverrides: true,
+    });
+    const aliasRetryPeerSync = await syncManagedPeerDependenciesForInstall({
+      omitUnsupportedManagedOverrides: true,
+    });
+    if (!aliasRetryPeerSync.ok) {
+      return await rollbackFailedManagedNpmInstall(aliasRetryPeerSync.error);
+    }
+    install = await runCommandWithTimeout(npmInstallArgs, npmInstallOptions);
+  }
+  if (install.code !== 0) {
+    await rollbackManagedNpmPluginInstall({
+      npmRoot,
+      packageName: params.packageName,
+      targetDir: installRoot,
+      timeoutMs,
+      logger,
+      peerDependencySnapshot: rollbackPeerDependencySnapshot,
+    });
+    return {
+      ok: false,
+      error: `npm install failed: ${install.stderr.trim() || install.stdout.trim()}`,
+    };
+  }
+  let settledManagedPeerDependencies = false;
+  for (let peerSyncPass = 0; peerSyncPass < 10; peerSyncPass += 1) {
+    const peerSync = await syncManagedPeerDependenciesForInstall({
+      omitUnsupportedManagedOverrides,
+    });
+    if (!peerSync.ok) {
+      return await rollbackFailedManagedNpmInstall(peerSync.error);
     }
     try {
       await relinkOpenClawPeerDependenciesInManagedNpmRoot({
