@@ -216,7 +216,8 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
       return;
     }
 
-    const fallbackText = freshTelegramCfg.guest?.fallbackText ?? DEFAULT_GUEST_FALLBACK_TEXT;
+    const fallbackText =
+      freshTelegramCfg.guest?.fallbackText?.trim() || DEFAULT_GUEST_FALLBACK_TEXT;
     const guestAllowFrom = params.allowFromOverride ?? freshTelegramCfg.allowFrom;
     let answered = false;
     const answerText = async (text: string) => {
@@ -290,7 +291,7 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
           suppressUpdateLastRoute: true,
         },
         bot: params.bot,
-        cfg: params.cfg,
+        cfg: freshCfg,
         account: params.account,
         historyLimit: params.historyLimit,
         groupHistories: params.groupHistories,
@@ -327,12 +328,12 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
           statusReactionController: null,
         },
         bot: params.bot,
-        cfg: params.cfg,
+        cfg: freshCfg,
         runtime: params.runtime,
         replyToMode: params.replyToMode,
         streamMode: "off",
         textLimit: params.textLimit,
-        telegramCfg: params.telegramCfg,
+        telegramCfg: freshTelegramCfg,
         telegramDeps: params.telegramDeps,
         opts: params.opts,
         sourceReplyDeliveryMode: "automatic",

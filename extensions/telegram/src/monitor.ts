@@ -48,7 +48,7 @@ export function createTelegramRunnerOptions(
         // Match grammY defaults
         timeout: 30,
         // Request reactions without dropping default update types.
-        allowed_updates: resolveTelegramAllowedUpdates(params),
+        allowed_updates: resolveTelegramAllowedUpdates(params) as never,
       },
       // Suppress grammY getUpdates stack traces; we log concise errors ourselves.
       silent: true,

@@ -759,6 +759,7 @@ export const dispatchTelegramMessage = async ({
   });
   const replyFenceLaneKey = getTelegramSequentialKey({
     message: msg,
+    ...(ctxPayload.OriginatingTo?.startsWith("telegram:guest:") ? { guestMessage: msg } : {}),
     ...(context.primaryCtx.me ? { me: context.primaryCtx.me } : {}),
   });
   const scopedReplyFenceLaneKey = buildTelegramReplyFenceLaneKey({

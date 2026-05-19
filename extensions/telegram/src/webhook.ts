@@ -463,7 +463,7 @@ export async function startTelegramWebhook(opts: {
             secret_token: secret,
             allowed_updates: resolveTelegramAllowedUpdates({
               guest: account?.config.guest,
-            }),
+            }) as never,
             certificate: opts.webhookCertPath ? new InputFile(opts.webhookCertPath) : undefined,
           }),
       });
