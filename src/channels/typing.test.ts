@@ -43,6 +43,9 @@ function createTypingHarness(overrides: TypingCallbackOverrides = {}) {
     stop,
     onStartError,
     onStopError,
+    ...(overrides.keepaliveIntervalMs !== undefined
+      ? { keepaliveIntervalMs: overrides.keepaliveIntervalMs }
+      : {}),
     ...(overrides.maxConsecutiveFailures !== undefined
       ? { maxConsecutiveFailures: overrides.maxConsecutiveFailures }
       : {}),
@@ -125,6 +128,18 @@ describe("createTypingCallbacks", () => {
 
       await vi.advanceTimersByTimeAsync(9_000);
       expect(start).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  it("supports one-shot typing callbacks without callback-owned keepalive", async () => {
+    await withFakeTimers(async () => {
+      const { start, callbacks } = createTypingHarness({ keepaliveIntervalMs: 0 });
+
+      await callbacks.onReplyStart();
+      expect(start).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(start).toHaveBeenCalledTimes(1);
     });
   });
 

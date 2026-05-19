@@ -39,6 +39,7 @@ export function createDiscordReplyTypingFeedback(params: {
         error: err,
       });
     },
+    keepaliveIntervalMs: 0,
     maxDurationMs: params.maxDurationMs ?? DISCORD_REPLY_TYPING_MAX_DURATION_MS,
   });
   return {
