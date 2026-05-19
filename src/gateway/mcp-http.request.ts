@@ -7,6 +7,7 @@ import { safeEqualSecret } from "../security/secret-equal.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { normalizeMessageChannel } from "../utils/message-channel.js";
 import { getHeader } from "./http-utils.js";
+import type { McpLoopbackTokenScope } from "./mcp-http.loopback-runtime.js";
 import { isLoopbackAddress } from "./net.js";
 import { checkBrowserOrigin } from "./origin-check.js";
 
@@ -72,7 +73,8 @@ export function validateMcpLoopbackRequest(params: {
   res: ServerResponse;
   ownerToken: string;
   nonOwnerToken: string;
-}): { senderIsOwner: boolean } | null {
+  resolveScopedTokenContext?: (authHeader: string) => McpLoopbackTokenScope | undefined;
+}): McpLoopbackTokenScope | null {
   let url: URL;
   try {
     url = new URL(params.req.url ?? "/", `http://${params.req.headers.host ?? "localhost"}`);
@@ -123,10 +125,19 @@ export function validateMcpLoopbackRequest(params: {
   }
 
   const authHeader = getHeader(params.req, "authorization") ?? "";
-  const ownerTokenMatched = safeEqualSecret(authHeader, `Bearer ${params.ownerToken}`);
-  const nonOwnerTokenMatched = safeEqualSecret(authHeader, `Bearer ${params.nonOwnerToken}`);
-  const senderIsOwner = ownerTokenMatched ? true : nonOwnerTokenMatched ? false : null;
-  if (senderIsOwner === null) {
+  const scopedTokenContext = params.resolveScopedTokenContext?.(authHeader);
+  const ownerTokenMatched =
+    !scopedTokenContext && safeEqualSecret(authHeader, `Bearer ${params.ownerToken}`);
+  const nonOwnerTokenMatched =
+    !scopedTokenContext && safeEqualSecret(authHeader, `Bearer ${params.nonOwnerToken}`);
+  const tokenContext =
+    scopedTokenContext ??
+    (ownerTokenMatched
+      ? { senderIsOwner: true }
+      : nonOwnerTokenMatched
+        ? { senderIsOwner: false }
+        : null);
+  if (tokenContext === null) {
     logMcpLoopbackHttp("reject", {
       reason: "unauthorized",
       method: params.req.method ?? "",
@@ -149,7 +160,7 @@ export function validateMcpLoopbackRequest(params: {
     return null;
   }
 
-  return { senderIsOwner };
+  return tokenContext;
 }
 
 export async function readMcpHttpBody(req: IncomingMessage): Promise<string> {
@@ -171,16 +182,14 @@ export async function readMcpHttpBody(req: IncomingMessage): Promise<string> {
 }
 
 export function resolveMcpRequestContext(
-  req: IncomingMessage,
   cfg: OpenClawConfig,
-  auth: { senderIsOwner: boolean },
+  auth: McpLoopbackTokenScope,
 ): McpRequestContext {
   return {
-    sessionKey: resolveScopedSessionKey(cfg, getHeader(req, "x-session-key")),
-    messageProvider:
-      normalizeMessageChannel(getHeader(req, "x-openclaw-message-channel")) ?? undefined,
-    accountId: normalizeOptionalString(getHeader(req, "x-openclaw-account-id")),
-    inboundEventKind: normalizeMcpInboundEventKind(getHeader(req, "x-openclaw-inbound-event-kind")),
+    sessionKey: resolveScopedSessionKey(cfg, auth.sessionKey),
+    messageProvider: normalizeMessageChannel(auth.messageProvider) ?? undefined,
+    accountId: normalizeOptionalString(auth.accountId),
+    inboundEventKind: normalizeMcpInboundEventKind(auth.inboundEventKind),
     senderIsOwner: auth.senderIsOwner,
   };
 }

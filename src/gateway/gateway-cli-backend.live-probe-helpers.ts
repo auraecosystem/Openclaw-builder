@@ -17,7 +17,10 @@ import {
   type CronListJob,
 } from "./live-agent-probes.js";
 import { getActiveMcpLoopbackRuntime } from "./mcp-http.js";
-import { resolveMcpLoopbackBearerToken } from "./mcp-http.loopback-runtime.js";
+import {
+  issueMcpLoopbackScopedBearerToken,
+  revokeMcpLoopbackScopedBearerToken,
+} from "./mcp-http.loopback-runtime.js";
 import { extractPayloadText } from "./test-helpers.agent-results.js";
 
 // CI Docker live lanes can see repeated cancelled cron tool calls before a job
@@ -177,34 +180,37 @@ async function callLoopbackJsonRpc(params: {
   if (!runtime) {
     throw new Error("mcp loopback runtime is not active");
   }
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${resolveMcpLoopbackBearerToken(runtime, params.senderIsOwner)}`,
-    "Content-Type": "application/json",
-    "x-session-key": params.sessionKey,
-  };
-  if (params.messageProvider) {
-    headers["x-openclaw-message-channel"] = params.messageProvider;
-  }
-  if (params.accountId) {
-    headers["x-openclaw-account-id"] = params.accountId;
-  }
-  const response = await fetch(`http://127.0.0.1:${runtime.port}/mcp`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(params.body),
+  const token = issueMcpLoopbackScopedBearerToken(runtime, {
+    sessionKey: params.sessionKey,
+    messageProvider: params.messageProvider,
+    accountId: params.accountId,
+    senderIsOwner: params.senderIsOwner,
   });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`mcp loopback http ${response.status}: ${text}`);
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+  try {
+    const response = await fetch(`http://127.0.0.1:${runtime.port}/mcp`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(params.body),
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`mcp loopback http ${response.status}: ${text}`);
+    }
+    if (!text.trim()) {
+      return {};
+    }
+    const parsed = JSON.parse(text) as LoopbackJsonRpcResponse;
+    if (parsed.error?.message) {
+      throw new Error(`mcp loopback json-rpc error: ${parsed.error.message}`);
+    }
+    return parsed;
+  } finally {
+    revokeMcpLoopbackScopedBearerToken(token);
   }
-  if (!text.trim()) {
-    return {};
-  }
-  const parsed = JSON.parse(text) as LoopbackJsonRpcResponse;
-  if (parsed.error?.message) {
-    throw new Error(`mcp loopback json-rpc error: ${parsed.error.message}`);
-  }
-  return parsed;
 }
 
 export async function verifyCliCronMcpLoopbackPreflight(params: {
