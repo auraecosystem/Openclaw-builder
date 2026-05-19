@@ -256,7 +256,7 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
         );
         return;
       }
-      const routeAgentId = resolveDefaultAgentId(params.cfg);
+      const routeAgentId = resolveDefaultAgentId(freshCfg);
       const guestConversationId = `guest-from-group:${chatId}:sender:${senderId || "unknown"}`;
       const primaryCtx: TelegramContext = {
         message: msg,
