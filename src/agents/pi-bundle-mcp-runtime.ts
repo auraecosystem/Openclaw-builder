@@ -707,7 +707,7 @@ export async function disposeAllSessionMcpRuntimes(): Promise<void> {
   await getSessionMcpRuntimeManager().disposeAll();
 }
 
-export const __testing = {
+export const testing = {
   createSessionMcpRuntimeManager,
   async resetSessionMcpRuntimeManager() {
     await disposeAllSessionMcpRuntimes();
@@ -722,3 +722,4 @@ export const __testing = {
   LenientToolSchema,
   LenientListToolsResultSchema,
 };
+export { testing as __testing };

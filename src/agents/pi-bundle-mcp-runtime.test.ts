@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBundleMcpJsonSchemaValidator } from "./pi-bundle-mcp-runtime.js";
 import { cleanupBundleMcpHarness } from "./pi-bundle-mcp-test-harness.js";
 import {
-  __testing,
+  testing,
   getOrCreateSessionMcpRuntime,
   materializeBundleMcpToolsForRun,
   retireSessionMcpRuntime,
@@ -18,7 +18,7 @@ vi.mock("./embedded-pi-mcp.js", () => ({
 }));
 
 type RuntimeFactoryOptions = NonNullable<
-  Parameters<typeof __testing.createSessionMcpRuntimeManager>[0]
+  Parameters<typeof testing.createSessionMcpRuntimeManager>[0]
 >;
 type RuntimeFactory = NonNullable<RuntimeFactoryOptions["createRuntime"]>;
 
@@ -313,7 +313,7 @@ describe("session MCP runtime", () => {
         },
       };
     };
-    const manager = __testing.createSessionMcpRuntimeManager({ createRuntime });
+    const manager = testing.createSessionMcpRuntimeManager({ createRuntime });
 
     const runtimeA = await manager.getOrCreate({
       sessionId: "session-a",
@@ -382,7 +382,7 @@ describe("session MCP runtime", () => {
         }),
       };
     };
-    const manager = __testing.createSessionMcpRuntimeManager({ createRuntime });
+    const manager = testing.createSessionMcpRuntimeManager({ createRuntime });
 
     const runtimeA = await manager.getOrCreate({
       sessionId: "session-c",
@@ -471,7 +471,7 @@ describe("session MCP runtime", () => {
         rejectCatalog?.(new Error(`bundle-mcp runtime disposed for session ${params.sessionId}`));
       },
     });
-    const manager = __testing.createSessionMcpRuntimeManager({ createRuntime });
+    const manager = testing.createSessionMcpRuntimeManager({ createRuntime });
     const runtime = await manager.getOrCreate({
       sessionId: "session-d",
       sessionKey: "agent:test:session-d",
@@ -500,12 +500,12 @@ describe("session MCP runtime", () => {
       sessionKey: "agent:test:session-retire",
       workspaceDir: "/workspace",
     });
-    expect(__testing.getCachedSessionIds()).toContain("session-retire");
+    expect(testing.getCachedSessionIds()).toContain("session-retire");
 
     await expect(
       retireSessionMcpRuntime({ sessionId: " session-retire ", reason: "test" }),
     ).resolves.toBe(true);
-    expect(__testing.getCachedSessionIds()).not.toContain("session-retire");
+    expect(testing.getCachedSessionIds()).not.toContain("session-retire");
 
     await expect(retireSessionMcpRuntime({ sessionId: " ", reason: "test" })).resolves.toBe(false);
   });
@@ -516,7 +516,7 @@ describe("session MCP runtime", () => {
       sessionKey: "agent:test:session-retire-key",
       workspaceDir: "/workspace",
     });
-    expect(__testing.getCachedSessionIds()).toContain("session-retire-key");
+    expect(testing.getCachedSessionIds()).toContain("session-retire-key");
 
     await expect(
       retireSessionMcpRuntimeForSessionKey({
@@ -524,7 +524,7 @@ describe("session MCP runtime", () => {
         reason: "test",
       }),
     ).resolves.toBe(true);
-    expect(__testing.getCachedSessionIds()).not.toContain("session-retire-key");
+    expect(testing.getCachedSessionIds()).not.toContain("session-retire-key");
 
     await expect(
       retireSessionMcpRuntimeForSessionKey({ sessionKey: "agent:test:missing", reason: "test" }),
@@ -564,7 +564,7 @@ describe("session MCP runtime", () => {
         },
       };
     };
-    const manager = __testing.createSessionMcpRuntimeManager({
+    const manager = testing.createSessionMcpRuntimeManager({
       createRuntime,
       now: () => now,
       enableIdleSweepTimer: false,
@@ -594,7 +594,7 @@ describe("session MCP runtime", () => {
   it("keeps idle runtime eviction disabled when the TTL is zero", async () => {
     let now = 1_000;
     const disposed: string[] = [];
-    const manager = __testing.createSessionMcpRuntimeManager({
+    const manager = testing.createSessionMcpRuntimeManager({
       createRuntime: (params) => ({
         ...makeRuntime([{ toolName: "bundle_probe", description: "Bundle MCP probe" }]),
         sessionId: params.sessionId,

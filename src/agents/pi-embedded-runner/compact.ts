@@ -811,7 +811,11 @@ async function compactEmbeddedPiSessionDirectOnce(
       senderIsOwner: params.senderIsOwner,
       warn: (message) => log.warn(message),
     });
-    const effectiveTools = [...tools, ...filteredBundledTools];
+    const normalizedBundledTools =
+      filteredBundledTools.length > 0
+        ? runtimePlan.tools.normalize(filteredBundledTools, runtimePlanModelContext)
+        : filteredBundledTools;
+    const effectiveTools = [...tools, ...normalizedBundledTools];
     const allowedToolNames = collectAllowedToolNames({ tools: effectiveTools });
     runtimePlan.tools.logDiagnostics(effectiveTools, runtimePlanModelContext);
     const machineName = await getMachineDisplayName();
@@ -1459,7 +1463,7 @@ async function compactEmbeddedPiSessionDirectOnce(
   }
 }
 
-export const __testing = {
+export const testing = {
   hasRealConversationContent,
   hasMeaningfulConversationContent,
   containsRealConversationMessages,
@@ -1474,3 +1478,4 @@ export const __testing = {
 } as const;
 
 export { runPostCompactionSideEffects } from "./compaction-hooks.js";
+export { testing as __testing };
