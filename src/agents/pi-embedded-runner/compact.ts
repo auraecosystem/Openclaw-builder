@@ -362,6 +362,7 @@ function resolveCompactionAgentId(params: CompactEmbeddedPiSessionParams): strin
   return resolveSessionAgentIds({
     sessionKey: params.sandboxSessionKey ?? params.sessionKey,
     config: params.config,
+    agentId: params.agentId,
   }).sessionAgentId;
 }
 
@@ -507,6 +508,7 @@ async function compactEmbeddedPiSessionDirectOnce(
   const earlyAgentIds = resolveSessionAgentIds({
     sessionKey: params.sessionKey,
     config: params.config,
+    agentId: params.agentId,
   });
   const resolvedCompactionTarget = resolveEmbeddedCompactionTarget({
     config: params.config,
@@ -635,6 +637,7 @@ async function compactEmbeddedPiSessionDirectOnce(
   const { sessionAgentId: effectiveSkillAgentId } = resolveSessionAgentIds({
     sessionKey: params.sessionKey,
     config: params.config,
+    agentId: params.agentId,
   });
 
   let restoreSkillEnv: (() => void) | undefined;
@@ -852,6 +855,7 @@ async function compactEmbeddedPiSessionDirectOnce(
     const { defaultAgentId, sessionAgentId } = resolveSessionAgentIds({
       sessionKey: params.sessionKey,
       config: params.config,
+      agentId: params.agentId,
     });
     // Resolve channel-specific message actions for system prompt
     const channelActions = runtimeChannel
