@@ -62,6 +62,7 @@ import { formatErrorMessage } from "../../infra/errors.js";
 import { logSessionTurnCreated } from "../../logging/diagnostic.js";
 import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
 import { CommandLane } from "../../process/lanes.js";
+import { classifySessionKeyShape } from "../../routing/session-key.js";
 import { defaultRuntime } from "../../runtime.js";
 import {
   hasNonEmptyString,
@@ -1270,8 +1271,13 @@ export async function runAgentTurnWithFallback(params: {
     params.opts?.onAgentRunStart?.(runId);
   };
   const currentMessageId = params.sessionCtx.MessageSidFull ?? params.sessionCtx.MessageSid;
+  const sessionKeyShape = classifySessionKeyShape(params.sessionKey);
   const activeAgentId =
-    resolveAgentIdFromSessionKey(params.sessionKey) ?? params.followupRun.run.agentId ?? undefined;
+    sessionKeyShape === "agent"
+      ? resolveAgentIdFromSessionKey(params.sessionKey)
+      : (params.followupRun.run.agentId ??
+        resolveAgentIdFromSessionKey(params.sessionKey) ??
+        undefined);
   const shouldNotifyUserAboutCompaction =
     (
       (activeAgentId
