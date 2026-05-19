@@ -65,7 +65,7 @@ import {
 import { resolveUserPath } from "../../../utils.js";
 import { normalizeMessageChannel } from "../../../utils/message-channel.js";
 import { isReasoningTagProvider } from "../../../utils/provider-utils.js";
-import { resolveAgentConfig } from "../../agent-scope-config.js";
+import { resolveAgentCompactionConfig } from "../../agent-scope-config.js";
 import { resolveAgentDir, resolveSessionAgentIds } from "../../agent-scope.js";
 import { createAnthropicPayloadLogger } from "../../anthropic-payload-log.js";
 import { listActiveProcessSessionReferences } from "../../bash-process-references.js";
@@ -2496,10 +2496,8 @@ export async function runEmbeddedAttempt(
         agentId: sessionAgentId,
       });
       const midTurnPrecheckEnabled =
-        (
-          resolveAgentConfig(params.config ?? {}, sessionAgentId)?.compaction ??
-          params.config?.agents?.defaults?.compaction
-        )?.midTurnPrecheck?.enabled === true;
+        resolveAgentCompactionConfig(params.config, sessionAgentId)?.midTurnPrecheck?.enabled ===
+        true;
       let pendingMidTurnPrecheckRequest: MidTurnPrecheckRequest | null = null;
       const onMidTurnPrecheck = (request: MidTurnPrecheckRequest) => {
         pendingMidTurnPrecheckRequest = request;

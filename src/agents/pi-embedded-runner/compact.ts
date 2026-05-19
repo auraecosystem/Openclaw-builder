@@ -34,7 +34,7 @@ import { isCronSessionKey, isSubagentSessionKey } from "../../routing/session-ke
 import { resolveUserPath } from "../../utils.js";
 import { normalizeMessageChannel } from "../../utils/message-channel.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
-import { resolveAgentConfig } from "../agent-scope-config.js";
+import { resolveAgentCompactionConfig } from "../agent-scope-config.js";
 import {
   resolveAgentDir,
   resolveRunModelFallbacksOverride,
@@ -370,11 +370,7 @@ function hasExplicitCompactionModel(
   params: CompactEmbeddedPiSessionParams,
   agentId?: string,
 ): boolean {
-  const scopedModel =
-    params.config && agentId
-      ? resolveAgentConfig(params.config, agentId)?.compaction?.model
-      : undefined;
-  return Boolean(scopedModel ?? params.config?.agents?.defaults?.compaction?.model);
+  return Boolean(resolveAgentCompactionConfig(params.config, agentId)?.model);
 }
 
 function resolveCompactionFallbacksOverride(
@@ -1299,10 +1295,8 @@ async function compactEmbeddedPiSessionDirectOnce(
               const hardenedBoundary = await hardenManualCompactionBoundary({
                 sessionFile: params.sessionFile,
                 preserveRecentTail:
-                  typeof (
-                    resolveAgentConfig(params.config ?? {}, sessionAgentId)?.compaction ??
-                    params.config?.agents?.defaults?.compaction
-                  )?.keepRecentTokens === "number",
+                  typeof resolveAgentCompactionConfig(params.config, sessionAgentId)
+                    ?.keepRecentTokens === "number",
               });
               if (hardenedBoundary.applied) {
                 effectiveFirstKeptEntryId =

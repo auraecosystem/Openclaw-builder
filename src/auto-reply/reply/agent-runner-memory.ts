@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { resolveAgentConfig } from "../../agents/agent-scope-config.js";
+import { resolveAgentCompactionConfig } from "../../agents/agent-scope-config.js";
 import { resolveBootstrapWarningSignaturesSeen } from "../../agents/bootstrap-budget.js";
 import { estimateMessagesTokens } from "../../agents/compaction.js";
 import { resolveAgentHarnessPolicy } from "../../agents/harness/policy.js";
@@ -631,8 +631,7 @@ export async function runPreflightCompactionIfNeeded(params: {
   const memoryFlushPlan = resolveMemoryFlushPlan({ cfg: params.cfg, agentId: activeAgentId });
   const reserveTokensFloor =
     memoryFlushPlan?.reserveTokensFloor ??
-    resolveAgentConfig(params.cfg, activeAgentId)?.compaction?.reserveTokensFloor ??
-    params.cfg.agents?.defaults?.compaction?.reserveTokensFloor ??
+    resolveAgentCompactionConfig(params.cfg, activeAgentId)?.reserveTokensFloor ??
     20_000;
   const softThresholdTokens = memoryFlushPlan?.softThresholdTokens ?? 4_000;
   const freshPersistedTokens = resolveFreshSessionTotalTokens(entry);

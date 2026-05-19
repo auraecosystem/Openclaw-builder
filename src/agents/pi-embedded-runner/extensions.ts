@@ -4,7 +4,10 @@ import type { ExtensionFactory, SessionManager } from "@earendil-works/pi-coding
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { ProviderRuntimeModel } from "../../plugins/provider-runtime-model.types.js";
 import { normalizeOptionalLowercaseString } from "../../shared/string-coerce.js";
-import { resolveAgentConfig } from "../agent-scope-config.js";
+import {
+  resolveAgentCompactionConfig,
+  resolveAgentContextPruningConfig,
+} from "../agent-scope-config.js";
 import { resolveContextWindowInfo } from "../context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../defaults.js";
 import { createAgentToolResultMiddlewareRunner } from "../harness/tool-result-middleware.js";
@@ -17,13 +20,6 @@ import { makeToolPrunablePredicate } from "../pi-hooks/context-pruning/tools.js"
 import { ensurePiCompactionReserveTokens, resolveEffectiveCompactionMode } from "../pi-settings.js";
 import { resolveTranscriptPolicy } from "../transcript-policy.js";
 import { isCacheTtlEligibleProvider, readLastCacheTtlTimestamp } from "./cache-ttl.js";
-
-function resolveScopedAgentConfig(cfg: OpenClawConfig | undefined, agentId?: string | null) {
-  if (!cfg || !agentId) {
-    return undefined;
-  }
-  return resolveAgentConfig(cfg, agentId);
-}
 
 type PiToolResultEvent = {
   threadId?: string;
@@ -115,9 +111,7 @@ function buildContextPruningFactory(params: {
   modelId: string;
   model: ProviderRuntimeModel | undefined;
 }): ExtensionFactory | undefined {
-  const raw =
-    resolveScopedAgentConfig(params.cfg, params.agentId)?.contextPruning ??
-    params.cfg?.agents?.defaults?.contextPruning;
+  const raw = resolveAgentContextPruningConfig(params.cfg, params.agentId);
   if (raw?.mode !== "cache-ttl") {
     return undefined;
   }
@@ -158,9 +152,7 @@ export function buildEmbeddedExtensionFactories(params: {
   model: ProviderRuntimeModel | undefined;
 }): ExtensionFactory[] {
   const factories: ExtensionFactory[] = [];
-  const compactionCfg =
-    resolveScopedAgentConfig(params.cfg, params.agentId)?.compaction ??
-    params.cfg?.agents?.defaults?.compaction;
+  const compactionCfg = resolveAgentCompactionConfig(params.cfg, params.agentId);
   if (resolveEffectiveCompactionMode(params.cfg, params.agentId) === "safeguard") {
     const qualityGuardCfg = compactionCfg?.qualityGuard;
     const contextWindowInfo = resolveContextWindowInfo({
