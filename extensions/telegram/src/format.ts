@@ -183,13 +183,13 @@ const TELEGRAM_SIMPLE_HTML_TAGS = new Set([
   "code",
   "pre",
   "tg-spoiler",
-  "blockquote",
 ]);
 const TELEGRAM_ATTR_HTML_TAG_PATTERNS = new Map([
   ["a", /^\s+href="[^"]+"\s*$/],
   ["span", /^\s+class="tg-spoiler"\s*$/],
   ["tg-emoji", /^\s+emoji-id="[^"]+"\s*$/],
   ["tg-time", /^\s+datetime="[^"]+"\s*$/],
+  ["blockquote", /^(\s+expandable)?\s*$/],
 ]);
 let fileReferencePattern: RegExp | undefined;
 let orphanedTldPattern: RegExp | undefined;
