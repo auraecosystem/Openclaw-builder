@@ -215,9 +215,6 @@ async function finalizeAcpTurnOutput(params: {
   ttsAccountId?: string;
   shouldEmitResolvedIdentityNotice: boolean;
 }): Promise<boolean> {
-  await params.delivery.settleVisibleText();
-  let queuedFinal =
-    params.delivery.hasDeliveredVisibleText() && !params.delivery.hasFailedVisibleTextDelivery();
   const ttsMode = resolveConfiguredTtsMode(params.cfg, {
     agentId: params.agentId,
     channelId: params.ttsChannel,
@@ -236,8 +233,17 @@ async function finalizeAcpTurnOutput(params: {
   const canAttemptFinalTts =
     ttsStatus != null && !(ttsStatus.autoMode === "inbound" && !params.inboundAudio);
 
+  // Defer settling visible text when TTS "final" will synthesize audio: settling
+  // first would flush text to the channel before audio is ready, causing churn.
+  const willAttemptFinalTts = ttsMode === "final" && hasAccumulatedBlockText && canAttemptFinalTts;
+  if (!willAttemptFinalTts) {
+    await params.delivery.settleVisibleText();
+  }
+  let queuedFinal =
+    params.delivery.hasDeliveredVisibleText() && !params.delivery.hasFailedVisibleTextDelivery();
+
   let finalMediaDelivered = false;
-  if (ttsMode === "final" && hasAccumulatedBlockText && canAttemptFinalTts) {
+  if (willAttemptFinalTts) {
     try {
       const { maybeApplyTtsToPayload } = await loadDispatchAcpTtsRuntime();
       const ttsSyntheticReply = await maybeApplyTtsToPayload({
@@ -255,13 +261,13 @@ async function finalizeAcpTurnOutput(params: {
           "final",
           markReplyPayloadAsTtsSupplement(
             {
+              text: accumulatedVisibleBlockText,
               mediaUrl: ttsSyntheticReply.mediaUrl,
               audioAsVoice: ttsSyntheticReply.audioAsVoice,
               spokenText: accumulatedBlockTtsText,
               trustedLocalMedia: true,
             },
             accumulatedBlockTtsText,
-            { visibleTextAlreadyDelivered: true },
           ),
         );
         queuedFinal = queuedFinal || delivered;
@@ -269,6 +275,12 @@ async function finalizeAcpTurnOutput(params: {
       }
     } catch (err) {
       logVerbose(`dispatch-acp: accumulated ACP block TTS failed: ${formatErrorMessage(err)}`);
+    }
+    if (!finalMediaDelivered) {
+      await params.delivery.settleVisibleText();
+      queuedFinal =
+        params.delivery.hasDeliveredVisibleText() &&
+        !params.delivery.hasFailedVisibleTextDelivery();
     }
   }
 
