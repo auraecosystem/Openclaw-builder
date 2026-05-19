@@ -852,6 +852,8 @@ export function applyJobResult(
   opts?: {
     // Preserve recurring "every" anchors for manual force runs.
     preserveSchedule?: boolean;
+    // Manual runs should never trigger deleteAfterRun.
+    isManual?: boolean;
   },
 ): boolean {
   const prevLastRunAtMs = job.state.lastRunAtMs;
@@ -909,44 +911,61 @@ export function applyJobResult(
   // separate counter so opt-in skip alerts do not affect retry behavior.
   const alertConfig = resolveFailureAlert(state, job);
   if (result.status === "error") {
-    job.state.consecutiveErrors = (job.state.consecutiveErrors ?? 0) + 1;
-    job.state.consecutiveSkipped = 0;
-    maybeEmitFailureAlert(state, {
-      job,
-      alertConfig,
-      status: "error",
-      error: result.error,
-      consecutiveCount: job.state.consecutiveErrors,
-    });
-  } else if (result.status === "skipped") {
-    job.state.consecutiveErrors = 0;
-    job.state.consecutiveSkipped = (job.state.consecutiveSkipped ?? 0) + 1;
-    if (alertConfig?.includeSkipped) {
+    if (!opts?.isManual) {
+      job.state.consecutiveErrors = (job.state.consecutiveErrors ?? 0) + 1;
+      job.state.consecutiveSkipped = 0;
       maybeEmitFailureAlert(state, {
         job,
         alertConfig,
-        status: "skipped",
+        status: "error",
         error: result.error,
-        consecutiveCount: job.state.consecutiveSkipped,
+        consecutiveCount: job.state.consecutiveErrors,
       });
-    } else {
-      job.state.lastFailureAlertAtMs = undefined;
+    }
+  } else if (result.status === "skipped") {
+    if (!opts?.isManual) {
+      job.state.consecutiveErrors = 0;
+      job.state.consecutiveSkipped = (job.state.consecutiveSkipped ?? 0) + 1;
+      if (alertConfig?.includeSkipped) {
+        maybeEmitFailureAlert(state, {
+          job,
+          alertConfig,
+          status: "skipped",
+          error: result.error,
+          consecutiveCount: job.state.consecutiveSkipped,
+        });
+      } else {
+        job.state.lastFailureAlertAtMs = undefined;
+      }
     }
   } else {
-    job.state.consecutiveErrors = 0;
-    job.state.consecutiveSkipped = 0;
+    if (!opts?.isManual) {
+      job.state.consecutiveErrors = 0;
+      job.state.consecutiveSkipped = 0;
+    }
     job.state.lastFailureAlertAtMs = undefined;
   }
 
-  const shouldDelete =
+  const wouldDelete =
     job.schedule.kind === "at" && job.deleteAfterRun === true && result.status === "ok";
+
+  const shouldDelete = wouldDelete && !opts?.isManual;
+
+  if (wouldDelete && opts?.isManual) {
+    state.deps.log.info(
+      { jobId: job.id, jobName: job.name },
+      "cron: skipping deleteAfterRun for manual run — job preserved for scheduled execution",
+    );
+  }
 
   if (!shouldDelete) {
     if (job.schedule.kind === "at") {
       if (result.status === "ok" || result.status === "skipped") {
-        // One-shot done or skipped: disable to prevent tight-loop (#11452).
-        job.enabled = false;
-        job.state.nextRunAtMs = undefined;
+        if (!opts?.isManual) {
+          // One-shot done or skipped: disable to prevent tight-loop (#11452).
+          job.enabled = false;
+          job.state.nextRunAtMs = undefined;
+        }
       } else if (result.status === "error") {
         const retryConfig = resolveRetryConfig(state.deps.cronConfig);
         const retryHint = resolveCronExecutionRetryHint(
