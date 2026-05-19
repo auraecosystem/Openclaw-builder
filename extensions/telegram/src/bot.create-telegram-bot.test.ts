@@ -159,12 +159,16 @@ function makeGuestMessageCtx(
     text = "@openclaw_bot hello",
     messageThreadId,
   } = params;
+  const chat =
+    chatId > 0
+      ? ({ id: chatId, type: "private", first_name: "Guest Chat" } as const)
+      : ({ id: chatId, type: "supergroup", title: "Guest Chat" } as const);
   return {
     update: {
       update_id: nextGuestUpdateId++,
       guest_message: {
         guest_query_id: guestQueryId,
-        chat: { id: chatId, type: "supergroup", title: "Guest Group" },
+        chat,
         from: { id: senderId, username },
         text,
         date: 1736380800,
@@ -524,10 +528,10 @@ describe("createTelegramBot", () => {
     expect(replySpy.mock.calls.at(0)?.[1]?.sourceReplyDeliveryMode).toBe("automatic");
     const payload = requireValue(replySpy.mock.calls.at(0), "replySpy call")[0];
     expect(payload.ChatType).toBe("direct");
-    expect(payload.From).toBe("telegram:guest-from-group:-100123:sender:424242");
+    expect(payload.From).toBe("telegram:guest:-100123:sender:424242");
     expect(payload.OriginatingTo).toBe("telegram:guest:guest-query-1");
     expect(payload.SessionKey).toBe(
-      "agent:main:telegram:default:direct:guest-from-group:-100123:sender:424242",
+      "agent:main:telegram:default:direct:guest:-100123:sender:424242",
     );
     expect(payload.BodyForAgent).toContain("guestuser (@guestuser) id:424242: @openclaw_bot hello");
     expect(payload.MessageThreadId).toBeUndefined();
@@ -591,7 +595,7 @@ describe("createTelegramBot", () => {
     expect(pipelineSpy).toHaveBeenCalledWith(expect.objectContaining({ agentId: "main" }));
     const context = requireValue(replySpy.mock.calls.at(0), "replySpy call")[0];
     expect(context.SessionKey).toBe(
-      "agent:main:telegram:default:direct:guest-from-group:-100125:sender:424244",
+      "agent:main:telegram:default:direct:guest:-100125:sender:424244",
     );
     expect(context.SessionKey).not.toContain("bound-agent");
     expect(getGuestAnswerText()).toBe("guest command answer");
@@ -618,7 +622,7 @@ describe("createTelegramBot", () => {
 
     await runGuestMessage({
       guestQueryId: "guest-query-secondary",
-      chatId: -100124,
+      chatId: 424243,
       senderId: 424243,
       username: "guestuser2",
     });
@@ -626,9 +630,8 @@ describe("createTelegramBot", () => {
     expect(replySpy).toHaveBeenCalledTimes(1);
     const context = requireValue(replySpy.mock.calls.at(0), "replySpy call")[0];
     expect(context.AccountId).toBe("secondary");
-    expect(context.ChatType).toBe("direct");
     expect(context.SessionKey).toBe(
-      "agent:main:telegram:secondary:direct:guest-from-group:-100124:sender:424243",
+      "agent:main:telegram:secondary:direct:guest:424243:sender:424243",
     );
     const payload = answerGuestQuerySpy.mock.calls.at(0)?.[0];
     expect(payload?.result.input_message_content.message_text).toBe("guest answer");

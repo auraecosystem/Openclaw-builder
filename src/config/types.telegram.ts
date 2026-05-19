@@ -115,7 +115,7 @@ export type TelegramAccountConfig = {
   capabilities?: TelegramCapabilitiesConfig;
   /** Telegram-native exec approval delivery + approver authorization. */
   execApprovals?: TelegramExecApprovalConfig;
-  /** Telegram Guest Mode support for @bot queries in chats where the bot is not a member. */
+  /** Telegram Guest Mode support for @bot queries in supported Telegram chats. */
   guest?: TelegramGuestModeConfig;
   /** Markdown formatting overrides (tables). */
   markdown?: MarkdownConfig;

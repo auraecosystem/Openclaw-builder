@@ -120,7 +120,7 @@ function buildGuestSessionKey(params: {
       dmScope: "per-account-channel-peer",
       peer: {
         kind: "direct",
-        id: `guest-from-group:${params.chatId}${senderPart}`,
+        id: `guest:${params.chatId}${senderPart}`,
       },
     }),
   );
@@ -257,7 +257,7 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
         return;
       }
       const routeAgentId = resolveDefaultAgentId(freshCfg);
-      const guestConversationId = `guest-from-group:${chatId}:sender:${senderId || "unknown"}`;
+      const guestConversationId = `guest:${chatId}:sender:${senderId || "unknown"}`;
       const primaryCtx: TelegramContext = {
         message: msg,
         me: guestCtx.me,
