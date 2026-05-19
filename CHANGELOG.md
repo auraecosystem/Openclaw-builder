@@ -35,6 +35,7 @@ Docs: https://docs.openclaw.ai
 - CLI/TUI: include gateway plugin slash commands in TUI autocomplete, so connected sessions can suggest plugin-owned commands exposed by the running Gateway. (#83640) Thanks @se7en-agent.
 - Gateway/mobile: restore QR setup-code handoff of bounded operator tokens for iOS and Android onboarding while keeping admin and pairing scopes out of bootstrap. (#83684) Thanks @ngutman.
 - iOS: repair Release archive compilation for the TestFlight build. (#84255) Thanks @ngutman.
+- Channels/model picker: stop synthesizing fake `<defaultProvider>/<aliasName>` entries when an agent's `model.fallbacks` references a configured CLI-runtime alias such as `opus-cli`, so Telegram, Discord, and Mattermost `/model` pickers no longer list those aliases under the wrong provider. Thanks @AtelyPham.
 
 ## 2026.5.19
 
