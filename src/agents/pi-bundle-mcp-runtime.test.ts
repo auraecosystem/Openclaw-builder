@@ -142,7 +142,7 @@ describe("session MCP runtime", () => {
   });
 
   it("backfills type: 'object' only when inputSchema omits the type field", () => {
-    const { normalizeInputSchema } = __testing;
+    const { normalizeInputSchema } = testing;
 
     // Schema without type should get type: "object" backfilled
     expect(normalizeInputSchema({ properties: { foo: { type: "string" } } })).toEqual({
@@ -173,7 +173,7 @@ describe("session MCP runtime", () => {
     // Regression for #63602: the SDK's strict ToolSchema requires
     // inputSchema.type === "object" via z.literal, so servers that omit type
     // would crash listTools() before this fix.
-    const { LenientListToolsResultSchema } = __testing;
+    const { LenientListToolsResultSchema } = testing;
 
     const payload = {
       tools: [
@@ -207,7 +207,7 @@ describe("session MCP runtime", () => {
   });
 
   it("rejects tools whose root inputSchema declares an explicit non-object type", () => {
-    const { isValidRootInputSchema, normalizeInputSchema } = __testing;
+    const { isValidRootInputSchema, normalizeInputSchema } = testing;
 
     // A type-less schema is valid once normalized.
     expect(isValidRootInputSchema(normalizeInputSchema({ properties: {} }))).toBe(true);
@@ -224,7 +224,7 @@ describe("session MCP runtime", () => {
   });
 
   it("counts only accepted tools after catalog schema filtering", () => {
-    const { collectValidCatalogTools } = __testing;
+    const { collectValidCatalogTools } = testing;
 
     const catalogTools = collectValidCatalogTools({
       serverName: "bundleProbe",
