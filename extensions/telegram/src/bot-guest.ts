@@ -210,6 +210,12 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
       return;
     }
 
+    const guestDmPolicy = freshTelegramCfg.dmPolicy ?? params.dmPolicy;
+    if (guestDmPolicy === "disabled") {
+      logVerbose("telegram guest: blocked guest_message because dmPolicy is disabled");
+      return;
+    }
+
     const fallbackText = freshTelegramCfg.guest?.fallbackText ?? DEFAULT_GUEST_FALLBACK_TEXT;
     const guestAllowFrom = params.allowFromOverride ?? freshTelegramCfg.allowFrom;
     let answered = false;
@@ -288,7 +294,7 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
         account: params.account,
         historyLimit: params.historyLimit,
         groupHistories: params.groupHistories,
-        dmPolicy: params.dmPolicy,
+        dmPolicy: guestDmPolicy,
         allowFrom: guestAllowFrom,
         groupAllowFrom: guestAllowFrom,
         ackReactionScope: "off",

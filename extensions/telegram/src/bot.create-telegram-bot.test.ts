@@ -494,6 +494,37 @@ describe("createTelegramBot", () => {
     expect(sendMessageSpy).not.toHaveBeenCalled();
   });
 
+  it("does not send Telegram guest fallback when fresh DM policy disables access", async () => {
+    const startupConfig = {
+      channels: {
+        telegram: {
+          dmPolicy: "open",
+          allowFrom: ["*"],
+          guest: { enabled: true },
+        },
+      },
+    } satisfies OpenClawConfig;
+    loadConfig.mockReturnValue({
+      channels: {
+        telegram: {
+          dmPolicy: "disabled",
+          allowFrom: ["*"],
+          guest: { enabled: true },
+        },
+      },
+    });
+    createTelegramBot({ token: "tok", config: startupConfig });
+
+    await runTelegramMiddlewareChain({
+      ctx: makeGuestMessageCtx({ guestQueryId: "guest-query-dm-disabled" }),
+      finalHandler: vi.fn(async () => undefined),
+    });
+
+    expect(replySpy).not.toHaveBeenCalled();
+    expect(answerGuestQuerySpy).not.toHaveBeenCalled();
+    expect(sendMessageSpy).not.toHaveBeenCalled();
+  });
+
   it("blocks Telegram guest messages through account-level allowFrom", async () => {
     loadConfig.mockReturnValue({
       channels: {
