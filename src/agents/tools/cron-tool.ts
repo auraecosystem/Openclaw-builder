@@ -7,6 +7,7 @@ import { normalizeHttpWebhookUrl } from "../../cron/webhook-url.js";
 import { extractTextFromChatContent } from "../../shared/chat-content.js";
 import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 import { isRecord, truncateUtf16Safe } from "../../utils.js";
+import { parseAgentSessionKey } from "../../sessions/session-key-utils.js";
 import type { DeliveryContext } from "../../utils/delivery-context.shared.js";
 import { resolveSessionAgentId } from "../agent-scope.js";
 import { optionalStringEnum, stringEnum } from "../schema/typebox.js";
@@ -844,7 +845,20 @@ Use jobId canonical; id accepted compat. contextMessages (0-10) adds previous me
             ? resolveSessionAgentId({ sessionKey: opts.agentSessionKey, config: cfg })
             : undefined;
           const sessionKey = explicitSessionKey ?? inferredSessionKey;
-          const agentId = explicitAgentId ?? inferredAgentId;
+          // When a caller supplies an explicit cross-agent sessionKey without
+          // an explicit agentId, the gateway target resolver treats agentId as
+          // authoritative — pairing the caller's inferred agentId with a
+          // foreign session key would canonicalize the wake back to the
+          // caller's main lane (closes ClawSweeper P1 on PR #83738). Derive
+          // the agentId from the explicit canonical session key instead; only
+          // fall through to the inferred caller-agent when no explicit
+          // sessionKey was supplied.
+          const agentIdFromExplicitSessionKey = explicitSessionKey
+            ? parseAgentSessionKey(explicitSessionKey)?.agentId
+            : undefined;
+          const agentId =
+            explicitAgentId ??
+            (explicitSessionKey ? agentIdFromExplicitSessionKey : inferredAgentId);
           return jsonResult(
             await callGateway(
               "wake",
