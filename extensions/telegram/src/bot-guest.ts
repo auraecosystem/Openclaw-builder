@@ -70,6 +70,7 @@ type RegisterTelegramGuestHandlersParams = {
   groupHistories: BuildTelegramMessageContextParams["groupHistories"];
   dmPolicy: DmPolicy;
   allowFrom?: Array<string | number>;
+  allowFromOverride?: Array<string | number>;
   logger: BuildTelegramMessageContextParams["logger"];
   resolveGroupActivation: BuildTelegramMessageContextParams["resolveGroupActivation"];
   loadFreshConfig: () => OpenClawConfig;
@@ -210,6 +211,7 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
     }
 
     const fallbackText = freshTelegramCfg.guest?.fallbackText ?? DEFAULT_GUEST_FALLBACK_TEXT;
+    const guestAllowFrom = params.allowFromOverride ?? freshTelegramCfg.allowFrom;
     let answered = false;
     const answerText = async (text: string) => {
       if (answered) {
@@ -230,7 +232,7 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
       const effectiveGuestAllow = normalizeAllowFrom(
         await expandTelegramAllowFromWithAccessGroups({
           cfg: freshCfg,
-          allowFrom: params.allowFrom,
+          allowFrom: guestAllowFrom,
           accountId: params.account.accountId,
           senderId,
         }),
@@ -287,8 +289,8 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
         historyLimit: params.historyLimit,
         groupHistories: params.groupHistories,
         dmPolicy: params.dmPolicy,
-        allowFrom: params.allowFrom,
-        groupAllowFrom: params.allowFrom,
+        allowFrom: guestAllowFrom,
+        groupAllowFrom: guestAllowFrom,
         ackReactionScope: "off",
         logger: params.logger,
         resolveGroupActivation: params.resolveGroupActivation,

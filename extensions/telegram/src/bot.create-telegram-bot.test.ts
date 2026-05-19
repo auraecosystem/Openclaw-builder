@@ -463,6 +463,37 @@ describe("createTelegramBot", () => {
     expect(sendMessageSpy).not.toHaveBeenCalled();
   });
 
+  it("authorizes Telegram guest messages with fresh account allowFrom", async () => {
+    const startupConfig = {
+      channels: {
+        telegram: {
+          dmPolicy: "open",
+          allowFrom: ["*"],
+          guest: { enabled: true },
+        },
+      },
+    } satisfies OpenClawConfig;
+    loadConfig.mockReturnValue({
+      channels: {
+        telegram: {
+          dmPolicy: "open",
+          allowFrom: [999999],
+          guest: { enabled: true },
+        },
+      },
+    });
+    createTelegramBot({ token: "tok", config: startupConfig });
+
+    await runTelegramMiddlewareChain({
+      ctx: makeGuestMessageCtx({ guestQueryId: "guest-query-fresh-allowfrom" }),
+      finalHandler: vi.fn(async () => undefined),
+    });
+
+    expect(replySpy).not.toHaveBeenCalled();
+    expect(answerGuestQuerySpy).not.toHaveBeenCalled();
+    expect(sendMessageSpy).not.toHaveBeenCalled();
+  });
+
   it("blocks Telegram guest messages through account-level allowFrom", async () => {
     loadConfig.mockReturnValue({
       channels: {
