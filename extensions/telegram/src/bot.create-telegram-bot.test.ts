@@ -604,18 +604,12 @@ describe("createTelegramBot", () => {
 
   it("routes Telegram guest messages on non-default accounts as direct turns", async () => {
     createConfiguredTelegramBot(
-      makeGuestEnabledConfig({
-        defaultAccount: "default",
-        accounts: {
-          default: { botToken: "default-token" },
-          secondary: {
-            botToken: "secondary-token",
-            dmPolicy: "open",
-            allowFrom: ["*"],
-            guest: { enabled: true },
-          },
+      makeGuestEnabledConfig(
+        { accounts: { secondary: {} } },
+        {
+          bindings: [{ agentId: "bound", match: { channel: "telegram", accountId: "secondary" } }],
         },
-      }),
+      ),
       { accountId: "secondary" },
     );
     replySpy.mockResolvedValue({ text: "guest answer" });
@@ -631,7 +625,7 @@ describe("createTelegramBot", () => {
     const context = requireValue(replySpy.mock.calls.at(0), "replySpy call")[0];
     expect(context.AccountId).toBe("secondary");
     expect(context.SessionKey).toBe(
-      "agent:main:telegram:secondary:direct:guest:424243:sender:424243",
+      "agent:bound:telegram:secondary:direct:guest:424243:sender:424243",
     );
     const payload = answerGuestQuerySpy.mock.calls.at(0)?.[0];
     expect(payload?.result.input_message_content.message_text).toBe("guest answer");

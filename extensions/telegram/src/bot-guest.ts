@@ -20,9 +20,9 @@ import {
   type BuildTelegramMessageContextParams,
 } from "./bot-message-context.js";
 import { dispatchTelegramMessage } from "./bot-message-dispatch.js";
-import { resolveDefaultAgentId } from "./bot.agent.runtime.js";
 import type { TelegramBotOptions } from "./bot.types.js";
 import type { TelegramContext } from "./bot/types.js";
+import { resolveTelegramConversationRoute } from "./conversation-route.js";
 
 const DEFAULT_GUEST_FALLBACK_TEXT = "I could not produce a visible answer. Please try again.";
 const TELEGRAM_GUEST_MESSAGE_TEXT_LIMIT = 4096;
@@ -257,7 +257,14 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
         );
         return;
       }
-      const routeAgentId = resolveDefaultAgentId(freshCfg);
+      const route = resolveTelegramConversationRoute({
+        cfg: freshCfg,
+        accountId: params.account.accountId,
+        chatId,
+        isGroup: false,
+        senderId,
+        skipBindings: true,
+      }).route;
       const guestConversationId = `guest:${chatId}:sender:${senderId || "unknown"}`;
       const primaryCtx: TelegramContext = {
         message: msg,
@@ -274,12 +281,11 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
         options: {
           forceWasMentioned: true,
           sessionKeyOverride: buildGuestSessionKey({
-            agentId: routeAgentId,
+            agentId: route.agentId,
             accountId: params.account.accountId,
             chatId,
             senderId,
           }),
-          routeAgentIdOverride: routeAgentId,
           messageIdOverride: `guest:${guestQueryId}`,
           systemPromptPrefix: GUEST_PROMPT_PREFIX,
           skipGroupBaseAccess: true,
