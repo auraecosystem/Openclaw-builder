@@ -12,14 +12,18 @@ function readString(value: Record<string, unknown>, key: string): string | undef
 
 export function resolveSubagentThinkingOverride(params: {
   cfg: OpenClawConfig;
+  requesterAgentConfig?: unknown;
   targetAgentConfig?: unknown;
   thinkingOverrideRaw?: string;
   callerThinkingRaw?: string;
 }) {
+  const requesterSubagents = asRecord(asRecord(params.requesterAgentConfig)?.subagents);
   const targetSubagents = asRecord(asRecord(params.targetAgentConfig)?.subagents);
   const defaultSubagents = asRecord(params.cfg.agents?.defaults?.subagents);
   const resolvedThinkingDefaultRaw =
-    readString(targetSubagents ?? {}, "thinking") ?? readString(defaultSubagents ?? {}, "thinking");
+    readString(requesterSubagents ?? {}, "thinking") ??
+    readString(targetSubagents ?? {}, "thinking") ??
+    readString(defaultSubagents ?? {}, "thinking");
 
   const thinkingCandidateRaw =
     params.thinkingOverrideRaw || resolvedThinkingDefaultRaw || params.callerThinkingRaw;
