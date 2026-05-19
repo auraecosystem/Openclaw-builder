@@ -304,7 +304,18 @@ export const CronToolSchema = Type.Object(
     contextMessages: Type.Optional(
       Type.Number({ minimum: 0, maximum: REMINDER_CONTEXT_MESSAGES_MAX }),
     ),
-    agentId: Type.Optional(Type.String({ description: "List filter: agent id" })),
+    agentId: Type.Optional(
+      Type.String({
+        description:
+          "List filter for `action: \"list\"`; wake target override for `action: \"wake\"` (defaults to the calling agent when omitted on wake)",
+      }),
+    ),
+    sessionKey: Type.Optional(
+      Type.String({
+        description:
+          "Wake target override for `action: \"wake\"`: route the event to the named session rather than the calling agent's current session. Defaults to the resolved calling-session key when omitted.",
+      }),
+    ),
   },
   { additionalProperties: true },
 );
@@ -507,7 +518,7 @@ ACTIONS:
 - remove: delete job; needs jobId
 - run: trigger now; needs jobId
 - runs: run history; needs jobId
-- wake: send wake event; needs text, optional mode
+- wake: send wake event; needs text, optional mode; defaults the target to the calling session/agent. Pass top-level sessionKey/agentId to wake a different lane.
 
 JOB SCHEMA (for add action):
 {
