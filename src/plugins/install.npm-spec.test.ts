@@ -69,10 +69,17 @@ function isManagedNpmInstallCommand(argv: unknown): argv is string[] {
   return isNpmInstallCommand(argv) && !isNpmPeerPlannerInstallCommand(argv);
 }
 
-function expectNpmInstallIntoRoot(params: { calls: unknown[][]; npmRoot: string }) {
+function expectNpmInstallIntoRoot(params: {
+  calls: unknown[][];
+  npmRoot: string;
+  expectedFreshnessBypass?: "before";
+}) {
   const installCalls = params.calls.filter((call) => isManagedNpmInstallCommand(call[0]));
   expect(installCalls).toHaveLength(1);
-  expect((installCalls[0]?.[1] as { cwd?: unknown } | undefined)?.cwd).toBe(params.npmRoot);
+  const installOptions = installCalls[0]?.[1] as
+    | { cwd?: unknown; env?: Record<string, string | undefined> }
+    | undefined;
+  expect(installOptions?.cwd).toBe(params.npmRoot);
   expect(installCalls[0]?.[0]).toEqual([
     "npm",
     "install",
@@ -84,6 +91,10 @@ function expectNpmInstallIntoRoot(params: { calls: unknown[][]; npmRoot: string 
     "--no-audit",
     "--no-fund",
   ]);
+  if (params.expectedFreshnessBypass === "before") {
+    expect(installOptions?.env?.npm_config_before).toBeTruthy();
+    expect(installOptions?.env?.npm_config_min_release_age).toBe("");
+  }
 }
 
 function writeInstalledNpmPlugin(params: {
@@ -445,6 +456,8 @@ describe("installPluginFromNpmSpec", () => {
   it("installs npm pack archives through the managed npm root", async () => {
     const stateDir = suiteTempRootTracker.makeTempDir();
     const npmRoot = path.join(stateDir, "npm");
+    fs.mkdirSync(npmRoot, { recursive: true });
+    fs.writeFileSync(path.join(npmRoot, ".npmrc"), "before=2026-01-01T00:00:00.000Z\n", "utf8");
     const archivePath = path.join(stateDir, "openclaw-pack-demo-1.2.3.tgz");
     fs.writeFileSync(archivePath, "fixture pack contents", "utf8");
 
@@ -485,6 +498,7 @@ describe("installPluginFromNpmSpec", () => {
     expectNpmInstallIntoRoot({
       calls: runCommandWithTimeoutMock.mock.calls,
       npmRoot,
+      expectedFreshnessBypass: "before",
     });
     const managedManifest = JSON.parse(
       await fs.promises.readFile(path.join(npmRoot, "package.json"), "utf8"),
