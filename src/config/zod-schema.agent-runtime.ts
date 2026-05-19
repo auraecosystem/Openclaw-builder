@@ -1008,7 +1008,6 @@ export const ToolsSchema = z
     ...CommonToolPolicyFields,
     web: ToolsWebSchema,
     media: ToolsMediaSchema,
-    browser: ToolsMediaUnderstandingSchema,
     links: ToolsLinksSchema,
     sessions: z
       .object({
