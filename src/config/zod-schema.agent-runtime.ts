@@ -15,7 +15,6 @@ import {
   SecretInputSchema,
   ToolsLinksSchema,
   ToolsMediaSchema,
-  ToolsMediaUnderstandingSchema,
   TtsConfigSchema,
 } from "./zod-schema.core.js";
 import { sensitive } from "./zod-schema.sensitive.js";
