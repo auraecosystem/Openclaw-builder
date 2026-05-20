@@ -1044,6 +1044,64 @@ describe("subagent registry seam flow", () => {
     expect(mocks.runSubagentAnnounceFlow).toHaveBeenCalledTimes(1);
   });
 
+  it("does not corrupt run state when lifecycle event handler throws", async () => {
+    mocks.callGateway.mockImplementation(async (request: { method?: string }) => {
+      if (request.method === "agent.wait") {
+        return { status: "pending" };
+      }
+      return {};
+    });
+    // Make completeSubagentRun reject to exercise the catch path
+    mocks.runSubagentAnnounceFlow.mockRejectedValueOnce(new Error("announce failed"));
+
+    mod.registerSubagentRun({
+      runId: "run-catch-no-corrupt",
+      childSessionKey: "agent:main:subagent:child",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "catch path test",
+      cleanup: "keep",
+      expectsCompletionMessage: true,
+    });
+
+    const lastOnAgentEventCall = mocks.onAgentEvent.mock.calls[
+      mocks.onAgentEvent.mock.calls.length - 1
+    ] as unknown as
+      | [(evt: { runId: string; stream: string; data: Record<string, unknown> }) => void]
+      | undefined;
+    const lifecycleHandler = lastOnAgentEventCall?.[0];
+    expect(lifecycleHandler).toBeTypeOf("function");
+
+    lifecycleHandler?.({
+      runId: "run-catch-no-corrupt",
+      stream: "lifecycle",
+      data: { phase: "start", startedAt: 100 },
+    });
+
+    lifecycleHandler?.({
+      runId: "run-catch-no-corrupt",
+      stream: "lifecycle",
+      data: {
+        phase: "end",
+        startedAt: 100,
+        endedAt: 200,
+        livenessState: "blocked",
+        error: "Context overflow",
+      },
+    });
+
+    await vi.waitFor(
+      () => {
+        const run = mod
+          .listSubagentRunsForRequester("agent:main:main")
+          .find((entry) => entry.runId === "run-catch-no-corrupt");
+        expect(run?.outcome?.status).toBe("error");
+        expect(run?.endedReason).toBe("subagent-error");
+      },
+      { timeout: 2_000, interval: 10 },
+    );
+  });
+
   it("preserves run-mode keep entries past SESSION_RUN_TTL_MS sweep", async () => {
     mod.registerSubagentRun({
       runId: "run-keep-survives-ttl",

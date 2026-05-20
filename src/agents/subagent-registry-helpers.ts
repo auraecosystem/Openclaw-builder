@@ -269,7 +269,7 @@ export function reconcileOrphanedRun(params: {
   runId: string;
   entry: SubagentRunRecord;
   reason: SubagentRunOrphanReason;
-  source: "restore" | "resume";
+  source: "restore" | "resume" | "lifecycle-catch-recovery";
   runs: Map<string, SubagentRunRecord>;
   resumedRuns: Set<string>;
 }) {
