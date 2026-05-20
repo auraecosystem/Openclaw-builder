@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
+import { resolveFastModeState } from "../agents/fast-mode.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveStateDir } from "../config/paths.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -240,11 +241,12 @@ async function defaultExtractBatch(params: {
     thinkLevel: "off",
     verboseLevel: "off",
     reasoningLevel: "off",
-    // Do not hardcode fastMode here: leaving the field undefined lets the
-    // commitments extraction inherit the configured fast-mode state (which
-    // defaults to false). Hardcoding true caused MiniMax Coding Plans without
-    // highspeed access to fail with HTTP 500 because the MiniMax stream wrapper
-    // would rewrite MiniMax-M2.7 -> MiniMax-M2.7-highspeed (#78451).
+    fastMode: resolveFastModeState({
+      cfg,
+      provider: modelRef.provider,
+      model: modelRef.model,
+      agentId: first.agentId,
+    }).enabled,
     timeoutMs: resolved.extraction.timeoutSeconds * 1000,
     runId,
     bootstrapContextMode: "lightweight",
