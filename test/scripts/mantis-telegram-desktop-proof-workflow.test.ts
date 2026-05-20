@@ -118,7 +118,12 @@ describe("Mantis Telegram Desktop proof workflow", () => {
       expect(step.run).toContain("GITHUB_RUN_ID");
       expect(step.run).toContain(".createdAt < $current_created");
       expect(step.run).toContain("for status in queued in_progress waiting pending requested");
-      expect(step.run).not.toContain('select(.status == "queued"');
+      expect(step.run).toContain("stale_before=");
+      expect(step.run).toContain(".createdAt >= $stale_before");
+      expect(step.run).toContain("run_has_active_jobs()");
+      expect(step.run).toContain('gh run view "$run_id"');
+      expect(step.run).toContain("${run_id#\\#}");
+      expect(step.run).not.toContain('.[] | select(.status == "queued"');
       expect(step.run).toContain("sleep 60");
     }
   });
