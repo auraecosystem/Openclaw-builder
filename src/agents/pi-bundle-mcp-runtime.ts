@@ -166,15 +166,26 @@ function loadSessionMcpConfig(params: {
   };
 }
 
+export function resolveSessionMcpConfigSummary(params: {
+  workspaceDir: string;
+  cfg?: OpenClawConfig;
+}): { fingerprint: string; serverNames: string[] } {
+  const { loaded, fingerprint } = loadSessionMcpConfig({
+    workspaceDir: params.workspaceDir,
+    cfg: params.cfg,
+    logDiagnostics: false,
+  });
+  return {
+    fingerprint,
+    serverNames: Object.keys(loaded.mcpServers).toSorted((a, b) => a.localeCompare(b)),
+  };
+}
+
 export function resolveSessionMcpConfigFingerprint(params: {
   workspaceDir: string;
   cfg?: OpenClawConfig;
 }): string {
-  return loadSessionMcpConfig({
-    workspaceDir: params.workspaceDir,
-    cfg: params.cfg,
-    logDiagnostics: false,
-  }).fingerprint;
+  return resolveSessionMcpConfigSummary(params).fingerprint;
 }
 
 function createDisposedError(sessionId: string): Error {

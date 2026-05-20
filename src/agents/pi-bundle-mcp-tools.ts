@@ -16,6 +16,7 @@ export {
   getSessionMcpRuntimeManager,
   peekSessionMcpRuntime,
   resolveSessionMcpConfigFingerprint,
+  resolveSessionMcpConfigSummary,
   retireSessionMcpRuntime,
   retireSessionMcpRuntimeForSessionKey,
 } from "./pi-bundle-mcp-runtime.js";
