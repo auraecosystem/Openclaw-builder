@@ -462,36 +462,6 @@ export async function executePreparedCliRun(
           const ownedPreparedBackendCleanup = context.preparedBackend.cleanup;
           context.preparedBackend.cleanup = undefined;
           // Per-tool-emission verbose resolver — mirrors
-          // server-chat.ts:resolveToolVerboseLevel:
-          //   1. run context's verbose level (registered at run start)
-          //   2. session entry's verbose level when newer than run start
-          //      (covers sessions.patch updates that don't refresh the run ctx)
-          //   3. config default
-          // Reading the session entry per-tool catches mid-run verbose-off
-          // toggles that persist via sessions.patch without updating the
-          // run-context registry.
-          const shouldInjectToolInlineMarkers = (): boolean => {
-            const ctx = getAgentRunContext(params.runId);
-            const runVerbose = normalizeVerboseLevel(ctx?.verboseLevel);
-            const sessionEntry = params.sessionKey
-              ? loadSessionEntryByKey(params.sessionKey)
-              : undefined;
-            const sessionVerbose = normalizeVerboseLevel(sessionEntry?.verboseLevel);
-            const sessionUpdatedAt =
-              typeof sessionEntry?.updatedAt === "number" ? sessionEntry.updatedAt : undefined;
-            const sessionChangedAfterRunStarted =
-              sessionUpdatedAt !== undefined &&
-              ctx?.registeredAt !== undefined &&
-              sessionUpdatedAt >= ctx.registeredAt;
-            const resolved =
-              (sessionVerbose && (!runVerbose || sessionChangedAfterRunStarted)
-                ? sessionVerbose
-                : undefined) ??
-              runVerbose ??
-              normalizeVerboseLevel(params.config?.agents?.defaults?.verboseDefault) ??
-              "off";
-            return resolved !== "off";
-          };
           const liveResult = await runClaudeLiveSessionTurn({
             context,
             args,
@@ -500,7 +470,7 @@ export async function executePreparedCliRun(
             useResume,
             noOutputTimeoutMs,
             getProcessSupervisor: executeDeps.getProcessSupervisor,
-            onAssistantDelta: ({ text, delta, replacement }) => {
+            onAssistantDelta: ({ text, delta }) => {
               emitAgentEvent({
                 runId: params.runId,
                 stream: "assistant",
@@ -513,11 +483,6 @@ export async function executePreparedCliRun(
                     delta,
                     context.backendResolved.textTransforms?.output,
                   ),
-                  // Forward the replacement signal so live-chat's merger
-                  // honours intentionally-shorter assistant text (e.g.
-                  // rolling-timer terminal cleanup) instead of treating
-                  // it as a stale partial-chunk rollback.
-                  ...(replacement ? { replacement: true } : {}),
                 },
               });
             },
@@ -539,7 +504,6 @@ export async function executePreparedCliRun(
                 },
               });
             },
-            shouldInjectToolInlineMarkers,
             cleanup: async () => {
               try {
                 await claudeSkillsPlugin.cleanup();
@@ -559,35 +523,11 @@ export async function executePreparedCliRun(
             ),
           };
         }
-        // Same session-aware per-emission resolver as the live-session branch.
-        const shouldInjectToolInlineMarkersHeadless = (): boolean => {
-          const ctx = getAgentRunContext(params.runId);
-          const runVerbose = normalizeVerboseLevel(ctx?.verboseLevel);
-          const sessionEntry = params.sessionKey
-            ? loadSessionEntryByKey(params.sessionKey)
-            : undefined;
-          const sessionVerbose = normalizeVerboseLevel(sessionEntry?.verboseLevel);
-          const sessionUpdatedAt =
-            typeof sessionEntry?.updatedAt === "number" ? sessionEntry.updatedAt : undefined;
-          const sessionChangedAfterRunStarted =
-            sessionUpdatedAt !== undefined &&
-            ctx?.registeredAt !== undefined &&
-            sessionUpdatedAt >= ctx.registeredAt;
-          const resolved =
-            (sessionVerbose && (!runVerbose || sessionChangedAfterRunStarted)
-              ? sessionVerbose
-              : undefined) ??
-            runVerbose ??
-            normalizeVerboseLevel(params.config?.agents?.defaults?.verboseDefault) ??
-            "off";
-          return resolved !== "off";
-        };
         const streamingParser = hasJsonlOutput
           ? createCliJsonlStreamingParser({
               backend,
               providerId: context.backendResolved.id,
-              shouldInjectToolInlineMarkers: shouldInjectToolInlineMarkersHeadless,
-              onAssistantDelta: ({ text, delta, replacement }) => {
+              onAssistantDelta: ({ text, delta }) => {
                 emitAgentEvent({
                   runId: params.runId,
                   stream: "assistant",
@@ -600,8 +540,6 @@ export async function executePreparedCliRun(
                       delta,
                       context.backendResolved.textTransforms?.output,
                     ),
-                    // See live-session branch above for replacement semantics.
-                    ...(replacement ? { replacement: true } : {}),
                   },
                 });
               },

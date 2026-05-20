@@ -25,15 +25,6 @@ export type CliStreamingDelta = {
   delta: string;
   sessionId?: string;
   usage?: CliUsage;
-  /**
-   * When true, the emitter is signalling that `text` is a full replacement
-   * — the live-chat merger should use `text` even when it is a strict
-   * prefix of its previousText (which the default "rollback" branch would
-   * otherwise treat as stale and ignore). Used by the rolling-timer
-   * terminal-cleanup path where the new text is shorter than what's
-   * already been shown.
-   */
-  replacement?: boolean;
 };
 
 function isClaudeCliProvider(providerId: string): boolean {
@@ -459,7 +450,6 @@ function createClaudeToolUseTracker(params: {
   backend: CliBackendConfig;
   providerId: string;
   onToolEvent?: (evt: ClaudeToolEvent) => void;
-  onToolText?: (text: string) => void;
   getSessionId: () => string | undefined;
   getUsage: () => CliUsage | undefined;
 }): (parsed: Record<string, unknown>) => void {
@@ -467,7 +457,7 @@ function createClaudeToolUseTracker(params: {
 
   const emitTool = (entry: ClaudeToolBlockEntry): void => {
     if (entry.emitted) {return;}
-    if (!params.onToolEvent && !params.onToolText) {return;}
+    if (!params.onToolEvent) {return;}
     let args = parseClaudeToolArgs(entry.input, entry.partialJson);
     if (args && Object.keys(args).length === 0 && entry.partialJson) {
       try {
@@ -475,50 +465,21 @@ function createClaudeToolUseTracker(params: {
         if (p && typeof p === "object") {args = p as Record<string, unknown>;}
       } catch {}
     }
-    // Sanitize once before either consumer sees the args — matches the
-    // existing embedded-runtime contract (pi-embedded-subscribe.handlers
-    // .tools.ts) so tokens, API keys, and secret-bearing strings in
-    // command / URL / header fields are redacted before they reach inline
-    // assistant deltas OR structured tool events.
+    // Sanitize before the structured event surfaces — matches the
+    // pi-embedded-subscribe.handlers.tools.ts contract so tokens, API keys,
+    // and secret-bearing strings in command / URL / header fields are
+    // redacted before downstream consumers ever see them.
     const safeArgs = args
       ? (sanitizeToolArgs(args) as Record<string, unknown>)
       : undefined;
-    if (params.onToolText) {
-      let detail = "";
-      if (safeArgs) {
-        const val =
-          safeArgs.command ||
-          safeArgs.file_path ||
-          safeArgs.pattern ||
-          safeArgs.query ||
-          safeArgs.description ||
-          safeArgs.url;
-        if (typeof val === "string" && val.trim()) {
-          detail = val.trim();
-          if (detail.length > 120) {detail = detail.slice(0, 117) + "…";}
-        }
-      }
-      const ts = new Date().toLocaleTimeString("en-GB", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      });
-      params.onToolText(
-        detail
-          ? `\n\n[${ts}] 🛠️ ${entry.name}: ${detail}\n`
-          : `\n\n[${ts}] 🛠️ ${entry.name}\n`,
-      );
-    }
-    if (params.onToolEvent) {
-      params.onToolEvent({
-        phase: "start",
-        name: entry.name,
-        args: safeArgs,
-        itemId: entry.id,
-        sessionId: params.getSessionId(),
-        usage: params.getUsage(),
-      });
-    }
+    params.onToolEvent({
+      phase: "start",
+      name: entry.name,
+      args: safeArgs,
+      itemId: entry.id,
+      sessionId: params.getSessionId(),
+      usage: params.getUsage(),
+    });
     entry.emitted = true;
   };
 
@@ -580,18 +541,6 @@ export function createCliJsonlStreamingParser(params: {
   providerId: string;
   onAssistantDelta: (delta: CliStreamingDelta) => void;
   onToolEvent?: (evt: ClaudeToolEvent) => void;
-  /**
-   * Called at each tool-start emission to decide whether to also inject the
-   * `\n\n[HH:MM:SS] 🛠️ ToolName: detail\n` marker (plus rolling 8s timer)
-   * into the assistant text stream. Returning `false` keeps assistant text
-   * clean — only the structured `onToolEvent` fires, which downstream channels
-   * gate by their own tool-verbose policy. The callback is invoked per-tool
-   * (not captured once at parser construction) so session-level verbose changes
-   * mid-run are honoured: e.g. a user toggling tool verbose off during a long
-   * run will stop subsequent inline markers immediately, matching the
-   * server-chat re-resolution path. Omitting the callback defaults to `false`.
-   */
-  shouldInjectToolInlineMarkers?: () => boolean;
 }) {
   let lineBuffer = "";
   let assistantText = "";
@@ -600,69 +549,10 @@ export function createCliJsonlStreamingParser(params: {
   let output: CliOutput | null = null;
   const texts: string[] = [];
 
-  // Rolling-timer state: while a tool runs, we paint `_ <elapsed>s — <hh:mm:ss>_`
-  // at the tail of assistantText and refresh every 8s so the user sees the
-  // turn is still alive. Cleared on next text_delta, on result, or on finish.
-  let toolKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
-  let toolKeepaliveStart = 0;
-  let toolTickStart = -1;
-
-  const clearToolKeepalive = (): void => {
-    if (toolKeepaliveTimer) {
-      clearInterval(toolKeepaliveTimer);
-      toolKeepaliveTimer = null;
-    }
-  };
-
-  const stripToolTick = (): void => {
-    if (toolTickStart >= 0 && toolTickStart < assistantText.length) {
-      assistantText = assistantText.slice(0, toolTickStart);
-    }
-    toolTickStart = -1;
-  };
-
-  // For terminal paths (result, finish) where no follow-up text delta is
-  // coming: emit a replacement delta so the live-chat merger replaces the
-  // stale `_ Ns ..._` tick that was last sent. The new `text` is a strict
-  // prefix of the previously emitted text (timer suffix stripped) — the
-  // merger's default rollback branch would keep the longer previousText,
-  // leaving the timer visible. Set `replacement: true` to bypass that
-  // branch and force the merger to honour the shorter text.
-  const emitTickReplacementIfPainted = (): void => {
-    if (toolTickStart < 0) {return;}
-    stripToolTick();
-    params.onAssistantDelta({ text: assistantText, delta: "", replacement: true });
-  };
-
   const trackClaudeToolUse = createClaudeToolUseTracker({
     backend: params.backend,
     providerId: params.providerId,
     onToolEvent: params.onToolEvent,
-    // Per-tool re-evaluation of inline-marker policy: invokes the caller's
-    // resolver at emit time so a session verbose change mid-run is honoured.
-    // No-op when the caller didn't pass a resolver (default: never inject).
-    onToolText: (text) => {
-      if (!params.shouldInjectToolInlineMarkers?.()) {return;}
-      clearToolKeepalive();
-      stripToolTick();
-      assistantText += text;
-      params.onAssistantDelta({ text: assistantText, delta: text });
-      toolKeepaliveStart = Date.now();
-      toolTickStart = assistantText.length;
-      toolKeepaliveTimer = setInterval(() => {
-        const elapsed = Math.round((Date.now() - toolKeepaliveStart) / 1000);
-        const now = new Date().toLocaleTimeString("en-GB", {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        });
-        assistantText = assistantText.slice(0, toolTickStart) + `_ ${elapsed}s — ${now}_`;
-        // Replacement semantics for the tick: empty delta signals to the
-        // live-chat merger to use the new full text rather than append a
-        // delta to its previousText (which still contains the old tick).
-        params.onAssistantDelta({ text: assistantText, delta: "" });
-      }, 8000);
-    },
     getSessionId: () => sessionId,
     getUsage: () => usage,
   });
@@ -683,8 +573,6 @@ export function createCliJsonlStreamingParser(params: {
       usage,
     });
     if (result) {
-      clearToolKeepalive();
-      emitTickReplacementIfPainted();
       output = result;
       return;
     }
@@ -706,24 +594,6 @@ export function createCliJsonlStreamingParser(params: {
       usage,
     });
     if (!delta) {
-      return;
-    }
-    if (toolKeepaliveTimer) {
-      clearToolKeepalive();
-      stripToolTick();
-      if (!assistantText.endsWith("\n\n")) {
-        assistantText = assistantText.replace(/\n*$/, "\n\n");
-      }
-      assistantText = assistantText + delta.delta;
-      // Replacement semantics: emit delta:"" so the live-chat merger uses
-      // nextText (the new full state) rather than appending the provider
-      // delta to its previousText (which still contains the stripped timer).
-      params.onAssistantDelta({
-        text: assistantText,
-        delta: "",
-        sessionId: delta.sessionId,
-        usage: delta.usage,
-      });
       return;
     }
     assistantText = delta.text;
@@ -767,16 +637,7 @@ export function createCliJsonlStreamingParser(params: {
       flushLines(false);
     },
     finish() {
-      clearToolKeepalive();
-      emitTickReplacementIfPainted();
       flushLines(true);
-      // The final flush can parse a content_block_stop for a tool, which
-      // (when inline markers are enabled) starts a fresh keepalive interval.
-      // Re-clear after the flush so the parser is truly quiescent when
-      // finish() returns — no setInterval left running past the caller's
-      // "we're done" signal.
-      clearToolKeepalive();
-      emitTickReplacementIfPainted();
     },
     getOutput() {
       if (output) {

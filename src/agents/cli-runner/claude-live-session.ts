@@ -761,7 +761,6 @@ function createTurn(params: {
   noOutputTimeoutMs: number;
   onAssistantDelta: (delta: CliStreamingDelta) => void;
   onToolEvent?: (evt: ClaudeToolEvent) => void;
-  shouldInjectToolInlineMarkers?: () => boolean;
   session: ClaudeLiveSession;
   resolve: (output: CliOutput) => void;
   reject: (error: unknown) => void;
@@ -779,7 +778,6 @@ function createTurn(params: {
       providerId: params.context.backendResolved.id,
       onAssistantDelta: params.onAssistantDelta,
       onToolEvent: params.onToolEvent,
-      shouldInjectToolInlineMarkers: params.shouldInjectToolInlineMarkers,
     }),
     resolve: params.resolve,
     reject: params.reject,
@@ -846,7 +844,6 @@ export async function runClaudeLiveSessionTurn(params: {
   getProcessSupervisor: () => ProcessSupervisor;
   onAssistantDelta: (delta: CliStreamingDelta) => void;
   onToolEvent?: (evt: ClaudeToolEvent) => void;
-  shouldInjectToolInlineMarkers?: () => boolean;
   cleanup: () => Promise<void>;
 }): Promise<ClaudeLiveRunResult> {
   const key = buildClaudeLiveKey(params.context);
@@ -959,7 +956,6 @@ export async function runClaudeLiveSessionTurn(params: {
       noOutputTimeoutMs: params.noOutputTimeoutMs,
       onAssistantDelta: params.onAssistantDelta,
       onToolEvent: params.onToolEvent,
-      shouldInjectToolInlineMarkers: params.shouldInjectToolInlineMarkers,
       session: liveSession,
       resolve,
       reject,
