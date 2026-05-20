@@ -1905,6 +1905,8 @@ export async function runAgentTurnWithFallback(params: {
                     }
                     if (phase === "start" || phase === "update") {
                       const toolStartProgressPromise = params.opts?.onToolStart?.({
+                        itemId: readStringValue(evt.data.itemId),
+                        toolCallId: readStringValue(evt.data.toolCallId),
                         name,
                         phase,
                         args,
