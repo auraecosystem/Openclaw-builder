@@ -121,6 +121,9 @@ export function getCurrentPluginMetadataSnapshot(
   ) {
     return undefined;
   }
+  if (snapshotPluginIds !== undefined && requestedPluginIds === undefined) {
+    return undefined;
+  }
   if (
     snapshotPluginIds !== undefined &&
     params.config === undefined &&

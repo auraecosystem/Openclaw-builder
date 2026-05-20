@@ -150,7 +150,7 @@ describe("current plugin metadata snapshot", () => {
     const snapshot = createSnapshot({ config, pluginIds: ["demo"] });
     setCurrentPluginMetadataSnapshot(snapshot, { config });
 
-    expect(getCurrentPluginMetadataSnapshot({ config })).toBe(snapshot);
+    expect(getCurrentPluginMetadataSnapshot({ config })).toBeUndefined();
     expect(
       getCurrentPluginMetadataSnapshot({
         allowWorkspaceScopedSnapshot: true,
@@ -168,6 +168,8 @@ describe("current plugin metadata snapshot", () => {
     const scoped = createSnapshot({ config, pluginIds: ["other", "demo"] });
     setCurrentPluginMetadataSnapshot(scoped, { config });
 
+    expect(getCurrentPluginMetadataSnapshot({ config })).toBeUndefined();
+    expect(getCurrentPluginMetadataSnapshot({ config, allowScopedSnapshot: true })).toBeUndefined();
     expect(getCurrentPluginMetadataSnapshot({ config, pluginIds: ["demo", "other"] })).toBe(scoped);
     expect(getCurrentPluginMetadataSnapshot({ config, pluginIds: ["demo"] })).toBeUndefined();
   });
