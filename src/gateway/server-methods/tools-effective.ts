@@ -155,7 +155,7 @@ function mcpDiscoveryNotice(
         message: `MCP servers ${servers} are configured but not connected for this session yet. Refresh available tools or send a message to discover them.`,
       };
     default:
-      // This should never happen given the function signature, but makes the linter happy
+      // Exhaustiveness guard for oxlint's consistent-return rule.
       return undefined;
   }
 }
