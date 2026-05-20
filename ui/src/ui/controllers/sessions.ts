@@ -67,6 +67,7 @@ const SESSION_EVENT_ROW_FIELDS = [
   "childSessions",
   "compactionCheckpointCount",
   "contextTokens",
+  "derivedTitle",
   "displayName",
   "endedAt",
   "elevatedLevel",
