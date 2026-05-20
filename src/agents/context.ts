@@ -12,6 +12,7 @@ import { resolveDefaultAgentDir } from "./agent-scope.js";
 import { lookupCachedContextTokens, MODEL_CONTEXT_TOKEN_CACHE } from "./context-cache.js";
 import { CONTEXT_WINDOW_RUNTIME_STATE } from "./context-runtime-state.js";
 import { normalizeProviderId } from "./model-selection.js";
+import { isClaudeCliCompatibleBackend } from "./provider-id.js";
 
 export { resetContextWindowCacheForTest } from "./context-runtime-state.js";
 
@@ -392,7 +393,7 @@ function resolveConfiguredProviderContextTokens(
 }
 
 function isAnthropic1MModel(provider: string, model: string): boolean {
-  if (provider !== "anthropic" && provider !== "claude-cli") {
+  if (provider !== "anthropic" && !isClaudeCliCompatibleBackend(provider)) {
     return false;
   }
   const modelId = resolveModelFamilyId(model);
@@ -405,7 +406,8 @@ function shouldUseAnthropicOpus47ContextWindow(params: {
 }): boolean {
   const provider = params.provider ? normalizeProviderId(params.provider) : "";
   return (
-    (provider === "anthropic" || provider === "claude-cli") && isClaudeOpus47Model(params.model)
+    (provider === "anthropic" || isClaudeCliCompatibleBackend(provider)) &&
+    isClaudeOpus47Model(params.model)
   );
 }
 
@@ -417,7 +419,7 @@ function shouldUseDiscoveredAnthropicOpus47ContextWindow(model: ModelEntry): boo
     return false;
   }
   if (provider) {
-    return provider === "anthropic" || provider === "claude-cli";
+    return provider === "anthropic" || isClaudeCliCompatibleBackend(provider);
   }
   const normalized = normalizeLowercaseStringOrEmpty(modelId);
   const slash = normalized.indexOf("/");
@@ -425,7 +427,7 @@ function shouldUseDiscoveredAnthropicOpus47ContextWindow(model: ModelEntry): boo
     return false;
   }
   const inferredProvider = normalizeProviderId(normalized.slice(0, slash));
-  return inferredProvider === "claude-cli";
+  return isClaudeCliCompatibleBackend(inferredProvider);
 }
 
 function resolveModelFamilyId(modelId: string): string {
