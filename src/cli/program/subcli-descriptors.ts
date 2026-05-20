@@ -179,8 +179,6 @@ const subCliCommandCatalog = defineCommandDescriptorCatalog([
   },
 ] as const satisfies ReadonlyArray<SubCliDescriptor>);
 
-export const SUB_CLI_DESCRIPTORS = subCliCommandCatalog.descriptors;
-
 export function getSubCliEntries(): ReadonlyArray<SubCliDescriptor> {
   const descriptors = subCliCommandCatalog.getDescriptors();
   if (isPrivateQaCliEnabled()) {
