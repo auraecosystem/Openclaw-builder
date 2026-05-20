@@ -8,9 +8,6 @@ import { enqueueSystemEvent as enqueueSystemEventImpl } from "../../infra/system
 import { getProcessSupervisor as getProcessSupervisorImpl } from "../../process/supervisor/index.js";
 import { resolveEventSessionKey, scopedHeartbeatWakeOptions } from "../../routing/session-key.js";
 import { appendBootstrapPromptWarning } from "../bootstrap-budget.js";
-import { normalizeVerboseLevel } from "../../auto-reply/thinking.js";
-import { getAgentRunContext } from "../../infra/agent-events.js";
-import { loadSessionEntryByKey } from "../subagent-announce-delivery.js";
 import { sanitizeToolArgs } from "../pi-embedded-subscribe.tools.js";
 import {
   createCliJsonlStreamingParser,
