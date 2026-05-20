@@ -113,7 +113,7 @@ export async function runPostCorePluginConvergence(params: {
       ...repair.changes,
     ],
     warnings,
-    errored: warnings.length > 0,
+    errored: (repair.failedPluginIds?.length ?? 0) > 0 || smoke.failures.length > 0,
     smokeFailures: smoke.failures,
     installRecords: records,
   };
