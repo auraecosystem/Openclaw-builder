@@ -2,7 +2,6 @@ import type { CliBackendConfig } from "../config/types.js";
 import { extractBalancedJsonFragments } from "../shared/balanced-json.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { isRecord } from "../utils.js";
-import { sanitizeToolArgs } from "./pi-embedded-subscribe.tools.js";
 
 type CliUsage = {
   input?: number;
@@ -380,167 +379,10 @@ function parseClaudeCliStreamingDelta(params: {
   };
 }
 
-export type ClaudeToolEvent = {
-  phase: "start";
-  name: string;
-  args: Record<string, unknown> | undefined;
-  itemId: string | undefined;
-  sessionId: string | undefined;
-  usage: CliUsage | undefined;
-};
-
-type ClaudeToolBlockEntry = {
-  id: string;
-  name: string;
-  input: unknown;
-  partialJson: string;
-  emitted: boolean;
-};
-
-function readClaudeToolBlockKey(
-  event: Record<string, unknown>,
-  block: Record<string, unknown>,
-): string | undefined {
-  const id = typeof block.id === "string" && block.id.trim() ? block.id.trim() : undefined;
-  if (id) {return id;}
-  const index =
-    typeof event.index === "number"
-      ? event.index
-      : typeof event.content_block_index === "number"
-        ? event.content_block_index
-        : undefined;
-  return index === undefined ? undefined : `index:${index}`;
-}
-
-function readClaudeToolName(block: Record<string, unknown>): string | undefined {
-  for (const key of ["name", "tool_name", "toolName"] as const) {
-    const value = block[key];
-    if (typeof value === "string" && value.trim()) {return value.trim();}
-  }
-  return undefined;
-}
-
-function parseClaudeToolArgs(
-  input: unknown,
-  partialJson: string,
-): Record<string, unknown> | undefined {
-  if (isRecord(input)) {return input;}
-  const text =
-    typeof input === "string" && input.trim()
-      ? input.trim()
-      : typeof partialJson === "string" && partialJson.trim()
-        ? partialJson.trim()
-        : "";
-  if (!text) {return undefined;}
-  try {
-    const parsed = JSON.parse(text);
-    return isRecord(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function readClaudeToolDeltaPartial(delta: unknown): string {
-  if (!isRecord(delta)) {return "";}
-  if (delta.type !== "input_json_delta") {return "";}
-  return typeof delta.partial_json === "string" ? delta.partial_json : "";
-}
-
-function createClaudeToolUseTracker(params: {
-  backend: CliBackendConfig;
-  providerId: string;
-  onToolEvent?: (evt: ClaudeToolEvent) => void;
-  getSessionId: () => string | undefined;
-  getUsage: () => CliUsage | undefined;
-}): (parsed: Record<string, unknown>) => void {
-  const toolBlocks = new Map<string, ClaudeToolBlockEntry>();
-
-  const emitTool = (entry: ClaudeToolBlockEntry): void => {
-    if (entry.emitted) {return;}
-    if (!params.onToolEvent) {return;}
-    let args = parseClaudeToolArgs(entry.input, entry.partialJson);
-    if (args && Object.keys(args).length === 0 && entry.partialJson) {
-      try {
-        const p = JSON.parse(entry.partialJson);
-        if (p && typeof p === "object") {args = p as Record<string, unknown>;}
-      } catch {}
-    }
-    // Sanitize before the structured event surfaces — matches the
-    // pi-embedded-subscribe.handlers.tools.ts contract so tokens, API keys,
-    // and secret-bearing strings in command / URL / header fields are
-    // redacted before downstream consumers ever see them.
-    const safeArgs = args
-      ? (sanitizeToolArgs(args) as Record<string, unknown>)
-      : undefined;
-    params.onToolEvent({
-      phase: "start",
-      name: entry.name,
-      args: safeArgs,
-      itemId: entry.id,
-      sessionId: params.getSessionId(),
-      usage: params.getUsage(),
-    });
-    entry.emitted = true;
-  };
-
-  return (parsed) => {
-    if (!usesClaudeStreamJsonDialect({ backend: params.backend, providerId: params.providerId })) {
-      return;
-    }
-    if (parsed.type !== "stream_event" || !isRecord(parsed.event)) {return;}
-    const event = parsed.event;
-    if (event.type === "content_block_start" && isRecord(event.content_block)) {
-      const block = event.content_block;
-      if (block.type !== "tool_use" && block.type !== "server_tool_use" && block.type !== "mcp_tool_use") {
-        return;
-      }
-      const key = readClaudeToolBlockKey(event, block);
-      const name = readClaudeToolName(block);
-      if (!key || !name) {return;}
-      const entry: ClaudeToolBlockEntry = {
-        id: typeof block.id === "string" ? block.id : key,
-        name,
-        input: block.input,
-        partialJson: "",
-        emitted: false,
-      };
-      toolBlocks.set(key, entry);
-      const idxKey =
-        typeof event.index === "number"
-          ? `index:${event.index}`
-          : typeof event.content_block_index === "number"
-            ? `index:${event.content_block_index}`
-            : undefined;
-      if (idxKey && idxKey !== key) {toolBlocks.set(idxKey, entry);}
-      return;
-    }
-    if (event.type !== "content_block_delta" && event.type !== "content_block_stop") {return;}
-    const index =
-      typeof event.index === "number"
-        ? event.index
-        : typeof event.content_block_index === "number"
-          ? event.content_block_index
-          : undefined;
-    if (index === undefined) {return;}
-    const entry =
-      toolBlocks.get(`index:${index}`) ?? Array.from(toolBlocks.values()).at(index);
-    if (!entry) {return;}
-    if (event.type === "content_block_delta") {
-      const partial = readClaudeToolDeltaPartial(event.delta);
-      if (partial) {entry.partialJson += partial;}
-      return;
-    }
-    emitTool(entry);
-    toolBlocks.delete(`index:${index}`);
-    if (entry.id) {toolBlocks.delete(entry.id);}
-  };
-}
-
 export function createCliJsonlStreamingParser(params: {
   backend: CliBackendConfig;
   providerId: string;
   onAssistantDelta: (delta: CliStreamingDelta) => void;
-  onToolEvent?: (evt: ClaudeToolEvent) => void;
 }) {
   let lineBuffer = "";
   let assistantText = "";
@@ -549,21 +391,12 @@ export function createCliJsonlStreamingParser(params: {
   let output: CliOutput | null = null;
   const texts: string[] = [];
 
-  const trackClaudeToolUse = createClaudeToolUseTracker({
-    backend: params.backend,
-    providerId: params.providerId,
-    onToolEvent: params.onToolEvent,
-    getSessionId: () => sessionId,
-    getUsage: () => usage,
-  });
-
   const handleParsedRecord = (parsed: Record<string, unknown>) => {
     sessionId = pickCliSessionId(parsed, params.backend) ?? sessionId;
     if (!sessionId && typeof parsed.thread_id === "string") {
       sessionId = parsed.thread_id.trim();
     }
     usage = readCliUsage(parsed) ?? usage;
-    trackClaudeToolUse(parsed);
 
     const result = parseClaudeCliJsonlResult({
       backend: params.backend,
@@ -585,7 +418,7 @@ export function createCliJsonlStreamingParser(params: {
       }
     }
 
-    let delta = parseClaudeCliStreamingDelta({
+    const delta = parseClaudeCliStreamingDelta({
       backend: params.backend,
       providerId: params.providerId,
       parsed,

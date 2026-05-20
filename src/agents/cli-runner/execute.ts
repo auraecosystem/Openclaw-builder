@@ -8,7 +8,6 @@ import { enqueueSystemEvent as enqueueSystemEventImpl } from "../../infra/system
 import { getProcessSupervisor as getProcessSupervisorImpl } from "../../process/supervisor/index.js";
 import { resolveEventSessionKey, scopedHeartbeatWakeOptions } from "../../routing/session-key.js";
 import { appendBootstrapPromptWarning } from "../bootstrap-budget.js";
-import { sanitizeToolArgs } from "../pi-embedded-subscribe.tools.js";
 import {
   createCliJsonlStreamingParser,
   extractCliErrorMessage,
@@ -458,7 +457,6 @@ export async function executePreparedCliRun(
           claudeSkillsPluginCleanupOwned = true;
           const ownedPreparedBackendCleanup = context.preparedBackend.cleanup;
           context.preparedBackend.cleanup = undefined;
-          // Per-tool-emission verbose resolver — mirrors
           const liveResult = await runClaudeLiveSessionTurn({
             context,
             args,
@@ -480,24 +478,6 @@ export async function executePreparedCliRun(
                     delta,
                     context.backendResolved.textTransforms?.output,
                   ),
-                },
-              });
-            },
-            onToolEvent: (evt) => {
-              emitAgentEvent({
-                runId: params.runId,
-                stream: "tool",
-                data: {
-                  phase: evt.phase,
-                  name: evt.name,
-                  // Defense-in-depth: the parser already sanitizes args
-                  // before invoking this callback. Re-running the helper
-                  // here costs nothing and guarantees the channel-side
-                  // tool-event contract is honoured even if a future
-                  // parser change forgets the pre-sanitize step.
-                  args: evt.args ? sanitizeToolArgs(evt.args) : undefined,
-                  itemId: evt.itemId,
-                  toolCallId: evt.itemId,
                 },
               });
             },
@@ -537,20 +517,6 @@ export async function executePreparedCliRun(
                       delta,
                       context.backendResolved.textTransforms?.output,
                     ),
-                  },
-                });
-              },
-              onToolEvent: (evt) => {
-                emitAgentEvent({
-                  runId: params.runId,
-                  stream: "tool",
-                  data: {
-                    phase: evt.phase,
-                    name: evt.name,
-                    // Defense-in-depth — see live-session branch above.
-                    args: evt.args ? sanitizeToolArgs(evt.args) : undefined,
-                    itemId: evt.itemId,
-                    toolCallId: evt.itemId,
                   },
                 });
               },

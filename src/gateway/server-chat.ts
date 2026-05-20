@@ -956,14 +956,7 @@ export function createAgentEventHandler({
         typeof evt.data?.text === "string" &&
         !shouldSuppressAssistantEventForLiveChat(evt.data)
       ) {
-        emitChatDelta(
-          sessionKey,
-          clientRunId,
-          evt.runId,
-          evt.seq,
-          evt.data.text,
-          evt.data.delta,
-        );
+        emitChatDelta(sessionKey, clientRunId, evt.runId, evt.seq, evt.data.text, evt.data.delta);
       }
     }
 

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  type ClaudeToolEvent,
   createCliJsonlStreamingParser,
   extractCliErrorMessage,
   parseCliJson,
@@ -447,108 +446,5 @@ describe("createCliJsonlStreamingParser", () => {
     expect(deltas).toEqual([
       { text: "hello", delta: "hello", sessionId: "session-stream", usage: undefined },
     ]);
-  });
-
-  describe("Claude tool-use tracker", () => {
-    // Build a parser wired to the claude-stream-json dialect with capturing
-    // arrays for the two emission paths (assistant deltas + structured tool
-    // events). Each test calls `parser.push(...)` with a canned `stream_event`
-    // sequence drawn from a real claude-cli-interactive turn and asserts the
-    // tracker's contract: partial-JSON reassembly, sanitization, inline
-    // marker shape, and verbose gating.
-    const makeParser = (overrides: {
-      onToolEvent?: (evt: ClaudeToolEvent) => void;
-      providerId?: string;
-      jsonlDialect?: string;
-    } = {}) => {
-      const deltas: Array<{ text: string; delta: string }> = [];
-      const tools: ClaudeToolEvent[] = [];
-      const parser = createCliJsonlStreamingParser({
-        backend: {
-          command: "local-cli",
-          output: "jsonl",
-          // CliBackendConfig narrows this field to the literal "claude-stream-json".
-          // The dialect-gate test deliberately passes "json" at runtime to negate
-          // the gate (jsonlDialect === "claude-stream-json"); cast at the boundary
-          // so that negative case still compiles.
-          jsonlDialect: (overrides.jsonlDialect ?? "claude-stream-json") as "claude-stream-json",
-          sessionIdFields: ["session_id"],
-        },
-        providerId: overrides.providerId ?? "claude-cli",
-        onAssistantDelta: (d) => deltas.push({ text: d.text, delta: d.delta }),
-        onToolEvent: overrides.onToolEvent ?? ((evt) => tools.push(evt)),
-      });
-      return { parser, deltas, tools };
-    };
-
-    const toolUseSequence = (params: { id: string; name: string; partials: string[] }): string =>
-      [
-        JSON.stringify({ type: "init", session_id: "session-tools" }),
-        JSON.stringify({
-          type: "stream_event",
-          event: {
-            type: "content_block_start",
-            index: 0,
-            content_block: { type: "tool_use", id: params.id, name: params.name, input: {} },
-          },
-        }),
-        ...params.partials.map((partial) =>
-          JSON.stringify({
-            type: "stream_event",
-            event: {
-              type: "content_block_delta",
-              index: 0,
-              delta: { type: "input_json_delta", partial_json: partial },
-            },
-          }),
-        ),
-        JSON.stringify({
-          type: "stream_event",
-          event: { type: "content_block_stop", index: 0 },
-        }),
-        // Trailing newline so parser.push flushes the content_block_stop
-        // record without waiting for parser.finish() — tests that assert
-        // on emit timing within a single push call need this.
-        "",
-      ].join("\n");
-
-    it("reassembles partial input_json_delta chunks into a single onToolEvent on content_block_stop", () => {
-      const { parser, tools } = makeParser();
-      parser.push(
-        toolUseSequence({
-          id: "toolu_01",
-          name: "Read",
-          partials: ['{"file_pa', 'th":"/tm', 'p/example.md"}'],
-        }),
-      );
-      parser.finish();
-      expect(tools).toHaveLength(1);
-      expect(tools[0]).toMatchObject({
-        phase: "start",
-        name: "Read",
-        itemId: "toolu_01",
-        args: { file_path: "/tmp/example.md" },
-        sessionId: "session-tools",
-      });
-    });
-
-    it("does not emit tool events on non-Claude backends (dialect gate)", () => {
-      // The dialect gate is `backend.jsonlDialect === "claude-stream-json" ||
-      // providerId is claude-cli`. To exercise the short-circuit we must
-      // negate BOTH sides — a non-Claude provider AND a different dialect.
-      const { parser, tools } = makeParser({
-        providerId: "openai",
-        jsonlDialect: "json",
-      });
-      parser.push(
-        toolUseSequence({
-          id: "toolu_05",
-          name: "Read",
-          partials: ['{"file_path":"/etc/passwd"}'],
-        }),
-      );
-      parser.finish();
-      expect(tools).toEqual([]);
-    });
   });
 });
