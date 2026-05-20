@@ -18,7 +18,9 @@ import {
   type ExecAllowlistEntry,
   type ExecAsk,
   type ExecCommandSegment,
+  type ExecSegmentSatisfiedBy,
   type ExecSecurity,
+  type SkillBinTrustEntry,
 } from "../infra/exec-approvals.js";
 import { evaluateExecDenylist } from "../infra/exec-denylist.js";
 import type { ExecHostRequest, ExecHostResponse, ExecHostRunResult } from "../infra/exec-host.js";
@@ -115,8 +117,13 @@ type SystemRunPolicyPhase = SystemRunParsePhase & {
   allowlistMatches: ExecAllowlistEntry[];
   analysisOk: boolean;
   allowlistSatisfied: boolean;
+  safeBins: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["safeBins"];
+  safeBinProfiles: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["safeBinProfiles"];
+  trustedSafeBinDirs: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["trustedSafeBinDirs"];
+  skillBins: SkillBinTrustEntry[];
+  autoAllowSkills: boolean;
   segments: ExecCommandSegment[];
-  segmentSatisfiedBy: import("../infra/exec-approvals.js").ExecSegmentSatisfiedBy[];
+  segmentSatisfiedBy: ExecSegmentSatisfiedBy[];
   plannedAllowlistArgv: string[] | undefined;
   isWindows: boolean;
   approvedCwdSnapshot: ApprovedCwdSnapshot | undefined;
@@ -568,6 +575,11 @@ async function evaluateSystemRunPolicyPhase(
     allowlistMatches,
     analysisOk,
     allowlistSatisfied,
+    safeBins,
+    safeBinProfiles,
+    trustedSafeBinDirs,
+    skillBins: bins,
+    autoAllowSkills,
     segments,
     segmentSatisfiedBy,
     plannedAllowlistArgv: plannedAllowlistArgv ?? undefined,
@@ -634,6 +646,12 @@ async function executeSystemRunPhase(
     plannedAllowlistArgv: phase.plannedAllowlistArgv,
     argv: phase.argv,
     security: phase.security,
+    approvals: phase.approvals,
+    safeBins: phase.safeBins,
+    safeBinProfiles: phase.safeBinProfiles,
+    trustedSafeBinDirs: phase.trustedSafeBinDirs,
+    skillBins: phase.skillBins,
+    autoAllowSkills: phase.autoAllowSkills,
     isWindows: phase.isWindows,
     policy: phase.policy,
     shellCommand: phase.shellPayload,
