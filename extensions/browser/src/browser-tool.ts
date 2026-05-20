@@ -37,6 +37,7 @@ import {
   readStringParam,
   readStringValue,
   resolveBrowserConfig,
+  resolveRuntimeImageSanitization,
   resolveExistingPathsWithinRoot,
   resolveNodeIdFromList,
   resolveProfile,
@@ -836,6 +837,7 @@ export function createBrowserTool(opts?: {
             label: "browser:screenshot",
             path: screenshotPath,
             details: result,
+            imageSanitization: resolveRuntimeImageSanitization(),
           });
         }
         case "navigate": {
