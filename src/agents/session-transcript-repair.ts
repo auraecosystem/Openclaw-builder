@@ -625,6 +625,10 @@ export function repairToolUseResultPairing(
           ) {
             spanResultsById.set(id, normalizedToolResult);
             changed = true;
+          } else {
+            // Dropping a duplicate tool result (either synthetic or repeated real);
+            // the transcript changes since this occurrence will be removed.
+            changed = true;
           }
           continue;
         }
