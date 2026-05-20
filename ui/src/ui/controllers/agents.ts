@@ -16,7 +16,9 @@ import { saveConfig } from "./config.ts";
 import type { ConfigState } from "./config.ts";
 import {
   formatMissingOperatorReadScopeMessage,
+  formatMissingOperatorScopeMessage,
   isMissingOperatorReadScopeError,
+  isMissingOperatorScopeError,
 } from "./scope-errors.ts";
 
 export type AgentsState = {
@@ -50,10 +52,11 @@ function hasSelectedAgentMismatch(state: AgentsState, agentId: string): boolean 
 
 function resolveToolsErrorMessage(
   err: unknown,
-  target: "tools catalog" | "effective tools",
+  target: "tools catalog" | "effective tools" | "effective tool refresh",
+  requiredScope: "operator.read" | "operator.write" = "operator.read",
 ): string {
-  return isMissingOperatorReadScopeError(err)
-    ? formatMissingOperatorReadScopeMessage(target)
+  return isMissingOperatorScopeError(err, requiredScope)
+    ? formatMissingOperatorScopeMessage(target, requiredScope)
     : String(err);
 }
 
@@ -123,9 +126,14 @@ export async function loadToolsCatalog(state: AgentsState, agentId: string) {
   }
 }
 
-export async function loadToolsEffective(
+async function requestToolsEffective(
   state: AgentsState,
   params: { agentId: string; sessionKey: string },
+  options: {
+    method: "tools.effective" | "tools.effective.refresh";
+    errorTarget: "effective tools" | "effective tool refresh";
+    requiredScope: "operator.read" | "operator.write";
+  },
 ) {
   const resolvedAgentId = params.agentId.trim();
   const resolvedSessionKey = params.sessionKey.trim();
@@ -151,7 +159,7 @@ export async function loadToolsEffective(
   state.toolsEffectiveError = null;
   state.toolsEffectiveResult = null;
   try {
-    const res = await state.client.request<ToolsEffectiveResult>("tools.effective", {
+    const res = await state.client.request<ToolsEffectiveResult>(options.method, {
       agentId: resolvedAgentId,
       sessionKey: resolvedSessionKey,
     });
@@ -164,13 +172,39 @@ export async function loadToolsEffective(
     if (shouldIgnoreResponse()) {
       return;
     }
-    state.toolsEffectiveError = resolveToolsErrorMessage(err, "effective tools");
+    state.toolsEffectiveError = resolveToolsErrorMessage(
+      err,
+      options.errorTarget,
+      options.requiredScope,
+    );
   } finally {
     if (state.toolsEffectiveLoadingKey === requestKey) {
       state.toolsEffectiveLoadingKey = null;
       state.toolsEffectiveLoading = false;
     }
   }
+}
+
+export async function loadToolsEffective(
+  state: AgentsState,
+  params: { agentId: string; sessionKey: string },
+) {
+  await requestToolsEffective(state, params, {
+    method: "tools.effective",
+    errorTarget: "effective tools",
+    requiredScope: "operator.read",
+  });
+}
+
+export async function refreshToolsEffective(
+  state: AgentsState,
+  params: { agentId: string; sessionKey: string },
+) {
+  await requestToolsEffective(state, params, {
+    method: "tools.effective.refresh",
+    errorTarget: "effective tool refresh",
+    requiredScope: "operator.write",
+  });
 }
 
 export function resetToolsEffectiveState(state: AgentsState) {

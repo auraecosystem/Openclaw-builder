@@ -125,6 +125,7 @@ function createProps(overrides: Partial<AgentsProps> = {}): AgentsProps {
     onFileSave: () => undefined,
     onToolsProfileChange: () => undefined,
     onToolsOverridesChange: () => undefined,
+    onEffectiveToolsRefresh: () => undefined,
     onConfigReload: () => undefined,
     onConfigSave: () => undefined,
     onModelChange: () => undefined,

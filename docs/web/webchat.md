@@ -61,12 +61,17 @@ Normal agent-run final answers should be durable because Pi writes the assistant
 
 - The Control UI `/agents` Tools panel has two separate views:
   - **Available Right Now** uses `tools.effective(sessionKey=...)` and shows a server-derived
-    projection of the current session inventory, including core, plugin, channel-owned, and MCP
-    server tools.
+    read-only projection of the current session inventory, including core, plugin, channel-owned,
+    and already-discovered MCP server tools.
+  - The **Refresh Available Tools** action calls `tools.effective.refresh(sessionKey=...)` to
+    explicitly start/list configured MCP servers for that session, then updates the same runtime
+    inventory view.
   - **Tool Configuration** uses `tools.catalog` and stays focused on profiles, overrides, and
     catalog semantics.
 - Runtime availability is session-scoped. Switching sessions on the same agent can change the
-  **Available Right Now** list.
+  **Available Right Now** list. If configured MCP servers have not been connected or were changed
+  since the last discovery, the panel shows a notice instead of silently starting MCP transports
+  from the read path.
 - The config editor does not imply runtime availability; effective access still follows policy
   precedence (`allow`/`deny`, per-agent and provider/channel overrides).
 

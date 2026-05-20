@@ -39,6 +39,7 @@ import {
   loadAgents,
   loadToolsCatalog,
   loadToolsEffective,
+  refreshToolsEffective,
   resetToolsEffectiveState,
   refreshVisibleToolsEffectiveForCurrentSession,
   saveAgentsConfig,
@@ -2411,6 +2412,17 @@ export function renderApp(state: AppViewState) {
                   } else {
                     removeConfigFormValue(state, [...basePath, "deny"]);
                   }
+                },
+                onEffectiveToolsRefresh: () => {
+                  const resolvedSessionKey = state.sessionKey.trim();
+                  const activeSessionAgentId = resolveAgentIdFromSessionKey(resolvedSessionKey);
+                  if (!resolvedSessionKey || !activeSessionAgentId) {
+                    return;
+                  }
+                  void refreshToolsEffective(state, {
+                    agentId: activeSessionAgentId,
+                    sessionKey: resolvedSessionKey,
+                  });
                 },
                 onConfigReload: () => loadConfig(state, { discardPendingChanges: true }),
                 onConfigSave: () => saveAgentsConfig(state),
