@@ -526,6 +526,7 @@ export function buildAfterTurnRuntimeContext(params: {
   tokenBudget?: number;
   currentTokenCount?: number;
   promptCache?: ContextEnginePromptCacheInfo;
+  useCompactionThinkingLevel?: boolean;
 }): ContextEngineRuntimeContext {
   return {
     ...buildEmbeddedCompactionRuntimeContext({
@@ -546,6 +547,7 @@ export function buildAfterTurnRuntimeContext(params: {
       provider: params.attempt.provider,
       modelId: params.attempt.modelId,
       thinkLevel: params.attempt.thinkLevel,
+      useCompactionThinkingLevel: params.useCompactionThinkingLevel,
       reasoningLevel: params.attempt.reasoningLevel,
       bashElevated: params.attempt.bashElevated,
       extraSystemPrompt: params.attempt.extraSystemPrompt,

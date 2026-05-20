@@ -127,7 +127,10 @@ import {
   runBeforeCompactionHooks,
   runPostCompactionSideEffects,
 } from "./compaction-hooks.js";
-import { resolveEmbeddedCompactionTarget } from "./compaction-runtime-context.js";
+import {
+  resolveEmbeddedCompactionTarget,
+  resolveEmbeddedCompactionThinkingLevel,
+} from "./compaction-runtime-context.js";
 import {
   compactWithSafetyTimeout,
   resolveCompactionTimeoutMs,
@@ -518,7 +521,11 @@ async function compactEmbeddedPiSessionDirectOnce(
   const provider = resolvedCompactionTarget.provider ?? DEFAULT_PROVIDER;
   const modelId = resolvedCompactionTarget.model ?? DEFAULT_MODEL;
   const authProfileId = resolvedCompactionTarget.authProfileId;
-  let thinkLevel: ThinkLevel = params.thinkLevel ?? "off";
+  let thinkLevel = resolveEmbeddedCompactionThinkingLevel({
+    config: params.config,
+    agentId: earlyAgentIds.sessionAgentId,
+    thinkLevel: params.thinkLevel,
+  });
   const attemptedThinking = new Set<ThinkLevel>();
   const fail = (reason: string, err?: unknown): EmbeddedPiCompactResult => {
     const failureReason = classifyCompactionReason(reason);

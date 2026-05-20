@@ -1116,12 +1116,18 @@ describe("runCodexAppServerAttempt context-engine lifecycle", () => {
       return undefined;
     });
     const params = createParams(sessionFile, workspaceDir);
+    params.sessionKey = "legacy-session-key";
+    params.agentId = "lossless-agent";
     params.contextEngine = contextEngine;
     params.contextTokenBudget = 400_000;
-    // 1 s host-resolved compaction timeout so the hung compact() is bounded
-    // well within the 5 s run timeout used by this harness.
+    // 1 s agent-resolved compaction timeout so the hung compact() is bounded
+    // well within the 5 s run timeout used by this harness. The default remains
+    // much larger to prove legacy session keys still bind to the explicit agent.
     params.config = {
-      agents: { defaults: { compaction: { timeoutSeconds: 1 } } },
+      agents: {
+        defaults: { compaction: { timeoutSeconds: 60 } },
+        list: [{ id: "lossless-agent", compaction: { timeoutSeconds: 1 } }],
+      },
     } as EmbeddedRunAttemptParams["config"];
 
     const run = runCodexAppServerAttempt(params);

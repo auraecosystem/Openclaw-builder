@@ -1060,7 +1060,7 @@ export async function runCodexAppServerAttempt(
   const activeContextEnginePluginId = activeContextEngine
     ? resolveContextEngineOwnerPluginId(activeContextEngine)
     : undefined;
-  const buildActiveContextEngineRuntimeContext = () =>
+  const buildActiveContextEngineRuntimeContext = (options: { forCompaction?: boolean } = {}) =>
     buildHarnessContextEngineRuntimeContext({
       attempt: buildActiveRunAttemptParams(),
       workspaceDir: effectiveWorkspace,
@@ -1068,6 +1068,7 @@ export async function runCodexAppServerAttempt(
       activeAgentId: sessionAgentId,
       contextEnginePluginId: activeContextEnginePluginId,
       tokenBudget: params.contextTokenBudget,
+      useCompactionThinkingLevel: options.forCompaction,
     });
   const forceContextEngineCompactionForCodexOverflow = async (
     error: unknown,
@@ -1088,7 +1089,7 @@ export async function runCodexAppServerAttempt(
       },
     );
     try {
-      const runtimeContext = buildActiveContextEngineRuntimeContext();
+      const runtimeContext = buildActiveContextEngineRuntimeContext({ forCompaction: true });
       const overflowTokenCount = params.contextTokenBudget ?? params.contextWindowInfo?.tokens;
       // Bound the plugin-owned compaction with the same finite safety timeout
       // that protects native runtime compaction, and thread the run-level
@@ -1111,7 +1112,7 @@ export async function runCodexAppServerAttempt(
               }
             : runtimeContext,
         },
-        resolveCompactionTimeoutMs(params.config),
+        resolveCompactionTimeoutMs(params.config, sessionAgentId),
         runAbortController.signal,
       );
       embeddedAgentLog.info("codex app-server context-engine forced compaction result", {
@@ -1128,7 +1129,9 @@ export async function runCodexAppServerAttempt(
         return false;
       }
       adoptContextEngineCompactionTranscript(compactResult);
-      const maintenanceRuntimeContext = buildActiveContextEngineRuntimeContext();
+      const maintenanceRuntimeContext = buildActiveContextEngineRuntimeContext({
+        forCompaction: true,
+      });
       await runHarnessContextEngineMaintenance({
         contextEngine: activeContextEngine,
         sessionId: activeSessionId,
@@ -1137,6 +1140,7 @@ export async function runCodexAppServerAttempt(
         reason: "compaction",
         runtimeContext: maintenanceRuntimeContext,
         config: params.config,
+        agentId: sessionAgentId,
       });
       return true;
     } catch (compactErr) {
