@@ -7,12 +7,17 @@ import {
 import { detectPolicyInlineEval } from "../infra/command-analysis/policy.js";
 import {
   type ExecApprovalsFile,
+  type ExecAllowlistEntry,
   type ExecAsk,
+  type ExecCommandSegment,
   type ExecSecurity,
   type SystemRunApprovalPlan,
+  analyzeShellCommand,
   evaluateShellAllowlist,
   hasDurableExecApproval,
+  hasNodeCommandAllowAlwaysMarker,
   resolveExecApprovalsFromFile,
+  resolveAllowAlwaysPatternCoverage,
 } from "../infra/exec-approvals.js";
 import { buildNodeShellCommand } from "../infra/node-shell.js";
 import { parsePreparedSystemRunPayload } from "../infra/system-run-approval-context.js";
@@ -58,6 +63,51 @@ function buildNodeApprovalAnalysisEnv(env: Record<string, string> | undefined): 
     PATH: "",
     Path: "",
   };
+}
+
+function hasNodeAllowAlwaysCommandApproval(params: {
+  allowlist: readonly ExecAllowlistEntry[];
+  commandText: string;
+  segments: readonly ExecCommandSegment[];
+  cwd?: string;
+  env: NodeJS.ProcessEnv;
+  platform?: string | null;
+}): boolean {
+  const normalizedCommand = params.commandText.trim();
+  if (!normalizedCommand) {
+    return false;
+  }
+  if (params.segments.length === 0) {
+    return false;
+  }
+  if (
+    !hasNodeCommandAllowAlwaysMarker({
+      allowlist: params.allowlist,
+      commandText: normalizedCommand,
+    })
+  ) {
+    return false;
+  }
+  const matchingEntries = new Set<string>();
+  for (const entry of params.allowlist) {
+    if (entry.source !== "allow-always") {
+      continue;
+    }
+    matchingEntries.add(`${entry.pattern}\x00${entry.argPattern ?? ""}`);
+  }
+  const coverage = resolveAllowAlwaysPatternCoverage({
+    segments: [...params.segments],
+    cwd: params.cwd,
+    env: params.env,
+    platform: params.platform,
+  });
+  const expectedPatterns = coverage.patterns.map(
+    (pattern) => `${pattern.pattern}\x00${pattern.argPattern ?? ""}`,
+  );
+  if (expectedPatterns.length > 0) {
+    return coverage.complete && expectedPatterns.every((pattern) => matchingEntries.has(pattern));
+  }
+  return true;
 }
 
 export function shouldSkipNodeApprovalPrepare(params: {
@@ -310,6 +360,12 @@ export async function analyzeNodeApprovalRequirement(params: {
   hostAsk: ExecAsk;
 }): Promise<NodeApprovalAnalysis> {
   const analysisEnv = buildNodeApprovalAnalysisEnv(params.target.env);
+  const commandAnalysis = analyzeShellCommand({
+    command: params.request.command,
+    cwd: params.request.workdir,
+    env: analysisEnv,
+    platform: params.target.platform,
+  });
   const baseAllowlistEval = evaluateShellAllowlist({
     command: params.request.command,
     allowlist: [],
@@ -360,12 +416,21 @@ export async function analyzeNodeApprovalRequirement(params: {
           platform: params.target.platform,
           trustedSafeBinDirs: params.request.trustedSafeBinDirs,
         });
-        durableApprovalSatisfied = hasDurableExecApproval({
-          analysisOk: allowlistEval.analysisOk,
-          segmentAllowlistEntries: allowlistEval.segmentAllowlistEntries,
-          allowlist: resolved.allowlist,
-          commandText: params.prepared.rawCommand,
-        });
+        durableApprovalSatisfied =
+          hasDurableExecApproval({
+            analysisOk: allowlistEval.analysisOk,
+            segmentAllowlistEntries: allowlistEval.segmentAllowlistEntries,
+            allowlist: resolved.allowlist,
+            commandText: params.prepared.rawCommand,
+          }) ||
+          hasNodeAllowAlwaysCommandApproval({
+            allowlist: resolved.allowlist,
+            commandText: params.prepared.rawCommand,
+            segments: commandAnalysis.ok ? commandAnalysis.segments : [],
+            cwd: params.request.workdir,
+            env: analysisEnv,
+            platform: params.target.platform,
+          });
         allowlistSatisfied = allowlistEval.allowlistSatisfied;
         analysisOk = allowlistEval.analysisOk;
       }
