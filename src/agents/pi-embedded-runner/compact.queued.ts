@@ -302,6 +302,7 @@ export async function compactEmbeddedPiSession(
             reason: "compaction",
             runtimeContext,
             config: params.config,
+            agentId: agentIds.sessionAgentId,
           });
         }
         if (engineOwnsCompaction && result.ok && result.compacted) {

@@ -15,6 +15,7 @@ import {
   maybeCompactAgentHarnessSessionMock,
   registerProviderStreamForModelMock,
   resolveContextEngineMock,
+  resolveContextEngineCapabilitiesMock,
   resolveEmbeddedAgentStreamFnMock,
   resolveCompactionTimeoutMsMock,
   resolveMemorySearchConfigMock,
@@ -1576,6 +1577,38 @@ describe("compactEmbeddedPiSession hooks (ownsCompaction engine)", () => {
     );
 
     expect(resolveCompactionTimeoutMsMock).toHaveBeenCalledWith(config, "lossless-agent");
+  });
+
+  it("binds queued post-compaction maintenance to the resolved legacy session agent", async () => {
+    const maintain = vi.fn(async (_params?: unknown) => ({
+      changed: false,
+      bytesFreed: 0,
+      rewrittenEntries: 0,
+    }));
+    resolveContextEngineMock.mockResolvedValue({
+      info: { ownsCompaction: true },
+      compact: contextEngineCompactMock,
+      maintain,
+    } as never);
+
+    await compactEmbeddedPiSession(
+      wrappedCompactionArgs({
+        sessionKey: "legacy-topic-47",
+        agentId: "lossless-agent",
+      }),
+    );
+
+    expect(maintain).toHaveBeenCalledTimes(1);
+    expect(mockCallArg(maintain)).toMatchObject({
+      sessionKey: "legacy-topic-47",
+    });
+    expect(resolveContextEngineCapabilitiesMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: "legacy-topic-47",
+        agentId: "lossless-agent",
+        purpose: "context-engine.compaction.maintenance",
+      }),
+    );
   });
 
   it("passes resolved context-engine runtime context to harness compaction", async () => {
