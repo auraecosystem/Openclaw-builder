@@ -28,11 +28,13 @@ import {
   resolvePluginMetadataSnapshot,
   type PluginMetadataSnapshot,
 } from "./plugin-metadata-snapshot.js";
+import type { PluginMetadataSnapshotPluginIdScope } from "./plugin-metadata-snapshot.types.js";
 import {
   createPluginRegistryIdNormalizer,
   normalizePluginsConfigWithRegistry,
 } from "./plugin-registry-contributions.js";
 import type { PluginRegistrySnapshot } from "./plugin-registry-snapshot.js";
+import { normalizePluginIdScope, serializePluginIdScope } from "./plugin-scope.js";
 
 export type GatewayStartupPluginPlan = {
   channelPluginIds: readonly string[];
@@ -677,6 +679,43 @@ export function resolveGatewayStartupMetadataPluginIds(params: {
     return undefined;
   }
   return sortUniquePluginIds(scope);
+}
+
+export function createGatewayStartupMetadataPluginIdScope(params: {
+  config: OpenClawConfig;
+  activationSourceConfig?: OpenClawConfig;
+  env: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+}): PluginMetadataSnapshotPluginIdScope {
+  return {
+    key: hashJson({
+      kind: "gateway-startup",
+      config: params.config,
+      activationSourceConfig: params.activationSourceConfig ?? null,
+      platform: params.platform ?? null,
+    }),
+    resolve: ({ index }) =>
+      resolveGatewayStartupMetadataPluginIds({
+        config: params.config,
+        ...(params.activationSourceConfig !== undefined
+          ? { activationSourceConfig: params.activationSourceConfig }
+          : {}),
+        env: params.env,
+        index,
+        ...(params.platform !== undefined ? { platform: params.platform } : {}),
+      }),
+  };
+}
+
+export function isMetadataSnapshotScopedForGatewayStartup(params: {
+  metadataSnapshot: Pick<PluginMetadataSnapshot, "index" | "pluginIds">;
+  pluginIdScope: PluginMetadataSnapshotPluginIdScope;
+}): boolean {
+  const expectedPluginIds = normalizePluginIdScope(
+    params.pluginIdScope.resolve({ index: params.metadataSnapshot.index }),
+  );
+  const snapshotPluginIds = normalizePluginIdScope(params.metadataSnapshot.pluginIds);
+  return serializePluginIdScope(snapshotPluginIds) === serializePluginIdScope(expectedPluginIds);
 }
 
 function manifestOwnsConfiguredGenerationProvider(params: {
@@ -1328,6 +1367,14 @@ export function loadGatewayStartupPluginPlan(params: {
   platform?: NodeJS.Platform;
 }): GatewayStartupPluginPlan {
   const snapshotConfig = params.activationSourceConfig ?? params.config;
+  const pluginIdScope = createGatewayStartupMetadataPluginIdScope({
+    config: params.config,
+    ...(params.activationSourceConfig !== undefined
+      ? { activationSourceConfig: params.activationSourceConfig }
+      : {}),
+    env: params.env,
+    ...(params.platform !== undefined ? { platform: params.platform } : {}),
+  });
   const metadataSnapshot =
     params.metadataSnapshot &&
     isPluginMetadataSnapshotCompatible({
@@ -1337,6 +1384,10 @@ export function loadGatewayStartupPluginPlan(params: {
       allowScopedSnapshot: true,
       workspaceDir: params.workspaceDir,
       index: params.index,
+    }) &&
+    isMetadataSnapshotScopedForGatewayStartup({
+      metadataSnapshot: params.metadataSnapshot,
+      pluginIdScope,
     })
       ? params.metadataSnapshot
       : resolvePluginMetadataSnapshot({
@@ -1345,24 +1396,7 @@ export function loadGatewayStartupPluginPlan(params: {
           env: params.env,
           allowWorkspaceScopedCurrent: params.workspaceDir === undefined,
           ...(params.index ? { index: params.index } : {}),
-          pluginIdScope: {
-            key: hashJson({
-              kind: "gateway-startup",
-              config: params.config,
-              activationSourceConfig: params.activationSourceConfig ?? null,
-              platform: params.platform ?? null,
-            }),
-            resolve: ({ index }) =>
-              resolveGatewayStartupMetadataPluginIds({
-                config: params.config,
-                ...(params.activationSourceConfig !== undefined
-                  ? { activationSourceConfig: params.activationSourceConfig }
-                  : {}),
-                env: params.env,
-                index,
-                ...(params.platform !== undefined ? { platform: params.platform } : {}),
-              }),
-          },
+          pluginIdScope,
         });
   return resolveGatewayStartupPluginPlanFromRegistry({
     config: params.config,
