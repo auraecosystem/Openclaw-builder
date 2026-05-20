@@ -4,6 +4,7 @@ import path from "node:path";
 import { resolveCliBackendLiveTest } from "../agents/cli-backends.js";
 import { migrateLegacyRuntimeModelRef } from "../agents/model-runtime-aliases.js";
 import { parseModelRef } from "../agents/model-selection.js";
+import { isClaudeCliCompatibleBackend } from "../agents/provider-id.js";
 import {
   loadOrCreateDeviceIdentity,
   publicKeyRawBase64UrlFromPem,
@@ -168,13 +169,13 @@ export function resolveCliModelSwitchProbeTarget(
 ): string | undefined {
   const normalizedProvider = normalizeLowercaseStringOrEmpty(providerId);
   const normalizedModelRef = normalizeLowercaseStringOrEmpty(modelRef);
-  if (normalizedProvider !== "claude-cli") {
+  if (!isClaudeCliCompatibleBackend(normalizedProvider)) {
     return undefined;
   }
-  if (normalizedModelRef !== "claude-cli/claude-sonnet-4-6") {
+  if (normalizedModelRef !== `${normalizedProvider}/claude-sonnet-4-6`) {
     return undefined;
   }
-  return "claude-cli/claude-opus-4-6";
+  return `${normalizedProvider}/claude-opus-4-6`;
 }
 
 export function shouldRunCliModelSwitchProbe(providerId: string, modelRef: string): boolean {

@@ -1,6 +1,6 @@
 import { DEFAULT_CONTEXT_TOKENS } from "../agents/defaults.js";
 import { normalizeConfiguredProviderCatalogModelId } from "../agents/model-ref-shared.js";
-import { normalizeProviderId } from "../agents/provider-id.js";
+import { isClaudeCliCompatibleBackend, normalizeProviderId } from "../agents/provider-id.js";
 import type { PluginManifestRegistry } from "../plugins/manifest-registry.js";
 import {
   DEFAULT_AGENT_MAX_CONCURRENT,
@@ -463,7 +463,7 @@ function hasAnthropicDefaultSignal(cfg: OpenClawConfig, env: NodeJS.ProcessEnv):
   if (profiles) {
     for (const profile of Object.values(profiles)) {
       const provider = normalizeProviderId(profile?.provider);
-      if (provider === "anthropic" || provider === "claude-cli") {
+      if (provider === "anthropic" || isClaudeCliCompatibleBackend(provider)) {
         return true;
       }
     }
@@ -474,7 +474,7 @@ function hasAnthropicDefaultSignal(cfg: OpenClawConfig, env: NodeJS.ProcessEnv):
   }
   return Object.keys(order).some((provider) => {
     const normalizedProvider = normalizeProviderId(provider);
-    if (normalizedProvider !== "anthropic" && normalizedProvider !== "claude-cli") {
+    if (normalizedProvider !== "anthropic" && !isClaudeCliCompatibleBackend(normalizedProvider)) {
       return false;
     }
     return (order as Record<string, unknown>)[provider] !== undefined;

@@ -13,6 +13,7 @@ import {
   readCodexCliCredentialsCached,
 } from "./cli-credentials.js";
 import { resolveEnvApiKey, resolveUsableCustomProviderApiKey } from "./model-auth.js";
+import { isClaudeCliCompatibleBackend } from "./provider-id.js";
 import { normalizeProviderId } from "./model-selection.js";
 
 export function resolveModelAuthLabel(params: {
@@ -106,10 +107,10 @@ export function resolveModelAuthLabel(params: {
     return "oauth (codex-cli)";
   }
   if (
-    providerKey === "claude-cli" &&
+    isClaudeCliCompatibleBackend(providerKey) &&
     readClaudeCliCredentialsCached({ ttlMs: 5_000, allowKeychainPrompt: false })
   ) {
-    return "oauth (claude-cli)";
+    return `oauth (${providerKey})`;
   }
 
   const customKey = resolveUsableCustomProviderApiKey({

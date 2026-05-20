@@ -54,13 +54,34 @@ function makeInheritFilter(wrapperPath: string): (args: readonly string[]) => st
   return (args) => [wrapperPath, ...stripPModeArgs(args)];
 }
 
-// Resolve wrapper path relative to this module at runtime so it works whether
-// the plugin is loaded from source (wrapper.ts) or compiled dist (wrapper.js).
+// Resolve wrapper path relative to this module at runtime. Must tolerate two
+// layouts:
+//   (a) source / non-hoisted build — this file is a sibling of interactive-proxy/
+//       so ./interactive-proxy/wrapper.{js,ts} resolves correctly off
+//       import.meta.url.
+//   (b) hoisted dist — OpenClaw's bundler (rollup) lifts this module into a
+//       shared chunk at dist/<chunk>-<hash>.js. import.meta.url then points at
+//       that chunk's location (dist/), NOT the original source location
+//       (dist/extensions/anthropic/). The static-asset copier still writes the
+//       interactive-proxy files to dist/extensions/anthropic/interactive-proxy/,
+//       so we have to try that path explicitly.
+// Probe both layouts in order, then fail loudly with the candidates we tried
+// rather than handing Bun a path that doesn't exist.
 function resolveWrapperPath(): string {
   const selfUrl = import.meta.url;
-  const jsPath = fileURLToPath(new URL("./interactive-proxy/wrapper.js", selfUrl));
-  if (existsSync(jsPath)) {return jsPath;}
-  return fileURLToPath(new URL("./interactive-proxy/wrapper.ts", selfUrl));
+  const candidates = [
+    fileURLToPath(new URL("./interactive-proxy/wrapper.js", selfUrl)),
+    fileURLToPath(new URL("./interactive-proxy/wrapper.ts", selfUrl)),
+    fileURLToPath(new URL("./extensions/anthropic/interactive-proxy/wrapper.js", selfUrl)),
+    fileURLToPath(new URL("./extensions/anthropic/interactive-proxy/wrapper.ts", selfUrl)),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {return candidate;}
+  }
+  throw new Error(
+    `[anthropic-interactive] interactive-proxy/wrapper not found relative to ${fileURLToPath(selfUrl)}. ` +
+      `Tried: ${candidates.join(", ")}`,
+  );
 }
 
 const WRAPPER_PATH = resolveWrapperPath();

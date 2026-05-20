@@ -2,6 +2,7 @@ import type { CliBackendConfig } from "../config/types.js";
 import { extractBalancedJsonFragments } from "../shared/balanced-json.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { isRecord } from "../utils.js";
+import { isClaudeCliCompatibleBackend } from "./provider-id.js";
 
 type CliUsage = {
   input?: number;
@@ -31,7 +32,7 @@ export type CliStreamingDelta = {
 };
 
 function isClaudeCliProvider(providerId: string): boolean {
-  return normalizeLowercaseStringOrEmpty(providerId) === "claude-cli";
+  return isClaudeCliCompatibleBackend(providerId);
 }
 
 function usesClaudeStreamJsonDialect(params: {
