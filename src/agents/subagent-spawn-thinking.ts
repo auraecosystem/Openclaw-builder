@@ -47,7 +47,7 @@ export function resolveSubagentThinkingOverride(params: {
     status: "ok" as const,
     thinkingOverride: normalizedThinking,
     initialSessionPatch: {
-      thinkingLevel: normalizedThinking === "off" ? null : normalizedThinking,
+      thinkingLevel: normalizedThinking,
     },
   };
 }
