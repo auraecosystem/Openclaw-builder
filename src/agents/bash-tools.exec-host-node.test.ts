@@ -23,11 +23,49 @@ const preparedPlan = vi.hoisted(() => ({
     sha256: "abc123",
   },
 }));
+const nodeCommandMarker = vi.hoisted(() => "=node-command:test");
 
 const callGatewayToolMock = vi.hoisted(() => vi.fn());
 const listNodesMock = vi.hoisted(() => vi.fn());
 const parsePreparedSystemRunPayloadMock = vi.hoisted(() => vi.fn());
-const requiresExecApprovalMock = vi.hoisted(() => vi.fn(() => true));
+const evaluateShellAllowlistMock = vi.hoisted(() =>
+  vi.fn((_params: unknown): unknown => ({
+    allowlistMatches: [],
+    analysisOk: true,
+    allowlistSatisfied: false,
+    segments: [{ resolution: null, argv: ["bun", "./script.ts"] }],
+    segmentAllowlistEntries: [],
+    segmentSatisfiedBy: [null],
+  })),
+);
+const analyzeShellCommandMock = vi.hoisted(() =>
+  vi.fn((): unknown => ({
+    ok: true,
+    segments: [{ resolution: null, argv: ["tool", "--version"] }],
+  })),
+);
+const hasNodeCommandAllowAlwaysMarkerMock = vi.hoisted(() =>
+  vi.fn((raw: unknown): boolean =>
+    ((raw as { allowlist?: Array<{ pattern?: string }> }).allowlist ?? []).some(
+      (entry) => entry.pattern === "=node-command:test",
+    ),
+  ),
+);
+const resolveAllowAlwaysPatternCoverageMock = vi.hoisted(() =>
+  vi.fn((): unknown => ({
+    complete: true,
+    patterns: [{ pattern: "/trusted/bin/tool" }],
+  })),
+);
+const hasDurableExecApprovalMock = vi.hoisted(() => vi.fn(() => false));
+const resolveExecApprovalsFromFileMock = vi.hoisted(() =>
+  vi.fn((): unknown => ({
+    agent: { security: "allowlist", ask: "on-miss" },
+    allowlist: [],
+    file: { version: 1, agents: {} },
+  })),
+);
+const requiresExecApprovalMock = vi.hoisted(() => vi.fn((_params: unknown) => true));
 const resolveExecHostApprovalContextMock = vi.hoisted(() =>
   vi.fn(() => ({
     approvals: { allowlist: [], file: { version: 1, agents: {} } },
@@ -76,20 +114,14 @@ const detectInterpreterInlineEvalArgvMock = vi.hoisted(() =>
 );
 
 vi.mock("../infra/exec-approvals.js", () => ({
-  evaluateShellAllowlist: vi.fn(() => ({
-    allowlistMatches: [],
-    analysisOk: true,
-    allowlistSatisfied: false,
-    segments: [{ resolution: null, argv: ["bun", "./script.ts"] }],
-    segmentAllowlistEntries: [],
-  })),
-  hasDurableExecApproval: vi.fn(() => false),
+  analyzeShellCommand: analyzeShellCommandMock,
+  evaluateShellAllowlist: evaluateShellAllowlistMock,
+  hasDurableExecApproval: hasDurableExecApprovalMock,
+  hasNodeCommandAllowAlwaysMarker: hasNodeCommandAllowAlwaysMarkerMock,
   requiresExecApproval: requiresExecApprovalMock,
+  resolveAllowAlwaysPatternCoverage: resolveAllowAlwaysPatternCoverageMock,
   resolveExecApprovalAllowedDecisions: vi.fn(() => ["allow-once", "allow-always", "deny"]),
-  resolveExecApprovalsFromFile: vi.fn(() => ({
-    allowlist: [],
-    file: { version: 1, agents: {} },
-  })),
+  resolveExecApprovalsFromFile: resolveExecApprovalsFromFileMock,
 }));
 
 vi.mock("../infra/command-analysis/inline-eval.js", () => ({
@@ -158,6 +190,11 @@ type GatewayToolCall = {
   callOptions?: unknown;
 };
 
+type ShellAllowlistMockParams = {
+  allowlist?: readonly { pattern?: string }[];
+  env?: NodeJS.ProcessEnv;
+};
+
 function requireGatewayCall(index: number): GatewayToolCall {
   const call = callGatewayToolMock.mock.calls[index];
   if (!call) {
@@ -216,6 +253,73 @@ function expectSystemRunInvoke(params: { invokeTimeoutMs: number; runTimeoutMs: 
   expect(requireRunParams(call).timeoutMs).toBe(params.runTimeoutMs);
 }
 
+function mockGatewayInvokesWithNodeApprovals(file: Record<string, unknown>) {
+  callGatewayToolMock.mockImplementation(
+    async (method: string, _options: unknown, params: MockNodeInvokeParams | undefined) => {
+      if (method === "exec.approvals.node.get") {
+        return { file };
+      }
+      if (method !== "node.invoke") {
+        throw new Error(`unexpected gateway method: ${method}`);
+      }
+      if (params?.command === "system.run.prepare") {
+        return { payload: { plan: preparedPlan } };
+      }
+      if (params?.command === "system.run") {
+        return {
+          payload: {
+            success: true,
+            stdout: "ok",
+            stderr: "",
+            exitCode: 0,
+            timedOut: false,
+          },
+        };
+      }
+      throw new Error(`unexpected node invoke command: ${String(params?.command)}`);
+    },
+  );
+}
+
+function usePolicyApprovalRequirementMock() {
+  requiresExecApprovalMock.mockImplementation((raw: unknown) => {
+    const params = raw as {
+      ask: string;
+      security: string;
+      analysisOk: boolean;
+      allowlistSatisfied: boolean;
+      durableApprovalSatisfied: boolean;
+    };
+    return (
+      params.ask === "always" ||
+      (params.ask === "on-miss" &&
+        params.security === "allowlist" &&
+        (!params.analysisOk || !params.allowlistSatisfied) &&
+        !params.durableApprovalSatisfied)
+    );
+  });
+}
+
+function buildAllowlistEvalResult(params?: {
+  allowlistSatisfied?: boolean;
+  segmentAllowlistEntry?: { pattern: string } | null;
+}) {
+  return {
+    allowlistMatches:
+      params?.allowlistSatisfied && params.segmentAllowlistEntry
+        ? [params.segmentAllowlistEntry]
+        : [],
+    analysisOk: true,
+    allowlistSatisfied: params?.allowlistSatisfied === true,
+    segments: [{ resolution: null, argv: ["tool", "--version"] }],
+    segmentAllowlistEntries:
+      params?.allowlistSatisfied && params.segmentAllowlistEntry
+        ? [params.segmentAllowlistEntry]
+        : [null],
+    segmentSatisfiedBy: [params?.allowlistSatisfied ? "allowlist" : null],
+  };
+}
+
 describe("executeNodeHostCommand", () => {
   beforeAll(async () => {
     ({ executeNodeHostCommand } = await import("./bash-tools.exec-host-node.js"));
@@ -255,6 +359,34 @@ describe("executeNodeHostCommand", () => {
     ]);
     parsePreparedSystemRunPayloadMock.mockReset();
     parsePreparedSystemRunPayloadMock.mockReturnValue({ plan: preparedPlan });
+    evaluateShellAllowlistMock.mockReset();
+    evaluateShellAllowlistMock.mockReturnValue({
+      allowlistMatches: [],
+      analysisOk: true,
+      allowlistSatisfied: false,
+      segments: [{ resolution: null, argv: ["bun", "./script.ts"] }],
+      segmentAllowlistEntries: [],
+      segmentSatisfiedBy: [null],
+    });
+    analyzeShellCommandMock.mockReset();
+    analyzeShellCommandMock.mockReturnValue({
+      ok: true,
+      segments: [{ resolution: null, argv: ["tool", "--version"] }],
+    });
+    hasNodeCommandAllowAlwaysMarkerMock.mockClear();
+    resolveAllowAlwaysPatternCoverageMock.mockReset();
+    resolveAllowAlwaysPatternCoverageMock.mockReturnValue({
+      complete: true,
+      patterns: [{ pattern: "/trusted/bin/tool" }],
+    });
+    hasDurableExecApprovalMock.mockReset();
+    hasDurableExecApprovalMock.mockReturnValue(false);
+    resolveExecApprovalsFromFileMock.mockReset();
+    resolveExecApprovalsFromFileMock.mockReturnValue({
+      agent: { security: "allowlist", ask: "on-miss" },
+      allowlist: [],
+      file: { version: 1, agents: {} },
+    });
     requiresExecApprovalMock.mockReset();
     requiresExecApprovalMock.mockReturnValue(true);
     resolveExecHostApprovalContextMock.mockReset();
@@ -399,6 +531,499 @@ describe("executeNodeHostCommand", () => {
       expect(runParams.rawCommand).toBe(expectedPlan.commandText);
       expect(runParams.systemRunPlan).toEqual(expectedPlan);
     });
+  });
+
+  it("requires approval when node allowlist matching would depend on gateway PATH", async () => {
+    const allowlistEntry = { pattern: "/trusted/bin/tool" };
+    mockGatewayInvokesWithNodeApprovals({ version: 1, agents: {} });
+    usePolicyApprovalRequirementMock();
+    resolveExecApprovalsFromFileMock.mockReturnValue({
+      agent: { security: "allowlist", ask: "on-miss" },
+      allowlist: [allowlistEntry],
+      file: { version: 1, agents: {} },
+    });
+    evaluateShellAllowlistMock.mockImplementation((raw: unknown) => {
+      const params = raw as ShellAllowlistMockParams;
+      const hasNodeAllowlist = (params.allowlist ?? []).length > 0;
+      const gatewayPathWouldMatch = params.env?.PATH?.includes("/trusted/bin") === true;
+      return buildAllowlistEvalResult({
+        allowlistSatisfied: hasNodeAllowlist && gatewayPathWouldMatch,
+        segmentAllowlistEntry: allowlistEntry,
+      });
+    });
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: { allowlist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "allowlist",
+      hostAsk: "on-miss",
+      askFallback: "deny",
+    });
+    resolveApprovalDecisionOrUndefinedMock.mockResolvedValue(undefined);
+
+    const result = await executeNodeHostCommand({
+      command: "tool --version",
+      workdir: "/tmp/work",
+      env: { PATH: "/trusted/bin:/usr/bin" },
+      security: "allowlist",
+      ask: "on-miss",
+      defaultTimeoutSec: 30,
+      approvalRunningNoticeMs: 0,
+      warnings: [],
+      agentId: "requested-agent",
+      sessionKey: "requested-session",
+    });
+
+    expect(result.details?.status).toBe("approval-pending");
+    expect(registerExecApprovalRequestForHostOrThrowMock).toHaveBeenCalledTimes(1);
+    expect(requireRegisteredApprovalRequest().env).toBeUndefined();
+    const evalEnvs = evaluateShellAllowlistMock.mock.calls.map(
+      ([raw]) => (raw as ShellAllowlistMockParams).env,
+    );
+    expect(evalEnvs).toHaveLength(2);
+    expect(evalEnvs.every((env) => env?.PATH === "" && env?.Path === "")).toBe(true);
+    await vi.waitFor(() => {
+      expect(resolveApprovalDecisionOrUndefinedMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("reuses exact node allow-always command entries for prechecks", async () => {
+    const allowlistEntry = {
+      pattern: "/trusted/bin/tool",
+      source: "allow-always" as const,
+    };
+    const commandMarker = { pattern: nodeCommandMarker, source: "allow-always" as const };
+    mockGatewayInvokesWithNodeApprovals({ version: 1, agents: {} });
+    usePolicyApprovalRequirementMock();
+    resolveExecApprovalsFromFileMock.mockReturnValue({
+      agent: { security: "allowlist", ask: "on-miss" },
+      allowlist: [commandMarker, allowlistEntry],
+      file: { version: 1, agents: {} },
+    });
+    evaluateShellAllowlistMock.mockImplementation((raw: unknown) => {
+      const params = raw as ShellAllowlistMockParams;
+      expect(params.env?.PATH).toBe("");
+      expect(params.env?.Path).toBe("");
+      return buildAllowlistEvalResult({
+        allowlistSatisfied: false,
+        segmentAllowlistEntry: null,
+      });
+    });
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: { allowlist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "allowlist",
+      hostAsk: "on-miss",
+      askFallback: "deny",
+    });
+
+    const result = await executeNodeHostCommand({
+      command: "tool --version",
+      workdir: "/tmp/work",
+      env: { PATH: "/gateway/bin:/usr/bin" },
+      security: "allowlist",
+      ask: "on-miss",
+      defaultTimeoutSec: 30,
+      approvalRunningNoticeMs: 0,
+      warnings: [],
+      agentId: "requested-agent",
+      sessionKey: "requested-session",
+    });
+
+    expect(result.details?.status).toBe("completed");
+    expect(registerExecApprovalRequestForHostOrThrowMock).not.toHaveBeenCalled();
+    expect(requiresExecApprovalMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        analysisOk: true,
+        allowlistSatisfied: false,
+        durableApprovalSatisfied: true,
+      }),
+    );
+    expect(requireRunParams(requireGatewayCommand("system.run")).env).toBeUndefined();
+  });
+
+  it("reuses de-duplicated node allow-always metadata for repeated command segments", async () => {
+    const allowlistEntry = {
+      pattern: "/trusted/bin/tool",
+      source: "allow-always" as const,
+    };
+    const commandMarker = { pattern: nodeCommandMarker, source: "allow-always" as const };
+    mockGatewayInvokesWithNodeApprovals({ version: 1, agents: {} });
+    usePolicyApprovalRequirementMock();
+    resolveExecApprovalsFromFileMock.mockReturnValue({
+      agent: { security: "allowlist", ask: "on-miss" },
+      allowlist: [commandMarker, allowlistEntry],
+      file: { version: 1, agents: {} },
+    });
+    evaluateShellAllowlistMock.mockReturnValue({
+      allowlistMatches: [],
+      analysisOk: true,
+      allowlistSatisfied: false,
+      segments: [
+        { resolution: null, argv: ["tool", "a"] },
+        { resolution: null, argv: ["tool", "b"] },
+      ],
+      segmentAllowlistEntries: [null, null],
+      segmentSatisfiedBy: [null, null],
+    });
+    analyzeShellCommandMock.mockReturnValue({
+      ok: true,
+      segments: [
+        { resolution: null, argv: ["tool", "a"] },
+        { resolution: null, argv: ["tool", "b"] },
+      ],
+    });
+    resolveAllowAlwaysPatternCoverageMock.mockReturnValue({
+      complete: true,
+      patterns: [{ pattern: "/trusted/bin/tool" }],
+    });
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: { allowlist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "allowlist",
+      hostAsk: "on-miss",
+      askFallback: "deny",
+    });
+
+    const result = await executeNodeHostCommand({
+      command: "tool a && tool b",
+      workdir: "/tmp/work",
+      security: "allowlist",
+      ask: "on-miss",
+      defaultTimeoutSec: 30,
+      approvalRunningNoticeMs: 0,
+      warnings: [],
+      agentId: "requested-agent",
+      sessionKey: "requested-session",
+    });
+
+    expect(result.details?.status).toBe("completed");
+    expect(registerExecApprovalRequestForHostOrThrowMock).not.toHaveBeenCalled();
+    expect(requiresExecApprovalMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        allowlistSatisfied: false,
+        durableApprovalSatisfied: true,
+      }),
+    );
+  });
+
+  it("does not reuse partial node allow-always metadata for compound commands", async () => {
+    const allowlistEntry = {
+      pattern: "/trusted/bin/foo",
+      source: "allow-always" as const,
+    };
+    const commandMarker = { pattern: nodeCommandMarker, source: "allow-always" as const };
+    mockGatewayInvokesWithNodeApprovals({ version: 1, agents: {} });
+    usePolicyApprovalRequirementMock();
+    resolveExecApprovalsFromFileMock.mockReturnValue({
+      agent: { security: "allowlist", ask: "on-miss" },
+      allowlist: [commandMarker, allowlistEntry],
+      file: { version: 1, agents: {} },
+    });
+    evaluateShellAllowlistMock.mockReturnValue({
+      allowlistMatches: [],
+      analysisOk: true,
+      allowlistSatisfied: false,
+      segments: [
+        { resolution: null, argv: ["foo"] },
+        { resolution: null, argv: ["bar"] },
+      ],
+      segmentAllowlistEntries: [null, null],
+      segmentSatisfiedBy: [null, null],
+    });
+    analyzeShellCommandMock.mockReturnValue({
+      ok: true,
+      segments: [
+        { resolution: null, argv: ["foo"] },
+        { resolution: null, argv: ["bar"] },
+      ],
+    });
+    resolveAllowAlwaysPatternCoverageMock.mockReturnValue({
+      complete: true,
+      patterns: [{ pattern: "/trusted/bin/foo" }, { pattern: "/trusted/bin/bar" }],
+    });
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: { allowlist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "allowlist",
+      hostAsk: "on-miss",
+      askFallback: "deny",
+    });
+    resolveApprovalDecisionOrUndefinedMock.mockResolvedValue(undefined);
+
+    const result = await executeNodeHostCommand({
+      command: "foo && bar",
+      workdir: "/tmp/work",
+      security: "allowlist",
+      ask: "on-miss",
+      defaultTimeoutSec: 30,
+      approvalRunningNoticeMs: 0,
+      warnings: [],
+      agentId: "requested-agent",
+      sessionKey: "requested-session",
+    });
+
+    expect(result.details?.status).toBe("approval-pending");
+    expect(registerExecApprovalRequestForHostOrThrowMock).toHaveBeenCalledTimes(1);
+    expect(requiresExecApprovalMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        allowlistSatisfied: false,
+        durableApprovalSatisfied: false,
+      }),
+    );
+  });
+
+  it("does not reuse last-used node metadata without an exact command marker", async () => {
+    const allowlistEntries = [
+      {
+        pattern: "/trusted/bin/foo",
+        argPattern: "^a\x00$",
+        source: "allow-always" as const,
+        lastUsedCommand: preparedPlan.commandText,
+      },
+      {
+        pattern: "/trusted/bin/foo",
+        argPattern: "^b\x00$",
+        source: "allow-always" as const,
+        lastUsedCommand: preparedPlan.commandText,
+      },
+    ];
+    mockGatewayInvokesWithNodeApprovals({ version: 1, agents: {} });
+    usePolicyApprovalRequirementMock();
+    resolveExecApprovalsFromFileMock.mockReturnValue({
+      agent: { security: "allowlist", ask: "on-miss" },
+      allowlist: allowlistEntries,
+      file: { version: 1, agents: {} },
+    });
+    evaluateShellAllowlistMock.mockReturnValue({
+      allowlistMatches: [],
+      analysisOk: true,
+      allowlistSatisfied: false,
+      segments: [
+        { resolution: null, argv: ["foo", "a"] },
+        { resolution: null, argv: ["foo", "b"] },
+        { resolution: null, argv: ["missingcmd"] },
+      ],
+      segmentAllowlistEntries: [null, null, null],
+      segmentSatisfiedBy: [null, null, null],
+    });
+    analyzeShellCommandMock.mockReturnValue({
+      ok: true,
+      segments: [
+        { resolution: null, argv: ["foo", "a"] },
+        { resolution: null, argv: ["foo", "b"] },
+        { resolution: null, argv: ["missingcmd"] },
+      ],
+    });
+    resolveAllowAlwaysPatternCoverageMock.mockReturnValue({ complete: false, patterns: [] });
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: { allowlist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "allowlist",
+      hostAsk: "on-miss",
+      askFallback: "deny",
+    });
+    resolveApprovalDecisionOrUndefinedMock.mockResolvedValue(undefined);
+
+    const result = await executeNodeHostCommand({
+      command: "foo a && foo b && missingcmd",
+      workdir: "/tmp/work",
+      security: "allowlist",
+      ask: "on-miss",
+      defaultTimeoutSec: 30,
+      approvalRunningNoticeMs: 0,
+      warnings: [],
+      agentId: "requested-agent",
+      sessionKey: "requested-session",
+    });
+
+    expect(result.details?.status).toBe("approval-pending");
+    expect(registerExecApprovalRequestForHostOrThrowMock).toHaveBeenCalledTimes(1);
+    expect(requiresExecApprovalMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        allowlistSatisfied: false,
+        durableApprovalSatisfied: false,
+      }),
+    );
+  });
+
+  it("does not reuse node allow-always metadata when only representable segments match", async () => {
+    const allowlistEntries = [
+      {
+        pattern: "/bin/echo",
+        source: "allow-always" as const,
+      },
+      {
+        pattern: "/bin/date",
+        source: "allow-always" as const,
+      },
+    ];
+    const commandMarker = { pattern: nodeCommandMarker, source: "allow-always" as const };
+    mockGatewayInvokesWithNodeApprovals({ version: 1, agents: {} });
+    usePolicyApprovalRequirementMock();
+    resolveExecApprovalsFromFileMock.mockReturnValue({
+      agent: { security: "allowlist", ask: "on-miss" },
+      allowlist: [commandMarker, ...allowlistEntries],
+      file: { version: 1, agents: {} },
+    });
+    evaluateShellAllowlistMock.mockReturnValue({
+      allowlistMatches: [],
+      analysisOk: true,
+      allowlistSatisfied: false,
+      segments: [
+        { resolution: null, argv: ["sh", "-c", "/bin/echo ok && /bin/date"] },
+        { resolution: null, argv: ["missingcmd"] },
+      ],
+      segmentAllowlistEntries: [null, null],
+      segmentSatisfiedBy: [null, null],
+    });
+    analyzeShellCommandMock.mockReturnValue({
+      ok: true,
+      segments: [
+        { resolution: null, argv: ["sh", "-c", "/bin/echo ok && /bin/date"] },
+        { resolution: null, argv: ["missingcmd"] },
+      ],
+    });
+    resolveAllowAlwaysPatternCoverageMock.mockReturnValue({
+      complete: false,
+      patterns: [{ pattern: "/bin/echo" }, { pattern: "/bin/date" }],
+    });
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: { allowlist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "allowlist",
+      hostAsk: "on-miss",
+      askFallback: "deny",
+    });
+    resolveApprovalDecisionOrUndefinedMock.mockResolvedValue(undefined);
+
+    const result = await executeNodeHostCommand({
+      command: 'sh -c "/bin/echo ok && /bin/date" && missingcmd',
+      workdir: "/tmp/work",
+      security: "allowlist",
+      ask: "on-miss",
+      defaultTimeoutSec: 30,
+      approvalRunningNoticeMs: 0,
+      warnings: [],
+      agentId: "requested-agent",
+      sessionKey: "requested-session",
+    });
+
+    expect(result.details?.status).toBe("approval-pending");
+    expect(registerExecApprovalRequestForHostOrThrowMock).toHaveBeenCalledTimes(1);
+    expect(requiresExecApprovalMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        allowlistSatisfied: false,
+        durableApprovalSatisfied: false,
+      }),
+    );
+  });
+
+  it("does not use unresolved node allow-always fallback for shell wrappers", async () => {
+    const allowlistEntry = {
+      pattern: "/trusted/bin/foo",
+      source: "allow-always" as const,
+    };
+    mockGatewayInvokesWithNodeApprovals({ version: 1, agents: {} });
+    usePolicyApprovalRequirementMock();
+    resolveExecApprovalsFromFileMock.mockReturnValue({
+      agent: { security: "allowlist", ask: "on-miss" },
+      allowlist: [allowlistEntry],
+      file: { version: 1, agents: {} },
+    });
+    evaluateShellAllowlistMock.mockReturnValue({
+      allowlistMatches: [],
+      analysisOk: true,
+      allowlistSatisfied: false,
+      segments: [{ resolution: null, argv: ["bash", "-lc", "foo && missingcmd"] }],
+      segmentAllowlistEntries: [null],
+      segmentSatisfiedBy: [null],
+    });
+    analyzeShellCommandMock.mockReturnValue({
+      ok: true,
+      segments: [{ resolution: null, argv: ["bash", "-lc", "foo && missingcmd"] }],
+    });
+    resolveAllowAlwaysPatternCoverageMock.mockReturnValue({ complete: false, patterns: [] });
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: { allowlist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "allowlist",
+      hostAsk: "on-miss",
+      askFallback: "deny",
+    });
+    resolveApprovalDecisionOrUndefinedMock.mockResolvedValue(undefined);
+
+    const result = await executeNodeHostCommand({
+      command: 'bash -lc "foo && missingcmd"',
+      workdir: "/tmp/work",
+      security: "allowlist",
+      ask: "on-miss",
+      defaultTimeoutSec: 30,
+      approvalRunningNoticeMs: 0,
+      warnings: [],
+      agentId: "requested-agent",
+      sessionKey: "requested-session",
+    });
+
+    expect(result.details?.status).toBe("approval-pending");
+    expect(registerExecApprovalRequestForHostOrThrowMock).toHaveBeenCalledTimes(1);
+    expect(requiresExecApprovalMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        allowlistSatisfied: false,
+        durableApprovalSatisfied: false,
+      }),
+    );
+  });
+
+  it("uses forwarded node env overrides for node approval prechecks", async () => {
+    const allowlistEntry = { pattern: "/trusted/bin/tool" };
+    mockGatewayInvokesWithNodeApprovals({ version: 1, agents: {} });
+    usePolicyApprovalRequirementMock();
+    resolveExecApprovalsFromFileMock.mockReturnValue({
+      agent: { security: "allowlist", ask: "on-miss" },
+      allowlist: [allowlistEntry],
+      file: { version: 1, agents: {} },
+    });
+    evaluateShellAllowlistMock.mockImplementation((raw: unknown) => {
+      const params = raw as ShellAllowlistMockParams;
+      const hasNodeAllowlist = (params.allowlist ?? []).length > 0;
+      return buildAllowlistEvalResult({
+        allowlistSatisfied:
+          hasNodeAllowlist &&
+          params.env != null &&
+          params.env.FOO === "bar" &&
+          params.env.PATH === "",
+        segmentAllowlistEntry: allowlistEntry,
+      });
+    });
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: { allowlist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "allowlist",
+      hostAsk: "on-miss",
+      askFallback: "deny",
+    });
+
+    const result = await executeNodeHostCommand({
+      command: "tool --version",
+      workdir: "/tmp/work",
+      env: { PATH: "/gateway/bin:/usr/bin" },
+      requestedEnv: { FOO: "bar" },
+      security: "allowlist",
+      ask: "on-miss",
+      defaultTimeoutSec: 30,
+      approvalRunningNoticeMs: 0,
+      warnings: [],
+      agentId: "requested-agent",
+      sessionKey: "requested-session",
+    });
+
+    expect(result.details?.status).toBe("completed");
+    expect(registerExecApprovalRequestForHostOrThrowMock).not.toHaveBeenCalled();
+    expect(requiresExecApprovalMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        analysisOk: true,
+        allowlistSatisfied: true,
+        durableApprovalSatisfied: false,
+      }),
+    );
+    expect(requireRunParams(requireGatewayCommand("system.run")).env).toEqual({ FOO: "bar" });
+    const evalEnvs = evaluateShellAllowlistMock.mock.calls.map(
+      ([raw]) => (raw as ShellAllowlistMockParams).env,
+    );
+    expect(evalEnvs).toHaveLength(2);
+    expect(evalEnvs.every((env) => env != null && env.FOO === "bar" && env.PATH === "")).toBe(true);
   });
 
   it("skips approval prepare in full/off mode", async () => {
