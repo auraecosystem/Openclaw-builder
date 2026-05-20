@@ -1,5 +1,6 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
+  resolveGatewayStartupMetadataPluginIds,
   resolveGatewayStartupPluginPlanFromRegistry,
   type GatewayStartupPluginPlan,
 } from "./channel-plugin-ids.js";
@@ -55,6 +56,7 @@ export function loadPluginLookUpTable(params: LoadPluginLookUpTableParams): Plug
       snapshot: params.metadataSnapshot,
       config: requestedSnapshotConfig,
       env: params.env,
+      allowScopedSnapshot: true,
       workspaceDir: params.workspaceDir,
       index: params.index,
     })
@@ -65,6 +67,22 @@ export function loadPluginLookUpTable(params: LoadPluginLookUpTableParams): Plug
           env: params.env,
           allowWorkspaceScopedCurrent: params.workspaceDir === undefined,
           ...(params.index ? { index: params.index } : {}),
+          pluginIdScope: {
+            key: hashJson({
+              kind: "gateway-startup",
+              config: params.config,
+              activationSourceConfig: params.activationSourceConfig ?? null,
+            }),
+            resolve: ({ index }) =>
+              resolveGatewayStartupMetadataPluginIds({
+                config: params.config,
+                ...(params.activationSourceConfig !== undefined
+                  ? { activationSourceConfig: params.activationSourceConfig }
+                  : {}),
+                env: params.env,
+                index,
+              }),
+          },
         });
   const { index, manifestRegistry } = metadataSnapshot;
   const startupPlanStartedAt = performance.now();

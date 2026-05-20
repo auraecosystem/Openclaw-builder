@@ -10,6 +10,7 @@ import {
   type ResolvePluginControlPlaneContextParams,
 } from "./plugin-control-plane-context.js";
 import type { PluginMetadataSnapshot } from "./plugin-metadata-snapshot.types.js";
+import { normalizePluginIdScope, serializePluginIdScope } from "./plugin-scope.js";
 
 type CurrentPluginMetadataSnapshotState = ReturnType<typeof getCurrentPluginMetadataSnapshotState>;
 
@@ -95,6 +96,8 @@ export function getCurrentPluginMetadataSnapshot(
   params: {
     config?: OpenClawConfig;
     env?: NodeJS.ProcessEnv;
+    allowScopedSnapshot?: boolean;
+    pluginIds?: readonly string[];
     workspaceDir?: string;
     allowWorkspaceScopedSnapshot?: boolean;
     requireDefaultDiscoveryContext?: boolean;
@@ -108,6 +111,24 @@ export function getCurrentPluginMetadataSnapshot(
   } = getCurrentPluginMetadataSnapshotState();
   const snapshot = rawSnapshot as PluginMetadataSnapshot | undefined;
   if (!snapshot) {
+    return undefined;
+  }
+  const requestedPluginIds = normalizePluginIdScope(params.pluginIds);
+  const snapshotPluginIds = normalizePluginIdScope(snapshot.pluginIds);
+  if (
+    snapshotPluginIds !== undefined &&
+    params.config === undefined &&
+    params.allowScopedSnapshot !== true &&
+    (requestedPluginIds === undefined ||
+      serializePluginIdScope(requestedPluginIds) !== serializePluginIdScope(snapshotPluginIds))
+  ) {
+    return undefined;
+  }
+  if (
+    snapshotPluginIds !== undefined &&
+    requestedPluginIds !== undefined &&
+    serializePluginIdScope(requestedPluginIds) !== serializePluginIdScope(snapshotPluginIds)
+  ) {
     return undefined;
   }
   const requestedPolicyHash = params.config

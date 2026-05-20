@@ -17,6 +17,7 @@ export {
   resolveChannelPluginIdsFromRegistry,
   resolveConfiguredDeferredChannelPluginIds,
   resolveConfiguredDeferredChannelPluginIdsFromRegistry,
+  resolveGatewayStartupMetadataPluginIds,
   loadGatewayStartupPluginPlan,
   resolveGatewayStartupPluginIds,
   resolveGatewayStartupPluginPlanFromRegistry,

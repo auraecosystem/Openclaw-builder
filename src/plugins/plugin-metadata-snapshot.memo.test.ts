@@ -261,6 +261,37 @@ describe("loadPluginMetadataSnapshot process memo", () => {
     expect(second.byPluginId.get("demo")).toBe(second.plugins[0]);
   });
 
+  it("keeps scoped and unscoped metadata snapshots in separate memo slots", () => {
+    const index = makeIndex();
+    loadPluginRegistrySnapshotWithMetadata.mockReturnValue({
+      source: "provided",
+      snapshot: index,
+      diagnostics: [],
+    });
+
+    const scoped = loadPluginMetadataSnapshot({
+      config: {},
+      env: {},
+      index,
+      pluginIds: ["demo"],
+    });
+    const unscoped = loadPluginMetadataSnapshot({
+      config: {},
+      env: {},
+      index,
+    });
+
+    expect(scoped.pluginIds).toEqual(["demo"]);
+    expect(unscoped.pluginIds).toBeUndefined();
+    expect(loadPluginManifestRegistryForInstalledIndex).toHaveBeenCalledTimes(2);
+    expect(loadPluginManifestRegistryForInstalledIndex.mock.calls[0]?.[0]).toMatchObject({
+      pluginIds: ["demo"],
+    });
+    expect(loadPluginManifestRegistryForInstalledIndex.mock.calls[1]?.[0]).not.toHaveProperty(
+      "pluginIds",
+    );
+  });
+
   it("keeps hot persisted snapshots for alternating config callers", () => {
     const stateDir = tempStateDir();
     touchPersistedIndex(stateDir);

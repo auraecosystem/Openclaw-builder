@@ -13,13 +13,15 @@ import {
 import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 import { hasExplicitChannelConfig } from "./channel-presence-policy.js";
 import { collectPluginConfigContractMatches } from "./config-contracts.js";
-import { resolveEffectivePluginActivationState } from "./config-state.js";
+import { normalizePluginsConfigWithResolver } from "./config-normalization-shared.js";
+import { normalizePluginId, resolveEffectivePluginActivationState } from "./config-state.js";
 import { isPluginEnabledByDefaultForPlatform } from "./default-enablement.js";
 import {
   collectConfiguredSpeechProviderIds,
   normalizeConfiguredSpeechProviderIdForStartup,
 } from "./gateway-startup-speech-providers.js";
-import type { InstalledPluginIndexRecord } from "./installed-plugin-index.js";
+import { hashJson } from "./installed-plugin-index-hash.js";
+import type { InstalledPluginIndex, InstalledPluginIndexRecord } from "./installed-plugin-index.js";
 import type { PluginManifestRecord, PluginManifestRegistry } from "./manifest-registry.js";
 import {
   isPluginMetadataSnapshotCompatible,
@@ -47,6 +49,36 @@ type ConfiguredGenerationProviderIds = Record<GenerationProviderContractKey, Rea
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function sortUniquePluginIds(values: Iterable<string>): string[] {
+  return [...new Set([...values].map((value) => value.trim()).filter(Boolean))].toSorted(
+    (left, right) => left.localeCompare(right),
+  );
+}
+
+function createInstalledIndexPluginIdNormalizer(
+  index: InstalledPluginIndex,
+): (pluginId: string) => string {
+  const pluginIdsByLowercase = new Map<string, string>();
+  for (const plugin of index.plugins) {
+    const normalized = normalizeOptionalLowercaseString(plugin.pluginId);
+    if (normalized) {
+      pluginIdsByLowercase.set(normalized, plugin.pluginId);
+    }
+  }
+  return (pluginId: string): string => {
+    const normalized = normalizePluginId(pluginId);
+    const lowercase = normalizeOptionalLowercaseString(normalized);
+    return lowercase ? (pluginIdsByLowercase.get(lowercase) ?? normalized) : normalized;
+  };
+}
+
+function normalizePluginsConfigForInstalledIndex(
+  config: OpenClawConfig["plugins"] | undefined,
+  index: InstalledPluginIndex,
+) {
+  return normalizePluginsConfigWithResolver(config, createInstalledIndexPluginIdNormalizer(index));
 }
 
 function isConfigActivationValueEnabled(value: unknown): boolean {
@@ -189,7 +221,17 @@ function hasConfiguredActivationPath(params: {
   manifest: PluginManifestRecord | undefined;
   config: OpenClawConfig;
 }): boolean {
-  const paths = params.manifest?.activation?.onConfigPaths;
+  return hasConfiguredActivationPathPatterns({
+    paths: params.manifest?.activation?.onConfigPaths,
+    config: params.config,
+  });
+}
+
+function hasConfiguredActivationPathPatterns(params: {
+  paths: readonly string[] | undefined;
+  config: OpenClawConfig;
+}): boolean {
+  const paths = params.paths;
   if (!paths?.length) {
     return false;
   }
@@ -199,6 +241,36 @@ function hasConfiguredActivationPath(params: {
       pathPattern,
     }).some((match) => isConfigActivationValueEnabled(match.value)),
   );
+}
+
+function canUseInstalledIndexConfigPathActivationScope(index: InstalledPluginIndex): boolean {
+  return index.plugins.every(
+    (plugin) =>
+      !plugin.compat.includes("activation-config-path-hint") ||
+      plugin.startup.configPaths !== undefined,
+  );
+}
+
+function addConfiguredActivationPathPluginIds(
+  target: Set<string>,
+  params: {
+    activationSourceConfig: OpenClawConfig;
+    index: InstalledPluginIndex;
+  },
+): void {
+  for (const plugin of params.index.plugins) {
+    if (plugin.origin !== "bundled") {
+      continue;
+    }
+    if (
+      hasConfiguredActivationPathPatterns({
+        paths: plugin.startup.configPaths,
+        config: params.activationSourceConfig,
+      })
+    ) {
+      target.add(plugin.pluginId);
+    }
+  }
 }
 
 function manifestOwnsConfiguredSpeechProvider(params: {
@@ -277,6 +349,334 @@ function collectConfiguredGenerationProviderIds(
     videoGenerationProviders: collectModelProviderIds(defaults?.videoGenerationModel),
     musicGenerationProviders: collectModelProviderIds(defaults?.musicGenerationModel),
   };
+}
+
+function addPluginConfigEntryIds(
+  target: Set<string>,
+  plugins: ReturnType<typeof normalizePluginsConfigForInstalledIndex>,
+): void {
+  for (const [pluginId, entry] of Object.entries(plugins.entries)) {
+    if (entry?.enabled !== false) {
+      target.add(pluginId);
+    }
+  }
+}
+
+function addConfiguredSlotPluginIds(
+  target: Set<string>,
+  params: {
+    activationSourceConfig: OpenClawConfig;
+    activationSourcePlugins: ReturnType<typeof normalizePluginsConfigForInstalledIndex>;
+    normalizePluginId: (pluginId: string) => string;
+  },
+): void {
+  const memorySlot = resolveMemorySlotStartupPluginId(params);
+  if (memorySlot) {
+    target.add(memorySlot);
+  }
+  const contextEngineSlot = resolveContextEngineSlotStartupPluginId(params);
+  if (contextEngineSlot) {
+    target.add(contextEngineSlot);
+  }
+}
+
+function collectConfiguredStartupChannelIds(params: {
+  activationSourceConfig: OpenClawConfig;
+  config: OpenClawConfig;
+  env: NodeJS.ProcessEnv;
+}): string[] {
+  return sortUniquePluginIds([
+    ...listPotentialEnabledChannelIds(params.config, params.env),
+    ...listPotentialEnabledChannelIds(params.activationSourceConfig, params.env),
+  ]);
+}
+
+function pluginRecordMatchesConfiguredChannelId(
+  plugin: InstalledPluginIndexRecord,
+  configuredChannelId: string,
+): boolean {
+  const channelId = normalizeOptionalLowercaseString(configuredChannelId);
+  if (!channelId) {
+    return false;
+  }
+  const pluginId = normalizeOptionalLowercaseString(plugin.pluginId);
+  if (pluginId && pluginId === channelId) {
+    return true;
+  }
+  const packageChannelId = normalizeOptionalLowercaseString(plugin.packageChannel?.id);
+  return packageChannelId === channelId;
+}
+
+function pluginRecordMatchesConfiguredChannel(
+  plugin: InstalledPluginIndexRecord,
+  configuredChannelIds: Iterable<string>,
+): boolean {
+  for (const channelId of configuredChannelIds) {
+    if (pluginRecordMatchesConfiguredChannelId(plugin, channelId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function canUseDirectConfiguredChannelScope(params: {
+  configuredChannelIds: readonly string[];
+  index: InstalledPluginIndex;
+}): boolean {
+  if (params.configuredChannelIds.length === 0) {
+    return true;
+  }
+  return params.configuredChannelIds.every((channelId) =>
+    params.index.plugins.some((plugin) =>
+      pluginRecordMatchesConfiguredChannelId(plugin, channelId),
+    ),
+  );
+}
+
+function addDirectConfiguredChannelPluginIds(
+  target: Set<string>,
+  params: {
+    configuredChannelIds: readonly string[];
+    index: InstalledPluginIndex;
+  },
+): void {
+  if (params.configuredChannelIds.length === 0) {
+    return;
+  }
+  const configuredChannelIds = new Set(params.configuredChannelIds);
+  for (const plugin of params.index.plugins) {
+    if (pluginRecordMatchesConfiguredChannel(plugin, configuredChannelIds)) {
+      target.add(plugin.pluginId);
+    }
+  }
+}
+
+function collectConfiguredProviderIds(config: OpenClawConfig): string[] {
+  const configuredWebSearchProviderIds = collectConfiguredWebSearchProviderIds(config);
+  const configuredGenerationProviderIds = collectConfiguredGenerationProviderIds(config);
+  return sortUniquePluginIds([
+    ...collectConfiguredSpeechProviderIds(config),
+    ...configuredWebSearchProviderIds,
+    ...configuredGenerationProviderIds.imageGenerationProviders,
+    ...configuredGenerationProviderIds.videoGenerationProviders,
+    ...configuredGenerationProviderIds.musicGenerationProviders,
+  ]);
+}
+
+function canUseDirectConfiguredProviderScope(params: {
+  configuredProviderIds: readonly string[];
+  index: InstalledPluginIndex;
+  scopePluginIds: ReadonlySet<string>;
+}): boolean {
+  if (params.configuredProviderIds.length === 0) {
+    return true;
+  }
+  const pluginIds = new Set(
+    params.index.plugins
+      .map((plugin) => normalizeOptionalLowercaseString(plugin.pluginId))
+      .filter((pluginId): pluginId is string => Boolean(pluginId)),
+  );
+  const scopePluginIds = new Set(
+    [...params.scopePluginIds]
+      .map((pluginId) => normalizeOptionalLowercaseString(pluginId))
+      .filter((pluginId): pluginId is string => Boolean(pluginId)),
+  );
+  return params.configuredProviderIds.every((providerId) => {
+    const normalized = normalizeOptionalLowercaseString(providerId);
+    return Boolean(normalized && (pluginIds.has(normalized) || scopePluginIds.has(normalized)));
+  });
+}
+
+function scopeOnlyReferencesInstalledPluginIds(params: {
+  index: InstalledPluginIndex;
+  scope: ReadonlySet<string>;
+}): boolean {
+  const installedPluginIds = new Set(
+    params.index.plugins
+      .map((plugin) => normalizeOptionalLowercaseString(plugin.pluginId))
+      .filter((pluginId): pluginId is string => Boolean(pluginId)),
+  );
+  return [...params.scope].every((pluginId) => {
+    const normalized = normalizeOptionalLowercaseString(pluginId);
+    return Boolean(normalized && installedPluginIds.has(normalized));
+  });
+}
+
+function addDirectConfiguredProviderPluginIds(
+  target: Set<string>,
+  params: {
+    configuredProviderIds: readonly string[];
+    index: InstalledPluginIndex;
+  },
+): void {
+  if (params.configuredProviderIds.length === 0) {
+    return;
+  }
+  const configuredProviderIds = new Set(
+    params.configuredProviderIds
+      .map((providerId) => normalizeOptionalLowercaseString(providerId))
+      .filter((providerId): providerId is string => Boolean(providerId)),
+  );
+  for (const plugin of params.index.plugins) {
+    const pluginId = normalizeOptionalLowercaseString(plugin.pluginId);
+    if (pluginId && configuredProviderIds.has(pluginId)) {
+      target.add(plugin.pluginId);
+    }
+  }
+}
+
+function addRequiredAgentHarnessPluginIds(
+  target: Set<string>,
+  params: {
+    activationSourceConfig: OpenClawConfig;
+    config: OpenClawConfig;
+    index: InstalledPluginIndex;
+    pluginsConfig: ReturnType<typeof normalizePluginsConfigForInstalledIndex>;
+    activationSource: {
+      plugins: ReturnType<typeof normalizePluginsConfigForInstalledIndex>;
+      rootConfig?: OpenClawConfig;
+    };
+    env: NodeJS.ProcessEnv;
+    platform?: NodeJS.Platform;
+  },
+): void {
+  const requiredAgentHarnessRuntimes = new Set(
+    collectConfiguredAgentHarnessRuntimes(params.activationSourceConfig, params.env, {
+      includeEnvRuntime: false,
+      includeLegacyAgentRuntimes: false,
+    }),
+  );
+  if (requiredAgentHarnessRuntimes.size === 0) {
+    return;
+  }
+  for (const plugin of params.index.plugins) {
+    if (
+      canStartRequiredAgentHarnessPlugin({
+        plugin,
+        pluginsConfig: params.pluginsConfig,
+        activationSource: params.activationSource,
+        config: params.config,
+        requiredAgentHarnessRuntimes,
+        platform: params.platform,
+      })
+    ) {
+      target.add(plugin.pluginId);
+    }
+  }
+}
+
+export function resolveGatewayStartupMetadataPluginIds(params: {
+  config: OpenClawConfig;
+  activationSourceConfig?: OpenClawConfig;
+  env: NodeJS.ProcessEnv;
+  index: InstalledPluginIndex;
+  platform?: NodeJS.Platform;
+}): string[] | undefined {
+  const activationSourceConfig = params.activationSourceConfig ?? params.config;
+  const pluginsConfig = normalizePluginsConfigForInstalledIndex(
+    params.config.plugins,
+    params.index,
+  );
+  const activationSourcePlugins = normalizePluginsConfigForInstalledIndex(
+    activationSourceConfig.plugins,
+    params.index,
+  );
+  if (!pluginsConfig.enabled || !activationSourcePlugins.enabled) {
+    return [];
+  }
+  if (
+    params.config.plugins?.bundledDiscovery === "compat" ||
+    activationSourceConfig.plugins?.bundledDiscovery === "compat"
+  ) {
+    return undefined;
+  }
+  if (pluginsConfig.allow.length === 0 && activationSourcePlugins.allow.length === 0) {
+    return undefined;
+  }
+
+  const scope = new Set<string>([...pluginsConfig.allow, ...activationSourcePlugins.allow]);
+  addPluginConfigEntryIds(scope, pluginsConfig);
+  addPluginConfigEntryIds(scope, activationSourcePlugins);
+
+  const normalizePluginId = createInstalledIndexPluginIdNormalizer(params.index);
+  addConfiguredSlotPluginIds(scope, {
+    activationSourceConfig,
+    activationSourcePlugins,
+    normalizePluginId,
+  });
+  for (const pluginId of resolveGatewayStartupDreamingPluginIds(params.config)) {
+    scope.add(pluginId);
+  }
+  if (!canUseInstalledIndexConfigPathActivationScope(params.index)) {
+    return undefined;
+  }
+  addConfiguredActivationPathPluginIds(scope, {
+    activationSourceConfig,
+    index: params.index,
+  });
+
+  const configuredChannelIds = collectConfiguredStartupChannelIds({
+    config: params.config,
+    activationSourceConfig,
+    env: params.env,
+  });
+  if (!canUseDirectConfiguredChannelScope({ configuredChannelIds, index: params.index })) {
+    return undefined;
+  }
+  addDirectConfiguredChannelPluginIds(scope, {
+    configuredChannelIds,
+    index: params.index,
+  });
+
+  const configuredProviderIds = sortUniquePluginIds([
+    ...collectConfiguredProviderIds(params.config),
+    ...collectConfiguredProviderIds(activationSourceConfig),
+  ]);
+  if (
+    !canUseDirectConfiguredProviderScope({
+      configuredProviderIds,
+      index: params.index,
+      scopePluginIds: scope,
+    })
+  ) {
+    return undefined;
+  }
+  addDirectConfiguredProviderPluginIds(scope, {
+    configuredProviderIds,
+    index: params.index,
+  });
+
+  addRequiredAgentHarnessPluginIds(scope, {
+    activationSourceConfig,
+    config: params.config,
+    index: params.index,
+    pluginsConfig,
+    activationSource: {
+      plugins: activationSourcePlugins,
+      rootConfig: activationSourceConfig,
+    },
+    env: params.env,
+    platform: params.platform,
+  });
+
+  const deniedPluginIds = new Set([...pluginsConfig.deny, ...activationSourcePlugins.deny]);
+  for (const pluginId of deniedPluginIds) {
+    scope.delete(pluginId);
+  }
+  for (const [pluginId, entry] of Object.entries(pluginsConfig.entries)) {
+    if (entry?.enabled === false) {
+      scope.delete(pluginId);
+    }
+  }
+  for (const [pluginId, entry] of Object.entries(activationSourcePlugins.entries)) {
+    if (entry?.enabled === false) {
+      scope.delete(pluginId);
+    }
+  }
+  if (!scopeOnlyReferencesInstalledPluginIds({ index: params.index, scope })) {
+    return undefined;
+  }
+  return sortUniquePluginIds(scope);
 }
 
 function manifestOwnsConfiguredGenerationProvider(params: {
@@ -934,6 +1334,7 @@ export function loadGatewayStartupPluginPlan(params: {
       snapshot: params.metadataSnapshot,
       config: snapshotConfig,
       env: params.env,
+      allowScopedSnapshot: true,
       workspaceDir: params.workspaceDir,
       index: params.index,
     })
@@ -944,6 +1345,24 @@ export function loadGatewayStartupPluginPlan(params: {
           env: params.env,
           allowWorkspaceScopedCurrent: params.workspaceDir === undefined,
           ...(params.index ? { index: params.index } : {}),
+          pluginIdScope: {
+            key: hashJson({
+              kind: "gateway-startup",
+              config: params.config,
+              activationSourceConfig: params.activationSourceConfig ?? null,
+              platform: params.platform ?? null,
+            }),
+            resolve: ({ index }) =>
+              resolveGatewayStartupMetadataPluginIds({
+                config: params.config,
+                ...(params.activationSourceConfig !== undefined
+                  ? { activationSourceConfig: params.activationSourceConfig }
+                  : {}),
+                env: params.env,
+                index,
+                ...(params.platform !== undefined ? { platform: params.platform } : {}),
+              }),
+          },
         });
   return resolveGatewayStartupPluginPlanFromRegistry({
     config: params.config,

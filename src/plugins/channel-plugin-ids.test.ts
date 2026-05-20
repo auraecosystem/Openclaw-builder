@@ -75,6 +75,7 @@ import {
   resolveConfiguredChannelPresencePolicy,
   resolveConfiguredDeferredChannelPluginIdsFromRegistry,
   resolveConfiguredChannelPluginIds,
+  resolveGatewayStartupMetadataPluginIds,
   resolveGatewayStartupPluginIds,
   resolveGatewayStartupPluginIdsFromRegistry,
   resolveGatewayStartupPluginPlanFromRegistry,
@@ -418,6 +419,7 @@ function createInstalledPluginRecordFixture(
       deferConfiguredChannelFullLoadUntilAfterListen:
         record.startupDeferConfiguredChannelFullLoadUntilAfterListen === true,
       agentHarnesses: normalizeStartupAgentHarnesses(record),
+      configPaths: record.activation?.onConfigPaths ?? [],
     },
     compat: [],
   };
@@ -1384,6 +1386,137 @@ describe("resolveGatewayStartupPluginIds", () => {
       env: createPluginPlanningTestEnv(),
       expected: ["demo-channel", "browser"],
     });
+  });
+
+  it("derives a conservative metadata manifest scope for restrictive startup allowlists", () => {
+    const registry = createManifestRegistryFixture();
+    const index = createInstalledPluginIndexFixture(registry);
+
+    expect(
+      resolveGatewayStartupMetadataPluginIds({
+        config: {
+          channels: {
+            "demo-channel": {
+              token: "configured",
+            },
+          },
+          plugins: {
+            allow: ["browser"],
+            slots: {
+              memory: "none",
+            },
+          },
+        } as OpenClawConfig,
+        env: createPluginPlanningTestEnv(),
+        index,
+      }),
+    ).toEqual(["browser", "demo-channel"]);
+  });
+
+  it("keeps config-path activation owners in restrictive startup metadata scopes", () => {
+    const registry = createManifestRegistryFixture();
+    const index = createInstalledPluginIndexFixture(registry);
+
+    expect(
+      resolveGatewayStartupMetadataPluginIds({
+        config: {
+          browser: {
+            enabled: true,
+          },
+          channels: {},
+          plugins: {
+            allow: ["openai"],
+            slots: {
+              memory: "none",
+            },
+          },
+        } as OpenClawConfig,
+        env: createPluginPlanningTestEnv(),
+        index,
+      }),
+    ).toEqual(["browser", "openai"]);
+  });
+
+  it("falls back to unscoped metadata for legacy indexes without config-path activation metadata", () => {
+    const registry = createManifestRegistryFixture();
+    const legacyIndex = createInstalledPluginIndexFixture(registry);
+    const legacyPlugins = [...legacyIndex.plugins];
+    const browserPluginIndex = legacyPlugins.findIndex((plugin) => plugin.pluginId === "browser");
+    const browserPlugin = legacyPlugins[browserPluginIndex];
+    if (!browserPlugin) {
+      throw new Error("Expected browser plugin fixture");
+    }
+    legacyPlugins[browserPluginIndex] = {
+      ...browserPlugin,
+      startup: {
+        sidecar: browserPlugin.startup.sidecar,
+        memory: browserPlugin.startup.memory,
+        deferConfiguredChannelFullLoadUntilAfterListen:
+          browserPlugin.startup.deferConfiguredChannelFullLoadUntilAfterListen,
+        agentHarnesses: browserPlugin.startup.agentHarnesses,
+      },
+      compat: ["activation-config-path-hint"],
+    };
+    const index = {
+      ...legacyIndex,
+      plugins: legacyPlugins,
+    };
+
+    expect(
+      resolveGatewayStartupMetadataPluginIds({
+        config: {
+          browser: {
+            enabled: true,
+          },
+          channels: {},
+          plugins: {
+            allow: ["openai"],
+          },
+        } as OpenClawConfig,
+        env: createPluginPlanningTestEnv(),
+        index,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("does not scope metadata manifests when bundled discovery compat can widen allowlists", () => {
+    const registry = createManifestRegistryFixture();
+    const index = createInstalledPluginIndexFixture(registry);
+
+    expect(
+      resolveGatewayStartupMetadataPluginIds({
+        config: {
+          plugins: {
+            allow: ["browser"],
+            bundledDiscovery: "compat",
+          },
+        } as OpenClawConfig,
+        env: createPluginPlanningTestEnv(),
+        index,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("falls back to unscoped metadata when a configured provider cannot be mapped before manifests", () => {
+    const registry = createManifestRegistryFixture();
+    const index = createInstalledPluginIndexFixture(registry);
+
+    expect(
+      resolveGatewayStartupMetadataPluginIds({
+        config: {
+          agents: {
+            defaults: {
+              imageGenerationModel: "unknown-provider/model",
+            },
+          },
+          plugins: {
+            allow: ["browser"],
+          },
+        } as OpenClawConfig,
+        env: createPluginPlanningTestEnv(),
+        index,
+      }),
+    ).toBeUndefined();
   });
 
   it("does not treat explicitly disabled stale channel config as startup intent", () => {

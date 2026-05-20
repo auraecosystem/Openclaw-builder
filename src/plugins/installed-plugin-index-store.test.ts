@@ -167,6 +167,37 @@ describe("installed plugin index persistence", () => {
     expectPluginIds(persisted, ["demo"]);
   });
 
+  it("preserves startup config paths across persisted index roundtrips", async () => {
+    const stateDir = makeTempDir();
+    const index = createIndex({
+      plugins: [
+        {
+          pluginId: "browser",
+          manifestPath: "/plugins/browser/openclaw.plugin.json",
+          manifestHash: "browser-manifest-hash",
+          rootDir: "/plugins/browser",
+          origin: "bundled",
+          enabled: true,
+          enabledByDefault: true,
+          startup: {
+            sidecar: true,
+            memory: false,
+            deferConfiguredChannelFullLoadUntilAfterListen: false,
+            agentHarnesses: [],
+            configPaths: ["browser"],
+          },
+          compat: ["activation-config-path-hint"],
+        },
+      ],
+    });
+
+    await writePersistedInstalledPluginIndex(index, { stateDir });
+
+    const persisted = requirePersisted(await readPersistedInstalledPluginIndex({ stateDir }));
+    expect(persisted.plugins[0]?.startup.configPaths).toEqual(["browser"]);
+    expect(persisted.plugins[0]?.compat).toEqual(["activation-config-path-hint"]);
+  });
+
   it("does not preserve prototype poison keys from persisted index JSON", async () => {
     const stateDir = makeTempDir();
     const filePath = resolveInstalledPluginIndexStorePath({ stateDir });

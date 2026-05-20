@@ -49,6 +49,7 @@ const InstalledPluginIndexStartupSchema = z.object({
   memory: z.boolean(),
   deferConfiguredChannelFullLoadUntilAfterListen: z.boolean(),
   agentHarnesses: StringArraySchema,
+  configPaths: StringArraySchema.optional(),
 });
 
 const InstalledPluginFileSignatureSchema = z.object({

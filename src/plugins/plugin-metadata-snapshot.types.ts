@@ -4,6 +4,11 @@ import type { PluginManifestRecord, PluginManifestRegistry } from "./manifest-re
 import type { PluginDiagnostic } from "./manifest-types.js";
 import type { PluginRegistrySnapshotSource } from "./plugin-registry-snapshot.types.js";
 
+export type PluginMetadataSnapshotPluginIdScope = {
+  key: string;
+  resolve: (params: { index: InstalledPluginIndex }) => readonly string[] | undefined;
+};
+
 export type PluginMetadataSnapshotOwnerMaps = {
   channels: ReadonlyMap<string, readonly string[]>;
   channelConfigs: ReadonlyMap<string, readonly string[]>;
@@ -37,6 +42,7 @@ export type PluginMetadataSnapshotRegistryDiagnostic = {
 export type PluginMetadataSnapshot = {
   policyHash: string;
   configFingerprint?: string;
+  pluginIds?: readonly string[];
   registrySource?: PluginRegistrySnapshotSource;
   workspaceDir?: string;
   index: InstalledPluginIndex;
@@ -60,6 +66,8 @@ export type LoadPluginMetadataSnapshotParams = {
   stateDir?: string;
   env: NodeJS.ProcessEnv;
   index?: InstalledPluginIndex;
+  pluginIds?: readonly string[];
+  pluginIdScope?: PluginMetadataSnapshotPluginIdScope;
   preferPersisted?: boolean;
 };
 

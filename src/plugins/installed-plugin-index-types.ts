@@ -29,6 +29,11 @@ export type InstalledPluginStartupInfo = {
   memory: boolean;
   deferConfiguredChannelFullLoadUntilAfterListen: boolean;
   agentHarnesses: readonly string[];
+  /**
+   * Manifest activation.onConfigPaths copied into the installed index for
+   * pre-manifest startup scoping. Missing on older persisted index files.
+   */
+  configPaths?: readonly string[];
 };
 
 export type InstalledPluginInstallRecordInfo = Pick<

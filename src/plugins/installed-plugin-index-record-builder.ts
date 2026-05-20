@@ -40,6 +40,7 @@ function buildStartupInfo(record: PluginManifestRecord): InstalledPluginStartupI
       ...(record.activation?.onAgentHarnesses ?? []),
       ...(record.cliBackends ?? []),
     ]),
+    configPaths: sortUnique(record.activation?.onConfigPaths),
   };
 }
 
