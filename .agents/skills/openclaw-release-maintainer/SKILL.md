@@ -25,8 +25,28 @@ Use this skill for release and publish-time workflow. Keep ordinary development 
 - Before release branching, commit any dirty files in coherent groups, push,
   pull/rebase, then run `/changelog` on `main` and commit/push/pull that
   changelog rewrite immediately before creating the release branch.
-- Do not delete or rewrite beta tags after they leave the machine. If a
-  published or pushed beta needs a fix, commit the fix on the release branch and
+- During release planning, inspect both `src/plugins/compat/registry.ts` and
+  `src/commands/doctor/shared/deprecation-compat.ts` before branching and again
+  before final publish. For every deprecated or removal-pending compatibility
+  record whose `removeAfter` date is on or before the release date, either
+  remove the compatibility path where safe and validate the affected tests, or
+  write down why removal is blocked and get explicit maintainer approval before
+  shipping the expired compatibility path.
+- When removing deprecated runtime/config compatibility, preserve any doctor
+  migration, repair, or hint that is still needed by supported upgrade paths.
+  Doctor-side compatibility should stay tracked in
+  `src/commands/doctor/shared/deprecation-compat.ts` until maintainers confirm
+  the repair is no longer needed.
+- Revalidate compatibility replacement text during release planning. The
+  recommended replacement can shift as plugin ownership, externalization, and
+  config footprint move, so do not blindly copy stale replacement annotations
+  into release notes.
+- Do not delete or rewrite beta tags after their matching npm package has been
+  published. If a pushed beta tag fails before npm publish, the version is not
+  consumed: keep the same `-beta.N`, delete/recreate or force-move the git tag
+  and prerelease to the fixed commit, and rerun preflight. Do not increment to
+  the next beta number until the matching npm package has actually published.
+  If a published beta needs a fix, commit the fix on the release branch and
   increment to the next `-beta.N`.
 - For a beta release train, run the fast local preflight first, publish the
   beta to npm `beta`, then run the expensive published-package roster focused
@@ -45,8 +65,8 @@ Use this skill for release and publish-time workflow. Keep ordinary development 
   stable base version section, for example `v2026.4.20-beta.1` uses
   `## 2026.4.20` release notes.
 - When any beta or stable release is live, make a best-effort Discord
-  announcement using Peter's bot token from `.profile`; do not block or roll
-  back the release if the announcement fails.
+  announcement using the configured secret workflow; do not block or roll back
+  the release if the announcement fails.
 - When asked to announce on X, use `~/Projects/bird/bird` and follow the
   release tweet style below.
 
@@ -80,10 +100,11 @@ Use this skill for release and publish-time workflow. Keep ordinary development 
   parallel, publish npm from the successful npm preflight, then start published
   npm install/update, Docker, and Parallels verification while mac artifacts
   continue.
-- After a beta is published, run the expensive Docker, Parallels, and QA-Lab
-  release rosters in parallel instead of serializing them. Use selective reruns
-  after failures or fixes, but keep proof that Docker, Parallels, and QA-Lab
-  each passed at least once before stable/latest promotion.
+- After a beta is published, overlap remote/manual release rosters where useful,
+  but avoid piling local Docker, Parallels, and QA-Lab work onto the same host
+  when it would create system-load noise. Use selective reruns after failures or
+  fixes, but keep proof that Docker, Parallels, and QA-Lab each passed at least
+  once before stable/latest promotion.
 - Mac packaging may be built from a slight release-branch variation of the
   tagged commit when the delta is mac packaging, signing, workflow, or
   validation-only release machinery. If mac packaging needs release-branch-only
@@ -116,6 +137,13 @@ Use this skill for release and publish-time workflow. Keep ordinary development 
   `CHANGELOG.md` version section, not highlights or an excerpt. When creating
   or editing a release, extract from `## YYYY.M.D` through the line before the
   next level-2 heading and use that complete block as the release notes.
+- When preparing release notes, scan `src/plugins/compat/registry.ts` and
+  `src/commands/doctor/shared/deprecation-compat.ts` for compatibility records
+  with `warningStarts` or `removeAfter` within 7 days after the release date.
+  Add an `Upcoming deprecations` note to the release notes when any exist,
+  including the compatibility code, target date, replacement, and a link to the
+  record's `docsPath` or `/plugins/compatibility` when no more specific
+  deprecation page exists.
 - When cutting a mac release with a beta GitHub prerelease:
   - tag `vYYYY.M.D-beta.N` from the release commit
   - create a prerelease titled `openclaw YYYY.M.D-beta.N`
@@ -142,6 +170,13 @@ live`; keep it clearly beta and avoid implying stable promotion.
   CI, validation, or internal release mechanics unless the release is explicitly
   about those. Peter prefers concrete user wins: features, integrations,
   workflow improvements, and practical reliability fixes.
+- Do not feature QA parity, test coverage, release gates, or validation lanes in
+  user-facing launch tweets. Keep them for release notes or maintainer proof
+  unless the operator explicitly asks for validation-focused copy.
+- Do not feature plugin-author or developer tooling such as SDK helpers,
+  tool-plugin scaffolding, build/validate/init commands, or internal CLI
+  plumbing in general user-facing launch tweets unless the operator explicitly
+  asks for developer-focused copy.
 - Tone: high-signal, slightly cheeky, confident, not corporate. One joke is
   enough. Avoid punching down, insulting users, or promising what was not
   verified.
@@ -157,6 +192,9 @@ live`; keep it clearly beta and avoid implying stable promotion.
   compact launch post, then publish one focused feature explainer per reply.
   Follow-up replies should not repeat "new in VERSION" or the version number
   when the thread context already makes it obvious.
+- Peter's preferred thread workflow: first agree on the generic launch tweet,
+  then proceed through follow-up tweets one by one. When he says `next`, provide
+  or copy the next follow-up only; do not dump the full thread again unless asked.
 - Every follow-up tweet should include a docs URL for that specific feature.
   Prefer a bare URL over `Docs: <url>` unless the label is needed for clarity.
   Keep follow-ups concise: around 160-220 raw characters is usually the sweet
@@ -257,13 +295,11 @@ node --import tsx scripts/openclaw-npm-postpublish-verify.ts <published-version>
 ## Check all relevant release builds
 
 - Always validate the OpenClaw npm release path before creating the tag.
-- Source Peter's profile before live release validation so OpenAI and Anthropic
-  credentials are available without printing secrets:
-  `set -a; source "$HOME/.profile"; set +a`.
+- Use the configured secret workflow before live release validation so OpenAI
+  and Anthropic credentials are available without printing secrets.
 - Parallels validation and any local live model QA for this train must use both
-  `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`. If either is missing after sourcing
-  `.profile`, stop before starting those local long lanes and report the
-  missing key.
+  `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`. If either cannot be injected, stop
+  before starting those local long lanes and report the missing key.
 - Live credentialed channel QA is the GitHub Actions workflow
   `QA-Lab - All Lanes` (`.github/workflows/qa-live-telegram-convex.yml`), not a
   local substitute. Dispatch it from Actions against the release tag and wait
@@ -301,9 +337,11 @@ node --import tsx scripts/openclaw-npm-postpublish-verify.ts <published-version>
   - Docker install/update coverage that exercises the published beta package
   - published npm Telegram proof: dispatch Actions > `NPM Telegram Beta E2E`
     from `main` with `package_spec=openclaw@<beta-version>` and
-    `provider_mode=mock-openai`, approve `npm-release`, and require success.
-    This is the default button path for installed-package onboarding,
-    Telegram setup, and real Telegram E2E against the published npm package.
+    `provider_mode=mock-openai`, and require success. This workflow is
+    maintainer-dispatched and intentionally has no `npm-release` approval gate;
+    `qa-live-shared` only supplies the shared QA secrets. This is the default
+    button path for installed-package onboarding, Telegram setup, and real
+    Telegram E2E against the published npm package.
     Use the local `pnpm test:docker:npm-telegram-live` lane with the matching
     `OPENCLAW_NPM_TELEGRAM_PACKAGE_SPEC` and Convex CI env only as a fallback
     or debugging path.
@@ -338,8 +376,10 @@ node --import tsx scripts/openclaw-npm-postpublish-verify.ts <published-version>
 - Any fix after preflight means a new commit. Delete and recreate the tag and
   matching GitHub release from the fixed commit, then rerun preflight from
   scratch before publishing.
-  Exception: never delete or recreate a beta tag that has already been pushed or
-  published; increment to the next beta number instead.
+  Exception: never delete or recreate a beta tag whose matching npm package has
+  already been published; increment to the next beta number instead. If only the
+  pushed tag/prerelease exists and npm publish has not happened, recreate that
+  same beta tag at the fixed commit.
 - For stable mac releases, generate the signed `appcast.xml` before uploading
   public release assets so the updater feed cannot lag the published binaries.
 - Serialize stable appcast-producing runs across tags so two releases do not
@@ -532,6 +572,9 @@ node --import tsx scripts/openclaw-npm-postpublish-verify.ts <published-version>
     commit, and rerun all relevant preflights from scratch before continuing.
     Never reuse old preflight results after the commit changes. For pushed or
     published beta tags, do not delete/recreate; increment to the next beta tag.
+    For preflight-only failures where npm did not publish the beta version,
+    delete/recreate the same beta tag and prerelease at the fixed commit instead
+    of skipping a prerelease number.
 20. Start `.github/workflows/openclaw-npm-release.yml` from the same branch with
     the same tag for the real publish, choose `npm_dist_tag` (`beta` default,
     `latest` only when you intentionally want direct stable publish), keep it
@@ -544,17 +587,17 @@ node --import tsx scripts/openclaw-npm-postpublish-verify.ts <published-version>
     for critical fixes that landed after the release branch cut; backport only
     important low-risk fixes before starting expensive lanes, or increment to
     the next beta if the fix must change the already-published package. If any
-    lane fails after the beta tag/package is pushed or published, fix,
-    commit/push/pull, increment to the next beta tag, and rerun the affected
-    beta evidence. Start Docker, Parallels, and QA-Lab in parallel once the
-    beta is live. Ensure the full expensive roster has passed at least once
-    before stable/latest promotion. The roster includes the manual Actions >
+    lane fails after the beta package is published, fix, commit/push/pull,
+    increment to the next beta tag, and rerun the affected beta evidence. Once
+    the beta is live, start remote/manual rosters where they
+    can overlap safely, but keep local Docker and Parallels load controlled.
+    Ensure the full expensive roster has passed at least once before
+    stable/latest promotion. The roster includes the manual Actions >
     `NPM Telegram Beta E2E` workflow against the exact published beta package.
     If a pre-npm lane fails before any tag/package leaves the machine, fix and
     rerun the same intended beta attempt. Repeat up to the operator's
     authorized beta-attempt limit, normally 4.
-24. Announce the beta/stable release on Discord best-effort using Peter's bot
-    token from `.profile`.
+24. Announce the beta/stable release on Discord best-effort using the configured secret workflow.
 25. If the operator requested beta only, stop after beta verification and the
     announcement.
 26. If the stable release was published to `beta`, use the light stable

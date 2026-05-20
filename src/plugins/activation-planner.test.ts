@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   loadPluginManifestRegistryForPluginRegistry: vi.fn(),
 }));
 
-vi.mock("./plugin-registry.js", () => ({
+vi.mock("./plugin-registry-contributions.js", () => ({
   loadPluginManifestRegistryForPluginRegistry: (...args: unknown[]) =>
     mocks.loadPluginManifestRegistryForPluginRegistry(...args),
 }));
@@ -35,6 +35,16 @@ describe("activation planner", () => {
         {
           id: "device-pair",
           commandAliases: [{ name: "pair", kind: "runtime-slash" }],
+          providers: [],
+          channels: [],
+          cliBackends: [],
+          skills: [],
+          hooks: [],
+          origin: "bundled",
+        },
+        {
+          id: "browser",
+          commandAliases: [{ name: "browser" }],
           providers: [],
           channels: [],
           cliBackends: [],
@@ -92,6 +102,15 @@ describe("activation planner", () => {
       resolveManifestActivationPluginIds({
         trigger: {
           kind: "command",
+          command: "browser",
+        },
+      }),
+    ).toEqual(["browser"]);
+
+    expect(
+      resolveManifestActivationPluginIds({
+        trigger: {
+          kind: "command",
           command: "pair",
         },
       }),
@@ -105,6 +124,24 @@ describe("activation planner", () => {
         },
       }),
     ).toEqual(["demo-channel"]);
+  });
+
+  it("does not activate manifest-triggered plugins that are disabled in config", () => {
+    expect(
+      resolveManifestActivationPluginIds({
+        config: {
+          plugins: {
+            entries: {
+              "memory-core": { enabled: false },
+            },
+          },
+        },
+        trigger: {
+          kind: "command",
+          command: "memory",
+        },
+      }),
+    ).toEqual([]);
   });
 
   it("keeps ids-only provider, agent harness, channel, and route planning stable", () => {
@@ -191,7 +228,11 @@ describe("activation planner", () => {
           command: "demo-tools",
         },
       }),
-    ).toMatchObject({
+    ).toEqual({
+      trigger: {
+        kind: "command",
+        command: "demo-tools",
+      },
       pluginIds: ["demo-channel"],
       entries: [
         {
@@ -353,6 +394,6 @@ describe("activation planner", () => {
         },
         onlyPluginIds: [],
       }),
-    ).toEqual([]);
+    ).toStrictEqual([]);
   });
 });
