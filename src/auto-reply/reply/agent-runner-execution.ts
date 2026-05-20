@@ -53,7 +53,7 @@ import {
 import { resolveSilentReplyPolicy } from "../../config/silent-reply.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
-import { emitAgentEvent, registerAgentRunContext } from "../../infra/agent-events.js";
+import { emitAgentEvent, onAgentEvent, registerAgentRunContext } from "../../infra/agent-events.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
 import { CommandLane } from "../../process/lanes.js";
@@ -1642,7 +1642,48 @@ export async function runAgentTurnWithFallback(params: {
               originatingChannel: params.followupRun.originatingChannel,
               provider: params.sessionCtx.Provider,
             });
-            const result = await runCliAgentWithLifecycle({
+            // Bridge stream:"tool" agent events emitted by the CLI runner into
+            // the followup's `onToolStart` opt. Without this, `cli-output`'s
+            // tool-use-injection (this PR's whole point) surfaces nothing for
+            // the followup path — primary CLI runs already forward tool events
+            // directly in their own loop, but the followup path here gates
+            // delivery on the explicit `onToolStart` callback. Subscribe once,
+            // serialise delivery on a single promise chain so two adjacent
+            // events can't interleave, drain + unsubscribe in finally.
+            const cliToolBridge = (() => {
+              let delivery: Promise<void> = Promise.resolve();
+              const rawUnsubscribe = onAgentEvent((evt) => {
+                if (evt.runId !== runId || evt.stream !== "tool") {return;}
+                if (params.followupRun.run.silentExpected) {return;}
+                const phase = typeof evt.data?.phase === "string" ? evt.data.phase : "";
+                if (phase !== "start" && phase !== "update") {return;}
+                const name = typeof evt.data?.name === "string" ? evt.data.name : undefined;
+                const args =
+                  evt.data?.args && typeof evt.data.args === "object"
+                    ? (evt.data.args as Record<string, unknown>)
+                    : undefined;
+                delivery = delivery
+                  .then(
+                    () =>
+                      params.opts?.onToolStart?.({
+                        name,
+                        phase,
+                        args,
+                        detailMode: params.toolProgressDetail,
+                      }) ?? Promise.resolve(),
+                  )
+                  .catch(() => undefined);
+              });
+              return {
+                unsubscribe: rawUnsubscribe,
+                async drain(): Promise<void> {
+                  await delivery;
+                },
+              };
+            })();
+            let result;
+            try {
+              result = await runCliAgentWithLifecycle({
               runId,
               provider: cliExecutionProvider,
               onAgentRunStart: notifyAgentRunStart,
@@ -1731,6 +1772,10 @@ export async function runAgentTurnWithFallback(params: {
                     })()
                   : rawResult,
             });
+            } finally {
+              cliToolBridge.unsubscribe();
+              await cliToolBridge.drain();
+            }
             bootstrapPromptWarningSignaturesSeen = resolveBootstrapWarningSignaturesSeen(
               result.meta?.systemPromptReport,
             );
