@@ -52,7 +52,11 @@ import {
   type NativeHookRelayEvent,
   type NativeHookRelayRegistrationHandle,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
-import { markAuthProfileBlockedUntil, resolveAgentDir } from "openclaw/plugin-sdk/agent-runtime";
+import {
+  markAuthProfileBlockedUntil,
+  resolveAgentCompactionConfig,
+  resolveAgentDir,
+} from "openclaw/plugin-sdk/agent-runtime";
 import {
   emitTrustedDiagnosticEvent,
   hasPendingInternalDiagnosticEvent,
@@ -746,18 +750,18 @@ async function rotateOversizedCodexAppServerStartupBinding(params: {
   agentDir: string;
   codexHome?: string;
   config: EmbeddedRunAttemptParams["config"] | undefined;
+  sessionAgentId?: string | null;
 }): Promise<CodexAppServerThreadBinding | undefined> {
   const binding = params.binding;
   if (!binding?.threadId) {
     return binding;
   }
-  if (params.config?.agents?.defaults?.compaction?.truncateAfterCompaction !== true) {
+  const compactionConfig = resolveAgentCompactionConfig(params.config, params.sessionAgentId);
+  if (compactionConfig?.truncateAfterCompaction !== true) {
     return binding;
   }
   const sessionRecord = await readCodexSessionRecordForSessionFile(params.sessionFile);
-  const maxBytes = parseCodexAppServerByteLimit(
-    params.config?.agents?.defaults?.compaction?.maxActiveTranscriptBytes,
-  );
+  const maxBytes = parseCodexAppServerByteLimit(compactionConfig.maxActiveTranscriptBytes);
   const rolloutFiles = await listCodexAppServerRolloutFilesForThread(
     params.agentDir,
     binding.threadId,
@@ -903,6 +907,7 @@ export async function runCodexAppServerAttempt(
     agentDir,
     codexHome: appServer.start.env?.CODEX_HOME,
     config: params.config,
+    sessionAgentId,
   });
   const startupAuthProfileCandidate =
     params.runtimePlan?.auth.forwardedAuthProfileId ??
