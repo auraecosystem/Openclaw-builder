@@ -113,6 +113,7 @@ export {
   readRecentSessionMessagesWithStatsAsync,
   readRecentSessionTranscriptLines,
   readRecentSessionUsageFromTranscript,
+  readSessionMessageByIdAsync,
   readSessionMessageCountAsync,
   readSessionTitleFieldsFromTranscript,
   readSessionTitleFieldsFromTranscriptAsync,
