@@ -2374,10 +2374,21 @@ export async function runEmbeddedPiAgent(
                 !fallbackConfigured &&
                 isTransientFailoverReason(promptFailoverReason)
               ) {
+                if (failedPromptProfileId && promptProfileFailureReason) {
+                  try {
+                    await maybeMarkAuthProfileFailure({
+                      profileId: failedPromptProfileId,
+                      reason: promptProfileFailureReason,
+                      modelId,
+                    });
+                  } catch (err) {
+                    log.warn(`prompt profile failure mark failed: ${String(err)}`);
+                  }
+                }
                 traceAttempts.push({
                   provider,
                   model: modelId,
-                  result: "rotate_profile",
+                  result: "same_profile_retry",
                   ...(promptFailoverReason ? { reason: promptFailoverReason } : {}),
                   stage: "prompt",
                 });
@@ -2385,7 +2396,9 @@ export async function runEmbeddedPiAgent(
                   previous: lastRetryFailoverReason,
                   failoverReason: promptFailoverReason,
                 });
-                logPromptFailoverDecision("rotate_profile");
+                log.warn(
+                  `prompt-side transient ${promptFailoverReason ?? "unknown"} with no fallback; retrying same profile for ${provider}/${modelId}`,
+                );
                 await maybeBackoffBeforeOverloadFailover(promptFailoverReason);
                 continue;
               }
@@ -2594,7 +2607,9 @@ export async function runEmbeddedPiAgent(
                 assistantFailoverOutcome.retryKind === "same_model_idle_timeout" ||
                 assistantFailoverReason === "timeout"
                   ? "timeout"
-                  : "rotate_profile",
+                  : assistantFailoverOutcome.retryKind === "same_profile_transient"
+                    ? "same_profile_retry"
+                    : "rotate_profile",
               ...(assistantFailoverReason ? { reason: assistantFailoverReason } : {}),
               stage: "assistant",
             });

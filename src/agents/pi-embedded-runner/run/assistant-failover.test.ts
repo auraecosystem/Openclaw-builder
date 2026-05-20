@@ -121,6 +121,7 @@ describe("handleAssistantFailover", () => {
 
     it("retries without profile rotation for overloaded when no fallback is configured (#84236)", async () => {
       const backoff = vi.fn(async () => {});
+      const warn = vi.fn();
       const outcome = await handleAssistantFailover(
         makeParams({
           initialDecision: { action: "rotate_profile", reason: "overloaded" },
@@ -129,6 +130,7 @@ describe("handleAssistantFailover", () => {
           billingFailure: false,
           advanceAuthProfile: vi.fn(async () => false),
           maybeBackoffBeforeOverloadFailover: backoff,
+          warn,
         }),
       );
 
@@ -136,8 +138,11 @@ describe("handleAssistantFailover", () => {
       if (outcome.action !== "retry") {
         return;
       }
-      expect(outcome.retryKind).toBeUndefined();
+      expect(outcome.retryKind).toBe("same_profile_transient");
       expect(backoff).toHaveBeenCalledWith("overloaded");
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("assistant-side transient overloaded"),
+      );
     });
 
     it("retries without profile rotation for rate_limit when no fallback is configured (#84236)", async () => {
