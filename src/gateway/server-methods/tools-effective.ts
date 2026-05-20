@@ -23,6 +23,7 @@ import {
   deliveryContextFromSession,
   getOrCreateSessionMcpRuntime,
   listAgentIds,
+  loadSessionEntry,
   materializeBundleMcpToolsForRun,
   peekSessionMcpRuntime,
   resolveAgentWorkspaceDir,
