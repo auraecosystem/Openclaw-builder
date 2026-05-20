@@ -2505,10 +2505,7 @@ describe("runWithModelFallback", () => {
       const cfg = makeCfg();
       const directProviderTimeout = new Error("provider request timed out after 60s");
       directProviderTimeout.name = "TimeoutError";
-      const run = vi
-        .fn()
-        .mockRejectedValueOnce(directProviderTimeout)
-        .mockResolvedValueOnce("ok");
+      const run = vi.fn().mockRejectedValueOnce(directProviderTimeout).mockResolvedValueOnce("ok");
 
       const result = await runWithModelFallback({
         cfg,
@@ -2708,6 +2705,53 @@ describe("runWithModelFallback", () => {
       controller.abort(
         "cron: isolated agent setup timed out before runner start (last phase: workspace_provision)",
       );
+
+      await expect(
+        runWithModelFallback({
+          cfg,
+          provider: "anthropic",
+          model: "claude-sonnet-4-6",
+          run,
+          abortSignal: controller.signal,
+        }),
+      ).rejects.toBeInstanceOf(Error);
+
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+
+    it("treats isolated-agent pre-execution stall (and phase suffix) as terminal", async () => {
+      // `src/cron/service/timer.ts:381/383` (`preExecutionTimeoutErrorMessage`)
+      // emits the pre-execution watchdog reason after setup completes but the
+      // runner never starts consuming the run budget. Bare and phase-suffixed
+      // variants must both short-circuit fallback.
+      const cfg = makeCfg();
+      const run = vi.fn().mockRejectedValue(makeAbortError("aborted"));
+
+      const controller = new AbortController();
+      controller.abort(
+        "cron: isolated agent run stalled before execution start (last phase: runner_ready)",
+      );
+
+      await expect(
+        runWithModelFallback({
+          cfg,
+          provider: "anthropic",
+          model: "claude-sonnet-4-6",
+          run,
+          abortSignal: controller.signal,
+        }),
+      ).rejects.toBeInstanceOf(Error);
+
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+
+    it("treats bare isolated-agent pre-execution stall as terminal", async () => {
+      // Bare form (no phase suffix) of `preExecutionTimeoutErrorMessage`.
+      const cfg = makeCfg();
+      const run = vi.fn().mockRejectedValue(makeAbortError("aborted"));
+
+      const controller = new AbortController();
+      controller.abort("cron: isolated agent run stalled before execution start");
 
       await expect(
         runWithModelFallback({

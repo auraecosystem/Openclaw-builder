@@ -148,6 +148,10 @@ const TERMINAL_ABORT_REASON_PREFIXES: readonly string[] = [
   // src/cron/service/timer.ts `setupTimeoutErrorMessage()` — isolated-agent setup
   // budget exhausted before runner start. Same bare + "(last phase: <name>)" shape.
   "cron: isolated agent setup timed out before runner start",
+  // src/cron/service/timer.ts `preExecutionTimeoutErrorMessage()` — isolated-agent
+  // pre-execution watchdog fired (e.g. agent setup completed but runner never
+  // started consuming the run-budget). Same bare + "(last phase: <name>)" shape.
+  "cron: isolated agent run stalled before execution start",
 ];
 
 function isTerminalAbortReasonString(reason: string): boolean {
@@ -221,10 +225,7 @@ function isTerminalAbort(signal: AbortSignal | undefined): boolean {
       // which catches cases where an error is constructed via
       // `new Error(timeoutErrorMessage())` and subsequently treated as the
       // abort reason.
-      if (
-        typeof candidate.message === "string" &&
-        isTerminalAbortReasonString(candidate.message)
-      ) {
+      if (typeof candidate.message === "string" && isTerminalAbortReasonString(candidate.message)) {
         return true;
       }
     }
@@ -282,10 +283,7 @@ function isTerminalAbortFromError(err: unknown): boolean {
     if (candidate.name === "ClientDisconnectError") {
       return true;
     }
-    if (
-      typeof candidate.message === "string" &&
-      isTerminalAbortReasonString(candidate.message)
-    ) {
+    if (typeof candidate.message === "string" && isTerminalAbortReasonString(candidate.message)) {
       return true;
     }
   }
