@@ -62,23 +62,31 @@ read -r PHONE_NUMBER
 
 # Install systemd units
 SERVICE_TEMPLATE="$SCRIPT_DIR/systemd/openclaw-auth-monitor.service"
-SERVICE_TARGET="$HOME/.config/systemd/user/openclaw-auth-monitor.service"
-TIMER_TARGET="$HOME/.config/systemd/user/openclaw-auth-monitor.timer"
+SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+SERVICE_TARGET="$SYSTEMD_USER_DIR/openclaw-auth-monitor.service"
+TIMER_TARGET="$SYSTEMD_USER_DIR/openclaw-auth-monitor.timer"
 AUTH_MONITOR_PATH="$SCRIPT_DIR/auth-monitor.sh"
 
 echo ""
 echo "Installing systemd timer..."
-mkdir -p ~/.config/systemd/user
-cp "$SERVICE_TEMPLATE" "$SERVICE_TARGET"
-cp "$SCRIPT_DIR/systemd/openclaw-auth-monitor.timer" "$TIMER_TARGET"
+mkdir -p "$SYSTEMD_USER_DIR"
 
 command -v python3 >/dev/null 2>&1 || {
     echo "ERROR: python3 is required but not found."
     exit 1
 }
 
-python3 - "$SERVICE_TARGET" "$AUTH_MONITOR_PATH" "$NTFY_TOPIC" "$PHONE_NUMBER" <<'PY'
+SERVICE_TEMP="$(mktemp "$SYSTEMD_USER_DIR/openclaw-auth-monitor.service.XXXXXX")"
+cleanup_service_temp() {
+    rm -f "$SERVICE_TEMP"
+}
+trap cleanup_service_temp EXIT
+
+cp "$SERVICE_TEMPLATE" "$SERVICE_TEMP"
+
+python3 - "$SERVICE_TEMP" "$AUTH_MONITOR_PATH" "$NTFY_TOPIC" "$PHONE_NUMBER" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 service_path = Path(sys.argv[1])
@@ -100,23 +108,20 @@ def replace_required(content: str, old: str, new: str, label: str) -> str:
     return updated
 
 
-def replace_environment(content: str, key: str, placeholder: str, value: str) -> str:
+def render_environment(content: str, key: str, placeholder: str, value: str) -> str:
     """Render an optional Environment line while keeping reruns idempotent.
 
     Older versions of this setup script edited the checked-in unit template in
     place. Users rerunning setup from those checkouts may therefore have either
     the original commented placeholder or an already-uncommented Environment
-    line. Accept both forms so setup can repair those installs instead of
-    failing before enabling the timer.
+    line with a custom value. Match by key so setup can repair those installs
+    instead of failing before enabling the timer.
     """
-    rendered = f"Environment={key}={value}"
-    replacements = (
-        (f"# Environment={key}={placeholder}", rendered),
-        (f"Environment={key}={placeholder}", rendered),
-    )
-    for old, new in replacements:
-        if old in content:
-            return content.replace(old, new)
+    rendered = f"Environment={key}={value}" if value else f"# Environment={key}={placeholder}"
+    pattern = re.compile(rf"^\s*#?\s*Environment={re.escape(key)}=.*$", re.MULTILINE)
+    updated, count = pattern.subn(rendered, content, count=1)
+    if count:
+        return updated
     print(f"ERROR: {key} placeholder not found in {service_path}", file=sys.stderr)
     sys.exit(1)
 
@@ -128,13 +133,14 @@ content = replace_required(
     f"ExecStart={systemd_quote_arg(auth_monitor_path)}",
     "ExecStart",
 )
-if ntfy_topic:
-    content = replace_environment(content, "NOTIFY_NTFY", "openclaw-alerts", ntfy_topic)
-if phone_number:
-    content = replace_environment(content, "NOTIFY_PHONE", "+1234567890", phone_number)
+content = render_environment(content, "NOTIFY_NTFY", "openclaw-alerts", ntfy_topic)
+content = render_environment(content, "NOTIFY_PHONE", "+1234567890", phone_number)
 service_path.write_text(content)
 PY
 
+mv "$SERVICE_TEMP" "$SERVICE_TARGET"
+trap - EXIT
+cp "$SCRIPT_DIR/systemd/openclaw-auth-monitor.timer" "$TIMER_TARGET"
 systemctl --user daemon-reload
 systemctl --user enable --now openclaw-auth-monitor.timer
 
