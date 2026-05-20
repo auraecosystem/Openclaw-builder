@@ -154,8 +154,10 @@ function mcpDiscoveryNotice(
         severity: "info",
         message: `MCP servers ${servers} are configured but not connected for this session yet. Refresh available tools or send a message to discover them.`,
       };
+    default:
+      // This should never happen given the function signature, but makes the linter happy
+      return undefined;
   }
-  return undefined;
 }
 
 function maybeAppendMcpNotice(
