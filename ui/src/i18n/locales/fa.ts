@@ -1118,6 +1118,7 @@ export const fa: TranslationMap = {
     uk: "Українська (اوکراینی)",
     id: "Bahasa Indonesia (اندونزیایی)",
     pl: "Polski (لهستانی)",
+    sv: "Svenska (سوئدی)",
     th: "ไทย (تایلندی)",
     vi: "Tiếng Việt (ویتنامی)",
     nl: "Nederlands (هلندی)",
