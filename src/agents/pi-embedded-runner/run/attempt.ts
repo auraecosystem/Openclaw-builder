@@ -4324,6 +4324,7 @@ export async function runEmbeddedAttempt(
             timedOutDuringCompaction,
             compactionOccurredThisAttempt,
             config: params.config,
+            agentId: sessionAgentId,
             provider: params.provider,
             modelId: params.modelId,
             modelApi: params.model.api,

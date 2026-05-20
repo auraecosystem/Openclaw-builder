@@ -1168,6 +1168,7 @@ export async function runCodexAppServerAttempt(
       runtimeContext: buildActiveContextEngineRuntimeContext(),
       runMaintenance: runHarnessContextEngineMaintenance,
       config: params.config,
+      agentId: sessionAgentId,
       warn: (message) => embeddedAgentLog.warn(message),
     });
     historyMessages =
@@ -3188,6 +3189,7 @@ export async function runCodexAppServerAttempt(
         }),
         runMaintenance: runHarnessContextEngineMaintenance,
         config: params.config,
+        agentId: sessionAgentId,
         warn: (message) => embeddedAgentLog.warn(message),
       });
     }
