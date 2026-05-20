@@ -110,6 +110,7 @@ async function resolveRequestedChannel(params: {
 }): Promise<
   | {
       cfg: OpenClawConfig;
+      sourceCfg: OpenClawConfig;
       channel: string;
     }
   | {
@@ -132,8 +133,9 @@ async function resolveRequestedChannel(params: {
       error: errorShape(ErrorCodes.INVALID_REQUEST, params.unsupportedMessage(channelInput)),
     };
   }
+  const sourceCfg = params.context.getRuntimeConfig();
   const cfg = applyPluginAutoEnable({
-    config: params.context.getRuntimeConfig(),
+    config: sourceCfg,
     env: process.env,
   }).config;
   let channel = normalizedChannel;
@@ -144,7 +146,7 @@ async function resolveRequestedChannel(params: {
       return { error: errorShape(ErrorCodes.INVALID_REQUEST, String(err)) };
     }
   }
-  return { cfg, channel };
+  return { cfg, sourceCfg, channel };
 }
 
 function resolveGatewayOutboundTarget(params: {
@@ -177,18 +179,35 @@ function resolveGatewayOutboundTarget(params: {
   return { ok: true, to: resolved.to };
 }
 
-function resolveMessageActionRuntimeConfig(cfg: OpenClawConfig): OpenClawConfig {
+function resolveMessageActionRuntimeConfig(params: {
+  cfg: OpenClawConfig;
+  sourceCfg: OpenClawConfig;
+}): OpenClawConfig {
   const activeRuntime = getActiveSecretsRuntimeConfigSnapshot();
   if (!activeRuntime) {
-    return cfg;
+    return params.cfg;
   }
-  return (
+  const selected =
     selectApplicableRuntimeConfig({
-      inputConfig: cfg,
+      inputConfig: params.sourceCfg,
       runtimeConfig: activeRuntime.config,
       runtimeSourceConfig: activeRuntime.sourceConfig,
-    }) ?? cfg
-  );
+    }) ??
+    selectApplicableRuntimeConfig({
+      inputConfig: params.cfg,
+      runtimeConfig: activeRuntime.config,
+      runtimeSourceConfig: activeRuntime.sourceConfig,
+    });
+  if (!selected) {
+    return params.cfg;
+  }
+  if (selected === activeRuntime.config && selected !== params.cfg) {
+    return applyPluginAutoEnable({
+      config: selected,
+      env: process.env,
+    }).config;
+  }
+  return selected;
 }
 
 function buildGatewayDeliveryPayload(params: {
@@ -358,8 +377,8 @@ export const sendHandlers: GatewayRequestHandlers = {
       if ("error" in resolvedChannel) {
         return { ok: false, error: resolvedChannel.error };
       }
-      const { cfg: selectedCfg, channel } = resolvedChannel;
-      const cfg = resolveMessageActionRuntimeConfig(selectedCfg);
+      const { cfg: selectedCfg, sourceCfg, channel } = resolvedChannel;
+      const cfg = resolveMessageActionRuntimeConfig({ cfg: selectedCfg, sourceCfg });
       const plugin = resolveOutboundChannelPlugin({ channel, cfg });
       if (!plugin?.actions?.handleAction) {
         return {
