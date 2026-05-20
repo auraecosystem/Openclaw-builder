@@ -291,11 +291,12 @@ describe("resolveAuthForTarget - authMode guards and explicit URL overrides", ()
     expect(auth.failureReason).toBeUndefined();
   });
 
-  it("fails-fast for explicit URL when SecretRef-backed local auth is unresolved", async () => {
-    // Without this guard, an explicit URL (e.g. --url wss://prod.example/ws)
-    // would silently probe with empty/partial auth when gateway.auth.token's
-    // SecretRef does not resolve, leaking connection metadata and surfacing a
-    // misleading "Connect: failed" instead of the actionable resolver diagnostic.
+  it("does not borrow local SecretRef auth for an explicit URL target", async () => {
+    // Explicit `--url` targets must never fall back to config/env credentials
+    // (documented contract). Even when gateway.auth.token is a SecretRef that
+    // would fail to resolve, an explicit URL probes with no auth rather than
+    // surfacing a local-auth diagnostic or leaking a resolved token to an
+    // arbitrary user-supplied URL.
     await withEnvAsync(
       {
         OPENCLAW_GATEWAY_PASSWORD: undefined,
@@ -326,12 +327,37 @@ describe("resolveAuthForTarget - authMode guards and explicit URL overrides", ()
           {},
         );
 
-        expect(auth.failureReason).toContain("gateway.auth.token");
-        expect(auth.diagnostics).toStrictEqual([
-          "gateway.auth.token SecretRef is unresolved (env:default:MISSING_GATEWAY_TOKEN).",
-        ]);
+        expect(auth.failureReason).toBeUndefined();
+        expect(auth.diagnostics).toBeUndefined();
         expect(auth.token).toBeUndefined();
         expect(auth.password).toBeUndefined();
+      },
+    );
+  });
+
+  it("does not leak a resolved local token to an explicit URL target", async () => {
+    // Explicit `--url` must not reuse a resolvable gateway.auth.token /
+    // OPENCLAW_GATEWAY_TOKEN; only explicit --token/--password apply.
+    await withEnvAsync(
+      {
+        OPENCLAW_GATEWAY_PASSWORD: undefined,
+        OPENCLAW_GATEWAY_TOKEN: "ambient-local-token",
+      },
+      async () => {
+        const auth = await resolveAuthForTarget(
+          { gateway: { auth: { mode: "token" } } },
+          {
+            id: "explicit",
+            kind: "explicit",
+            url: "wss://prod.example/ws",
+            active: true,
+          },
+          {},
+        );
+
+        expect(auth.token).toBeUndefined();
+        expect(auth.password).toBeUndefined();
+        expect(auth.failureReason).toBeUndefined();
       },
     );
   });
