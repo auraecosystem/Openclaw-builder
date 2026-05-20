@@ -4,6 +4,7 @@ import { normalizeChannelId } from "../../channels/plugins/index.js";
 import { dispatchChannelMessageAction } from "../../channels/plugins/message-action-dispatch.js";
 import { createOutboundSendDeps } from "../../cli/deps.js";
 import { applyPluginAutoEnable } from "../../config/plugin-auto-enable.js";
+import { selectApplicableRuntimeConfig } from "../../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolveOutboundChannelPlugin } from "../../infra/outbound/channel-resolution.js";
 import { resolveMessageChannelSelection } from "../../infra/outbound/channel-selection.js";
@@ -21,6 +22,7 @@ import { resolveOutboundTarget } from "../../infra/outbound/targets.js";
 import { extractToolPayload } from "../../infra/outbound/tool-payload.js";
 import { getAgentScopedMediaLocalRoots } from "../../media/local-roots.js";
 import { normalizePollInput } from "../../polls.js";
+import { getActiveSecretsRuntimeConfigSnapshot } from "../../secrets/runtime-state.js";
 import { parseThreadSessionSuffix } from "../../sessions/session-key-utils.js";
 import {
   normalizeOptionalLowercaseString,
@@ -173,6 +175,20 @@ function resolveGatewayOutboundTarget(params: {
     };
   }
   return { ok: true, to: resolved.to };
+}
+
+function resolveMessageActionRuntimeConfig(cfg: OpenClawConfig): OpenClawConfig {
+  const activeRuntime = getActiveSecretsRuntimeConfigSnapshot();
+  if (!activeRuntime) {
+    return cfg;
+  }
+  return (
+    selectApplicableRuntimeConfig({
+      inputConfig: cfg,
+      runtimeConfig: activeRuntime.config,
+      runtimeSourceConfig: activeRuntime.sourceConfig,
+    }) ?? cfg
+  );
 }
 
 function buildGatewayDeliveryPayload(params: {
@@ -342,7 +358,8 @@ export const sendHandlers: GatewayRequestHandlers = {
       if ("error" in resolvedChannel) {
         return { ok: false, error: resolvedChannel.error };
       }
-      const { cfg, channel } = resolvedChannel;
+      const { cfg: selectedCfg, channel } = resolvedChannel;
+      const cfg = resolveMessageActionRuntimeConfig(selectedCfg);
       const plugin = resolveOutboundChannelPlugin({ channel, cfg });
       if (!plugin?.actions?.handleAction) {
         return {
