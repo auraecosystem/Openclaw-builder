@@ -16,6 +16,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Discord/auto-thread-title: raise `DISCORD_THREAD_TITLE_MAX_TOKENS` 512 → 4096 and `DEFAULT_THREAD_TITLE_TIMEOUT_MS` 10 s → 60 s so reasoning models with sizable thinking budgets can still emit a short title, and clamp the effective request to the selected model's output cap (`min(4096, model.maxTokens)`) so a smaller-cap model no longer receives an over-limit request that silently skips the fire-and-forget rename. Thanks @hanamizuki.
 - Status: show the configured default, session-selected model, reason, clear hint, and docs link when a session remains pinned to a model that differs from `agents.defaults.model.primary`.
 - Mac app: keep local packaging signed with a stable app identity for permission testing and fix Control UI production builds under current Vite/Highlight.js exports.
 - macOS app: update the embedded Peekaboo bridge to 3.2.1 so OpenClaw-hosted UI automation works with current Peekaboo CLI capture flows.

@@ -186,11 +186,69 @@ describe("generateThreadTitle", () => {
       ],
     });
     expect(completionArgs.options).toEqual({
-      maxTokens: 512,
+      maxTokens: 4096,
       signal: completionArgs.options?.signal,
     });
     expect(completionArgs.options?.signal).toBeInstanceOf(AbortSignal);
     expect(completionArgs.options).not.toHaveProperty("temperature");
+  });
+
+  it("clamps title maxTokens to the selected model output cap", async () => {
+    prepareSimpleCompletionModelForAgentMock.mockResolvedValueOnce({
+      selection: {
+        provider: "anthropic",
+        modelId: "claude-sonnet-4-6",
+        agentDir: "/tmp/openclaw-agent",
+      },
+      model: {
+        provider: "anthropic",
+        id: "claude-sonnet-4-6",
+        maxTokens: 1024,
+      },
+      auth: {
+        apiKey: "sk-test",
+        source: "env:TEST_API_KEY",
+        mode: "api-key",
+      },
+    } as Awaited<ReturnType<typeof agentRuntimeModule.prepareSimpleCompletionModelForAgent>>);
+
+    await generateThreadTitle({
+      cfg: EMPTY_DISCORD_TEST_CONFIG,
+      agentId: "main",
+      messageText: "Need a generated title.",
+    });
+
+    const completionArgs = firstCompletionArgs();
+    expect(completionArgs.options?.maxTokens).toBe(1024);
+  });
+
+  it("keeps the default title budget when the model cap is higher or unset", async () => {
+    prepareSimpleCompletionModelForAgentMock.mockResolvedValueOnce({
+      selection: {
+        provider: "anthropic",
+        modelId: "claude-sonnet-4-6",
+        agentDir: "/tmp/openclaw-agent",
+      },
+      model: {
+        provider: "anthropic",
+        id: "claude-sonnet-4-6",
+        maxTokens: 200_000,
+      },
+      auth: {
+        apiKey: "sk-test",
+        source: "env:TEST_API_KEY",
+        mode: "api-key",
+      },
+    } as Awaited<ReturnType<typeof agentRuntimeModule.prepareSimpleCompletionModelForAgent>>);
+
+    await generateThreadTitle({
+      cfg: EMPTY_DISCORD_TEST_CONFIG,
+      agentId: "main",
+      messageText: "Need a generated title.",
+    });
+
+    const completionArgs = firstCompletionArgs();
+    expect(completionArgs.options?.maxTokens).toBe(4096);
   });
 
   it("returns null when completion throws", async () => {
