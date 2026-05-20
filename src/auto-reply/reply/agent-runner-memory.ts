@@ -11,6 +11,7 @@ import { runWithModelFallback } from "../../agents/model-fallback.js";
 import { listLegacyRuntimeModelProviderAliases } from "../../agents/model-runtime-aliases.js";
 import { isCliProvider } from "../../agents/model-selection.js";
 import { resolveContextConfigProviderForRuntime } from "../../agents/openai-codex-routing.js";
+import { resolveCompactionReserveTokensFloor } from "../../agents/pi-settings.js";
 import { resolveSandboxConfigForAgent, resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
 import {
   derivePromptTokens,
@@ -631,8 +632,7 @@ export async function runPreflightCompactionIfNeeded(params: {
   const memoryFlushPlan = resolveMemoryFlushPlan({ cfg: params.cfg, agentId: activeAgentId });
   const reserveTokensFloor =
     memoryFlushPlan?.reserveTokensFloor ??
-    resolveAgentCompactionConfig(params.cfg, activeAgentId)?.reserveTokensFloor ??
-    20_000;
+    resolveCompactionReserveTokensFloor(params.cfg, activeAgentId);
   const softThresholdTokens = memoryFlushPlan?.softThresholdTokens ?? 4_000;
   const freshPersistedTokens = resolveFreshSessionTotalTokens(entry);
   const persistedTotalTokens = entry.totalTokens;
