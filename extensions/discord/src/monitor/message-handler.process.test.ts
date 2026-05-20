@@ -148,7 +148,6 @@ type DispatchInboundParams = {
       deleted?: string[];
     }) => Promise<void> | void;
     sourceReplyDeliveryMode?: "automatic" | "message_tool_only";
-    typingKeepalive?: boolean;
     disableBlockStreaming?: boolean;
     suppressDefaultToolProgressMessages?: boolean;
     queuedDeliveryCorrelations?: Array<{ begin: () => () => void }>;
@@ -1328,32 +1327,9 @@ describe("processDiscordMessage session routing", () => {
 
     expectRecordFields(requireRecord(getLastDispatchReplyOptions(), "dispatch reply options"), {
       sourceReplyDeliveryMode: "message_tool_only",
-      typingKeepalive: false,
       disableBlockStreaming: true,
     });
     expect(createDiscordDraftStream).not.toHaveBeenCalled();
-  });
-
-  it("preserves core typing keepalive when message-tool guild replies configure typing mode", async () => {
-    const ctx = await createBaseContext({
-      shouldRequireMention: false,
-      effectiveWasMentioned: false,
-      cfg: {
-        messages: {
-          groupChat: { visibleReplies: "message_tool" },
-        },
-        session: {
-          store: "/tmp/openclaw-discord-process-test-sessions.json",
-          typingMode: "message",
-        },
-      },
-      route: BASE_CHANNEL_ROUTE,
-    });
-
-    await runProcessDiscordMessage(ctx);
-
-    expect(getLastDispatchReplyOptions()?.sourceReplyDeliveryMode).toBe("message_tool_only");
-    expect(getLastDispatchReplyOptions()?.typingKeepalive).toBeUndefined();
   });
 
   it("sends the configured ack while suppressing automatic status reactions for always-on guild replies", async () => {
