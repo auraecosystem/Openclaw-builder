@@ -71,72 +71,72 @@ echo ""
 echo "Installing systemd timer..."
 mkdir -p "$SYSTEMD_USER_DIR"
 
-command -v python3 >/dev/null 2>&1 || {
-    echo "ERROR: python3 is required but not found."
-    exit 1
-}
-
 SERVICE_TEMP="$(mktemp "$SYSTEMD_USER_DIR/openclaw-auth-monitor.service.XXXXXX")"
+SERVICE_RENDERED=""
 cleanup_service_temp() {
-    rm -f "$SERVICE_TEMP"
+    rm -f "$SERVICE_TEMP" "$SERVICE_RENDERED"
 }
 trap cleanup_service_temp EXIT
+SERVICE_RENDERED="$(mktemp "$SYSTEMD_USER_DIR/openclaw-auth-monitor.service.rendered.XXXXXX")"
 
 cp "$SERVICE_TEMPLATE" "$SERVICE_TEMP"
 
-python3 - "$SERVICE_TEMP" "$AUTH_MONITOR_PATH" "$NTFY_TOPIC" "$PHONE_NUMBER" <<'PY'
-from pathlib import Path
-import re
-import sys
+systemd_quote_arg() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//%/%%}"
+    value="${value//\"/\\\"}"
+    printf '"%s"' "$value"
+}
 
-service_path = Path(sys.argv[1])
-auth_monitor_path = sys.argv[2]
-ntfy_topic = sys.argv[3]
-phone_number = sys.argv[4]
+render_environment_line() {
+    local key="$1"
+    local placeholder="$2"
+    local value="$3"
 
+    if [ -n "$value" ]; then
+        printf 'Environment=%s=%s' "$key" "$value"
+    else
+        printf '# Environment=%s=%s' "$key" "$placeholder"
+    fi
+}
 
-def systemd_quote_arg(value: str) -> str:
-    escaped = value.replace("%", "%%").replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
+RENDERED_EXEC_START="ExecStart=$(systemd_quote_arg "$AUTH_MONITOR_PATH")"
+RENDERED_NTFY_LINE="$(render_environment_line "NOTIFY_NTFY" "openclaw-alerts" "$NTFY_TOPIC")"
+RENDERED_PHONE_LINE="$(render_environment_line "NOTIFY_PHONE" "+1234567890" "$PHONE_NUMBER")"
+FOUND_EXEC_START=0
+FOUND_NTFY=0
+FOUND_PHONE=0
 
+while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "ExecStart=/home/admin/openclaw/scripts/auth-monitor.sh" ]; then
+        printf '%s\n' "$RENDERED_EXEC_START"
+        FOUND_EXEC_START=1
+    elif [[ "$line" =~ ^[[:space:]]*#?[[:space:]]*Environment=NOTIFY_NTFY=.*$ ]]; then
+        printf '%s\n' "$RENDERED_NTFY_LINE"
+        FOUND_NTFY=1
+    elif [[ "$line" =~ ^[[:space:]]*#?[[:space:]]*Environment=NOTIFY_PHONE=.*$ ]]; then
+        printf '%s\n' "$RENDERED_PHONE_LINE"
+        FOUND_PHONE=1
+    else
+        printf '%s\n' "$line"
+    fi
+done < "$SERVICE_TEMP" > "$SERVICE_RENDERED"
 
-def replace_required(content: str, old: str, new: str, label: str) -> str:
-    updated = content.replace(old, new)
-    if updated == content:
-        print(f"ERROR: {label} placeholder not found in {service_path}", file=sys.stderr)
-        sys.exit(1)
-    return updated
+if [ "$FOUND_EXEC_START" -ne 1 ]; then
+    echo "ERROR: ExecStart placeholder not found in $SERVICE_TEMP" >&2
+    exit 1
+fi
+if [ "$FOUND_NTFY" -ne 1 ]; then
+    echo "ERROR: NOTIFY_NTFY placeholder not found in $SERVICE_TEMP" >&2
+    exit 1
+fi
+if [ "$FOUND_PHONE" -ne 1 ]; then
+    echo "ERROR: NOTIFY_PHONE placeholder not found in $SERVICE_TEMP" >&2
+    exit 1
+fi
 
-
-def render_environment(content: str, key: str, placeholder: str, value: str) -> str:
-    """Render an optional Environment line while keeping reruns idempotent.
-
-    Older versions of this setup script edited the checked-in unit template in
-    place. Users rerunning setup from those checkouts may therefore have either
-    the original commented placeholder or an already-uncommented Environment
-    line with a custom value. Match by key so setup can repair those installs
-    instead of failing before enabling the timer.
-    """
-    rendered = f"Environment={key}={value}" if value else f"# Environment={key}={placeholder}"
-    pattern = re.compile(rf"^\s*#?\s*Environment={re.escape(key)}=.*$", re.MULTILINE)
-    updated, count = pattern.subn(rendered, content, count=1)
-    if count:
-        return updated
-    print(f"ERROR: {key} placeholder not found in {service_path}", file=sys.stderr)
-    sys.exit(1)
-
-
-content = service_path.read_text()
-content = replace_required(
-    content,
-    "ExecStart=/home/admin/openclaw/scripts/auth-monitor.sh",
-    f"ExecStart={systemd_quote_arg(auth_monitor_path)}",
-    "ExecStart",
-)
-content = render_environment(content, "NOTIFY_NTFY", "openclaw-alerts", ntfy_topic)
-content = render_environment(content, "NOTIFY_PHONE", "+1234567890", phone_number)
-service_path.write_text(content)
-PY
+mv "$SERVICE_RENDERED" "$SERVICE_TEMP"
 
 mv "$SERVICE_TEMP" "$SERVICE_TARGET"
 trap - EXIT
