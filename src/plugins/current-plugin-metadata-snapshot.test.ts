@@ -145,6 +145,33 @@ describe("current plugin metadata snapshot", () => {
     ).toBe(snapshot);
   });
 
+  it("rejects configless default-discovery reuse for scoped snapshots", () => {
+    const config = { plugins: { allow: ["demo"] } };
+    const snapshot = createSnapshot({ config, pluginIds: ["demo"] });
+    setCurrentPluginMetadataSnapshot(snapshot, { config });
+
+    expect(getCurrentPluginMetadataSnapshot({ config })).toBe(snapshot);
+    expect(
+      getCurrentPluginMetadataSnapshot({
+        allowWorkspaceScopedSnapshot: true,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("requires exact plugin scope when the caller requests scoped reuse", () => {
+    const config = { plugins: { allow: ["demo", "other"] } };
+    const unscoped = createSnapshot({ config });
+    setCurrentPluginMetadataSnapshot(unscoped, { config });
+
+    expect(getCurrentPluginMetadataSnapshot({ config, pluginIds: ["demo"] })).toBeUndefined();
+
+    const scoped = createSnapshot({ config, pluginIds: ["other", "demo"] });
+    setCurrentPluginMetadataSnapshot(scoped, { config });
+
+    expect(getCurrentPluginMetadataSnapshot({ config, pluginIds: ["demo", "other"] })).toBe(scoped);
+    expect(getCurrentPluginMetadataSnapshot({ config, pluginIds: ["demo"] })).toBeUndefined();
+  });
+
   it("rejects a current snapshot when env-resolved plugin load paths change", () => {
     const config = { plugins: { load: { paths: ["~/plugins"] } } };
     const snapshot = createSnapshot({ config });

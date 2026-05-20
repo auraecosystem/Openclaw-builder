@@ -116,18 +116,17 @@ export function getCurrentPluginMetadataSnapshot(
   const requestedPluginIds = normalizePluginIdScope(params.pluginIds);
   const snapshotPluginIds = normalizePluginIdScope(snapshot.pluginIds);
   if (
-    snapshotPluginIds !== undefined &&
-    params.config === undefined &&
-    params.allowScopedSnapshot !== true &&
-    (requestedPluginIds === undefined ||
-      serializePluginIdScope(requestedPluginIds) !== serializePluginIdScope(snapshotPluginIds))
+    requestedPluginIds !== undefined &&
+    serializePluginIdScope(snapshotPluginIds) !== serializePluginIdScope(requestedPluginIds)
   ) {
     return undefined;
   }
   if (
     snapshotPluginIds !== undefined &&
-    requestedPluginIds !== undefined &&
-    serializePluginIdScope(requestedPluginIds) !== serializePluginIdScope(snapshotPluginIds)
+    params.config === undefined &&
+    params.allowScopedSnapshot !== true &&
+    (requestedPluginIds === undefined ||
+      serializePluginIdScope(requestedPluginIds) !== serializePluginIdScope(snapshotPluginIds))
   ) {
     return undefined;
   }
