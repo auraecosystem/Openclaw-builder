@@ -9,6 +9,16 @@ type SendExecApprovalFollowupResult =
 type BuildExecApprovalFollowupTargetMock = (
   value: ExecApprovalFollowupTarget,
 ) => ExecApprovalFollowupTarget | null;
+type MockExecHostApprovalContext = {
+  approvals: {
+    allowlist: Array<{ pattern: string; source?: string }>;
+    denylist?: Array<{ pattern: string; flags?: string }>;
+    file: { version: number; agents: Record<string, unknown> };
+  };
+  hostSecurity: "deny" | "allowlist" | "denylist" | "full";
+  hostAsk: "off" | "on-miss" | "always";
+  askFallback: "deny" | "allowlist" | "denylist" | "full";
+};
 
 const INLINE_EVAL_HIT = {
   executable: "python3",
@@ -70,12 +80,14 @@ const resolveApprovalDecisionOrUndefinedMock = vi.hoisted(() =>
   vi.fn(async (): Promise<string | null | undefined> => undefined),
 );
 const resolveExecHostApprovalContextMock = vi.hoisted(() =>
-  vi.fn(() => ({
-    approvals: { allowlist: [], file: { version: 1, agents: {} } },
-    hostSecurity: "allowlist",
-    hostAsk: "off",
-    askFallback: "deny",
-  })),
+  vi.fn(
+    (): MockExecHostApprovalContext => ({
+      approvals: { allowlist: [], denylist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "allowlist",
+      hostAsk: "off",
+      askFallback: "deny",
+    }),
+  ),
 );
 const runExecProcessMock = vi.hoisted(() => vi.fn());
 const sendExecApprovalFollowupResultMock = vi.hoisted(() =>
@@ -359,6 +371,53 @@ describe("processGatewayAllowlist", () => {
       hostSecurity: "full",
       hostAsk: "on-miss",
       askFallback: "deny",
+    });
+
+    const result = await runGatewayAllowlist({
+      command: "openclaw config set security.audit.suppressions '[]'",
+      security: "full",
+      ask: "on-miss",
+    });
+
+    expect(createAndRegisterDefaultExecApprovalRequestMock).toHaveBeenCalledTimes(1);
+    expect(result.pendingResult?.details.status).toBe("approval-pending");
+  });
+
+  it("checks denylist before denylist fallback for suppression edit approvals", async () => {
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: {
+        allowlist: [],
+        denylist: [{ pattern: String.raw`security\.audit\.suppressions` }],
+        file: { version: 1, agents: {} },
+      },
+      hostSecurity: "full",
+      hostAsk: "on-miss",
+      askFallback: "denylist",
+    });
+
+    const result = await runGatewayAllowlist({
+      command: "openclaw config set security.audit.suppressions '[]'",
+      security: "full",
+      ask: "on-miss",
+    });
+
+    expect(createAndRegisterDefaultExecApprovalRequestMock).not.toHaveBeenCalled();
+    expect(result.pendingResult?.details).toMatchObject({
+      status: "denied",
+      reason: "denylist",
+    });
+  });
+
+  it("allows denylist fallback approval after suppression edit precheck passes", async () => {
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: {
+        allowlist: [],
+        denylist: [{ pattern: String.raw`(?:^|\s)curl(?:\s|$)` }],
+        file: { version: 1, agents: {} },
+      },
+      hostSecurity: "full",
+      hostAsk: "on-miss",
+      askFallback: "denylist",
     });
 
     const result = await runGatewayAllowlist({

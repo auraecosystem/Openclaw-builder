@@ -298,8 +298,8 @@ export type GroupToolPolicyBySenderConfig = Record<string, GroupToolPolicyConfig
 export type ExecToolConfig = {
   /** Exec host routing (default: auto). */
   host?: "auto" | "sandbox" | "gateway" | "node";
-  /** Exec security mode (default: deny). */
-  security?: "deny" | "allowlist" | "full";
+  /** Exec security mode (default: deny for sandbox, full for gateway/node/macOS app). */
+  security?: "deny" | "denylist" | "allowlist" | "full";
   /** Exec ask mode (default: on-miss). */
   ask?: "off" | "on-miss" | "always";
   /** Default node binding for exec.host=node (node id/name). */
@@ -334,6 +334,8 @@ export type ExecToolConfig = {
    * Default false to reduce context noise.
    */
   notifyOnExitEmptySuccess?: boolean;
+  /** Log exec denylist denials and malformed denylist fail-closed decisions (default: true). */
+  logDenylistDenials?: boolean;
   /** apply_patch subtool configuration. */
   applyPatch?: {
     /** Enable apply_patch for OpenAI models (default: true; set false to disable). */

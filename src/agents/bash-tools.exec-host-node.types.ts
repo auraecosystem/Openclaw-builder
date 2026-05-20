@@ -1,4 +1,5 @@
 import type { ExecAsk, ExecSecurity } from "../infra/exec-approvals.js";
+import type { ExecDenylistEntry } from "../infra/exec-approvals.types.js";
 import type { ExecElevatedDefaults } from "./bash-tools.exec-types.js";
 
 export type ExecuteNodeHostCommandParams = {
@@ -27,4 +28,6 @@ export type ExecuteNodeHostCommandParams = {
   notifySessionKey?: string;
   notifyOnExit?: boolean;
   trustedSafeBinDirs?: ReadonlySet<string>;
+  denylistFallbackPrechecked?: boolean;
+  denylistFallbackDenylist?: readonly ExecDenylistEntry[];
 };

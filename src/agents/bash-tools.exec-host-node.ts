@@ -4,6 +4,7 @@ import {
   requiresExecApproval,
   resolveExecApprovalAllowedDecisions,
 } from "../infra/exec-approvals.js";
+import { evaluateExecDenylist } from "../infra/exec-denylist.js";
 import {
   buildExecApprovalRequesterContext,
   buildExecApprovalTurnSourceContext,
@@ -26,11 +27,25 @@ import {
   normalizeNotifyOutput,
 } from "./bash-tools.exec-runtime.js";
 import type { ExecToolDetails } from "./bash-tools.exec-types.js";
+import { textResult } from "./tools/common.js";
 import { callGatewayTool } from "./tools/gateway.js";
 
 export type { ExecuteNodeHostCommandParams } from "./bash-tools.exec-host-node.types.js";
 
 const APPROVED_NODE_INVOKE_SCOPES = [WRITE_SCOPE, APPROVALS_SCOPE];
+
+function buildNodeExecDenylistDeniedResult(params: {
+  cwd?: string;
+  nodeId?: string;
+}): AgentToolResult<ExecToolDetails> {
+  return textResult("exec command is denied due to command in deny list", {
+    status: "denied",
+    reason: "denylist",
+    host: "node",
+    cwd: params.cwd,
+    nodeId: params.nodeId,
+  });
+}
 
 export async function executeNodeHostCommand(
   params: ExecuteNodeHostCommandParams,
@@ -70,6 +85,23 @@ export async function executeNodeHostCommand(
       allowlistSatisfied,
       durableApprovalSatisfied,
     }) || inlineEvalHit !== null;
+
+  let denylistFallbackPrechecked = params.denylistFallbackPrechecked === true;
+  if (requiresAsk && askFallback === "denylist" && !denylistFallbackPrechecked) {
+    const denyDecision = evaluateExecDenylist({
+      command: params.command,
+      denylist: params.denylistFallbackDenylist ?? [],
+      cwd: prepared.cwd,
+      env: target.env,
+    });
+    denylistFallbackPrechecked = true;
+    if (denyDecision.denied) {
+      return buildNodeExecDenylistDeniedResult({
+        cwd: prepared.cwd,
+        nodeId: target.nodeId,
+      });
+    }
+  }
 
   let inlineApprovedByAsk = false;
   let inlineApprovalDecision: "allow-once" | "allow-always" | null = null;
@@ -123,6 +155,7 @@ export async function executeNodeHostCommand(
         execHostShared.createExecApprovalDecisionState({
           decision: preResolvedDecision,
           askFallback,
+          denylistFallbackPrechecked,
         });
       const strictInlineEvalDecision = execHostShared.enforceStrictInlineEvalApprovalBoundary({
         baseDecision,
@@ -176,12 +209,17 @@ export async function executeNodeHostCommand(
         } = execHostShared.createExecApprovalDecisionState({
           decision,
           askFallback,
+          denylistFallbackPrechecked,
         });
         let approvedByAsk = initialApprovedByAsk;
         let approvalDecision: "allow-once" | "allow-always" | null = null;
         let deniedReason = initialDeniedReason;
 
-        if (baseDecision.timedOut && askFallback === "full" && approvedByAsk) {
+        if (
+          baseDecision.timedOut &&
+          (askFallback === "full" || askFallback === "denylist") &&
+          approvedByAsk
+        ) {
           approvalDecision = "allow-once";
         } else if (decision === "allow-once") {
           approvedByAsk = true;

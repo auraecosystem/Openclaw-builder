@@ -44,6 +44,7 @@ export type ExecToolDefaults = {
   accountId?: string;
   notifyOnExit?: boolean;
   notifyOnExitEmptySuccess?: boolean;
+  logDenylistDenials?: boolean;
   cwd?: string;
 };
 
@@ -118,4 +119,11 @@ export type ExecToolDetails =
       cwd?: string;
       nodeId?: string;
       warningText?: string;
+    }
+  | {
+      status: "denied";
+      reason: "denylist";
+      host: ExecHost;
+      cwd?: string;
+      nodeId?: string;
     };

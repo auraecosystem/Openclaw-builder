@@ -9,6 +9,8 @@ import { detectPolicyInlineEval } from "../infra/command-analysis/policy.js";
 import {
   addDurableCommandApproval,
   hasDurableExecApproval,
+  maxAsk,
+  minSecurity,
   persistAllowAlwaysPatterns,
   recordAllowlistMatchesUse,
   resolveApprovalAuditTrustPath,
@@ -18,6 +20,7 @@ import {
   type ExecCommandSegment,
   type ExecSecurity,
 } from "../infra/exec-approvals.js";
+import { evaluateExecDenylist } from "../infra/exec-denylist.js";
 import type { ExecHostRequest, ExecHostResponse, ExecHostRunResult } from "../infra/exec-host.js";
 import { resolveExecSafeBinRuntimePolicy } from "../infra/exec-safe-bin-runtime-policy.js";
 import {
@@ -65,6 +68,7 @@ type SystemRunInvokeResult = {
 
 type SystemRunDeniedReason =
   | "security=deny"
+  | "denylist"
   | "approval-required"
   | "allowlist-miss"
   | "execution-plan-miss"
@@ -138,6 +142,7 @@ function warnWritableTrustedDirOnce(message: string): void {
 function normalizeDeniedReason(reason: string | null | undefined): SystemRunDeniedReason {
   switch (reason) {
     case "security=deny":
+    case "denylist":
     case "approval-required":
     case "allowlist-miss":
     case "execution-plan-miss":
@@ -147,6 +152,10 @@ function normalizeDeniedReason(reason: string | null | undefined): SystemRunDeni
     default:
       return "approval-required";
   }
+}
+
+function shouldEvaluateExecDenylist(security: ExecSecurity): boolean {
+  return security === "denylist" || security === "allowlist";
 }
 
 function resolveAgentExecConfig(
@@ -381,9 +390,45 @@ async function evaluateSystemRunPolicyPhase(
     security: configuredSecurity,
     ask: configuredAsk,
   });
-  const security = approvals.agent.security;
-  const ask = approvals.agent.ask;
+  const security = minSecurity(configuredSecurity, approvals.agent.security);
+  const ask = maxAsk(configuredAsk, approvals.agent.ask);
+  const askFallback = minSecurity(security, approvals.agent.askFallback);
   const autoAllowSkills = approvals.agent.autoAllowSkills;
+  const shouldEvaluateFallbackDenylist =
+    security === "full" && ask === "always" && askFallback === "denylist";
+  if (shouldEvaluateExecDenylist(security) || shouldEvaluateFallbackDenylist) {
+    const denyDecision = evaluateExecDenylist({
+      command: parsed.shellPayload ?? parsed.commandText,
+      denylist: approvals.denylist,
+      cwd: parsed.cwd,
+      env: parsed.env,
+    });
+    if (denyDecision.denied) {
+      const logDenylistDenials =
+        agentExec?.logDenylistDenials ?? cfg.tools?.exec?.logDenylistDenials ?? true;
+      if (logDenylistDenials) {
+        logWarn(
+          [
+            "system.run denylist: denied command",
+            `hash=${denyDecision.commandHash}`,
+            `length=${denyDecision.commandLength}`,
+            parsed.agentId ? `agent=${parsed.agentId}` : undefined,
+            denyDecision.invalid ? `invalid=${denyDecision.reason}` : undefined,
+            typeof denyDecision.ruleIndex === "number"
+              ? `ruleIndex=${denyDecision.ruleIndex}`
+              : undefined,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
+      }
+      await sendSystemRunDenied(opts, parsed.execution, {
+        reason: "denylist",
+        message: "SYSTEM_RUN_DENIED: exec command is denied due to command in deny list",
+      });
+      return null;
+    }
+  }
   const { safeBins, safeBinProfiles, trustedSafeBinDirs } = resolveExecSafeBinRuntimePolicy({
     global: cfg.tools?.exec,
     local: agentExec,
