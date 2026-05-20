@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { expect, test, vi } from "vitest";
+import type { SessionEntry } from "../config/sessions.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import {
   embeddedRunMock,
@@ -234,7 +235,7 @@ test("sessions.compaction.* lists checkpoints and branches or restores from pre-
   ws.close();
 });
 
-test("sessions.compaction.* discovers checkpoint transcript files when store metadata is missing", async () => {
+test("sessions.compaction.* discovers checkpoint transcript files when stored metadata is malformed", async () => {
   const { dir, storePath } = await createSessionStoreDir();
   const fixture = await createCheckpointFixture(dir);
   const { SessionManager } = await getSessionManagerModule();
@@ -250,6 +251,13 @@ test("sessions.compaction.* discovers checkpoint transcript files when store met
     entries: {
       main: sessionStoreEntry(fixture.sessionId, {
         sessionFile: fixture.sessionFile,
+        compactionCheckpoints: [
+          {
+            checkpointId,
+            createdAt: "malformed",
+            reason: "manual",
+          },
+        ] as unknown as SessionEntry["compactionCheckpoints"],
       }),
     },
   });
@@ -317,6 +325,27 @@ test("sessions.compaction.* discovers checkpoint transcript files when store met
         sessionFile: fixture.sessionFile,
       },
     });
+
+    const branched = await rpcReq<{
+      ok: true;
+      sourceKey: string;
+      key: string;
+      entry: { sessionId: string; sessionFile?: string; parentSessionKey?: string };
+    }>(ws, "sessions.compaction.branch", {
+      key: "main",
+      checkpointId,
+    });
+    expect(branched.ok).toBe(true);
+    expect(branched.payload?.sourceKey).toBe("agent:main:main");
+    expect(branched.payload?.entry.parentSessionKey).toBe("agent:main:main");
+    const branchedSessionFile = branched.payload?.entry.sessionFile;
+    if (!branchedSessionFile) {
+      throw new Error("expected branched disk checkpoint session file");
+    }
+    const branchedSession = SessionManager.open(branchedSessionFile, dir);
+    expect(branchedSession.getEntries()).toHaveLength(
+      fixture.preCompactionSession.getEntries().length,
+    );
 
     const restored = await rpcReq<{
       ok: true;

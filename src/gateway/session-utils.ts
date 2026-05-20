@@ -289,7 +289,7 @@ function isProjectableCompactionCheckpoint(
   );
 }
 
-function resolveProjectableCompactionCheckpoints(
+export function resolveProjectableCompactionCheckpoints(
   entry?: Pick<SessionEntry, "compactionCheckpoints"> | null,
 ): SessionCompactionCheckpointEntry[] {
   const checkpoints = entry?.compactionCheckpoints;
