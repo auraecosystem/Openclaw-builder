@@ -1634,6 +1634,8 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
               await pushPreviewToolProgress(
                 buildChannelProgressDraftLine({
                   event: "patch",
+                  itemId: payload.itemId,
+                  toolCallId: payload.toolCallId,
                   phase: payload.phase,
                   title: payload.title,
                   name: payload.name,
