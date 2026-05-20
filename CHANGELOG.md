@@ -20,7 +20,6 @@ Docs: https://docs.openclaw.ai
 - WhatsApp: clarify inbound group diagnostics so observed but unregistered groups point to `channels.whatsapp.groups` without changing routing or sender authorization. (#83846) Thanks @neeravmakwana.
 - WhatsApp: drain pending outbound deliveries on a 30s periodic timer in addition to the reconnect handler, so messages enqueued while the provider is already connected no longer wait for the next reconnect to send. (#79083) Thanks @Oviemudiaga.
 - CLI/TUI: include gateway plugin slash commands in TUI autocomplete, so connected sessions can suggest plugin-owned commands exposed by the running Gateway. (#83640) Thanks @se7en-agent.
-- Gateway/tools: split `tools.effective` MCP discovery into a read-only inventory projection plus explicit `tools.effective.refresh` live discovery, and surface refresh-needed notices in the Control UI Tools panel. Refs #76724.
 
 ## 2026.5.19
 
