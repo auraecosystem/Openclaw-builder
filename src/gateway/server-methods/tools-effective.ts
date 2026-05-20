@@ -155,6 +155,7 @@ function mcpDiscoveryNotice(
         message: `MCP servers ${servers} are configured but not connected for this session yet. Refresh available tools or send a message to discover them.`,
       };
   }
+  return undefined;
 }
 
 function maybeAppendMcpNotice(
