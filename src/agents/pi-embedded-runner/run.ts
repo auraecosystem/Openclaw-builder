@@ -1800,7 +1800,7 @@ export async function runEmbeddedPiAgent(
                     compactionTarget: "budget",
                     runtimeContext: timeoutCompactionRuntimeContext,
                   },
-                  resolveCompactionTimeoutMs(params.config),
+                  resolveCompactionTimeoutMs(params.config, sessionAgentId),
                   params.abortSignal,
                 );
               } catch (compactErr) {
@@ -1989,7 +1989,7 @@ export async function runEmbeddedPiAgent(
                     compactionTarget: "budget",
                     runtimeContext: overflowCompactionRuntimeContext,
                   },
-                  resolveCompactionTimeoutMs(params.config),
+                  resolveCompactionTimeoutMs(params.config, sessionAgentId),
                   params.abortSignal,
                 );
                 if (compactResult.ok && compactResult.compacted) {

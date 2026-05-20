@@ -220,7 +220,7 @@ export async function compactEmbeddedPiSession(
               force: params.trigger === "manual",
               runtimeContext,
             },
-            resolveCompactionTimeoutMs(params.config),
+            resolveCompactionTimeoutMs(params.config, sessionAgentId),
             params.abortSignal,
           );
         } catch (compactErr) {

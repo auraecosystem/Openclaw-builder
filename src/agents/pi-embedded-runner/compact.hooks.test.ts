@@ -16,6 +16,7 @@ import {
   registerProviderStreamForModelMock,
   resolveContextEngineMock,
   resolveEmbeddedAgentStreamFnMock,
+  resolveCompactionTimeoutMsMock,
   resolveMemorySearchConfigMock,
   resolveModelMock,
   resolveSandboxContextMock,
@@ -1545,6 +1546,36 @@ describe("compactEmbeddedPiSession hooks (ownsCompaction engine)", () => {
       provider: "google",
       model: "gemini-3.1-pro-preview",
     });
+  });
+
+  it("selects context-engine compaction timeout from the resolved queued session agent", async () => {
+    const config = {
+      agents: {
+        defaults: {
+          compaction: {
+            timeoutSeconds: 60,
+          },
+        },
+        list: [
+          {
+            id: "lossless-agent",
+            compaction: {
+              timeoutSeconds: 1,
+            },
+          },
+        ],
+      },
+    };
+
+    await compactEmbeddedPiSession(
+      wrappedCompactionArgs({
+        sessionKey: "legacy-topic-47",
+        agentId: "lossless-agent",
+        config,
+      }),
+    );
+
+    expect(resolveCompactionTimeoutMsMock).toHaveBeenCalledWith(config, "lossless-agent");
   });
 
   it("passes resolved context-engine runtime context to harness compaction", async () => {
