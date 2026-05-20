@@ -463,6 +463,7 @@ export async function maybeCompactAgentHarnessSession(
     provider: params.provider ?? "",
     modelId: params.model,
     config: params.config,
+    agentId: params.agentId,
     sessionKey: params.sessionKey,
   });
   if (!harness.compact) {
