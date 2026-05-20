@@ -12,7 +12,7 @@ import { normalizeOptionalString } from "../../shared/string-coerce.js";
 // itself, which we re-deliver as reasoning. claude-cli-interactive (PR
 // #81851) hits the same API and needs the same treatment; without it
 // adaptive-thinking turns surface no reasoning content at all on Telegram.
-function shouldBridgeCliAssistantTextToReasoning(provider: string): boolean {
+export function shouldBridgeCliAssistantTextToReasoning(provider: string): boolean {
   return isClaudeCliCompatibleBackend(provider);
 }
 

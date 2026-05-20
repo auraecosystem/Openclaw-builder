@@ -84,7 +84,10 @@ import {
 } from "../tokens.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { resolveRunAuthProfile } from "./agent-runner-auth-profile.js";
-import { runCliAgentWithLifecycle } from "./agent-runner-cli-dispatch.js";
+import {
+  runCliAgentWithLifecycle,
+  shouldBridgeCliAssistantTextToReasoning,
+} from "./agent-runner-cli-dispatch.js";
 import {
   GENERIC_EXTERNAL_RUN_FAILURE_TEXT,
   HEARTBEAT_EXTERNAL_RUN_FAILURE_TEXT,
@@ -1676,6 +1679,26 @@ export async function runAgentTurnWithFallback(params: {
                 onAgentRunStart: notifyAgentRunStart,
                 suppressAssistantBridge: params.followupRun.run.silentExpected,
                 onAssistantText: async (text) => {
+                  // Dedup: when the reasoning bridge gate routes this same
+                  // text into the reasoning lane (via assistant-text-as-reasoning
+                  // fallback in agent-runner-cli-dispatch.ts), suppress the
+                  // answer-lane delivery to avoid the user seeing duplicate
+                  // text. Only skip when thinking hasn't arrived yet — if
+                  // cliThinkingBridge above already started feeding the
+                  // reasoning lane via thinking_delta events, the answer-lane
+                  // delivery is still the only place this text lands.
+                  //
+                  // Also incidentally fixes a latent double-delivery bug in
+                  // plain claude-cli inherited from the merged
+                  // claude-cli-agent-reasoning-bridge PR (which gated the
+                  // reasoning-lane routing on the same predicate but never
+                  // gated the answer-lane delivery on the bridge gate).
+                  if (
+                    !cliThinkingArrived &&
+                    shouldBridgeCliAssistantTextToReasoning(cliExecutionProvider)
+                  ) {
+                    return;
+                  }
                   const textForTyping = await handlePartialForTyping({ text } as ReplyPayload);
                   if (textForTyping === undefined || !params.opts?.onPartialReply) {
                     return;
