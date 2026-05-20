@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { McpToolCatalog, SessionMcpRuntime } from "../../agents/pi-bundle-mcp-types.js";
 import { setPluginToolMeta } from "../../plugins/tools.js";
 import { ErrorCodes } from "../protocol/index.js";
 import { testing, toolsEffectiveHandlers } from "./tools-effective.js";
@@ -40,7 +41,9 @@ const runtimeMocks = vi.hoisted(() => ({
     tools: [] as unknown[],
     dispose: vi.fn(async () => undefined),
   })),
-  peekSessionMcpRuntime: vi.fn(() => undefined),
+  peekSessionMcpRuntime: vi.fn<
+    () => Pick<SessionMcpRuntime, "configFingerprint" | "peekCatalog"> | undefined
+  >(() => undefined),
   resolveSessionMcpConfigSummary: vi.fn(() => ({
     fingerprint: "mcp:1:test",
     serverNames: [] as string[],
@@ -250,7 +253,7 @@ describe("tools.effective handler", () => {
 
   it("projects MCP tools from an already-populated session runtime catalog", async () => {
     const mcpTool = makeMcpTool();
-    const catalog = { version: 1, generatedAt: 1, servers: {}, tools: [] };
+    const catalog: McpToolCatalog = { version: 1, generatedAt: 1, servers: {}, tools: [] };
     runtimeMocks.resolveSessionMcpConfigSummary.mockReturnValueOnce({
       fingerprint: "mcp:1:test",
       serverNames: ["reproProbe"],
