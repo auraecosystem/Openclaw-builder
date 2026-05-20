@@ -20,6 +20,7 @@ export type {
   DiscordMessageEvent,
   DiscordMessageHandler,
 } from "./listeners.types.js";
+import { recordRecentDiscordInboundMessage } from "../recent-inbound.js";
 import { backfillRecentDiscordInboundMessages } from "./reconnect-backfill.js";
 export { DiscordReactionListener, DiscordReactionRemoveListener } from "./listeners.reactions.js";
 import { setPresence } from "./presence-cache.js";
@@ -27,6 +28,29 @@ import { isThreadArchived } from "./thread-bindings.discord-api.js";
 import { closeDiscordThreadSessions } from "./thread-session-close.js";
 
 type Logger = ReturnType<typeof import("openclaw/plugin-sdk/runtime-env").createSubsystemLogger>;
+
+function readDiscordMessageId(data: DiscordMessageEvent): string | undefined {
+  const candidate = data as DiscordMessageEvent & { message?: { id?: unknown } };
+  return typeof candidate.message?.id === "string" && candidate.message.id.trim()
+    ? candidate.message.id.trim()
+    : typeof candidate.id === "string" && candidate.id.trim()
+      ? candidate.id.trim()
+      : undefined;
+}
+
+function readDiscordChannelId(data: DiscordMessageEvent): string | undefined {
+  const candidate = data as DiscordMessageEvent & {
+    channelId?: unknown;
+    message?: { channel_id?: unknown };
+  };
+  return typeof candidate.channel_id === "string" && candidate.channel_id.trim()
+    ? candidate.channel_id.trim()
+    : typeof candidate.channelId === "string" && candidate.channelId.trim()
+      ? candidate.channelId.trim()
+      : typeof candidate.message?.channel_id === "string" && candidate.message.channel_id.trim()
+        ? candidate.message.channel_id.trim()
+        : undefined;
+}
 
 export function registerDiscordListener(listeners: Array<object>, listener: object) {
   if (listeners.some((existing) => existing.constructor === listener.constructor)) {
@@ -41,6 +65,7 @@ export class DiscordMessageListener extends MessageCreateListener {
     private handler: DiscordMessageHandler,
     private logger?: Logger,
     private onEvent?: () => void,
+    private accountId?: string,
   ) {
     super();
   }
@@ -51,6 +76,13 @@ export class DiscordMessageListener extends MessageCreateListener {
     // Per-session ordering is owned by the message run queue.
     void Promise.resolve()
       .then(() => this.handler(data, client))
+      .then(() => {
+        recordRecentDiscordInboundMessage({
+          accountId: this.accountId,
+          channelId: readDiscordChannelId(data),
+          messageId: readDiscordMessageId(data),
+        });
+      })
       .catch((err) => {
         const logger = this.logger ?? discordEventQueueLog;
         logger.error(danger(`discord handler failed: ${String(err)}`));

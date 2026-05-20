@@ -2,6 +2,10 @@ import { type APIMessage } from "discord-api-types/v10";
 import { danger } from "openclaw/plugin-sdk/runtime-env";
 import { listChannelMessages } from "../internal/api.messages.js";
 import { Guild, type Client, Message, User } from "../internal/discord.js";
+import {
+  hasRecentDiscordInboundMessage,
+  recordRecentDiscordInboundMessage,
+} from "../recent-inbound.js";
 import { listRecentDiscordOutboundMessages } from "../recent-outbound.js";
 import type { DiscordMessageEvent, DiscordMessageHandler } from "./listeners.types.js";
 
@@ -22,6 +26,7 @@ type DiscordReconnectBackfillStats = {
   skippedCooldown: number;
   channelsScanned: number;
   candidates: number;
+  skippedAlreadyProcessed: number;
   replayed: number;
   errors: number;
 };
@@ -113,6 +118,7 @@ function createEmptyStats(anchorsAvailable: number): DiscordReconnectBackfillSta
     skippedCooldown: 0,
     channelsScanned: 0,
     candidates: 0,
+    skippedAlreadyProcessed: 0,
     replayed: 0,
     errors: 0,
   };
@@ -180,6 +186,18 @@ export async function backfillRecentDiscordInboundMessages(params: {
         count: candidates.length,
       });
       for (const message of candidates) {
+        if (
+          hasRecentDiscordInboundMessage({
+            accountId: params.accountId,
+            channelId: entry.channelId,
+            messageId: message.id,
+            maxAgeMs: RECENT_OUTBOUND_BACKFILL_WINDOW_MS,
+            now,
+          })
+        ) {
+          stats.skippedAlreadyProcessed += 1;
+          continue;
+        }
         params.onEvent?.();
         await params.messageHandler(
           toDispatchEvent({
@@ -190,6 +208,12 @@ export async function backfillRecentDiscordInboundMessages(params: {
           }),
           params.client,
         );
+        recordRecentDiscordInboundMessage({
+          accountId: params.accountId,
+          channelId: entry.channelId,
+          messageId: message.id,
+          at: now,
+        });
         stats.replayed += 1;
       }
     } catch (err) {

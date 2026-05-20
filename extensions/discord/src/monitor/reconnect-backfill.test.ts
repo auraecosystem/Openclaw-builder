@@ -5,6 +5,11 @@ import type { APIMessage } from "discord-api-types/v10";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakeRestClient } from "../internal/test-builders.test-support.js";
 import {
+  clearRecentDiscordInboundPersistenceForTest,
+  recordRecentDiscordInboundMessage,
+  resetRecentDiscordInboundMessagesForTest,
+} from "../recent-inbound.js";
+import {
   clearRecentDiscordOutboundPersistenceForTest,
   listRecentDiscordOutboundMessages,
   recordRecentDiscordOutboundMessage,
@@ -57,16 +62,24 @@ function apiMessage(overrides: Partial<APIMessage> & Pick<APIMessage, "id">): AP
 }
 
 const previousRecentOutboundStorePath = process.env.OPENCLAW_DISCORD_RECENT_OUTBOUND_STORE_PATH;
+const previousRecentInboundStorePath = process.env.OPENCLAW_DISCORD_RECENT_INBOUND_STORE_PATH;
 const recentOutboundStorePath = path.join(
   os.tmpdir(),
   `openclaw-discord-recent-outbound-${process.pid}.json`,
+);
+const recentInboundStorePath = path.join(
+  os.tmpdir(),
+  `openclaw-discord-recent-inbound-${process.pid}.json`,
 );
 
 describe("backfillRecentDiscordInboundMessages", () => {
   beforeEach(() => {
     process.env.OPENCLAW_DISCORD_RECENT_OUTBOUND_STORE_PATH = recentOutboundStorePath;
+    process.env.OPENCLAW_DISCORD_RECENT_INBOUND_STORE_PATH = recentInboundStorePath;
     clearRecentDiscordOutboundPersistenceForTest();
+    clearRecentDiscordInboundPersistenceForTest();
     resetRecentDiscordOutboundMessagesForTest();
+    resetRecentDiscordInboundMessagesForTest();
     resetRecentDiscordBackfillsForTest();
     preflightDiscordMessageMock.mockReset();
     processDiscordMessageMock.mockReset();
@@ -74,11 +87,18 @@ describe("backfillRecentDiscordInboundMessages", () => {
 
   afterEach(() => {
     clearRecentDiscordOutboundPersistenceForTest();
+    clearRecentDiscordInboundPersistenceForTest();
     resetRecentDiscordOutboundMessagesForTest();
+    resetRecentDiscordInboundMessagesForTest();
     if (previousRecentOutboundStorePath === undefined) {
       delete process.env.OPENCLAW_DISCORD_RECENT_OUTBOUND_STORE_PATH;
     } else {
       process.env.OPENCLAW_DISCORD_RECENT_OUTBOUND_STORE_PATH = previousRecentOutboundStorePath;
+    }
+    if (previousRecentInboundStorePath === undefined) {
+      delete process.env.OPENCLAW_DISCORD_RECENT_INBOUND_STORE_PATH;
+    } else {
+      process.env.OPENCLAW_DISCORD_RECENT_INBOUND_STORE_PATH = previousRecentInboundStorePath;
     }
   });
 
@@ -171,6 +191,49 @@ describe("backfillRecentDiscordInboundMessages", () => {
       query: { after: "201", limit: 50 },
     });
     expect(messageHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not replay inbound messages already processed before a restart", async () => {
+    const rest = createFakeRestClient([[apiMessage({ id: "202", content: "already handled" })]]);
+    const client = {
+      rest,
+      fetchChannel: vi.fn(async () => ({ id: "thread-1", guildId: "guild-1" })),
+    } as never;
+    const messageHandler = vi.fn(async (_data: unknown, _client?: unknown) => {});
+
+    recordRecentDiscordOutboundMessage({
+      accountId: "default",
+      channelId: "thread-1",
+      messageId: "201",
+      at: 1_000,
+    });
+    recordRecentDiscordInboundMessage({
+      accountId: "default",
+      channelId: "thread-1",
+      messageId: "202",
+      at: 1_500,
+    });
+
+    resetRecentDiscordOutboundMessagesForTest();
+    resetRecentDiscordInboundMessagesForTest();
+    const stats = await backfillRecentDiscordInboundMessages({
+      accountId: "default",
+      client,
+      messageHandler,
+      botUserId: "bot-1",
+      now: 2_000,
+    });
+
+    expect(rest.calls[0]).toMatchObject({
+      method: "GET",
+      query: { after: "201", limit: 50 },
+    });
+    expect(messageHandler).not.toHaveBeenCalled();
+    expect(stats).toMatchObject({
+      candidates: 1,
+      skippedAlreadyProcessed: 1,
+      replayed: 0,
+    });
   });
 
   it("reports reconnect backfill outcome stats", async () => {
