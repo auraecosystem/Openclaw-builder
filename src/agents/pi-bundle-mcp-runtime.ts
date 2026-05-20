@@ -356,6 +356,9 @@ export function createSessionMcpRuntime(params: {
       };
     },
     getCatalog,
+    peekCatalog() {
+      return catalog;
+    },
     markUsed() {
       lastUsedAt = Date.now();
     },
@@ -546,6 +549,12 @@ function createSessionMcpRuntimeManager(
     resolveSessionId(sessionKey) {
       return sessionIdBySessionKey.get(sessionKey);
     },
+    peekSession(params) {
+      const sessionId =
+        params.sessionId ??
+        (params.sessionKey ? sessionIdBySessionKey.get(params.sessionKey) : undefined);
+      return sessionId ? runtimesBySessionId.get(sessionId) : undefined;
+    },
     async disposeSession(sessionId) {
       const inFlight = createInFlight.get(sessionId);
       createInFlight.delete(sessionId);
@@ -599,6 +608,18 @@ export async function getOrCreateSessionMcpRuntime(params: {
   cfg?: OpenClawConfig;
 }): Promise<SessionMcpRuntime> {
   return await getSessionMcpRuntimeManager().getOrCreate(params);
+}
+
+export function peekSessionMcpRuntime(params: {
+  sessionId?: string | null;
+  sessionKey?: string | null;
+}): SessionMcpRuntime | undefined {
+  const sessionId = normalizeOptionalString(params.sessionId);
+  const sessionKey = normalizeOptionalString(params.sessionKey);
+  return getSessionMcpRuntimeManager().peekSession({
+    ...(sessionId ? { sessionId } : {}),
+    ...(sessionKey ? { sessionKey } : {}),
+  });
 }
 
 export async function disposeSessionMcpRuntime(sessionId: string): Promise<void> {

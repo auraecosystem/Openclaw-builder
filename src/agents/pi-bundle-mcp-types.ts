@@ -41,6 +41,7 @@ export type SessionMcpRuntime = {
   activeLeases?: number;
   acquireLease?: () => () => void;
   getCatalog: () => Promise<McpToolCatalog>;
+  peekCatalog: () => McpToolCatalog | null;
   markUsed: () => void;
   callTool: (serverName: string, toolName: string, input: unknown) => Promise<CallToolResult>;
   dispose: () => Promise<void>;
@@ -55,6 +56,10 @@ export type SessionMcpRuntimeManager = {
   }) => Promise<SessionMcpRuntime>;
   bindSessionKey: (sessionKey: string, sessionId: string) => void;
   resolveSessionId: (sessionKey: string) => string | undefined;
+  peekSession: (params: {
+    sessionId?: string;
+    sessionKey?: string;
+  }) => SessionMcpRuntime | undefined;
   disposeSession: (sessionId: string) => Promise<void>;
   disposeAll: () => Promise<void>;
   sweepIdleRuntimes: () => Promise<number>;

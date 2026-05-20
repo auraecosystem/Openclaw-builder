@@ -14,11 +14,13 @@ export {
   disposeSessionMcpRuntime,
   getOrCreateSessionMcpRuntime,
   getSessionMcpRuntimeManager,
+  peekSessionMcpRuntime,
   resolveSessionMcpConfigFingerprint,
   retireSessionMcpRuntime,
   retireSessionMcpRuntimeForSessionKey,
 } from "./pi-bundle-mcp-runtime.js";
 export {
+  buildBundleMcpToolsFromCatalog,
   createBundleMcpToolRuntime,
   materializeBundleMcpToolsForRun,
 } from "./pi-bundle-mcp-materialize.js";
