@@ -49,6 +49,20 @@ vi.mock("openclaw/plugin-sdk/web-media", () => ({
   loadWebMedia,
 }));
 
+const { requestHeartbeatSpy } = vi.hoisted(() => ({
+  requestHeartbeatSpy: vi.fn(),
+}));
+
+export { requestHeartbeatSpy };
+
+vi.mock("openclaw/plugin-sdk/heartbeat-runtime", () => ({
+  requestHeartbeat: requestHeartbeatSpy,
+}));
+
+vi.mock("../../../src/infra/heartbeat-wake.js", () => ({
+  requestHeartbeat: requestHeartbeatSpy,
+}));
+
 const {
   getRuntimeConfig,
   loadSessionStoreMock,
@@ -547,6 +561,8 @@ beforeEach(() => {
   editMessageReplyMarkupSpy.mockReset();
   editMessageReplyMarkupSpy.mockResolvedValue({ message_id: 88 });
   enqueueSystemEventSpy.mockReset();
+  enqueueSystemEventSpy.mockReturnValue(false);
+  requestHeartbeatSpy.mockReset();
   wasSentByBot.mockReset();
   wasSentByBot.mockReturnValue(false);
   listSkillCommandsForAgents.mockReset();

@@ -1,4 +1,4 @@
-import type { Message, ReactionTypeEmoji } from "grammy/types";
+import type { Message } from "grammy/types";
 import { parseExecApprovalCommandText } from "openclaw/plugin-sdk/approval-reply-runtime";
 import { resolveChannelConfigWrites } from "openclaw/plugin-sdk/channel-config-helpers";
 import {
@@ -39,6 +39,7 @@ import {
   resolveSessionStoreEntry,
   updateSessionStore,
 } from "openclaw/plugin-sdk/session-store-runtime";
+import { enqueueNotificationSystemEvent } from "openclaw/plugin-sdk/system-event-runtime";
 import { expandTelegramAllowFromWithAccessGroups } from "./access-groups.js";
 import { resolveTelegramAccount, resolveTelegramMediaRuntimeOptions } from "./accounts.js";
 import { withTelegramApiErrorLogging } from "./api-logging.js";
@@ -1447,15 +1448,22 @@ export const registerTelegramHandlers = ({
         }
       }
 
-      // Detect added reactions.
-      const oldEmojis = new Set(
-        reaction.old_reaction
-          .filter((r): r is ReactionTypeEmoji => r.type === "emoji")
-          .map((r) => r.emoji),
+      type ReactionEntry = { key: string; label: string };
+      const toReactionEntry = (item: (typeof reaction.new_reaction)[number]) =>
+        item.type === "emoji"
+          ? { key: `emoji:${item.emoji}`, label: item.emoji }
+          : item.type === "custom_emoji"
+            ? {
+                key: `custom_emoji:${item.custom_emoji_id}`,
+                label: `custom_emoji:${item.custom_emoji_id}`,
+              }
+            : undefined;
+      const oldReactionKeys = new Set(
+        reaction.old_reaction.map(toReactionEntry).map((r) => r?.key),
       );
       const addedReactions = reaction.new_reaction
-        .filter((r): r is ReactionTypeEmoji => r.type === "emoji")
-        .filter((r) => !oldEmojis.has(r.emoji));
+        .map(toReactionEntry)
+        .filter((r): r is ReactionEntry => r !== undefined && !oldReactionKeys.has(r.key));
 
       if (addedReactions.length === 0) {
         return;
@@ -1495,14 +1503,30 @@ export const registerTelegramHandlers = ({
       });
       const sessionKey = route.sessionKey;
 
-      // Enqueue system event for each added reaction.
-      for (const r of addedReactions) {
-        const emoji = r.emoji;
-        const text = `Telegram reaction added: ${emoji} by ${senderLabel} on msg ${messageId}`;
-        telegramDeps.enqueueSystemEvent(text, {
+      for (const addedReaction of addedReactions) {
+        const text = `Telegram reaction added: ${addedReaction.label} by ${senderLabel} on msg ${messageId} (reaction_key=${addedReaction.key})`;
+        const result = enqueueNotificationSystemEvent({
+          cfg: telegramDeps.getRuntimeConfig(),
+          channel: "telegram",
+          accountId,
+          agentId: route.agentId,
           sessionKey,
-          contextKey: `telegram:reaction:add:${chatId}:${messageId}:${user?.id ?? "anon"}:${emoji}`,
+          family: "reactions",
+          text,
+          contextKey: `telegram:reaction:add:${chatId}:${messageId}:${user?.id ?? "anon"}:${addedReaction.key}`,
+          forceSenderIsOwnerFalse: true,
+          trusted: false,
+          reason: "telegram-reaction",
+          enqueueSystemEvent: telegramDeps.enqueueSystemEvent,
         });
+        if (result.status === "skipped") {
+          logVerbose(`telegram: reaction event skipped by notificationWake policy: ${text}`);
+          continue;
+        }
+        if (result.status === "deduped") {
+          logVerbose(`telegram: skipped duplicate reaction event: ${text}`);
+          continue;
+        }
         logVerbose(`telegram: reaction event enqueued: ${text}`);
       }
     } catch (err) {

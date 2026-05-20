@@ -23,6 +23,7 @@ const {
   getOnHandler,
   listSkillCommandsForAgents,
   onSpy,
+  requestHeartbeatSpy,
   replySpy,
   resolveExecApprovalSpy,
   sendMessageSpy,
@@ -3173,9 +3174,11 @@ describe("createTelegramBot", () => {
     }
   });
 
-  it("enqueues system event for reaction", async () => {
+  it("queues system event for reaction without waking by default", async () => {
     onSpy.mockClear();
     enqueueSystemEventSpy.mockClear();
+    requestHeartbeatSpy.mockClear();
+    enqueueSystemEventSpy.mockReturnValue(true);
 
     loadConfig.mockReturnValue({
       channels: {
@@ -3202,9 +3205,133 @@ describe("createTelegramBot", () => {
 
     expect(enqueueSystemEventSpy).toHaveBeenCalledTimes(1);
     expect(firstSystemEventArg(0)).toBe(
-      `Telegram reaction added: ${THUMBS_UP_EMOJI} by Ada (@ada_bot) on msg 42`,
+      `Telegram reaction added: ${THUMBS_UP_EMOJI} by Ada (@ada_bot) on msg 42 (reaction_key=emoji:${THUMBS_UP_EMOJI})`,
     );
-    expect(String(systemEventOptions().contextKey)).toContain("telegram:reaction:add:1234:42:9");
+    expect(systemEventOptions()).toEqual(
+      expect.objectContaining({
+        contextKey: expect.stringContaining("telegram:reaction:add:1234:42:9"),
+        forceSenderIsOwnerFalse: true,
+        trusted: false,
+      }),
+    );
+    expect(requestHeartbeatSpy).not.toHaveBeenCalled();
+  });
+
+  it("wakes routed session for reaction when notificationWake opts in", async () => {
+    onSpy.mockClear();
+    enqueueSystemEventSpy.mockClear();
+    requestHeartbeatSpy.mockClear();
+    enqueueSystemEventSpy.mockReturnValue(true);
+
+    loadConfig.mockReturnValue({
+      channels: {
+        telegram: {
+          dmPolicy: "open",
+          allowFrom: ["*"],
+          reactionNotifications: "all",
+          notificationWake: { reactions: "wake" },
+        },
+      },
+    });
+
+    createTelegramBot({ token: "tok" });
+    const handler = getOnHandler("message_reaction") as (
+      ctx: Record<string, unknown>,
+    ) => Promise<void>;
+
+    await handler({
+      update: { update_id: 501 },
+      messageReaction: {
+        chat: { id: 1234, type: "private" },
+        message_id: 42,
+        user: { id: 9, first_name: "Ada", username: "ada_bot" },
+        date: 1736380800,
+        old_reaction: [],
+        new_reaction: [{ type: "emoji", emoji: THUMBS_UP_EMOJI }],
+      },
+    });
+
+    expect(enqueueSystemEventSpy).toHaveBeenCalledTimes(1);
+    expect(requestHeartbeatSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "notifications-event",
+        intent: "immediate",
+        reason: "notification-wake:telegram-reaction",
+      }),
+    );
+  });
+
+  it("enqueues custom emoji reactions with stable keys", async () => {
+    onSpy.mockClear();
+    enqueueSystemEventSpy.mockClear();
+    requestHeartbeatSpy.mockClear();
+    enqueueSystemEventSpy.mockReturnValue(true);
+
+    loadConfig.mockReturnValue({
+      channels: {
+        telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "all" },
+      },
+    });
+
+    createTelegramBot({ token: "tok" });
+    const handler = getOnHandler("message_reaction") as (
+      ctx: Record<string, unknown>,
+    ) => Promise<void>;
+
+    await handler({
+      update: { update_id: 508 },
+      messageReaction: {
+        chat: { id: 1234, type: "private" },
+        message_id: 42,
+        user: { id: 9, first_name: "Ada", username: "ada_bot" },
+        date: 1736380800,
+        old_reaction: [],
+        new_reaction: [{ type: "custom_emoji", custom_emoji_id: "1234567890123456789" }],
+      },
+    });
+
+    expect(enqueueSystemEventSpy).toHaveBeenCalledWith(
+      "Telegram reaction added: custom_emoji:1234567890123456789 by Ada (@ada_bot) on msg 42 (reaction_key=custom_emoji:1234567890123456789)",
+      expect.objectContaining({
+        contextKey: expect.stringContaining(
+          "telegram:reaction:add:1234:42:9:custom_emoji:1234567890123456789",
+        ),
+      }),
+    );
+    expect(requestHeartbeatSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not wake when reaction event enqueue is deduplicated", async () => {
+    onSpy.mockClear();
+    enqueueSystemEventSpy.mockClear();
+    requestHeartbeatSpy.mockClear();
+    enqueueSystemEventSpy.mockReturnValue(false);
+
+    loadConfig.mockReturnValue({
+      channels: {
+        telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "all" },
+      },
+    });
+
+    createTelegramBot({ token: "tok" });
+    const handler = getOnHandler("message_reaction") as (
+      ctx: Record<string, unknown>,
+    ) => Promise<void>;
+
+    await handler({
+      update: { update_id: 509 },
+      messageReaction: {
+        chat: { id: 1234, type: "private" },
+        message_id: 42,
+        user: { id: 9, first_name: "Ada" },
+        date: 1736380800,
+        old_reaction: [],
+        new_reaction: [{ type: "emoji", emoji: THUMBS_UP_EMOJI }],
+      },
+    });
+
+    expect(enqueueSystemEventSpy).toHaveBeenCalledTimes(1);
+    expect(requestHeartbeatSpy).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -3429,7 +3556,9 @@ describe("createTelegramBot", () => {
     });
 
     expect(enqueueSystemEventSpy).toHaveBeenCalledTimes(1);
-    expect(firstSystemEventArg(0)).toBe(`Telegram reaction added: ${PARTY_EMOJI} by Ada on msg 99`);
+    expect(firstSystemEventArg(0)).toBe(
+      `Telegram reaction added: ${PARTY_EMOJI} by Ada on msg 99 (reaction_key=emoji:${PARTY_EMOJI})`,
+    );
     expect(firstSystemEventArg(1)).toBeTypeOf("object");
   });
 
@@ -3589,8 +3718,8 @@ describe("createTelegramBot", () => {
 
     expect(enqueueSystemEventSpy).toHaveBeenCalledTimes(2);
     expect(enqueueSystemEventSpy.mock.calls.map((call) => call[0])).toEqual([
-      `Telegram reaction added: ${FIRE_EMOJI} by Ada on msg 42`,
-      `Telegram reaction added: ${PARTY_EMOJI} by Ada on msg 42`,
+      `Telegram reaction added: ${FIRE_EMOJI} by Ada on msg 42 (reaction_key=emoji:${FIRE_EMOJI})`,
+      `Telegram reaction added: ${PARTY_EMOJI} by Ada on msg 42 (reaction_key=emoji:${PARTY_EMOJI})`,
     ]);
   });
 
@@ -3625,7 +3754,7 @@ describe("createTelegramBot", () => {
 
     expect(enqueueSystemEventSpy).toHaveBeenCalledTimes(1);
     expect(firstSystemEventArg(0)).toBe(
-      `Telegram reaction added: ${FIRE_EMOJI} by Bob (@bob_user) on msg 100`,
+      `Telegram reaction added: ${FIRE_EMOJI} by Bob (@bob_user) on msg 100 (reaction_key=emoji:${FIRE_EMOJI})`,
     );
     expect(String(systemEventOptions().sessionKey)).toContain("telegram:group:5678:topic:1");
     expect(String(systemEventOptions().contextKey)).toContain("telegram:reaction:add:5678:100:10");
@@ -3660,7 +3789,9 @@ describe("createTelegramBot", () => {
     });
 
     expect(enqueueSystemEventSpy).toHaveBeenCalledTimes(1);
-    expect(firstSystemEventArg(0)).toBe(`Telegram reaction added: ${EYES_EMOJI} by Bob on msg 101`);
+    expect(firstSystemEventArg(0)).toBe(
+      `Telegram reaction added: ${EYES_EMOJI} by Bob on msg 101 (reaction_key=emoji:${EYES_EMOJI})`,
+    );
     expect(String(systemEventOptions().sessionKey)).toContain("telegram:group:5678:topic:1");
     expect(String(systemEventOptions().contextKey)).toContain("telegram:reaction:add:5678:101:10");
   });
@@ -3694,7 +3825,7 @@ describe("createTelegramBot", () => {
 
     expect(enqueueSystemEventSpy).toHaveBeenCalledTimes(1);
     expect(firstSystemEventArg(0)).toBe(
-      `Telegram reaction added: ${HEART_EMOJI} by Charlie on msg 200`,
+      `Telegram reaction added: ${HEART_EMOJI} by Charlie on msg 200 (reaction_key=emoji:${HEART_EMOJI})`,
     );
     expect(String(systemEventOptions().sessionKey)).toContain("telegram:group:9999");
     expect(String(systemEventOptions().contextKey)).toContain("telegram:reaction:add:9999:200:11");

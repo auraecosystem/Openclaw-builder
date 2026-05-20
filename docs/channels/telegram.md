@@ -772,16 +772,19 @@ curl "https://api.telegram.org/bot<bot_token>/getUpdates"
 
     When enabled, OpenClaw enqueues system events like:
 
-    - `Telegram reaction added: 👍 by Alice (@alice) on msg 42`
+    - `Telegram reaction added: 👍 by Alice (@alice) on msg 42 (reaction_key=emoji:👍)`
 
     Config:
 
     - `channels.telegram.reactionNotifications`: `off | own | all` (default: `own`)
+    - `channels.telegram.notificationWake.reactions`: `off | queue | wake | inherit` (default: `queue`)
     - `channels.telegram.reactionLevel`: `off | ack | minimal | extensive` (default: `minimal`)
 
     Notes:
 
     - `own` means user reactions to bot-sent messages only (best-effort via sent-message cache).
+    - Accepted reaction events enqueue by default. Set `notificationWake.reactions: "wake"` to request an immediate routed heartbeat wake for reaction-only inputs.
+    - Standard emoji use `reaction_key=emoji:<emoji>`; Telegram custom emoji use `reaction_key=custom_emoji:<id>`.
     - Reaction events still respect Telegram access controls (`dmPolicy`, `allowFrom`, `groupPolicy`, `groupAllowFrom`); unauthorized senders are dropped.
     - Telegram does not provide thread IDs in reaction updates.
       - non-forum groups route to group chat session
