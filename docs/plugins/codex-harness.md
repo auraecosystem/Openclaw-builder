@@ -202,6 +202,8 @@ Common command routing:
 | Attach the current chat                               | `/codex bind [--cwd <path>]`                                                                          |
 | Resume an existing Codex thread                       | `/codex resume <thread-id>`                                                                           |
 | List or filter Codex threads                          | `/codex threads [filter]`                                                                             |
+| List native Codex plugins                             | `/codex plugins list`                                                                                 |
+| Enable or disable a configured native Codex plugin    | `/codex plugins enable <name>`, `/codex plugins disable <name>`                                       |
 | Attach an existing Codex CLI session on a paired node | `/codex sessions --host <node> [filter]`, then `/codex resume <session-id> --host <node> --bind here` |
 | Send Codex feedback only                              | `/codex diagnostics [note]`                                                                           |
 | Start an ACP/acpx task                                | ACP/acpx session commands, not `/codex`                                                               |
@@ -518,6 +520,7 @@ Supported `appServer` fields:
 | `authToken`                   | unset                                                  | Bearer token for WebSocket transport.                                                                                                                                                                                                                                                                       |
 | `headers`                     | `{}`                                                   | Extra WebSocket headers.                                                                                                                                                                                                                                                                                    |
 | `clearEnv`                    | `[]`                                                   | Extra environment variable names removed from the spawned stdio app-server process after OpenClaw builds its inherited environment. OpenClaw keeps per-agent `CODEX_HOME` and inherited `HOME` for local launches.                                                                                          |
+| `codeModeOnly`                | `false`                                                | Opt into Codex's code-mode-only tool surface. OpenClaw dynamic tools remain registered with Codex so nested `tools.*` calls return through the app-server `item/tool/call` bridge.                                                                                                                          |
 | `requestTimeoutMs`            | `60000`                                                | Timeout for app-server control-plane calls.                                                                                                                                                                                                                                                                 |
 | `turnCompletionIdleTimeoutMs` | `60000`                                                | Quiet window after Codex accepts a turn or after a turn-scoped app-server request while OpenClaw waits for `turn/completed`. Raise this for slow post-tool or status-only synthesis phases.                                                                                                                 |
 | `mode`                        | `"yolo"` unless local Codex requirements disallow YOLO | Preset for YOLO or guardian-reviewed execution. Local stdio requirements that omit `danger-full-access`, `never` approval, or the `user` reviewer make the implicit default guardian.                                                                                                                       |
@@ -529,9 +532,10 @@ Supported `appServer` fields:
 OpenClaw-owned dynamic tool calls are bounded independently from
 `appServer.requestTimeoutMs`: Codex `item/tool/call` requests use a 30 second
 OpenClaw watchdog by default. A positive per-call `timeoutMs` argument extends
-or shortens that specific tool budget. The `image_generate` tool also uses
+or shortens that specific tool budget. The `image_generate` tool uses
 `agents.defaults.imageGenerationModel.timeoutMs` when the tool call does not
-provide its own timeout, and the media-understanding `image` tool uses
+provide its own timeout, or a 120 second image-generation default otherwise.
+The media-understanding `image` tool uses
 `tools.media.image.timeoutSeconds` or its 60 second media default. Dynamic tool
 budgets are capped at 600000 ms. On timeout, OpenClaw aborts the tool signal
 where supported and returns a failed dynamic-tool response to Codex so the turn
