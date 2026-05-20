@@ -54,7 +54,10 @@ function createIndex(overrides: Partial<InstalledPluginIndex> = {}): InstalledPl
   };
 }
 
-function createCandidate(rootDir: string, options: { id?: string } = {}): PluginCandidate {
+function createCandidate(
+  rootDir: string,
+  options: { id?: string; configPaths?: readonly string[] } = {},
+): PluginCandidate {
   const id = options.id ?? "demo";
   fs.writeFileSync(
     path.join(rootDir, "index.ts"),
@@ -68,6 +71,7 @@ function createCandidate(rootDir: string, options: { id?: string } = {}): Plugin
       name: id === "demo" ? "Demo" : "Next Demo",
       configSchema: { type: "object" },
       providers: [id],
+      ...(options.configPaths ? { activation: { onConfigPaths: options.configPaths } } : {}),
     }),
     "utf8",
   );
@@ -116,6 +120,21 @@ function expectInstallRecord(
   for (const [key, value] of Object.entries(expected)) {
     expect(record[key as keyof typeof record], key).toEqual(value);
   }
+}
+
+function dropStartupConfigPaths(
+  plugin: InstalledPluginIndex["plugins"][number],
+): InstalledPluginIndex["plugins"][number] {
+  return {
+    ...plugin,
+    startup: {
+      sidecar: plugin.startup.sidecar,
+      memory: plugin.startup.memory,
+      deferConfiguredChannelFullLoadUntilAfterListen:
+        plugin.startup.deferConfiguredChannelFullLoadUntilAfterListen,
+      agentHarnesses: plugin.startup.agentHarnesses,
+    },
+  };
 }
 
 async function expectPersistedIndex(
@@ -196,6 +215,51 @@ describe("installed plugin index persistence", () => {
     const persisted = requirePersisted(await readPersistedInstalledPluginIndex({ stateDir }));
     expect(persisted.plugins[0]?.startup.configPaths).toEqual(["browser"]);
     expect(persisted.plugins[0]?.compat).toEqual(["activation-config-path-hint"]);
+  });
+
+  it("marks legacy config-path startup indexes stale so update rebuilds them", async () => {
+    const stateDir = makeTempDir();
+    const pluginDir = path.join(stateDir, "plugins", "demo");
+    fs.mkdirSync(pluginDir, { recursive: true });
+    const env = {
+      OPENCLAW_BUNDLED_PLUGINS_DIR: undefined,
+      OPENCLAW_VERSION: "2026.4.25",
+      VITEST: "true",
+    };
+    const candidate = createCandidate(pluginDir, { configPaths: ["browser"] });
+    const current = await refreshPersistedInstalledPluginIndex({
+      reason: "manual",
+      stateDir,
+      candidates: [candidate],
+      env,
+    });
+    const legacy = {
+      ...current,
+      plugins: current.plugins.map(dropStartupConfigPaths),
+    };
+    fs.writeFileSync(
+      resolveInstalledPluginIndexStorePath({ stateDir }),
+      JSON.stringify(legacy),
+      "utf8",
+    );
+
+    const inspection = await inspectPersistedInstalledPluginIndex({
+      stateDir,
+      candidates: [candidate],
+      env,
+    });
+    expect(inspection.state).toBe("stale");
+    expect(inspection.refreshReasons).toEqual(["migration"]);
+
+    const refreshed = await refreshPersistedInstalledPluginIndex({
+      reason: "policy-changed",
+      stateDir,
+      candidates: [candidate],
+      env,
+    });
+    expect(refreshed.plugins[0]?.startup.configPaths).toEqual(["browser"]);
+    const persisted = requirePersisted(await readPersistedInstalledPluginIndex({ stateDir }));
+    expect(persisted.plugins[0]?.startup.configPaths).toEqual(["browser"]);
   });
 
   it("does not preserve prototype poison keys from persisted index JSON", async () => {

@@ -16,6 +16,7 @@ import {
 import {
   diffInstalledPluginIndexInvalidationReasons,
   extractPluginInstallRecordsFromInstalledPluginIndex,
+  hasLegacyInstalledPluginIndexConfigPathScopeGaps,
   INSTALLED_PLUGIN_INDEX_WARNING,
   INSTALLED_PLUGIN_INDEX_VERSION,
   INSTALLED_PLUGIN_INDEX_MIGRATION_VERSION,
@@ -224,7 +225,8 @@ function canRefreshPersistedPolicyState(
     persisted.version !== INSTALLED_PLUGIN_INDEX_VERSION ||
     persisted.hostContractVersion !== resolveCompatibilityHostVersion(env) ||
     persisted.compatRegistryVersion !== resolveCompatRegistryVersion() ||
-    persisted.migrationVersion !== INSTALLED_PLUGIN_INDEX_MIGRATION_VERSION
+    persisted.migrationVersion !== INSTALLED_PLUGIN_INDEX_MIGRATION_VERSION ||
+    hasLegacyInstalledPluginIndexConfigPathScopeGaps(persisted)
   ) {
     return false;
   }
