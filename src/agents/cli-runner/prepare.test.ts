@@ -89,11 +89,6 @@ function createTestMcpLoopbackServerConfig(port: number) {
         url: `http://127.0.0.1:${port}/mcp`,
         headers: {
           Authorization: "Bearer ${OPENCLAW_MCP_TOKEN}",
-          "x-session-key": "${OPENCLAW_MCP_SESSION_KEY}",
-          "x-openclaw-agent-id": "${OPENCLAW_MCP_AGENT_ID}",
-          "x-openclaw-account-id": "${OPENCLAW_MCP_ACCOUNT_ID}",
-          "x-openclaw-message-channel": "${OPENCLAW_MCP_MESSAGE_CHANNEL}",
-          "x-openclaw-inbound-event-kind": "${OPENCLAW_MCP_INBOUND_EVENT_KIND}",
         },
       },
     },
@@ -198,6 +193,8 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
       getActiveMcpLoopbackRuntime: vi.fn(() => undefined),
       ensureMcpLoopbackServer: vi.fn(createTestMcpLoopbackServer),
       createMcpLoopbackServerConfig: vi.fn(createTestMcpLoopbackServerConfig),
+      issueMcpLoopbackScopedBearerToken: vi.fn(() => "scoped-loopback-token"),
+      revokeMcpLoopbackScopedBearerToken: vi.fn(),
       resolveMcpLoopbackScopedTools: vi.fn(() => ({ agentId: "main", tools: [] })),
       resolveOpenClawReferencePaths: vi.fn(async () => ({ docsPath: null, sourcePath: null })),
     });
@@ -1162,7 +1159,7 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
     }
   });
 
-  it("passes current turn kind into bundle MCP loopback env", async () => {
+  it("binds current turn kind into the scoped bundle MCP token", async () => {
     const { dir, sessionFile } = createSessionFile();
     try {
       const getActiveMcpLoopbackRuntime = vi.fn(() => ({
@@ -1172,10 +1169,12 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
       }));
       const ensureMcpLoopbackServer = vi.fn(createTestMcpLoopbackServer);
       const createMcpLoopbackServerConfig = vi.fn(createTestMcpLoopbackServerConfig);
+      const issueMcpLoopbackScopedBearerToken = vi.fn(() => "scoped-room-token");
       setCliRunnerPrepareTestDeps({
         getActiveMcpLoopbackRuntime,
         ensureMcpLoopbackServer,
         createMcpLoopbackServerConfig,
+        issueMcpLoopbackScopedBearerToken,
       });
       cliBackendsTesting.setDepsForTest({
         resolvePluginSetupCliBackend: () => undefined,
@@ -1211,9 +1210,18 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
         messageChannel: "telegram",
       });
 
-      expect(context.preparedBackend.env).toMatchObject({
-        OPENCLAW_MCP_MESSAGE_CHANNEL: "telegram",
-        OPENCLAW_MCP_INBOUND_EVENT_KIND: "room_event",
+      expect(issueMcpLoopbackScopedBearerToken).toHaveBeenCalledWith(
+        { port: 31783, ownerToken: "owner-token", nonOwnerToken: "non-owner-token" },
+        {
+          sessionKey: "agent:main:telegram:group:chat123",
+          messageProvider: "telegram",
+          accountId: undefined,
+          inboundEventKind: "room_event",
+          senderIsOwner: false,
+        },
+      );
+      expect(context.preparedBackend.env).toEqual({
+        OPENCLAW_MCP_TOKEN: "scoped-room-token",
       });
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
