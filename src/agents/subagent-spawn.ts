@@ -15,6 +15,11 @@ import type { DeliveryContext } from "../utils/delivery-context.types.js";
 import { listAgentIds, resolveAgentDir } from "./agent-scope-config.js";
 import type { BootstrapContextMode } from "./bootstrap-files.js";
 import {
+  resolveAgentExecutionPlacement,
+  type AgentExecutionPlacement,
+  type AgentExecutionPlacementRequest,
+} from "./execution-backends.js";
+import {
   inheritedToolAllowPatch,
   inheritedToolDenyPatch,
   normalizeInheritedToolAllowlist,
@@ -140,6 +145,7 @@ export type SpawnSubagentParams = {
   context?: SpawnSubagentContextMode;
   lightContext?: boolean;
   expectsCompletionMessage?: boolean;
+  execution?: AgentExecutionPlacementRequest;
   attachments?: Array<{
     name: string;
     content: string;
@@ -177,6 +183,7 @@ export type SpawnSubagentResult = {
   note?: string;
   modelApplied?: boolean;
   error?: string;
+  execution?: AgentExecutionPlacement;
   attachments?: {
     count: number;
     totalBytes: number;
@@ -850,6 +857,17 @@ export async function spawnSubagentDirect(
       error: targetPolicy.error,
     };
   }
+  const executionResult = resolveAgentExecutionPlacement({
+    cfg,
+    request: params.execution,
+  });
+  if (!executionResult.ok) {
+    return {
+      status: "error",
+      error: executionResult.error,
+    };
+  }
+  const execution = executionResult.execution;
   const childSessionKey = `agent:${targetAgentId}:subagent:${crypto.randomUUID()}`;
   const requesterRuntime = resolveSandboxRuntimeStatus({
     cfg,
@@ -1271,6 +1289,7 @@ export async function spawnSubagentDirect(
       attachmentsDir: attachmentAbsDir,
       attachmentsRootDir: attachmentRootDir,
       retainAttachmentsOnKeep: retainOnSessionKeep,
+      execution,
     });
   } catch (err) {
     await rollbackPreparedContextEngine(contextEnginePreparation);
@@ -1352,6 +1371,7 @@ export async function spawnSubagentDirect(
       ? `${acceptedNote} ${preparedSpawnContext.forkFallbackNote}`
       : acceptedNote,
     modelApplied: resolvedModel ? modelApplied : undefined,
+    execution,
     attachments: attachmentsReceipt,
   };
 }
