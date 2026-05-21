@@ -11,6 +11,12 @@ type ParsedJsonLine = {
   value?: Record<string, unknown>;
 };
 
+type MissingCustomToolCall = {
+  lineIndex: number;
+  callId: string;
+  timestamp?: string;
+};
+
 const SYNTHETIC_TOOL_OUTPUT_TEXT =
   "[openclaw] custom tool call was interrupted by OpenClaw before a tool output was recorded; inserted synthetic output during transcript repair.";
 
@@ -43,65 +49,101 @@ export async function repairCodexRolloutMissingCustomToolOutputs(
 async function repairCodexRolloutFile(
   file: string,
 ): Promise<{ scanned: boolean; insertedOutputs: number }> {
-  let raw: string;
+  const scan = await scanCodexRolloutFile(file);
+  if (!scan.scanned || scan.missingCalls.length === 0) {
+    return { scanned: scan.scanned, insertedOutputs: 0 };
+  }
+  await rewriteCodexRolloutFileWithSyntheticOutputs(file, scan.missingCalls);
+  return { scanned: true, insertedOutputs: scan.missingCalls.length };
+}
+
+async function scanCodexRolloutFile(
+  file: string,
+): Promise<{ scanned: boolean; missingCalls: MissingCustomToolCall[] }> {
+  let handle: Awaited<ReturnType<typeof fs.open>>;
   try {
-    raw = await fs.readFile(file, "utf8");
+    handle = await fs.open(file, "r");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { scanned: false, insertedOutputs: 0 };
+      return { scanned: false, missingCalls: [] };
     }
     throw error;
   }
-  if (!raw.trim()) {
-    return { scanned: true, insertedOutputs: 0 };
-  }
 
-  const endsWithNewline = raw.endsWith("\n");
-  const lines = raw.split(/\r?\n/);
-  if (lines.length > 0 && lines[lines.length - 1] === "") {
-    lines.pop();
-  }
-  const parsedLines = lines.map(parseJsonLine);
   const outputCallIds = new Set<string>();
-  const toolCalls: Array<{ index: number; callId: string; timestamp?: string }> = [];
-  for (const [index, line] of parsedLines.entries()) {
-    const payload = readPayload(line.value);
-    const type = readString(payload, "type");
-    if (type === "custom_tool_call") {
-      const callId = readString(payload, "call_id");
-      if (callId) {
-        toolCalls.push({ index, callId, timestamp: readString(line.value, "timestamp") });
+  const toolCalls: MissingCustomToolCall[] = [];
+  try {
+    let lineIndex = 0;
+    for await (const rawLine of handle.readLines()) {
+      const line = parseJsonLine(rawLine);
+      const payload = readPayload(line.value);
+      const type = readString(payload, "type");
+      if (type === "custom_tool_call") {
+        const callId = readString(payload, "call_id");
+        if (callId) {
+          toolCalls.push({
+            lineIndex,
+            callId,
+            timestamp: readString(line.value, "timestamp"),
+          });
+        }
+      } else if (type === "custom_tool_call_output") {
+        const callId = readString(payload, "call_id");
+        if (callId) {
+          outputCallIds.add(callId);
+        }
       }
-    } else if (type === "custom_tool_call_output") {
-      const callId = readString(payload, "call_id");
-      if (callId) {
-        outputCallIds.add(callId);
-      }
+      lineIndex += 1;
     }
+  } finally {
+    await handle.close();
   }
 
-  const missingCalls = toolCalls.filter((call) => !outputCallIds.has(call.callId));
-  if (missingCalls.length === 0) {
-    return { scanned: true, insertedOutputs: 0 };
-  }
+  return {
+    scanned: true,
+    missingCalls: toolCalls.filter((call) => !outputCallIds.has(call.callId)),
+  };
+}
 
-  const missingByIndex = new Map<number, Array<{ callId: string; timestamp?: string }>>();
+async function rewriteCodexRolloutFileWithSyntheticOutputs(
+  file: string,
+  missingCalls: readonly MissingCustomToolCall[],
+): Promise<void> {
+  const missingByIndex = new Map<number, MissingCustomToolCall[]>();
   for (const call of missingCalls) {
-    const calls = missingByIndex.get(call.index) ?? [];
+    const calls = missingByIndex.get(call.lineIndex) ?? [];
     calls.push(call);
-    missingByIndex.set(call.index, calls);
+    missingByIndex.set(call.lineIndex, calls);
   }
 
-  const repaired: string[] = [];
-  for (const [index, line] of parsedLines.entries()) {
-    repaired.push(line.raw);
-    for (const call of missingByIndex.get(index) ?? []) {
-      repaired.push(JSON.stringify(buildSyntheticCustomToolOutput(call)));
+  const tempFile = `${file}.openclaw-repair-${process.pid}-${Date.now()}.tmp`;
+  let readHandle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  let writeHandle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  try {
+    readHandle = await fs.open(file, "r");
+    writeHandle = await fs.open(tempFile, "wx");
+    let lineIndex = 0;
+    for await (const rawLine of readHandle.readLines()) {
+      await writeHandle.writeFile(`${rawLine}\n`, "utf8");
+      for (const call of missingByIndex.get(lineIndex) ?? []) {
+        await writeHandle.writeFile(
+          `${JSON.stringify(buildSyntheticCustomToolOutput(call))}\n`,
+          "utf8",
+        );
+      }
+      lineIndex += 1;
     }
+    await writeHandle.close();
+    writeHandle = undefined;
+    await readHandle.close();
+    readHandle = undefined;
+    await fs.rename(tempFile, file);
+  } catch (error) {
+    await writeHandle?.close().catch(() => undefined);
+    await readHandle?.close().catch(() => undefined);
+    await fs.rm(tempFile, { force: true }).catch(() => undefined);
+    throw error;
   }
-  const nextRaw = repaired.join("\n") + (endsWithNewline ? "\n" : "");
-  await fs.writeFile(file, nextRaw, "utf8");
-  return { scanned: true, insertedOutputs: missingCalls.length };
 }
 
 function parseJsonLine(raw: string): ParsedJsonLine {
