@@ -1133,6 +1133,7 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
           prompt_tokens: 30,
           completion_tokens: 5,
           total_tokens: 35,
+          prompt_tokens_details: { cached_tokens: 20 },
         });
       }
 
@@ -1199,6 +1200,7 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
           prompt_tokens: 2,
           completion_tokens: 0,
           total_tokens: 2,
+          prompt_tokens_details: { cached_tokens: 2 },
         });
       }
 
@@ -2011,6 +2013,7 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
       prompt_tokens: 15,
       completion_tokens: 5,
       total_tokens: 20,
+      prompt_tokens_details: { cached_tokens: 3 },
     });
     expect(usageChunk?.choices).toStrictEqual([]);
   });
