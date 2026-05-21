@@ -7,9 +7,24 @@ import {
   resolveLocalHeavyCheckEnv,
   shouldAcquireLocalHeavyCheckLockForOxlint,
 } from "./lib/local-heavy-check-runtime.mjs";
+import { shouldPrepareExtensionPackageBoundaryArtifacts } from "./run-oxlint.mjs";
 
 const extraArgs = process.argv.slice(2);
 const runner = path.resolve("scripts", "run-oxlint.mjs");
+
+if (!shouldPrepareExtensionPackageBoundaryArtifacts(extraArgs)) {
+  const result = spawnSync(process.execPath, [runner, ...extraArgs], {
+    stdio: "inherit",
+    env: process.env,
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  process.exit(result.status ?? 1);
+}
+
 const shards = [
   {
     name: "core",
