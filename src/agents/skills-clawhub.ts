@@ -2,10 +2,13 @@ import path from "node:path";
 import {
   downloadClawHubSkillArchive,
   fetchClawHubSkillDetail,
+  fetchClawHubSkillTrustCard,
   resolveClawHubBaseUrl,
   searchClawHubSkills,
   type ClawHubSkillDetail,
   type ClawHubSkillSearchResult,
+  type ClawHubSkillTrustCard,
+  type ClawHubSkillTrustCardResponse,
 } from "../infra/clawhub.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { pathExists } from "../infra/fs-safe.js";
@@ -60,6 +63,19 @@ export type UpdateClawHubSkillResult =
       version: string;
       changed: boolean;
       targetDir: string;
+    }
+  | { ok: false; error: string };
+
+export type VerifyClawHubSkillTrustResult =
+  | {
+      ok: true;
+      slug: string;
+      requestedVersion?: string;
+      requestedTag?: string;
+      resolvedFrom: "installed" | "version" | "tag" | "latest";
+      registry: string;
+      response: ClawHubSkillTrustCardResponse;
+      trustCard: ClawHubSkillTrustCard;
     }
   | { ok: false; error: string };
 
@@ -176,6 +192,90 @@ export async function searchSkillsFromClawHub(params: {
     limit: params.limit,
     baseUrl: params.baseUrl,
   });
+}
+
+async function resolveVerifyTarget(params: {
+  workspaceDir: string;
+  slug: string;
+  version?: string;
+  tag?: string;
+  baseUrl?: string;
+}): Promise<{
+  slug: string;
+  version?: string;
+  tag?: string;
+  baseUrl?: string;
+  resolvedFrom: "installed" | "version" | "tag" | "latest";
+}> {
+  const slug = validateRequestedSkillSlug(params.slug);
+  if (params.version && params.tag) {
+    throw new Error("Use either --version or --tag.");
+  }
+  if (params.version) {
+    return {
+      slug,
+      version: params.version,
+      baseUrl: params.baseUrl,
+      resolvedFrom: "version",
+    };
+  }
+  if (params.tag) {
+    return {
+      slug,
+      tag: params.tag,
+      baseUrl: params.baseUrl,
+      resolvedFrom: "tag",
+    };
+  }
+  const origin = await readClawHubSkillOrigin(
+    resolveWorkspaceSkillInstallDir(params.workspaceDir, slug),
+  );
+  if (origin) {
+    return {
+      slug,
+      version: origin.installedVersion,
+      baseUrl: origin.registry,
+      resolvedFrom: "installed",
+    };
+  }
+  return {
+    slug,
+    baseUrl: params.baseUrl,
+    resolvedFrom: "latest",
+  };
+}
+
+export async function verifySkillFromClawHub(params: {
+  workspaceDir: string;
+  slug: string;
+  version?: string;
+  tag?: string;
+  baseUrl?: string;
+}): Promise<VerifyClawHubSkillTrustResult> {
+  try {
+    const target = await resolveVerifyTarget(params);
+    const response = await fetchClawHubSkillTrustCard({
+      slug: target.slug,
+      version: target.version,
+      tag: target.tag,
+      baseUrl: target.baseUrl,
+    });
+    return {
+      ok: true,
+      slug: target.slug,
+      ...(target.version ? { requestedVersion: target.version } : {}),
+      ...(target.tag ? { requestedTag: target.tag } : {}),
+      resolvedFrom: target.resolvedFrom,
+      registry: resolveClawHubBaseUrl(target.baseUrl),
+      response,
+      trustCard: response.trustCard,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: formatErrorMessage(err),
+    };
+  }
 }
 
 async function resolveInstallVersion(params: {

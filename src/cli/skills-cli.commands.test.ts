@@ -83,6 +83,7 @@ const mocks = vi.hoisted(() => {
     installSkillFromClawHubMock: vi.fn(),
     installSkillFromSourceMock: vi.fn(),
     updateSkillsFromClawHubMock: vi.fn(),
+    verifySkillFromClawHubMock: vi.fn(),
     readTrackedClawHubSkillSlugsMock: vi.fn(),
     buildWorkspaceSkillStatusMock,
     skillStatusReportFixture,
@@ -102,6 +103,7 @@ const {
   installSkillFromClawHubMock,
   installSkillFromSourceMock,
   updateSkillsFromClawHubMock,
+  verifySkillFromClawHubMock,
   readTrackedClawHubSkillSlugsMock,
   buildWorkspaceSkillStatusMock,
   skillStatusReportFixture,
@@ -176,6 +178,7 @@ vi.mock("../agents/skills-clawhub.js", () => ({
   searchSkillsFromClawHub: (...args: unknown[]) => mocks.searchSkillsFromClawHubMock(...args),
   installSkillFromClawHub: (...args: unknown[]) => mocks.installSkillFromClawHubMock(...args),
   updateSkillsFromClawHub: (...args: unknown[]) => mocks.updateSkillsFromClawHubMock(...args),
+  verifySkillFromClawHub: (...args: unknown[]) => mocks.verifySkillFromClawHubMock(...args),
   readTrackedClawHubSkillSlugs: (...args: unknown[]) =>
     mocks.readTrackedClawHubSkillSlugsMock(...args),
 }));
@@ -226,6 +229,7 @@ describe("skills cli commands", () => {
     installSkillFromClawHubMock.mockReset();
     installSkillFromSourceMock.mockReset();
     updateSkillsFromClawHubMock.mockReset();
+    verifySkillFromClawHubMock.mockReset();
     readTrackedClawHubSkillSlugsMock.mockReset();
     buildWorkspaceSkillStatusMock.mockReset();
 
@@ -243,6 +247,10 @@ describe("skills cli commands", () => {
       error: "source install disabled in test",
     });
     updateSkillsFromClawHubMock.mockResolvedValue([]);
+    verifySkillFromClawHubMock.mockResolvedValue({
+      ok: false,
+      error: "verify disabled in test",
+    });
     readTrackedClawHubSkillSlugsMock.mockResolvedValue([]);
     buildWorkspaceSkillStatusMock.mockReturnValue(skillStatusReportFixture);
     defaultRuntime.log.mockClear();
@@ -660,6 +668,123 @@ describe("skills cli commands", () => {
     expect(runtimeErrors).toContain("Use either --global or --agent, not both.");
     expect(readTrackedClawHubSkillSlugsMock).not.toHaveBeenCalled();
     expect(updateSkillsFromClawHubMock).not.toHaveBeenCalled();
+  });
+
+  it("verifies a ClawHub skill trust card from the active workspace", async () => {
+    verifySkillFromClawHubMock.mockResolvedValue({
+      ok: true,
+      slug: "calendar",
+      resolvedFrom: "installed",
+      registry: "https://clawhub.ai",
+      response: {},
+      trustCard: {
+        subject: { slug: "calendar", displayName: "Calendar", version: "1.2.3" },
+        publisher: { handle: "acme" },
+        artifact: {
+          fingerprint: "sha256:release",
+          files: [{ path: "SKILL.md" }],
+        },
+        audit: {
+          status: "pass",
+          summary: "No static findings.",
+          reasonCodes: [],
+        },
+        signature: { status: "unsigned" },
+        capabilities: {
+          tags: ["calendar"],
+          requires: { env: ["CALENDAR_TOKEN"] },
+        },
+      },
+    });
+
+    await runCommand(["skills", "verify", "calendar"]);
+
+    expect(verifySkillFromClawHubMock).toHaveBeenCalledWith({
+      workspaceDir: "/tmp/workspace",
+      slug: "calendar",
+      version: undefined,
+      tag: undefined,
+    });
+    expect(runtimeLogs).toContain("calendar@1.2.3 trust");
+    expect(runtimeLogs).toContain("Resolved: installed");
+    expect(runtimeLogs).toContain("Signature: unsigned");
+    expect(runtimeLogs).toContain("Requires: env=CALENDAR_TOKEN");
+    expect(defaultRuntime.exit).not.toHaveBeenCalledWith(1);
+  });
+
+  it("prints JSON for ClawHub skill trust verification", async () => {
+    verifySkillFromClawHubMock.mockResolvedValue({
+      ok: true,
+      slug: "calendar",
+      resolvedFrom: "version",
+      registry: "https://clawhub.ai",
+      response: { trustCard: { audit: { status: "pass" } } },
+      trustCard: { audit: { status: "pass" } },
+    });
+
+    await runCommand(["skills", "verify", "calendar", "--version", "1.2.3", "--json"]);
+
+    expect(verifySkillFromClawHubMock).toHaveBeenCalledWith({
+      workspaceDir: "/tmp/workspace",
+      slug: "calendar",
+      version: "1.2.3",
+      tag: undefined,
+    });
+    expect(defaultRuntime.writeJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: true,
+        slug: "calendar",
+        resolvedFrom: "version",
+      }),
+    );
+    expect(defaultRuntime.log).not.toHaveBeenCalled();
+  });
+
+  it("fails verification for non-pass trust card audits", async () => {
+    verifySkillFromClawHubMock.mockResolvedValue({
+      ok: true,
+      slug: "calendar",
+      resolvedFrom: "latest",
+      registry: "https://clawhub.ai",
+      response: {},
+      trustCard: {
+        subject: { slug: "calendar", version: "1.2.3" },
+        artifact: { files: [] },
+        audit: {
+          status: "review",
+          summary: "Needs review.",
+          reasonCodes: ["suspicious.dep_not_found_on_registry"],
+        },
+        signature: { status: "unsigned" },
+      },
+    });
+
+    await expect(runCommand(["skills", "verify", "calendar"])).rejects.toThrow("__exit__:1");
+
+    expect(runtimeLogs).toContain("Audit Reasons: suspicious.dep_not_found_on_registry");
+  });
+
+  it("fails verification when trust card audit status is missing", async () => {
+    verifySkillFromClawHubMock.mockResolvedValue({
+      ok: true,
+      slug: "calendar",
+      resolvedFrom: "latest",
+      registry: "https://clawhub.ai",
+      response: {},
+      trustCard: {
+        subject: { slug: "calendar", version: "1.2.3" },
+        artifact: { files: [] },
+        audit: {
+          summary: "Missing status.",
+          reasonCodes: [],
+        },
+        signature: { status: "unsigned" },
+      },
+    });
+
+    await expect(runCommand(["skills", "verify", "calendar"])).rejects.toThrow("__exit__:1");
+
+    expect(runtimeLogs).toContain("Audit: UNKNOWN");
   });
 
   it.each([

@@ -9,12 +9,14 @@ import {
   readTrackedClawHubSkillSlugs,
   searchSkillsFromClawHub,
   updateSkillsFromClawHub,
+  verifySkillFromClawHub,
 } from "../agents/skills-clawhub.js";
 import {
   installSkillFromSource,
   isSkillSourceInstallSpec,
 } from "../agents/skills-source-install.js";
 import { getRuntimeConfig } from "../config/config.js";
+import type { ClawHubSkillTrustCard } from "../infra/clawhub.js";
 import { defaultRuntime } from "../runtime.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { formatDocsLink } from "../terminal/links.js";
@@ -104,6 +106,117 @@ function resolveClawHubTargetWorkspaceDir(
     return CONFIG_DIR;
   }
   return resolveActiveWorkspaceDir({ agentId });
+}
+
+function trustAuditStatusLabel(status: string | undefined): string {
+  const label = (status ?? "unknown").toUpperCase();
+  if (status === "pass") {
+    return theme.success(label);
+  }
+  if (status === "review" || status === "pending") {
+    return theme.warn(label);
+  }
+  if (status === "malicious" || status === "error") {
+    return theme.error(label);
+  }
+  return label;
+}
+
+function trustCardString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function trustCardStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+}
+
+function formatTrustCardSource(source: ClawHubSkillTrustCard["source"]): string | undefined {
+  if (!source) {
+    return undefined;
+  }
+  const repo = trustCardString(source.repo);
+  const commit = trustCardString(source.commit);
+  const sourcePath = trustCardString(source.path);
+  const url = trustCardString(source.url);
+  if (repo && commit && sourcePath) {
+    return `${repo}@${commit.slice(0, 12)} ${sourcePath}`;
+  }
+  return url;
+}
+
+function formatTrustCardRequirementList(label: string, value: unknown): string | undefined {
+  const items = trustCardStringArray(value);
+  return items.length ? `${label}=${items.join(",")}` : undefined;
+}
+
+function formatTrustCardRequires(
+  requires: Record<string, unknown> | null | undefined,
+): string | undefined {
+  if (!requires || typeof requires !== "object") {
+    return undefined;
+  }
+  const record = requires;
+  const parts = [
+    formatTrustCardRequirementList("env", record.env),
+    formatTrustCardRequirementList("bins", record.bins),
+    formatTrustCardRequirementList("anyBins", record.anyBins),
+    formatTrustCardRequirementList("config", record.config),
+  ].filter((part): part is string => Boolean(part));
+  return parts.length ? parts.join("; ") : undefined;
+}
+
+function printSkillTrustVerification(params: {
+  slug: string;
+  resolvedFrom: "installed" | "version" | "tag" | "latest";
+  registry: string;
+  trustCard: ClawHubSkillTrustCard;
+}): string | undefined {
+  const card = params.trustCard;
+  const subjectSlug = trustCardString(card.subject?.slug) ?? params.slug;
+  const version = trustCardString(card.subject?.version) ?? "?";
+  const displayName = trustCardString(card.subject?.displayName);
+  const auditStatus = trustCardString(card.audit?.status);
+  const signatureStatus = trustCardString(card.signature?.status) ?? "unknown";
+  const fingerprint = trustCardString(card.artifact?.fingerprint);
+  const publisher =
+    trustCardString(card.publisher?.handle) ?? trustCardString(card.publisher?.displayName);
+  const capabilities = trustCardStringArray(card.capabilities?.tags);
+  const source = formatTrustCardSource(card.source);
+  const requires = formatTrustCardRequires(card.capabilities?.requires);
+
+  defaultRuntime.log(`${subjectSlug}@${version} trust`);
+  if (displayName) {
+    defaultRuntime.log(`Name: ${displayName}`);
+  }
+  defaultRuntime.log(`Registry: ${params.registry}`);
+  defaultRuntime.log(`Resolved: ${params.resolvedFrom}`);
+  if (publisher) {
+    defaultRuntime.log(`Publisher: ${publisher}`);
+  }
+  defaultRuntime.log(`Audit: ${trustAuditStatusLabel(auditStatus)}`);
+  if (card.audit?.summary) {
+    defaultRuntime.log(`Audit Summary: ${card.audit.summary}`);
+  }
+  if (card.audit?.reasonCodes?.length) {
+    defaultRuntime.log(`Audit Reasons: ${card.audit.reasonCodes.join(", ")}`);
+  }
+  defaultRuntime.log(`Signature: ${signatureStatus}`);
+  if (fingerprint) {
+    defaultRuntime.log(`Fingerprint: ${fingerprint}`);
+  }
+  defaultRuntime.log(`Files: ${card.artifact?.files?.length ?? 0}`);
+  if (source) {
+    defaultRuntime.log(`Source: ${source}`);
+  }
+  if (capabilities.length) {
+    defaultRuntime.log(`Capabilities: ${capabilities.join(", ")}`);
+  }
+  if (requires) {
+    defaultRuntime.log(`Requires: ${requires}`);
+  }
+  return auditStatus;
 }
 
 /**
@@ -284,6 +397,68 @@ export function registerSkillsCli(program: Command) {
               continue;
             }
             defaultRuntime.log(`${result.slug} already at ${result.version}`);
+          }
+        } catch (err) {
+          defaultRuntime.error(String(err));
+          defaultRuntime.exit(1);
+        }
+      },
+    );
+
+  skills
+    .command("verify")
+    .description("Verify a ClawHub skill trust card")
+    .argument("<slug>", "ClawHub skill slug")
+    .option("--version <version>", "Verify a specific version")
+    .option("--tag <tag>", "Verify a tag")
+    .option("--json", "Output as JSON", false)
+    .option("--global", "Use the shared managed skills directory for installed-version lookup")
+    .option("--agent <id>", "Target agent workspace (defaults to cwd-inferred, then default agent)")
+    .action(
+      async (
+        slug: string,
+        opts: {
+          version?: string;
+          tag?: string;
+          json?: boolean;
+          global?: boolean;
+          agent?: string;
+        },
+        command: Command,
+      ) => {
+        try {
+          if (opts.version && opts.tag) {
+            defaultRuntime.error("Use either --version or --tag.");
+            defaultRuntime.exit(1);
+            return;
+          }
+          const workspaceDir = resolveClawHubTargetWorkspaceDir(command, opts);
+          if (!workspaceDir) {
+            return;
+          }
+          const result = await verifySkillFromClawHub({
+            workspaceDir,
+            slug,
+            version: opts.version,
+            tag: opts.tag,
+          });
+          if (!result.ok) {
+            defaultRuntime.error(result.error);
+            defaultRuntime.exit(1);
+            return;
+          }
+          if (opts.json) {
+            defaultRuntime.writeJson(result);
+            return;
+          }
+          const auditStatus = printSkillTrustVerification({
+            slug: result.slug,
+            resolvedFrom: result.resolvedFrom,
+            registry: result.registry,
+            trustCard: result.trustCard,
+          });
+          if (auditStatus !== "pass") {
+            defaultRuntime.exit(1);
           }
         } catch (err) {
           defaultRuntime.error(String(err));

@@ -1,5 +1,5 @@
 ---
-summary: "CLI reference for `openclaw skills` (search/install/update/list/info/check)"
+summary: "CLI reference for `openclaw skills` (search/install/update/verify/list/info/check)"
 read_when:
   - You want to see which skills are available and ready to run
   - You want to search ClawHub or install skills from ClawHub, Git, or local directories
@@ -9,8 +9,8 @@ title: "Skills"
 
 # `openclaw skills`
 
-Inspect local skills, search ClawHub, install skills from ClawHub/Git/local directories, and update
-ClawHub-tracked installs.
+Inspect local skills, search ClawHub, install skills from ClawHub/Git/local directories, update
+ClawHub-tracked installs, and verify ClawHub trust cards.
 
 Related:
 
@@ -36,6 +36,10 @@ openclaw skills update <slug> --global
 openclaw skills update --all
 openclaw skills update --all --agent <id>
 openclaw skills update --all --global
+openclaw skills verify <slug>
+openclaw skills verify <slug> --version <version>
+openclaw skills verify <slug> --tag <tag>
+openclaw skills verify <slug> --json
 openclaw skills list
 openclaw skills list --eligible
 openclaw skills list --json
@@ -49,14 +53,15 @@ openclaw skills check --agent <id>
 openclaw skills check --json
 ```
 
-`search` and `update` use ClawHub directly. `install <slug>` installs a ClawHub
-skill, `install git:owner/repo[@ref]` clones a Git skill, and `install ./path`
-copies a local skill directory. By default, `install` and `update` target the
-active workspace `skills/` directory; with `--global`, they target the shared
-managed skills directory. `list`/`info`/`check` still inspect the local skills
-visible to the current workspace and config. Workspace-backed commands resolve
-the target workspace from `--agent <id>`, then the current working directory
-when it is inside a configured agent workspace, then the default agent.
+`search`, `update`, and `verify` use ClawHub directly. `install <slug>` installs
+a ClawHub skill, `install git:owner/repo[@ref]` clones a Git skill, and
+`install ./path` copies a local skill directory. By default, `install`, `update`,
+and `verify` target the active workspace `skills/` directory; with `--global`,
+they target the shared managed skills directory. `list`/`info`/`check` still
+inspect the local skills visible to the current workspace and config.
+Workspace-backed commands resolve the target workspace from `--agent <id>`, then
+the current working directory when it is inside a configured agent workspace,
+then the default agent.
 
 Git and local directory installs expect `SKILL.md` at the source root. The
 install slug comes from `SKILL.md` frontmatter `name` when it is valid, then the
@@ -89,6 +94,13 @@ Notes:
   shared managed skills directory instead of the workspace.
 - `update --all` updates tracked ClawHub installs in the selected workspace, or
   in the shared managed skills directory when combined with `--global`.
+- `verify <slug>` fetches the ClawHub trust card. If the skill was installed
+  from ClawHub, OpenClaw verifies the installed version recorded in
+  `.clawhub/origin.json`; otherwise it verifies the latest ClawHub version.
+- `verify --version <version>` and `verify --tag <tag>` override installed
+  version lookup.
+- `verify --json` prints the raw trust-card response for scripts. Human output
+  exits non-zero when the audit status is not `pass`.
 - `check --agent <id>` checks the selected agent's workspace and reports which
   ready skills are actually visible to that agent's prompt or command surface.
 - `list` is the default action when no subcommand is provided.

@@ -4,9 +4,10 @@ import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const fetchClawHubSkillDetailMock = vi.fn();
+const fetchClawHubSkillTrustCardMock = vi.fn();
 const downloadClawHubSkillArchiveMock = vi.fn();
 const listClawHubSkillsMock = vi.fn();
-const resolveClawHubBaseUrlMock = vi.fn(() => "https://clawhub.ai");
+const resolveClawHubBaseUrlMock = vi.fn((baseUrl?: string) => baseUrl ?? "https://clawhub.ai");
 const searchClawHubSkillsMock = vi.fn();
 const archiveCleanupMock = vi.fn();
 const withExtractedArchiveRootMock = vi.fn();
@@ -15,6 +16,7 @@ const pathExistsMock = vi.fn();
 
 vi.mock("../infra/clawhub.js", () => ({
   fetchClawHubSkillDetail: fetchClawHubSkillDetailMock,
+  fetchClawHubSkillTrustCard: fetchClawHubSkillTrustCardMock,
   downloadClawHubSkillArchive: downloadClawHubSkillArchiveMock,
   listClawHubSkills: listClawHubSkillsMock,
   resolveClawHubBaseUrl: resolveClawHubBaseUrlMock,
@@ -33,8 +35,12 @@ vi.mock("../infra/fs-safe.js", () => ({
   pathExists: pathExistsMock,
 }));
 
-const { installSkillFromClawHub, searchSkillsFromClawHub, updateSkillsFromClawHub } =
-  await import("./skills-clawhub.js");
+const {
+  installSkillFromClawHub,
+  searchSkillsFromClawHub,
+  updateSkillsFromClawHub,
+  verifySkillFromClawHub,
+} = await import("./skills-clawhub.js");
 
 function expectInstallPackageSourceDir(sourceDir: string) {
   const call = installPackageDirMock.mock.calls.at(0);
@@ -74,6 +80,7 @@ function expectInvalidSlug(result: Awaited<ReturnType<typeof installSkillFromCla
 describe("skills-clawhub", () => {
   beforeEach(() => {
     fetchClawHubSkillDetailMock.mockReset();
+    fetchClawHubSkillTrustCardMock.mockReset();
     downloadClawHubSkillArchiveMock.mockReset();
     listClawHubSkillsMock.mockReset();
     resolveClawHubBaseUrlMock.mockReset();
@@ -83,7 +90,9 @@ describe("skills-clawhub", () => {
     installPackageDirMock.mockReset();
     pathExistsMock.mockReset();
 
-    resolveClawHubBaseUrlMock.mockReturnValue("https://clawhub.ai");
+    resolveClawHubBaseUrlMock.mockImplementation(
+      (baseUrl?: string) => baseUrl ?? "https://clawhub.ai",
+    );
     pathExistsMock.mockImplementation(async (input: string) => input.endsWith("SKILL.md"));
     fetchClawHubSkillDetailMock.mockResolvedValue({
       skill: {
@@ -95,6 +104,20 @@ describe("skills-clawhub", () => {
       latestVersion: {
         version: "1.0.0",
         createdAt: 3,
+      },
+    });
+    fetchClawHubSkillTrustCardMock.mockResolvedValue({
+      skill: {
+        slug: "agentreceipt",
+        displayName: "AgentReceipt",
+      },
+      version: {
+        version: "1.0.0",
+        createdAt: 3,
+      },
+      trustCard: {
+        audit: { status: "pass" },
+        signature: { status: "unsigned" },
       },
     });
     downloadClawHubSkillArchiveMock.mockResolvedValue({
@@ -375,5 +398,95 @@ describe("skills-clawhub", () => {
       baseUrl: undefined,
     });
     expect(listClawHubSkillsMock).not.toHaveBeenCalled();
+  });
+
+  it("verifies the installed ClawHub skill version when no version is specified", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-skills-clawhub-"));
+    const skillDir = path.join(workspaceDir, "skills", "agentreceipt");
+    await fs.mkdir(path.join(skillDir, ".clawhub"), { recursive: true });
+    await fs.writeFile(
+      path.join(skillDir, ".clawhub", "origin.json"),
+      `${JSON.stringify(
+        {
+          version: 1,
+          registry: "https://registry.example",
+          slug: "agentreceipt",
+          installedVersion: "1.2.3",
+          installedAt: 123,
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    try {
+      const result = await verifySkillFromClawHub({
+        workspaceDir,
+        slug: "agentreceipt",
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+      expect(result.resolvedFrom).toBe("installed");
+      expect(result.requestedVersion).toBe("1.2.3");
+      expect(result.registry).toBe("https://registry.example");
+      expect(fetchClawHubSkillTrustCardMock).toHaveBeenCalledWith({
+        slug: "agentreceipt",
+        version: "1.2.3",
+        tag: undefined,
+        baseUrl: "https://registry.example",
+      });
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("verifies the latest ClawHub trust card when the skill is not installed", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-skills-clawhub-"));
+
+    try {
+      const result = await verifySkillFromClawHub({
+        workspaceDir,
+        slug: "agentreceipt",
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+      expect(result.resolvedFrom).toBe("latest");
+      expect(result.requestedVersion).toBeUndefined();
+      expect(fetchClawHubSkillTrustCardMock).toHaveBeenCalledWith({
+        slug: "agentreceipt",
+        version: undefined,
+        tag: undefined,
+        baseUrl: undefined,
+      });
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("lets an explicit trust-card version override the installed version", async () => {
+    const result = await verifySkillFromClawHub({
+      workspaceDir: "/tmp/workspace",
+      slug: "agentreceipt",
+      version: "2.0.0",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
+    expect(result.resolvedFrom).toBe("version");
+    expect(fetchClawHubSkillTrustCardMock).toHaveBeenCalledWith({
+      slug: "agentreceipt",
+      version: "2.0.0",
+      tag: undefined,
+      baseUrl: undefined,
+    });
   });
 });

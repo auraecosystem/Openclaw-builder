@@ -302,6 +302,54 @@ export type ClawHubSkillDetail = {
   } | null;
 };
 
+export type ClawHubSkillTrustCard = {
+  format?: string;
+  generatedAt?: number;
+  subject?: {
+    slug?: string;
+    displayName?: string;
+    version?: string;
+  } | null;
+  publisher?: {
+    handle?: string | null;
+    displayName?: string | null;
+  } | null;
+  source?: {
+    url?: string | null;
+    repo?: string | null;
+    commit?: string | null;
+    path?: string | null;
+  } | null;
+  artifact?: {
+    fingerprint?: string | null;
+    files?: unknown[];
+  } | null;
+  capabilities?: {
+    tags?: string[];
+    requires?: Record<string, unknown> | null;
+  } | null;
+  audit?: {
+    status?: "pass" | "review" | "malicious" | "pending" | "error" | (string & {});
+    summary?: string | null;
+    reasonCodes?: string[];
+  } | null;
+  signature?: {
+    status?: "unsigned" | "verified" | "invalid" | (string & {});
+  } | null;
+};
+
+export type ClawHubSkillTrustCardResponse = {
+  skill: {
+    slug: string;
+    displayName: string;
+  } | null;
+  version: {
+    version: string;
+    createdAt?: number;
+  } | null;
+  trustCard: ClawHubSkillTrustCard;
+};
+
 export type ClawHubSkillListResponse = {
   items: Array<{
     slug: string;
@@ -875,6 +923,28 @@ export async function fetchClawHubSkillDetail(params: {
     token: params.token,
     timeoutMs: params.timeoutMs,
     fetchImpl: params.fetchImpl,
+  });
+}
+
+export async function fetchClawHubSkillTrustCard(params: {
+  slug: string;
+  version?: string;
+  tag?: string;
+  baseUrl?: string;
+  token?: string;
+  timeoutMs?: number;
+  fetchImpl?: FetchLike;
+}): Promise<ClawHubSkillTrustCardResponse> {
+  return await fetchJson<ClawHubSkillTrustCardResponse>({
+    baseUrl: params.baseUrl,
+    path: `/api/v1/skills/${encodeURIComponent(params.slug)}/trust-card`,
+    token: params.token,
+    timeoutMs: params.timeoutMs,
+    fetchImpl: params.fetchImpl,
+    search: {
+      version: params.version,
+      tag: params.version ? undefined : params.tag,
+    },
   });
 }
 
