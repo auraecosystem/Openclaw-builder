@@ -239,6 +239,49 @@ describe("embedded attempt session lock lifecycle", () => {
     expect(release).toHaveBeenCalledTimes(4);
   });
 
+  it("allows append-only assistant output written by the active prompt", async () => {
+    const sessionFile = await createTempSessionFile();
+    const release = vi.fn(async () => {});
+    const acquireSessionWriteLock = vi.fn(async () => ({ release }));
+    const controller = await createEmbeddedAttemptSessionLockController({
+      acquireSessionWriteLock,
+      lockOptions: { ...lockOptions, sessionFile },
+    });
+
+    await controller.releaseForPrompt();
+    await fs.appendFile(
+      sessionFile,
+      '{"type":"message","message":{"role":"assistant","content":"partial"}}\n',
+      "utf8",
+    );
+
+    await expect(controller.withSessionWriteLock(() => "finalize")).resolves.toBe("finalize");
+    expect(controller.hasSessionTakeover()).toBe(false);
+  });
+
+  it("rejects assistant-looking appends when the session file identity changed", async () => {
+    const sessionFile = await createTempSessionFile();
+    const release = vi.fn(async () => {});
+    const acquireSessionWriteLock = vi.fn(async () => ({ release }));
+    const controller = await createEmbeddedAttemptSessionLockController({
+      acquireSessionWriteLock,
+      lockOptions: { ...lockOptions, sessionFile },
+    });
+
+    await controller.releaseForPrompt();
+    await fs.writeFile(
+      `${sessionFile}.replacement`,
+      '{"type":"session","id":"replacement"}\n{"type":"message","message":{"role":"assistant","content":"partial"}}\n',
+      "utf8",
+    );
+    await fs.rename(`${sessionFile}.replacement`, sessionFile);
+
+    await expect(controller.withSessionWriteLock(() => "finalize")).rejects.toBeInstanceOf(
+      EmbeddedAttemptSessionTakeoverError,
+    );
+    expect(controller.hasSessionTakeover()).toBe(true);
+  });
+
   it("refreshes the prompt fence after an owned transcript mirror append", async () => {
     const sessionFile = await createTempSessionFile();
     const release = vi.fn(async () => {});
@@ -492,6 +535,48 @@ describe("embedded attempt session lock lifecycle", () => {
       "handle:message_end",
       "lock",
       "process:message_end",
+    ]);
+  });
+
+  it("locks and reconnects the current Pi agent event handler", async () => {
+    const calls: string[] = [];
+    const session = {
+      _extensionRunner: { hasHandlers: vi.fn(() => false) },
+      _disconnectFromAgent: vi.fn(() => {
+        calls.push("disconnect");
+      }),
+      _reconnectToAgent: vi.fn(() => {
+        calls.push("reconnect");
+      }),
+      _handleAgentEvent: vi.fn(async (event: { type?: string }) => {
+        calls.push(`event:${event.type}`);
+      }),
+    };
+
+    installSessionEventWriteLock({
+      session,
+      withSessionWriteLock: async (run) => {
+        calls.push("lock");
+        try {
+          return await run();
+        } finally {
+          calls.push("unlock");
+        }
+      },
+    });
+
+    await session["_handleAgentEvent"]({ type: "message_end" });
+    await session["_handleAgentEvent"]({ type: "tool_execution_end" });
+
+    expect(session["_disconnectFromAgent"]).toHaveBeenCalledTimes(1);
+    expect(session["_reconnectToAgent"]).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual([
+      "disconnect",
+      "reconnect",
+      "lock",
+      "event:message_end",
+      "unlock",
+      "event:tool_execution_end",
     ]);
   });
 
