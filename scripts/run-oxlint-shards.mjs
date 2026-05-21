@@ -44,6 +44,20 @@ const shouldAcquireParentLock = shouldAcquireLocalHeavyCheckLockForOxlint(extraA
   cwd: process.cwd(),
   env: baseEnv,
 });
+
+if (!shouldAcquireParentLock) {
+  const result = spawnSync(process.execPath, [runner, ...extraArgs], {
+    stdio: "inherit",
+    env: baseEnv,
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  process.exit(result.status ?? 1);
+}
+
 const nativeTypecheckRefusalError = getLocalNativeTypecheckRefusalError({
   args: extraArgs,
   env: baseEnv,
