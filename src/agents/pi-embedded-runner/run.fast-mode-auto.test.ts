@@ -31,7 +31,10 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
     const events: Array<{
       data?: { summary?: unknown };
     }> = [];
-    const toolResults: Array<{ text?: string }> = [];
+    const toolResults: Array<{
+      text?: string;
+      channelData?: Record<string, unknown>;
+    }> = [];
     let completeAttempt: (() => void) | undefined;
     const attemptDone = new Promise<EmbeddedRunAttemptResult>((resolve) => {
       completeAttempt = () => {
@@ -65,6 +68,7 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
     const summaries = events.map((event) => event.data?.summary).filter(Boolean);
     expect(summaries.some((summary) => String(summary).startsWith("💨Fast: auto-off("))).toBe(true);
     expect(toolResults.some((payload) => payload.text?.startsWith("💨Fast: auto-off("))).toBe(true);
+    expect(toolResults.every((payload) => payload.channelData?.openclawProgressKind)).toBe(true);
 
     completeAttempt?.();
     await resultPromise;

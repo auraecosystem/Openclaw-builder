@@ -1931,6 +1931,8 @@ export async function dispatchReplyFromConfig(
       ? createTtsDirectiveTextStreamCleaner()
       : undefined;
 
+    const isFastModeAutoProgressPayload = (payload: ReplyPayload): boolean =>
+      payload.channelData?.openclawProgressKind === "fast-mode-auto";
     const resolveToolDeliveryPayload = (payload: ReplyPayload): ReplyPayload | null => {
       if (
         shouldSuppressLocalExecApprovalPrompt({
@@ -1952,6 +1954,9 @@ export async function dispatchReplyFromConfig(
           ? payload.channelData.execApproval
           : undefined;
       if (execApproval && typeof execApproval === "object" && !Array.isArray(execApproval)) {
+        return payload;
+      }
+      if (isFastModeAutoProgressPayload(payload)) {
         return payload;
       }
       // Group/native flows intentionally suppress tool summary text, but media-only
@@ -2146,7 +2151,10 @@ export async function dispatchReplyFromConfig(
                 if (shouldSuppressMessageToolOnlyTextErrorProgress(deliveryPayload)) {
                   return;
                 }
-                if (shouldSuppressDefaultToolProgressMessages()) {
+                if (
+                  shouldSuppressDefaultToolProgressMessages() &&
+                  !isFastModeAutoProgressPayload(deliveryPayload)
+                ) {
                   const hasMedia = resolveSendableOutboundReplyParts(deliveryPayload).hasMedia;
                   if (!hasMedia && !hasExecApprovalPayload(deliveryPayload)) {
                     return;

@@ -520,7 +520,10 @@ export async function runEmbeddedPiAgent(
           },
           ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
         });
-        await params.onToolResult?.({ text: summary });
+        await params.onToolResult?.({
+          text: summary,
+          channelData: { openclawProgressKind: "fast-mode-auto" },
+        });
       };
       const announceFastModeAutoOff = (payload: {
         enabled: boolean;
