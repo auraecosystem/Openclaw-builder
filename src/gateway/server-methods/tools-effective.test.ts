@@ -352,7 +352,6 @@ describe("tools.effective handler", () => {
         groupChannel: "#ops",
         groupSpace: "workspace-5",
         spawnedBy: "agent:main:telegram:group:parent-group",
-        senderIsOwner: false,
       }),
     );
     expect(dispose).toHaveBeenCalledTimes(1);
