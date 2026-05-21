@@ -1658,22 +1658,27 @@ export const dispatchTelegramMessage = async ({
                             interleavedOutput = "";
                             rawReasoningCheckpoint = 0;
                           }
-                          // Italicize the new portion of the reasoning text
-                          // and append it to interleavedOutput so it lives in
-                          // the same message as any tool-progress lines
-                          // injected via injectToolLineIntoInterleave. The
-                          // checkpoint guards against re-deliveries of the
-                          // same accumulated text.
+                          // Route the payload through the canonical Telegram
+                          // reasoning splitter first — it strips `<think>`-
+                          // style wrappers, the legacy "Reasoning:" prefix,
+                          // and other tag noise that the embedded native
+                          // runtime relies on being cleaned before display.
+                          // Without this, a payload like `<think>...</think>`
+                          // renders the tags literally in the interleaved
+                          // message instead of using the splitter's
+                          // `formatReasoningMessage` contract that the rest
+                          // of the Telegram dispatch path expects.
                           clearActiveTimer();
-                          const fullText = typeof payload.text === "string" ? payload.text : "";
-                          const newPart = fullText.slice(rawReasoningCheckpoint);
+                          const split = splitTelegramReasoningText(payload.text, true);
+                          const cleanedFullText = split.reasoningText ?? "";
+                          const newPart = cleanedFullText.slice(rawReasoningCheckpoint);
                           if (newPart) {
                             const italicized = newPart
                               .split("\n")
                               .map((l) => (l.trim() ? `_${l}_` : ""))
                               .join("\n");
                             interleavedOutput += italicized;
-                            rawReasoningCheckpoint = fullText.length;
+                            rawReasoningCheckpoint = cleanedFullText.length;
                           }
                           updateInterleavedDisplay();
                           // Lane has content the user shouldn't lose; mark
@@ -1848,12 +1853,15 @@ export const dispatchTelegramMessage = async ({
       runtime.error?.(danger(`telegram dispatch failed: ${String(err)}`));
     } finally {
       progressDraftGate.cancel();
-      // Stop the rolling tool-timer interval first — startToolTimer() runs a
-      // setInterval(3000ms) that the lane cleanup below does NOT cover. A turn
-      // that ends mid-tool would otherwise leak the interval for the rest of
-      // the process, waking every 3s to repaint a torn-down lane.
-      clearActiveTimer();
+      // Drain the queue FIRST before clearing the timer. A queued
+      // injectToolLineIntoInterleave task can call startToolTimer() during
+      // the await, so if we cleared first and then drained, the queued task
+      // would arm a fresh setInterval(3000ms) that no later code clears,
+      // leaking the interval for the rest of the process.
       await draftLaneEventQueue;
+      // Now that no further queued work can fire startToolTimer(), it's safe
+      // to clear any still-active timer.
+      clearActiveTimer();
       nativeToolProgressDraft?.stop();
       // Belt-and-braces: when interleavedOutput has content but onReasoningEnd
       // never fired (turn aborted mid-stream, error mid-reasoning, etc.), the
