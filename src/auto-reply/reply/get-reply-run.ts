@@ -727,6 +727,7 @@ export async function runPreparedReply(
         sessionKey,
         isMainSession,
         isNewSession,
+        isHeartbeat,
       });
       if (eventsBlock) {
         drainedSystemEventBlocks.push(eventsBlock.text);
