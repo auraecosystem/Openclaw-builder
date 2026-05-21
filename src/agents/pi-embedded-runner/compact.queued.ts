@@ -17,6 +17,7 @@ import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import type { ProviderRuntimeModel } from "../../plugins/provider-runtime-model.types.js";
 import { enqueueCommandInLane } from "../../process/command-queue.js";
 import { resolveUserPath } from "../../utils.js";
+import { resolveHookMessageProvider } from "../../utils/hook-message-provider.js";
 import { resolveAgentDir, resolveSessionAgentIds } from "../agent-scope.js";
 import { resolveContextWindowInfo } from "../context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../defaults.js";
@@ -153,7 +154,10 @@ export async function compactEmbeddedPiSession(
           sessionKey: params.sessionKey,
           config: params.config,
         });
-        const resolvedMessageProvider = params.messageChannel ?? params.messageProvider;
+        const resolvedMessageProvider = resolveHookMessageProvider({
+          sessionKey: params.sessionKey,
+          provider: params.messageChannel ?? params.messageProvider,
+        });
         const hookCtx = {
           sessionId: params.sessionId,
           agentId: sessionAgentId,

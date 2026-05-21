@@ -42,6 +42,7 @@ import {
   normalizeAgentId,
   parseAgentSessionKey,
 } from "../routing/session-key.js";
+import { inferHookMessageProviderFromSessionKey } from "../utils/hook-message-provider.js";
 import {
   forgetActiveSessionForShutdown,
   listActiveSessionsForShutdown,
@@ -635,6 +636,7 @@ export async function emitGatewayBeforeResetPluginHook(params: {
         agentId,
         sessionKey,
         sessionId,
+        messageProvider: inferHookMessageProviderFromSessionKey(sessionKey),
         workspaceDir,
       },
     )

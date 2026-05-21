@@ -1,6 +1,7 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { emitAgentEvent } from "../infra/agent-events.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
+import { resolveHookMessageProvider } from "../utils/hook-message-provider.js";
 import type { EmbeddedPiSubscribeContext } from "./pi-embedded-subscribe.handlers.types.js";
 import { makeZeroUsageSnapshot } from "./usage.js";
 
@@ -35,7 +36,17 @@ function compactionLogKind(reason: CompactionReason): string {
   return reason === "manual" ? "manual compaction" : "auto-compaction";
 }
 
-export function handleCompactionStart(ctx: EmbeddedPiSubscribeContext, evt: CompactionStartEvent) {
+function resolveCompactionHookMessageProvider(ctx: EmbeddedPiSubscribeContext): string | undefined {
+  return resolveHookMessageProvider({
+    sessionKey: ctx.params.sessionKey,
+    provider: ctx.params.messageChannel ?? ctx.params.messageProvider,
+  });
+}
+
+export function handleCompactionStart(
+  ctx: EmbeddedPiSubscribeContext,
+  evt: CompactionStartEvent = { type: "compaction_start" },
+) {
   const reason = normalizeCompactionReason(evt.reason);
   const kind = compactionLogKind(reason);
   ctx.state.compactionInFlight = true;
@@ -69,6 +80,7 @@ export function handleCompactionStart(ctx: EmbeddedPiSubscribeContext, evt: Comp
         },
         {
           sessionKey: ctx.params.sessionKey,
+          messageProvider: resolveCompactionHookMessageProvider(ctx),
         },
       )
       .catch((err) => {
@@ -157,7 +169,10 @@ export function handleCompactionEnd(ctx: EmbeddedPiSubscribeContext, evt: Compac
             compactedCount: ctx.getCompactionCount(),
             sessionFile: ctx.params.session.sessionFile,
           },
-          { sessionKey: ctx.params.sessionKey },
+          {
+            sessionKey: ctx.params.sessionKey,
+            messageProvider: resolveCompactionHookMessageProvider(ctx),
+          },
         )
         .catch((err) => {
           ctx.log.warn(`after_compaction hook failed: ${String(err)}`);

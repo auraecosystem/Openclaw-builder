@@ -652,6 +652,10 @@ async function compactEmbeddedPiSessionDirectOnce(
 
     const sessionLabel = params.sessionKey ?? params.sessionId;
     const resolvedMessageProvider = params.messageChannel ?? params.messageProvider;
+    const hookMessageProvider = resolveHookMessageProvider({
+      sessionKey: params.sessionKey,
+      provider: resolvedMessageProvider,
+    });
     const contextInjectionMode = resolveContextInjectionMode(params.config, effectiveSkillAgentId);
     const { contextFiles } =
       contextInjectionMode === "never"

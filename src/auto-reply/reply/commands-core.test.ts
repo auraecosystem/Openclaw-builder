@@ -95,6 +95,36 @@ describe("emitResetCommandHooks", () => {
     expect(ctx?.sessionKey).toBe("agent:navi:main");
     expect(ctx?.sessionId).toBe("prev-session");
     expect(ctx?.workspaceDir).toBe("/tmp/openclaw-workspace");
+    expect(ctx?.messageProvider).toBe("discord");
+  });
+
+  it("normalizes OriginatingChannel before emitting before_reset hook context", async () => {
+    const command = {
+      surface: "telegram",
+      senderId: "rai",
+      channel: "telegram",
+      from: "telegram:rai",
+      to: "telegram:bot",
+      resetHookTriggered: false,
+    } as HandleCommandsParams["command"];
+
+    await emitResetCommandHooks({
+      action: "new",
+      ctx: { OriginatingChannel: "Telegram" } as HandleCommandsParams["ctx"],
+      cfg: {} as HandleCommandsParams["cfg"],
+      command,
+      sessionKey: "agent:main:telegram:direct:123",
+      previousSessionEntry: {
+        sessionId: "prev-session",
+      } as HandleCommandsParams["previousSessionEntry"],
+      workspaceDir: "/tmp/openclaw-workspace",
+    });
+
+    expect(hookRunnerMocks.runBeforeReset).toHaveBeenCalledTimes(1);
+    const [, ctx] = hookRunnerMocks.runBeforeReset.mock.calls[0] ?? [];
+    expect(ctx).toMatchObject({
+      messageProvider: "telegram",
+    });
   });
 
   it("falls back to main when the reset hook has no session key", async () => {
@@ -103,6 +133,7 @@ describe("emitResetCommandHooks", () => {
     expect(ctx?.sessionKey).toBeUndefined();
     expect(ctx?.sessionId).toBe("prev-session");
     expect(ctx?.workspaceDir).toBe("/tmp/openclaw-workspace");
+    expect(ctx?.messageProvider).toBe("discord");
   });
 
   it("keeps the main-agent path on the main agent workspace", async () => {
@@ -111,6 +142,7 @@ describe("emitResetCommandHooks", () => {
     expect(ctx?.sessionKey).toBe("agent:main:main");
     expect(ctx?.sessionId).toBe("prev-session");
     expect(ctx?.workspaceDir).toBe("/tmp/openclaw-workspace");
+    expect(ctx?.messageProvider).toBe("discord");
   });
 
   it("recovers the archived transcript when the original reset transcript path is gone", async () => {
@@ -151,5 +183,6 @@ describe("emitResetCommandHooks", () => {
     expect(event.messages).toEqual([{ role: "user", content: "Recovered from archive" }]);
     expect(event.reason).toBe("new");
     expect(ctx.sessionId).toBe("prev-session");
+    expect(ctx.messageProvider).toBe("telegram");
   });
 });
