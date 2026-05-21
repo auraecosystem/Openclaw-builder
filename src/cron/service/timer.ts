@@ -152,6 +152,7 @@ type CronAgentWatchdog = {
   start: () => void;
   noteRunnerStarted: (info?: CronAgentExecutionStarted) => void;
   notePhase: (info: CronAgentExecutionPhaseUpdate) => void;
+  getDeadlineAtMs: () => number | undefined;
   activeExecution: () => CronAgentExecutionStarted | undefined;
   dispose: () => void;
 };
@@ -191,6 +192,7 @@ export async function executeJobCoreWithTimeout(
   const corePromise = executeJobCore(state, job, runAbortController.signal, {
     onExecutionStarted: deferTimeoutUntilExecutionStart ? watchdog.noteRunnerStarted : undefined,
     onExecutionPhase: deferTimeoutUntilExecutionStart ? watchdog.notePhase : undefined,
+    getDeadlineAtMs: watchdog.getDeadlineAtMs,
   });
   watchdog.start();
   void corePromise.catch((err) => {
@@ -231,6 +233,7 @@ function createCronAgentWatchdog(params: {
   let setupTimeoutId: NodeJS.Timeout | undefined;
   let preExecutionTimeoutId: NodeJS.Timeout | undefined;
   let activeExecution: CronAgentExecutionStarted | undefined;
+  let deadlineAtMs: number | undefined;
 
   const setTimedOut = (reason: string) => {
     if (state === "timed_out" || state === "disposed") {
@@ -243,6 +246,7 @@ function createCronAgentWatchdog(params: {
     if (timeoutId || state === "disposed") {
       return;
     }
+    deadlineAtMs = Date.now() + params.jobTimeoutMs;
     timeoutId = setTimeout(() => {
       setTimedOut(timeoutErrorMessage(activeExecution));
     }, params.jobTimeoutMs);
@@ -323,6 +327,7 @@ function createCronAgentWatchdog(params: {
       }
       noteExecutionProgress(info);
     },
+    getDeadlineAtMs: () => deadlineAtMs,
     activeExecution: () => activeExecution,
     dispose: () => {
       state = "disposed";
@@ -1674,6 +1679,8 @@ export async function executeJobCore(
   options?: {
     onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
     onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;
+    deadlineAtMs?: number;
+    getDeadlineAtMs?: () => number | undefined;
   },
 ): Promise<
   CronRunOutcome &
@@ -1851,6 +1858,8 @@ async function executeDetachedCronJob(
   options?: {
     onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
     onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;
+    deadlineAtMs?: number;
+    getDeadlineAtMs?: () => number | undefined;
   },
 ): Promise<
   CronRunOutcome &
@@ -1887,6 +1896,8 @@ async function executeDetachedCronJob(
     abortSignal,
     onExecutionStarted: options?.onExecutionStarted,
     onExecutionPhase: options?.onExecutionPhase,
+    deadlineAtMs: options?.deadlineAtMs,
+    getDeadlineAtMs: options?.getDeadlineAtMs,
   });
 
   if (abortSignal?.aborted) {
