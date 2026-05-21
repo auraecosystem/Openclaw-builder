@@ -260,7 +260,7 @@ async function deliverTelegramDirectMessageCompletion(params: {
     to: "123456789",
     accountId: "bot-1",
   };
-  const requesterSessionKey = params.requesterSessionKey ?? "agent:main:telegram:123456789";
+  const requesterSessionKey = params.requesterSessionKey ?? "agent:main:direct:telegram-123456789";
   testing.setDepsForTest({
     callGateway: params.callGateway,
     getRequesterSessionActivity: () => ({
