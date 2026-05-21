@@ -19,10 +19,10 @@ export type {
   ChannelStreamingConfig,
   ChannelStreamingProgressConfig,
   ChannelStreamingPreviewConfig,
-  SlackChannelStreamingConfig,
   StreamingMode,
   TextChunkMode,
 } from "../config/types.base.js";
+export type { SlackChannelStreamingConfig } from "../config/types.slack.js";
 
 type StreamingCompatEntry = {
   streaming?: unknown;
@@ -209,6 +209,8 @@ const EMOJI_PREFIX_RE = /^\p{Extended_Pictographic}/u;
 export type ChannelProgressDraftLineInput =
   | {
       event: "tool";
+      itemId?: string;
+      toolCallId?: string;
       name?: string;
       phase?: string;
       args?: Record<string, unknown>;
@@ -242,6 +244,8 @@ export type ChannelProgressDraftLineInput =
     }
   | {
       event: "command-output";
+      itemId?: string;
+      toolCallId?: string;
       phase?: string;
       title?: string;
       name?: string;
@@ -250,6 +254,8 @@ export type ChannelProgressDraftLineInput =
     }
   | {
       event: "patch";
+      itemId?: string;
+      toolCallId?: string;
       phase?: string;
       title?: string;
       name?: string;
@@ -293,6 +299,7 @@ function buildNamedProgressLine(
   metas: readonly (string | undefined | null)[] | undefined,
   options?: ChannelProgressLineOptions,
   fields?: {
+    id?: string;
     status?: string;
   },
 ): ChannelProgressDraftLine | undefined {
@@ -311,6 +318,7 @@ function buildNamedProgressLine(
     ? text.slice(prefix.length + 2).trim()
     : compactCommandPrefix;
   return {
+    ...(fields?.id ? { id: fields.id } : {}),
     kind,
     text,
     label: display.label,
@@ -418,6 +426,7 @@ export function buildChannelProgressDraftLine(
           input.phase && !input.name ? input.phase : undefined,
         ],
         options,
+        { id: input.itemId ?? input.toolCallId },
       );
     }
     case "item": {
@@ -433,6 +442,7 @@ export function buildChannelProgressDraftLine(
       }
       if (name) {
         return buildNamedProgressLine(input.event, name, [meta], options, {
+          id: input.itemId,
           status: input.status,
         });
       }
@@ -485,7 +495,7 @@ export function buildChannelProgressDraftLine(
         input.name ?? "exec",
         [status, input.title],
         options,
-        { status },
+        { id: input.itemId ?? input.toolCallId, status },
       );
     }
     case "patch": {
@@ -497,6 +507,7 @@ export function buildChannelProgressDraftLine(
         input.name ?? "apply_patch",
         patchMetas(input),
         options,
+        { id: input.itemId ?? input.toolCallId },
       );
     }
   }
