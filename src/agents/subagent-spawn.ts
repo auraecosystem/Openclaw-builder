@@ -126,11 +126,11 @@ const MAX_SUBAGENT_AGENT_GATEWAY_TIMEOUT_MS = 300_000;
 const SUBAGENT_GATEWAY_READINESS_TIMEOUT_MS = 20_000;
 const SUBAGENT_GATEWAY_READINESS_RETRY_DELAYS_MS_DEFAULT = [1_000, 3_000, 10_000] as const;
 const SUBAGENT_GATEWAY_READINESS_RETRY_DELAYS_MS_FAST = [8, 16, 32] as const;
-let _subagentGatewayReadinessRetryDelaysMs: readonly number[] | null = null;
+let subagentGatewayReadinessRetryDelaysMsForTest: readonly number[] | null = null;
 
 function getSubagentGatewayReadinessRetryDelaysMs(): readonly number[] {
-  if (_subagentGatewayReadinessRetryDelaysMs !== null) {
-    return _subagentGatewayReadinessRetryDelaysMs;
+  if (subagentGatewayReadinessRetryDelaysMsForTest !== null) {
+    return subagentGatewayReadinessRetryDelaysMsForTest;
   }
   return process.env.OPENCLAW_TEST_FAST === "1"
     ? SUBAGENT_GATEWAY_READINESS_RETRY_DELAYS_MS_FAST
@@ -883,14 +883,6 @@ export async function spawnSubagentDirect(
       ? { threadId: ctx.agentThreadId }
       : {}),
   });
-  try {
-    await ensureGatewayReadyForSubagentSpawn();
-  } catch (err) {
-    return {
-      status: "error",
-      error: summarizeError(err),
-    };
-  }
   let childSessionOrigin = resolveRequesterOriginForChild({
     cfg,
     targetAgentId,
@@ -1445,7 +1437,7 @@ export const testing = {
       : defaultSubagentSpawnDeps;
   },
   setReadinessRetryDelaysForTest(delays: readonly number[] | null) {
-    _subagentGatewayReadinessRetryDelaysMs = delays;
+    subagentGatewayReadinessRetryDelaysMsForTest = delays;
   },
 };
 export { testing as __testing };
