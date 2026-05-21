@@ -179,26 +179,42 @@ const subCliCommandCatalog = defineCommandDescriptorCatalog([
   },
 ] as const satisfies ReadonlyArray<SubCliDescriptor>);
 
-export function getSubCliEntries(): ReadonlyArray<SubCliDescriptor> {
-  const descriptors = subCliCommandCatalog.getDescriptors();
+function filterPrivateQaItems<T>(
+  items: ReadonlyArray<T>,
+  getName: (item: T) => string,
+): ReadonlyArray<T> {
   if (isPrivateQaCliEnabled()) {
-    return descriptors;
+    return items;
   }
-  return descriptors.filter((descriptor) => descriptor.name !== "qa");
+  return items.filter((item) => getName(item) !== "qa");
+}
+
+export const SUB_CLI_DESCRIPTORS = filterPrivateQaItems(
+  subCliCommandCatalog.descriptors,
+  (descriptor) => descriptor.name,
+);
+
+export function getSubCliEntries(): ReadonlyArray<SubCliDescriptor> {
+  return filterPrivateQaItems(
+    subCliCommandCatalog.getDescriptors(),
+    (descriptor) => descriptor.name,
+  );
 }
 
 export function getSubCliCommandsWithSubcommands(): string[] {
-  const commands = subCliCommandCatalog.getCommandsWithSubcommands();
-  if (isPrivateQaCliEnabled()) {
-    return commands;
-  }
-  return commands.filter((command) => command !== "qa");
+  return [
+    ...filterPrivateQaItems(
+      subCliCommandCatalog.getCommandsWithSubcommands(),
+      (command) => command,
+    ),
+  ];
 }
 
 export function getSubCliParentDefaultHelpCommands(): string[] {
-  const commands = subCliCommandCatalog.getParentDefaultHelpCommands();
-  if (isPrivateQaCliEnabled()) {
-    return commands;
-  }
-  return commands.filter((command) => command !== "qa");
+  return [
+    ...filterPrivateQaItems(
+      subCliCommandCatalog.getParentDefaultHelpCommands(),
+      (command) => command,
+    ),
+  ];
 }
