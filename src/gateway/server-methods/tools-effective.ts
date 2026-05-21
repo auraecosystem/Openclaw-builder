@@ -10,7 +10,6 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logDebug, logWarn } from "../../logger.js";
 import { stringifyRouteThreadId } from "../../plugin-sdk/channel-route.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
-import { ADMIN_SCOPE } from "../method-scopes.js";
 import {
   ErrorCodes,
   errorShape,
@@ -45,7 +44,6 @@ type TrustedToolsEffectiveContext = {
   workspaceDir: string;
   mcpConfigFingerprint: string;
   mcpServerNames: string[];
-  senderIsOwner: boolean;
   modelProvider?: string;
   modelId?: string;
   messageProvider?: string;
@@ -180,7 +178,6 @@ function resolveBaseToolsEffectiveInventory(
     messageProvider: context.messageProvider,
     modelProvider: context.modelProvider,
     modelId: context.modelId,
-    senderIsOwner: context.senderIsOwner,
     currentChannelId: context.currentChannelId,
     currentThreadTs: context.currentThreadTs,
     accountId: context.accountId,
@@ -208,7 +205,6 @@ function filterMcpTools(params: {
     groupChannel: params.context.groupChannel,
     groupSpace: params.context.groupSpace,
     spawnedBy: params.context.spawnedBy,
-    senderIsOwner: params.context.senderIsOwner,
     warn: logWarn,
   });
 }
@@ -283,7 +279,6 @@ async function resolveLiveToolsEffectiveInventory(
 function resolveTrustedToolsEffectiveContext(params: {
   sessionKey: string;
   requestedAgentId?: string;
-  senderIsOwner: boolean;
   respond: RespondFn;
 }) {
   const loaded = loadSessionEntry(params.sessionKey);
@@ -326,7 +321,6 @@ function resolveTrustedToolsEffectiveContext(params: {
     workspaceDir,
     mcpConfigFingerprint: mcpConfig.fingerprint,
     mcpServerNames: mcpConfig.serverNames,
-    senderIsOwner: params.senderIsOwner,
     modelProvider: resolvedModel.provider,
     modelId: resolvedModel.model,
     messageProvider:
@@ -365,7 +359,6 @@ async function handleToolsEffectiveRequest(params: {
   mode: "read" | "refresh";
   rawParams: unknown;
   respond: RespondFn;
-  client: Parameters<GatewayRequestHandlers[string]>[0]["client"];
   context: Parameters<GatewayRequestHandlers[string]>[0]["context"];
 }) {
   if (!validateToolsEffectiveParams(params.rawParams)) {
@@ -391,9 +384,6 @@ async function handleToolsEffectiveRequest(params: {
   const trustedContext = resolveTrustedToolsEffectiveContext({
     sessionKey: params.rawParams.sessionKey,
     requestedAgentId,
-    senderIsOwner: Array.isArray(params.client?.connect?.scopes)
-      ? params.client.connect.scopes.includes(ADMIN_SCOPE)
-      : false,
     respond: params.respond,
   });
   if (!trustedContext) {
@@ -417,23 +407,21 @@ async function handleToolsEffectiveRequest(params: {
 }
 
 export const toolsEffectiveHandlers: GatewayRequestHandlers = {
-  "tools.effective": async ({ params, respond, client, context }) => {
+  "tools.effective": async ({ params, respond, context }) => {
     await handleToolsEffectiveRequest({
       method: "tools.effective",
       mode: "read",
       rawParams: params,
       respond,
-      client,
       context,
     });
   },
-  "tools.effective.refresh": async ({ params, respond, client, context }) => {
+  "tools.effective.refresh": async ({ params, respond, context }) => {
     await handleToolsEffectiveRequest({
       method: "tools.effective.refresh",
       mode: "refresh",
       rawParams: params,
       respond,
-      client,
       context,
     });
   },
