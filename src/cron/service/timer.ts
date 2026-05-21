@@ -1023,6 +1023,14 @@ export function applyJobResult(
         }
       }
     } else if (result.status === "error" && isJobEnabled(job)) {
+      if (opts?.isManual) {
+        // Manual runs do not participate in recurring-job error backoff.
+        // Leave nextRunAtMs unchanged so the next scheduled fire is not delayed.
+        state.deps.log.info(
+          { jobId: job.id, jobName: job.name },
+          "cron: skipping recurring-job error backoff for manual run — nextRunAtMs preserved",
+        );
+      } else {
       // Apply exponential backoff for errored jobs to prevent retry storms.
       const backoff = errorBackoffMs(job.state.consecutiveErrors ?? 1);
       let normalNext: number | undefined;
@@ -1060,6 +1068,7 @@ export function applyJobResult(
         },
         "cron: applying error backoff",
       );
+      }
     } else if (isJobEnabled(job)) {
       let naturalNext: number | undefined;
       try {
