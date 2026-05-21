@@ -260,14 +260,25 @@ async function deliverTelegramDirectMessageCompletion(params: {
     to: "123456789",
     accountId: "bot-1",
   };
-  const requesterSessionKey = params.requesterSessionKey ?? "agent:main:telegram:123456789";
+  const requesterSessionKey = params.requesterSessionKey ?? "agent:main:telegram:direct:123456789";
   testing.setDepsForTest({
     callGateway: params.callGateway,
+    dispatchGatewayMethodInProcess: (async (method, agentParams, options) =>
+      await params.callGateway({
+        method,
+        params: agentParams,
+        expectFinal: options?.expectFinal,
+        timeoutMs: options?.timeoutMs,
+      })) as typeof runtimeDispatchGatewayMethodInProcess,
     getRequesterSessionActivity: () => ({
       sessionId: "requester-session-telegram",
       isActive: params.isActive === true,
     }),
-    getRuntimeConfig: () => ({}) as never,
+    getRuntimeConfig: () =>
+      ({
+        plugins: { enabled: false },
+        session: { store: "/tmp/openclaw-subagent-announce-delivery-empty-sessions.json" },
+      }) as never,
     ...(params.queueEmbeddedPiMessageWithOutcome
       ? { queueEmbeddedPiMessageWithOutcome: params.queueEmbeddedPiMessageWithOutcome }
       : {}),
@@ -586,6 +597,130 @@ describe("resolveSubagentCompletionOrigin", () => {
       channel: "telegram",
       accountId: "bot-1",
       to: "telegram:direct:123",
+    });
+  });
+
+  it("skips the child binding when requester-session-final owns completion delivery", async () => {
+    registerSessionBindingAdapter({
+      channel: "discord",
+      accountId: "acct-1",
+      listBySession: (targetSessionKey: string) => {
+        if (targetSessionKey === "agent:worker:subagent:child") {
+          return [
+            {
+              bindingId: "discord:acct-1:child-thread",
+              targetSessionKey,
+              targetKind: "subagent",
+              conversation: {
+                channel: "discord",
+                accountId: "acct-1",
+                conversationId: "child-thread",
+              },
+              status: "active",
+              boundAt: 1,
+            },
+          ];
+        }
+        if (targetSessionKey === "agent:main:main") {
+          return [
+            {
+              bindingId: "discord:acct-1:requester-thread",
+              targetSessionKey,
+              targetKind: "session",
+              conversation: {
+                channel: "discord",
+                accountId: "acct-1",
+                conversationId: "requester-thread",
+              },
+              status: "active",
+              boundAt: 1,
+            },
+          ];
+        }
+        return [];
+      },
+      resolveByConversation: () => null,
+    });
+
+    const origin = await resolveSubagentCompletionOrigin({
+      childSessionKey: "agent:worker:subagent:child",
+      requesterSessionKey: "agent:main:main",
+      requesterOrigin: {
+        channel: "discord",
+        accountId: "acct-1",
+        to: "channel:requester-thread",
+      },
+      spawnMode: "session",
+      expectsCompletionMessage: true,
+      completionOwner: "requester-session-final",
+    });
+
+    expect(origin).toEqual({
+      channel: "discord",
+      accountId: "acct-1",
+      to: "channel:requester-thread",
+    });
+  });
+
+  it("skips the child binding when origin-bridge-final owns completion delivery", async () => {
+    registerSessionBindingAdapter({
+      channel: "discord",
+      accountId: "acct-1",
+      listBySession: (targetSessionKey: string) => {
+        if (targetSessionKey === "agent:worker:subagent:child") {
+          return [
+            {
+              bindingId: "discord:acct-1:child-thread",
+              targetSessionKey,
+              targetKind: "subagent",
+              conversation: {
+                channel: "discord",
+                accountId: "acct-1",
+                conversationId: "child-thread",
+              },
+              status: "active",
+              boundAt: 1,
+            },
+          ];
+        }
+        if (targetSessionKey === "agent:main:main") {
+          return [
+            {
+              bindingId: "discord:acct-1:origin-thread",
+              targetSessionKey,
+              targetKind: "session",
+              conversation: {
+                channel: "discord",
+                accountId: "acct-1",
+                conversationId: "origin-thread",
+              },
+              status: "active",
+              boundAt: 1,
+            },
+          ];
+        }
+        return [];
+      },
+      resolveByConversation: () => null,
+    });
+
+    const origin = await resolveSubagentCompletionOrigin({
+      childSessionKey: "agent:worker:subagent:child",
+      requesterSessionKey: "agent:main:main",
+      requesterOrigin: {
+        channel: "discord",
+        accountId: "acct-1",
+        to: "channel:origin-thread",
+      },
+      spawnMode: "session",
+      expectsCompletionMessage: true,
+      completionOwner: "origin-bridge-final",
+    });
+
+    expect(origin).toEqual({
+      channel: "discord",
+      accountId: "acct-1",
+      to: "channel:origin-thread",
     });
   });
 });
@@ -1422,6 +1557,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     const result = await deliverTelegramDirectMessageCompletion({
       callGateway,
       sendMessage,
+      queueEmbeddedPiMessageWithOutcome: createQueueOutcomeMock(false),
       internalEvents: [
         {
           type: "task_completion",
