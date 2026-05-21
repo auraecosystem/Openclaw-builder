@@ -890,10 +890,10 @@ the Server-side compaction accordion below.
   <Accordion title="Fast mode">
     OpenClaw exposes a shared fast-mode toggle for `openai/*`:
 
-    - **Chat/UI:** `/fast status|on|off`
+    - **Chat/UI:** `/fast status|auto|on|off`
     - **Config:** `agents.defaults.models["<provider>/<model>"].params.fastMode`
 
-    When enabled, OpenClaw maps fast mode to OpenAI priority processing (`service_tier = "priority"`). Existing `service_tier` values are preserved, and fast mode does not rewrite `reasoning` or `text.verbosity`.
+    When enabled, OpenClaw maps fast mode to OpenAI priority processing (`service_tier = "priority"`). Existing `service_tier` values are preserved, and fast mode does not rewrite `reasoning` or `text.verbosity`. `fastMode: "auto"` starts new model calls fast for the first `params.fast_seconds` seconds of a run, then starts later retry, fallback, tool-result, or continuation calls without fast mode.
 
     ```json5
     {

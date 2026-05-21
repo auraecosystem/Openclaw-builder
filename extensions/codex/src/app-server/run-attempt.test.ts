@@ -11221,6 +11221,52 @@ describe("runCodexAppServerAttempt", () => {
     expect(turnRequestParams?.serviceTier).toBe("priority");
   });
 
+  it("maps OpenClaw fast mode onto Codex app-server resume and turn requests", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    await writeExistingBinding(sessionFile, workspaceDir, { model: "gpt-5.2" });
+    const { requests, waitForMethod, completeTurn } = createResumeHarness();
+    const params = createParams(sessionFile, workspaceDir);
+    params.fastMode = true;
+
+    const run = runCodexAppServerAttempt(params);
+    await waitForMethod("turn/start");
+    await completeTurn({ threadId: "thread-existing", turnId: "turn-1" });
+    await run;
+
+    const resumeRequest = requests.find((request) => request.method === "thread/resume");
+    const resumeRequestParams = resumeRequest?.params as Record<string, unknown> | undefined;
+    expect(resumeRequestParams?.serviceTier).toBe("priority");
+    const turnRequest = requests.find((request) => request.method === "turn/start");
+    const turnRequestParams = turnRequest?.params as Record<string, unknown> | undefined;
+    expect(turnRequestParams?.serviceTier).toBe("priority");
+  });
+
+  it("re-resolves automatic OpenClaw fast mode for Codex app-server turn requests", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    await writeExistingBinding(sessionFile, workspaceDir, { model: "gpt-5.2" });
+    const { requests, waitForMethod, completeTurn } = createResumeHarness();
+    const params = createParams(sessionFile, workspaceDir);
+    const fastMode = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+    params.fastMode = fastMode;
+
+    const run = runCodexAppServerAttempt(params, {
+      pluginConfig: { appServer: { serviceTier: "priority" } },
+    });
+    await waitForMethod("thread/resume");
+    await waitForMethod("turn/start");
+    await completeTurn({ threadId: "thread-existing", turnId: "turn-1" });
+    await run;
+
+    const resumeRequest = requests.find((request) => request.method === "thread/resume");
+    const resumeRequestParams = resumeRequest?.params as Record<string, unknown> | undefined;
+    expect(resumeRequestParams?.serviceTier).toBe("priority");
+    const turnRequest = requests.find((request) => request.method === "turn/start");
+    const turnRequestParams = turnRequest?.params as Record<string, unknown> | undefined;
+    expect(turnRequestParams).not.toHaveProperty("serviceTier");
+  });
+
   it("keys plugin app inventory by websocket credentials without exposing them", () => {
     const first = resolveCodexPluginAppCacheEndpoint({
       start: {

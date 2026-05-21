@@ -16,6 +16,7 @@ import { redactSensitiveText } from "../../logging/redact.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { annotateInterSessionPromptText } from "../../sessions/input-provenance.js";
 import { emitSessionTranscriptUpdate } from "../../sessions/transcript-events.js";
+import type { FastMode } from "../../shared/string-coerce.js";
 import { sanitizeForLog } from "../../terminal/ansi.js";
 import { resolveMessageChannel } from "../../utils/message-channel.js";
 import { resolveAuthProfileOrder } from "../auth-profiles/order.js";
@@ -378,7 +379,8 @@ export function runAgentAttempt(params: {
   body: string;
   isFallbackRetry: boolean;
   resolvedThinkLevel: ThinkLevel;
-  fastMode?: boolean;
+  fastMode?: FastMode;
+  fastModeAutoSeconds?: number;
   timeoutMs: number;
   runId: string;
   opts: AgentCommandOpts;
@@ -664,6 +666,7 @@ export function runAgentAttempt(params: {
     authProfileIdSource: authProfileId ? harnessAuthSelection.authProfileIdSource : undefined,
     thinkLevel: params.resolvedThinkLevel,
     fastMode: params.fastMode,
+    fastModeAutoSeconds: params.fastModeAutoSeconds,
     verboseLevel: params.resolvedVerboseLevel,
     bashElevated: params.opts.bashElevated,
     timeoutMs: params.timeoutMs,

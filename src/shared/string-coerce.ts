@@ -32,7 +32,9 @@ export function normalizeLowercaseStringOrEmpty(value: unknown): string {
   return normalizeOptionalLowercaseString(value) ?? "";
 }
 
-export function normalizeFastMode(raw?: string | boolean | null): boolean | undefined {
+export type FastMode = boolean | "auto";
+
+export function normalizeFastMode(raw?: unknown): FastMode | undefined {
   if (typeof raw === "boolean") {
     return raw;
   }
@@ -45,6 +47,9 @@ export function normalizeFastMode(raw?: string | boolean | null): boolean | unde
   }
   if (["on", "true", "yes", "1", "enable", "enabled", "fast"].includes(key)) {
     return true;
+  }
+  if (["auto", "automatic"].includes(key)) {
+    return "auto";
   }
   return undefined;
 }

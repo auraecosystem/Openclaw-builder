@@ -1,5 +1,6 @@
 import type { ChannelId } from "../channels/plugins/types.public.js";
 import type { SessionKind } from "../sessions/classify-session-kind.js";
+import type { FastMode } from "../shared/string-coerce.js";
 import type { TaskAuditSummary } from "../tasks/task-registry.audit.js";
 import type { TaskRegistrySummary } from "../tasks/task-registry.types.js";
 
@@ -11,7 +12,7 @@ export type SessionStatus = {
   updatedAt: number | null;
   age: number | null;
   thinkingLevel?: string;
-  fastMode?: boolean;
+  fastMode?: FastMode;
   verboseLevel?: string;
   traceLevel?: string;
   reasoningLevel?: string;

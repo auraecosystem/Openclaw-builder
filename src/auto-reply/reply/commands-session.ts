@@ -1,5 +1,5 @@
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
-import { resolveFastModeState } from "../../agents/fast-mode.js";
+import { formatFastModeValue, resolveFastModeState } from "../../agents/fast-mode.js";
 import {
   setChannelConversationBindingIdleTimeoutBySessionKey,
   setChannelConversationBindingMaxAgeBySessionKey,
@@ -413,7 +413,7 @@ export const handleFastCommand: CommandHandler = async (params, allowTextCommand
             : "";
     return {
       shouldContinue: false,
-      reply: { text: `⚙️ Current fast mode: ${state.enabled ? "on" : "off"}${suffix}.` },
+      reply: { text: `⚙️ Current fast mode: ${formatFastModeValue(state.mode)}${suffix}.` },
     };
   }
 
@@ -433,7 +433,7 @@ export const handleFastCommand: CommandHandler = async (params, allowTextCommand
     }
     return {
       shouldContinue: false,
-      reply: { text: "⚙️ Usage: /fast status|on|off|default" },
+      reply: { text: "⚙️ Usage: /fast status|auto|on|off|default" },
     };
   }
 
@@ -444,7 +444,12 @@ export const handleFastCommand: CommandHandler = async (params, allowTextCommand
 
   return {
     shouldContinue: false,
-    reply: { text: `⚙️ Fast mode ${nextMode ? "enabled" : "disabled"}.` },
+    reply: {
+      text:
+        nextMode === "auto"
+          ? "⚙️ Fast mode set to auto."
+          : `⚙️ Fast mode ${nextMode ? "enabled" : "disabled"}.`,
+    },
   };
 };
 

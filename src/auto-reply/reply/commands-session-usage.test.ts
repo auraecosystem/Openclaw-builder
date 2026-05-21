@@ -33,7 +33,7 @@ const loadCostUsageSummaryMock = vi.hoisted(() =>
   })),
 );
 const resolveFastModeStateMock = vi.hoisted(() =>
-  vi.fn(() => ({ enabled: true, source: "agent" })),
+  vi.fn(() => ({ mode: true, enabled: true, source: "agent", fastSeconds: 60 })),
 );
 
 vi.mock("../../agents/agent-scope.js", async () => {
@@ -52,6 +52,8 @@ vi.mock("../../infra/session-cost-usage.js", () => ({
 }));
 
 vi.mock("../../agents/fast-mode.js", () => ({
+  formatFastModeValue: (mode: boolean | "auto" | undefined) =>
+    mode === "auto" ? "auto" : mode === true ? "on" : "off",
   resolveFastModeState: resolveFastModeStateMock,
 }));
 
@@ -210,7 +212,12 @@ describe("handleFastCommand", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resolveSessionAgentIdMock.mockReturnValue("target");
-    resolveFastModeStateMock.mockReturnValue({ enabled: true, source: "agent" });
+    resolveFastModeStateMock.mockReturnValue({
+      mode: true,
+      enabled: true,
+      source: "agent",
+      fastSeconds: 60,
+    });
   });
 
   it("uses the canonical target session agent for /fast status", async () => {

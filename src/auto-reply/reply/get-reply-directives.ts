@@ -17,6 +17,7 @@ import type { MsgContext, TemplateContext } from "../templating.js";
 import {
   normalizeThinkLevel,
   type ElevatedLevel,
+  type FastMode,
   type ReasoningLevel,
   type ThinkLevel,
   type VerboseLevel,
@@ -115,7 +116,7 @@ export type ReplyDirectiveContinuation = {
   elevatedFailures: Array<{ gate: string; key: string }>;
   defaultActivation: ReturnType<typeof defaultGroupActivation>;
   resolvedThinkLevel: ThinkLevel | undefined;
-  resolvedFastMode: boolean;
+  resolvedFastMode: FastMode;
   resolvedVerboseLevel: VerboseLevel | undefined;
   resolvedReasoningLevel: ReasoningLevel;
   resolvedElevatedLevel: ElevatedLevel;
@@ -444,7 +445,7 @@ export async function resolveReplyDirectives(params: {
       model,
       agentId,
       sessionEntry: directives.clearFastMode ? undefined : targetSessionEntry,
-    }).enabled;
+    }).mode;
 
   const resolvedVerboseLevel =
     directives.verboseLevel ??

@@ -311,7 +311,10 @@ describe("resolveReplyDirectives", () => {
       contextTokens: params.contextTokens,
     }));
     mocks.resolveFastModeState.mockImplementation(({ sessionEntry }) => ({
+      mode: sessionEntry?.sessionId === "target-session",
       enabled: sessionEntry?.sessionId === "target-session",
+      source: "session",
+      fastSeconds: 60,
     }));
     mocks.resolveReplyExecOverrides.mockReturnValue(undefined);
   });

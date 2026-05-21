@@ -1,5 +1,6 @@
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { PromptImageOrderEntry } from "../media/prompt-image-order.js";
+import type { FastMode } from "../shared/string-coerce.js";
 import type { ReplyPayload } from "./reply-payload.js";
 import type { TypingController } from "./reply/typing.js";
 
@@ -70,7 +71,7 @@ export type GetReplyOptions = {
   /** One-shot thinking level override for this run; does not persist to the session. */
   thinkingLevelOverride?: string;
   /** One-shot fast-mode override for this run; does not persist to the session. */
-  fastModeOverride?: boolean;
+  fastModeOverride?: FastMode;
   /** Controls bootstrap workspace context injection (default: full). */
   bootstrapContextMode?: "full" | "lightweight";
   /** If true, suppress tool error warning payloads for this run. */

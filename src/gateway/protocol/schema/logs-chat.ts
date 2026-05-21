@@ -38,7 +38,7 @@ export const ChatSendParamsSchema = Type.Object(
     sessionId: Type.Optional(NonEmptyString),
     message: Type.String(),
     thinking: Type.Optional(Type.String()),
-    fastMode: Type.Optional(Type.Boolean()),
+    fastMode: Type.Optional(Type.Union([Type.Boolean(), Type.Literal("auto")])),
     deliver: Type.Optional(Type.Boolean()),
     originatingChannel: Type.Optional(Type.String()),
     originatingTo: Type.Optional(Type.String()),

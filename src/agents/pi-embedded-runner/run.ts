@@ -49,6 +49,7 @@ import {
   FailoverError,
   resolveFailoverStatus,
 } from "../failover-error.js";
+import { formatFastModeAutoProgressText, resolveFastModeForElapsed } from "../fast-mode.js";
 import { ensureSelectedAgentHarnessPlugin } from "../harness/runtime-plugin.js";
 import { selectAgentHarness } from "../harness/selection.js";
 import { LiveSessionModelSwitchError } from "../live-model-switch-error.js";
@@ -182,6 +183,7 @@ import {
   resolveHookModelSelection,
 } from "./run/setup.js";
 import { mergeAttemptToolMediaPayloads } from "./run/tool-media-payloads.js";
+import type { EmbeddedRunFastModeParam } from "./run/types.js";
 import {
   resolveLiveToolResultMaxChars,
   sessionLikelyHasOversizedToolResults,
@@ -481,6 +483,8 @@ export async function runEmbeddedPiAgent(
     return enqueueGlobal(async () => {
       throwIfAborted();
       const started = Date.now();
+      let fastModeAutoOffAnnounced = false;
+      let fastModeAutoResetAnnounced = false;
       const startupStages = createEmbeddedRunStageTracker();
       let startupStagesEmitted = false;
       const notifyExecutionPhase = (
@@ -498,6 +502,57 @@ export async function runEmbeddedPiAgent(
       ) => {
         noteLaneTaskProgress();
         params.onRunProgress?.(info);
+      };
+      const emitFastModeAutoProgress = async (payload: {
+        enabled: boolean;
+        elapsedSeconds: number;
+        fastSeconds: number;
+      }) => {
+        await params.onAgentEvent?.({
+          stream: "item",
+          data: {
+            kind: "status",
+            title: "Fast",
+            phase: "update",
+            summary: formatFastModeAutoProgressText(payload),
+          },
+          ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
+        });
+      };
+      const resolveAttemptFastMode = (): boolean | undefined => {
+        const resolved = resolveFastModeForElapsed({
+          mode: params.fastMode,
+          fastSeconds: params.fastModeAutoSeconds,
+          startedAtMs: started,
+        });
+        if (resolved.mode === "auto" && !resolved.enabled && !fastModeAutoOffAnnounced) {
+          fastModeAutoOffAnnounced = true;
+          void emitFastModeAutoProgress(resolved);
+        }
+        return resolved.mode === undefined ? undefined : resolved.enabled;
+      };
+      const resolveAttemptFastModeParam = (): EmbeddedRunFastModeParam | undefined => {
+        if (params.fastMode === "auto") {
+          return resolveAttemptFastMode;
+        }
+        return resolveAttemptFastMode();
+      };
+      const maybeEmitFastModeAutoReset = async () => {
+        if (!fastModeAutoOffAnnounced || fastModeAutoResetAnnounced) {
+          return;
+        }
+        fastModeAutoResetAnnounced = true;
+        const resetState = resolveFastModeForElapsed({
+          mode: "auto",
+          fastSeconds: params.fastModeAutoSeconds,
+          startedAtMs: started,
+          nowMs: started,
+        });
+        await emitFastModeAutoProgress({
+          enabled: true,
+          elapsedSeconds: 0,
+          fastSeconds: resetState.fastSeconds,
+        });
       };
       const emitStartupStageSummary = (phase: string) => {
         const summary = startupStages.snapshot();
@@ -1349,6 +1404,7 @@ export async function runEmbeddedPiAgent(
             apiKeyInfo,
             runtimeAuthState,
           });
+          const attemptFastMode = resolveAttemptFastModeParam();
           if (!startupStagesEmitted) {
             startupStages.mark(EMBEDDED_RUN_ATTEMPT_DISPATCH_STAGE.prompt);
           }
@@ -1378,7 +1434,7 @@ export async function runEmbeddedPiAgent(
             thinkingLevel: thinkLevel,
             extraParamsOverride: {
               ...params.streamParams,
-              fastMode: params.fastMode,
+              fastMode: attemptFastMode,
             },
           });
           if (!startupStagesEmitted) {
@@ -1481,7 +1537,7 @@ export async function runEmbeddedPiAgent(
             thinkLevel,
             onToolOutcome: observePostCompactionToolOutcome,
             onRunProgress: notifyRunProgress,
-            fastMode: params.fastMode,
+            fastMode: attemptFastMode,
             verboseLevel: params.verboseLevel,
             reasoningLevel: params.reasoningLevel,
             toolResultFormat: resolvedToolResultFormat,
@@ -3353,6 +3409,7 @@ export async function runEmbeddedPiAgent(
           };
         }
       } finally {
+        await maybeEmitFastModeAutoReset();
         forgetPromptBuildDrainCacheForRun(params.runId);
         stopRuntimeAuthRefreshTimer();
         await runAgentCleanupStep({
