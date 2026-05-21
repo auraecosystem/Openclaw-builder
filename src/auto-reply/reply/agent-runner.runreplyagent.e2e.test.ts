@@ -1431,6 +1431,49 @@ describe("runReplyAgent typing (heartbeat)", () => {
     });
   });
 
+  it("appends the Discord guard when tool work ends with only an incomplete-turn error payload", async () => {
+    state.runEmbeddedPiAgentMock.mockResolvedValueOnce({
+      payloads: [
+        { text: "⚠️ Agent couldn't generate a response. Please try again.", isError: true },
+      ],
+      meta: {
+        stopReason: "stop",
+        toolSummary: { calls: 2, tools: ["memory_search", "exec"] },
+      },
+    });
+
+    const { run } = createMinimalRun({
+      runOverrides: {
+        messageProvider: "discord",
+        sourceReplyDeliveryMode: "message_tool_only",
+        allowEmptyAssistantReplyAsSilent: true,
+      },
+      sessionCtx: {
+        Provider: "discord",
+        OriginatingChannel: "discord",
+        OriginatingTo: "channel:C1",
+        ChatType: "channel",
+        WasMentioned: false,
+        MessageSid: "1506801881224314910",
+      },
+    });
+
+    const res = await run();
+    expect(Array.isArray(res)).toBe(true);
+    const payloads = res as ReplyPayload[];
+
+    expect(payloads.map((payload) => payload.text)).toEqual([
+      "⚠️ Agent couldn't generate a response. Please try again.",
+      expect.stringContaining("Discord delivery guard"),
+    ]);
+    expect(payloads[0]?.isError).toBe(true);
+    expect(getReplyPayloadMetadata(payloads[0] ?? {})).toBeUndefined();
+    expect(payloads[1]?.isError).toBe(true);
+    expect(getReplyPayloadMetadata(payloads[1] ?? {})).toEqual({
+      deliverDespiteSourceReplySuppression: true,
+    });
+  });
+
   it("surfaces the Discord message-tool-only guard after cron side effects without final delivery", async () => {
     state.runEmbeddedPiAgentMock.mockResolvedValueOnce({
       payloads: [{ text: "NO_REPLY" }],

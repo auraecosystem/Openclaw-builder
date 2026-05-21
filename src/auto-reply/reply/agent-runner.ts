@@ -229,7 +229,6 @@ function isMessageToolOnlyGuardDeliverablePayload(payload: ReplyPayload): boolea
   return metadata?.beforeAgentRunBlocked !== true;
 }
 
-
 function hasMessageToolOnlySourceDeliveryPayload(payloads: ReplyPayload[]): boolean {
   return payloads.some(
     (payload) => getReplyPayloadMetadata(payload)?.deliverDespiteSourceReplySuppression === true,
@@ -252,7 +251,6 @@ function markMessageToolOnlyGuardPayloadsForSourceDelivery(
     return payload;
   });
 }
-
 
 function ensureDiscordMessageToolOnlyGuardPayloadForSourceDelivery(params: {
   payloads: ReplyPayload[];
