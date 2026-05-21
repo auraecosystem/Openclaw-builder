@@ -1,4 +1,5 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import { redactSecrets } from "../logging/redact.js";
 import type { ProcessSession } from "./bash-process-registry.js";
 import { deriveSessionName } from "./bash-tools.shared.js";
 import { encodeKeySequence, hasCursorModeSensitiveKeys } from "./pty-keys.js";
@@ -73,7 +74,7 @@ export async function handleProcessSendKeys(params: {
     details: {
       status: "running",
       sessionId: params.sessionId,
-      name: deriveSessionName(params.session.command),
+      name: redactSecrets(deriveSessionName(params.session.command)),
     },
   };
 }

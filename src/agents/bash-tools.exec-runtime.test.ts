@@ -380,6 +380,62 @@ describe("renderExecUpdateText", () => {
   });
 });
 
+describe("runExecProcess live updates", () => {
+  it("redacts secret-shaped stdout in update text and details tail", async () => {
+    const fakeSecretOutput = "OPENAI_API_KEY=sk-proj-redaction-canary-1234567890";
+    const updates: Array<{ content: Array<{ type: string; text?: string }>; details: unknown }> =
+      [];
+
+    supervisorMock.spawn.mockImplementationOnce(
+      async (input: { onStdout?: (chunk: string) => void }) => ({
+        runId: "run-redact-live-update",
+        startedAtMs: Date.now(),
+        pid: 123,
+        stdin: undefined,
+        wait: async () => {
+          input.onStdout?.(`${fakeSecretOutput}\n`);
+          await new Promise((resolve) => setImmediate(resolve));
+          return {
+            reason: "exit" as const,
+            exitCode: 0,
+            exitSignal: null,
+            durationMs: 10,
+            stdout: "",
+            stderr: "",
+            timedOut: false,
+            noOutputTimedOut: false,
+          };
+        },
+        cancel: vi.fn(),
+      }),
+    );
+
+    const run = await runExecProcess({
+      command: "printf secret",
+      workdir: "/tmp",
+      env: {},
+      usePty: false,
+      warnings: [],
+      maxOutput: 1000,
+      pendingMaxOutput: 1000,
+      notifyOnExit: false,
+      notifyOnExitEmptySuccess: false,
+      timeoutSec: null,
+      onUpdate: (update) => updates.push(update),
+    });
+    await run.promise;
+
+    expect(updates.length).toBeGreaterThan(0);
+    const update = updates[0];
+    const text = (update.content[0] as { text?: string }).text ?? "";
+    const details = update.details as { tail?: string };
+    expect(text).not.toContain(fakeSecretOutput);
+    expect(details.tail).not.toContain(fakeSecretOutput);
+    expect(text).toContain("OPENAI_API_KEY=sk-pro…7890");
+    expect(details.tail).toContain("OPENAI_API_KEY=sk-pro…7890");
+  });
+});
+
 describe("exec notifyOnExit suppression", () => {
   async function runBackgroundedExit(params: {
     reason: "manual-cancel" | "overall-timeout";
@@ -727,7 +783,9 @@ describe("runExecProcess POSIX command wrapper", () => {
     const spawnCall = supervisorMock.spawn.mock.calls[0][0];
 
     const commandStr = spawnCall.argv.join(" ");
-    expect(commandStr).toContain('export PATH="${OPENCLAW_PREPEND_PATH}${PATH:+:$PATH}"; unset OPENCLAW_PREPEND_PATH; echo test');
+    expect(commandStr).toContain(
+      'export PATH="${OPENCLAW_PREPEND_PATH}${PATH:+:$PATH}"; unset OPENCLAW_PREPEND_PATH; echo test',
+    );
   });
 
   it("does not wrap command on Windows", async () => {

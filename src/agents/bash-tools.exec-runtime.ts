@@ -25,6 +25,7 @@ export {
   normalizeExecTarget,
 } from "../infra/exec-approvals.js";
 import { logWarn } from "../logger.js";
+import { redactToolPayloadText } from "../logging/redact.js";
 import type { ManagedRun } from "../process/supervisor/index.js";
 import { getProcessSupervisor } from "../process/supervisor/index.js";
 import type { RunExit, TerminationReason } from "../process/supervisor/types.js";
@@ -583,7 +584,11 @@ export function buildExecRuntimeErrorOutcome(params: {
  * This ensures our paths take precedence even if user RC files (e.g. ~/.zshenv)
  * prepend their own entries to PATH during shell startup.
  */
-function wrapPosixCommandWithPathPrepend(command: string, env: Record<string, string>, pathPrepend?: string[]): string {
+function wrapPosixCommandWithPathPrepend(
+  command: string,
+  env: Record<string, string>,
+  pathPrepend?: string[],
+): string {
   if (process.platform === "win32") {
     return command;
   }
@@ -698,7 +703,7 @@ export async function runExecProcess(opts: {
     if (session.backgrounded || session.exited || updatesDisabled) {
       return;
     }
-    const tailText = session.tail || session.aggregated;
+    const tailText = redactToolPayloadText(session.tail || session.aggregated);
     // Note: opts.onUpdate() is provided by pi-agent-core's agent-loop and
     // internally pushes Promise.resolve(emit(event)) into an updateEvents
     // array.  Because emit → processEvents is async, any failure (e.g.
@@ -718,7 +723,7 @@ export async function runExecProcess(opts: {
         pid: session.pid ?? undefined,
         startedAt,
         cwd: session.cwd,
-        tail: session.tail,
+        tail: redactToolPayloadText(session.tail),
       },
     });
   };
@@ -794,9 +799,13 @@ export async function runExecProcess(opts: {
       };
     }
     const { shell, args: shellArgs } = getShellConfig();
-    
+
     // Wrap the command to enforce PATH prepend precedence over shell RC overrides.
-    const commandWithPathPrepend = wrapPosixCommandWithPathPrepend(execCommand, shellRuntimeEnv, opts.pathPrepend);
+    const commandWithPathPrepend = wrapPosixCommandWithPathPrepend(
+      execCommand,
+      shellRuntimeEnv,
+      opts.pathPrepend,
+    );
 
     const childArgv = [shell, ...shellArgs, commandWithPathPrepend];
     if (opts.usePty) {
