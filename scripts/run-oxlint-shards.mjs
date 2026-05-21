@@ -24,20 +24,24 @@ const shards = [
     args: ["--tsconfig", "config/tsconfig/oxlint.scripts.json", "scripts"],
   },
 ];
-const env = prepareLocalHeavyCheckEnvironment({
-  cwd: process.cwd(),
-  env: resolveLocalHeavyCheckEnv(process.env),
-});
+const baseEnv = resolveLocalHeavyCheckEnv(process.env);
 const shouldAcquireParentLock = shouldAcquireLocalHeavyCheckLockForOxlint(extraArgs, {
   cwd: process.cwd(),
-  env,
+  env: baseEnv,
 });
 const nativeTypecheckRefusalError = getLocalNativeTypecheckRefusalError({
   args: extraArgs,
-  env,
+  env: baseEnv,
   shouldRunHeavyCheck: shouldAcquireParentLock,
   toolName: "sharded type-aware oxlint",
 });
+const env =
+  nativeTypecheckRefusalError || !shouldAcquireParentLock
+    ? baseEnv
+    : prepareLocalHeavyCheckEnvironment({
+        cwd: process.cwd(),
+        env: baseEnv,
+      });
 const releaseLock =
   env.OPENCLAW_OXLINT_SKIP_LOCK === "1" || nativeTypecheckRefusalError || !shouldAcquireParentLock
     ? () => {}
