@@ -526,7 +526,7 @@ async function runHooksModelHealth(ctx: DoctorHealthFlowContext): Promise<void> 
 
 async function runWSLEnvironmentHealth(ctx: DoctorHealthFlowContext): Promise<void> {
   const { noteWSLEnvironment } = await import("../commands/doctor-wsl.js");
-  await noteWSLEnvironment(ctx);
+  await noteWSLEnvironment();
 }
 
 async function runSystemdLingerHealth(ctx: DoctorHealthFlowContext): Promise<void> {
