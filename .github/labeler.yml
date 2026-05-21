@@ -10,6 +10,11 @@
           - "extensions/file-transfer/**"
           - "docs/nodes/index.md"
           - "docs/plugins/sdk-runtime.md"
+"plugin: nearai":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "extensions/nearai/**"
+          - "docs/providers/nearai.md"
 "channel: discord":
   - changed-files:
       - any-glob-to-any-file:

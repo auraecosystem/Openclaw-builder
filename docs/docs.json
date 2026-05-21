@@ -1394,6 +1394,7 @@
                   "providers/minimax",
                   "providers/mistral",
                   "providers/moonshot",
+                  "providers/nearai",
                   "providers/nvidia",
                   "providers/ollama",
                   "providers/openai",
