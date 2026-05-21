@@ -2114,13 +2114,14 @@ export async function dispatchReplyFromConfig(
                   return;
                 }
                 markInboundDedupeReplayUnsafe();
-                if (!suppressAutomaticSourceDelivery && shouldSendToolSummaries()) {
+                const isFastModeAutoProgress = isFastModeAutoProgressPayload(payload);
+                if (!suppressAutomaticSourceDelivery) {
                   await onToolResultFromReplyOptions?.(payload);
                 }
                 if (isDispatchOperationAborted()) {
                   return;
                 }
-                if (shouldSuppressProgressDelivery()) {
+                if (shouldSuppressProgressDelivery() && !isFastModeAutoProgress) {
                   return;
                 }
                 const visibleToolPayload = resolveToolDeliveryPayload(payload);
@@ -2145,7 +2146,10 @@ export async function dispatchReplyFromConfig(
                 if (isDispatchOperationAborted()) {
                   return;
                 }
-                if (shouldSuppressLateTextOnlyToolProgress(deliveryPayload)) {
+                if (
+                  shouldSuppressLateTextOnlyToolProgress(deliveryPayload) &&
+                  !isFastModeAutoProgressPayload(deliveryPayload)
+                ) {
                   return;
                 }
                 if (shouldSuppressMessageToolOnlyTextErrorProgress(deliveryPayload)) {
