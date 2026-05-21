@@ -485,6 +485,7 @@ export async function runEmbeddedPiAgent(
       const started = Date.now();
       let fastModeAutoOffAnnounced = false;
       let fastModeAutoResetAnnounced = false;
+      let fastModeAutoOffTimer: ReturnType<typeof setTimeout> | undefined;
       const startupStages = createEmbeddedRunStageTracker();
       let startupStagesEmitted = false;
       const notifyExecutionPhase = (
@@ -519,15 +520,53 @@ export async function runEmbeddedPiAgent(
           ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
         });
       };
+      const announceFastModeAutoOff = (payload: {
+        enabled: boolean;
+        elapsedSeconds: number;
+        fastSeconds: number;
+      }) => {
+        if (payload.enabled || fastModeAutoOffAnnounced) {
+          return;
+        }
+        fastModeAutoOffAnnounced = true;
+        void emitFastModeAutoProgress(payload);
+      };
+      const clearFastModeAutoOffTimer = () => {
+        if (fastModeAutoOffTimer !== undefined) {
+          clearTimeout(fastModeAutoOffTimer);
+          fastModeAutoOffTimer = undefined;
+        }
+      };
+      const scheduleFastModeAutoOffTimer = () => {
+        if (params.fastMode !== "auto") {
+          return;
+        }
+        const resolved = resolveFastModeForElapsed({
+          mode: "auto",
+          fastSeconds: params.fastModeAutoSeconds,
+          startedAtMs: started,
+        });
+        const elapsedMs = Math.max(0, Date.now() - started);
+        const delayMs = Math.max(1, resolved.fastSeconds * 1000 - elapsedMs + 1);
+        clearFastModeAutoOffTimer();
+        fastModeAutoOffTimer = setTimeout(() => {
+          const next = resolveFastModeForElapsed({
+            mode: "auto",
+            fastSeconds: params.fastModeAutoSeconds,
+            startedAtMs: started,
+          });
+          announceFastModeAutoOff(next);
+        }, delayMs);
+        fastModeAutoOffTimer.unref?.();
+      };
       const resolveAttemptFastMode = (): boolean | undefined => {
         const resolved = resolveFastModeForElapsed({
           mode: params.fastMode,
           fastSeconds: params.fastModeAutoSeconds,
           startedAtMs: started,
         });
-        if (resolved.mode === "auto" && !resolved.enabled && !fastModeAutoOffAnnounced) {
-          fastModeAutoOffAnnounced = true;
-          void emitFastModeAutoProgress(resolved);
+        if (resolved.mode === "auto") {
+          announceFastModeAutoOff(resolved);
         }
         return resolved.mode === undefined ? undefined : resolved.enabled;
       };
@@ -554,6 +593,7 @@ export async function runEmbeddedPiAgent(
           fastSeconds: resetState.fastSeconds,
         });
       };
+      scheduleFastModeAutoOffTimer();
       const emitStartupStageSummary = (phase: string) => {
         const summary = startupStages.snapshot();
         const shouldWarn = shouldWarnEmbeddedRunStageSummary(summary);
@@ -3409,6 +3449,7 @@ export async function runEmbeddedPiAgent(
           };
         }
       } finally {
+        clearFastModeAutoOffTimer();
         await maybeEmitFastModeAutoReset();
         forgetPromptBuildDrainCacheForRun(params.runId);
         stopRuntimeAuthRefreshTimer();
