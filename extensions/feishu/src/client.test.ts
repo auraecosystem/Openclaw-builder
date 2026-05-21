@@ -32,8 +32,16 @@ const mockBaseHttpInstance = vi.hoisted(() => ({
   head: vi.fn().mockResolvedValue({}),
   options: vi.fn().mockResolvedValue({}),
 }));
-const proxyEnvKeys = ["https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY"] as const;
+const proxyEnvKeys = [
+  "https_proxy",
+  "HTTPS_PROXY",
+  "http_proxy",
+  "HTTP_PROXY",
+  "all_proxy",
+  "ALL_PROXY",
+] as const;
 type ProxyEnvKey = (typeof proxyEnvKeys)[number];
+const feishuWsUseProxyEnvKey = "OPENCLAW_FEISHU_WS_USE_PROXY";
 const registerFeishuDocToolsMock = vi.hoisted(() => vi.fn());
 const registerFeishuChatToolsMock = vi.hoisted(() => vi.fn());
 const registerFeishuWikiToolsMock = vi.hoisted(() => vi.fn());
@@ -54,6 +62,7 @@ let FEISHU_HTTP_TIMEOUT_ENV_VAR: string;
 
 let priorProxyEnv: Partial<Record<ProxyEnvKey, string | undefined>> = {};
 let priorFeishuTimeoutEnv: string | undefined;
+let priorFeishuWsUseProxyEnv: string | undefined;
 
 vi.mock("./channel.js", () => ({
   feishuPlugin: feishuPluginMock,
@@ -165,7 +174,9 @@ beforeAll(async () => {
         process.env.HTTPS_PROXY ??
         process.env.https_proxy ??
         process.env.HTTP_PROXY ??
-        process.env.http_proxy,
+        process.env.http_proxy ??
+        process.env.ALL_PROXY ??
+        process.env.all_proxy,
       ),
     ),
   }));
@@ -184,7 +195,9 @@ beforeAll(async () => {
 beforeEach(() => {
   priorProxyEnv = {};
   priorFeishuTimeoutEnv = process.env[FEISHU_HTTP_TIMEOUT_ENV_VAR];
+  priorFeishuWsUseProxyEnv = process.env[feishuWsUseProxyEnvKey];
   delete process.env[FEISHU_HTTP_TIMEOUT_ENV_VAR];
+  delete process.env[feishuWsUseProxyEnvKey];
   for (const key of proxyEnvKeys) {
     priorProxyEnv[key] = process.env[key];
     delete process.env[key];
@@ -220,6 +233,11 @@ afterEach(() => {
     delete process.env[FEISHU_HTTP_TIMEOUT_ENV_VAR];
   } else {
     process.env[FEISHU_HTTP_TIMEOUT_ENV_VAR] = priorFeishuTimeoutEnv;
+  }
+  if (priorFeishuWsUseProxyEnv === undefined) {
+    delete process.env[feishuWsUseProxyEnvKey];
+  } else {
+    process.env[feishuWsUseProxyEnvKey] = priorFeishuWsUseProxyEnv;
   }
   setFeishuClientRuntimeForTest();
 });
@@ -415,7 +433,21 @@ describe("createFeishuWSClient proxy handling", () => {
     expect(options.agent).toBeUndefined();
   });
 
-  it("creates a ws proxy agent when lowercase https_proxy is set", async () => {
+  it("does not inherit ambient proxy env by default", async () => {
+    process.env.https_proxy = "http://lower-https:8001";
+    process.env.HTTPS_PROXY = "http://upper-https:8002";
+    process.env.HTTP_PROXY = "http://upper-http:8999";
+    process.env.ALL_PROXY = "socks5://upper-all:1080";
+
+    await createFeishuWSClient(baseAccount);
+
+    expect(proxyAgentCtorMock).not.toHaveBeenCalled();
+    const options = firstWsClientOptions();
+    expect(options.agent).toBeUndefined();
+  });
+
+  it("creates a ws proxy agent when explicitly enabled and lowercase https_proxy is set", async () => {
+    process.env[feishuWsUseProxyEnvKey] = "1";
     process.env.https_proxy = "http://lower-https:8001";
 
     await createFeishuWSClient(baseAccount);
@@ -425,7 +457,8 @@ describe("createFeishuWSClient proxy handling", () => {
     expect(options.agent).toEqual({ proxied: true });
   });
 
-  it("creates a ws proxy agent when uppercase HTTPS_PROXY is set", async () => {
+  it("creates a ws proxy agent when explicitly enabled and uppercase HTTPS_PROXY is set", async () => {
+    process.env[feishuWsUseProxyEnvKey] = "1";
     process.env.HTTPS_PROXY = "http://upper-https:8002";
 
     await createFeishuWSClient(baseAccount);
@@ -435,8 +468,20 @@ describe("createFeishuWSClient proxy handling", () => {
     expect(options.agent).toEqual({ proxied: true });
   });
 
-  it("falls back to HTTP_PROXY for ws proxy agent creation", async () => {
+  it("falls back to HTTP_PROXY when explicitly enabled", async () => {
+    process.env[feishuWsUseProxyEnvKey] = "1";
     process.env.HTTP_PROXY = "http://upper-http:8999";
+
+    await createFeishuWSClient(baseAccount);
+
+    expect(proxyAgentCtorMock).toHaveBeenCalledTimes(1);
+    const options = firstWsClientOptions();
+    expect(options.agent).toEqual({ proxied: true });
+  });
+
+  it("falls back to ALL_PROXY when explicitly enabled", async () => {
+    process.env[feishuWsUseProxyEnvKey] = "1";
+    process.env.ALL_PROXY = "http://upper-all:8999";
 
     await createFeishuWSClient(baseAccount);
 

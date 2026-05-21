@@ -211,6 +211,33 @@ Feishu/Lark does not support native slash-command menus, so send these as plain 
 5. Ensure the gateway is running: `openclaw gateway status`
 6. Check logs: `openclaw logs --follow`
 
+### WebSocket needs an outbound proxy
+
+Feishu/Lark WebSocket connections are direct by default and do not automatically inherit
+process proxy variables such as `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, or their
+lowercase variants. This avoids routing the long-lived Feishu receive socket through an
+ambient proxy that may be intended only for unrelated provider or CLI traffic.
+
+If your deployment can reach Feishu/Lark only through an operator-controlled outbound
+HTTP(S) proxy, keep the standard proxy env configured and also opt Feishu WebSocket
+into ambient proxy routing:
+
+```bash
+export HTTPS_PROXY=http://proxy.example:8080
+export OPENCLAW_FEISHU_WS_USE_PROXY=1
+openclaw gateway run
+```
+
+After upgrading from a version where Feishu WebSocket inherited proxy env by default,
+HTTP(S)-proxy-only deployments must set `OPENCLAW_FEISHU_WS_USE_PROXY=1` to
+preserve that behavior. Leave it unset for direct egress.
+
+For installed gateway services, put both the proxy env and
+`OPENCLAW_FEISHU_WS_USE_PROXY=1` in the service durable environment, such as
+`$OPENCLAW_STATE_DIR/.env` or `~/.openclaw/.env`, then reinstall/restart the
+service. Shell exports used only for `openclaw gateway restart` are not inherited
+by launchd, systemd, or Scheduled Tasks.
+
 ### QR setup does not react in the Feishu mobile app
 
 1. Rerun setup: `openclaw channels login --channel feishu`
