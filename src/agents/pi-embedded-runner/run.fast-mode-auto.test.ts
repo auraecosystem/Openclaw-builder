@@ -31,6 +31,7 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
     const events: Array<{
       data?: { summary?: unknown };
     }> = [];
+    const toolResults: Array<{ text?: string }> = [];
     let completeAttempt: (() => void) | undefined;
     const attemptDone = new Promise<EmbeddedRunAttemptResult>((resolve) => {
       completeAttempt = () => {
@@ -51,6 +52,9 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
       onAgentEvent: (event) => {
         events.push(event);
       },
+      onToolResult: (payload) => {
+        toolResults.push(payload);
+      },
     });
 
     await vi.waitFor(() => {
@@ -60,10 +64,12 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
 
     const summaries = events.map((event) => event.data?.summary).filter(Boolean);
     expect(summaries.some((summary) => String(summary).startsWith("💨Fast: auto-off("))).toBe(true);
+    expect(toolResults.some((payload) => payload.text?.startsWith("💨Fast: auto-off("))).toBe(true);
 
     completeAttempt?.();
     await resultPromise;
 
     expect(events.map((event) => event.data?.summary)).toContain("💨Fast: auto-on");
+    expect(toolResults.map((payload) => payload.text)).toContain("💨Fast: auto-on");
   });
 });

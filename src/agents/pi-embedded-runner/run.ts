@@ -509,16 +509,18 @@ export async function runEmbeddedPiAgent(
         elapsedSeconds: number;
         fastSeconds: number;
       }) => {
+        const summary = formatFastModeAutoProgressText(payload);
         await params.onAgentEvent?.({
           stream: "item",
           data: {
             kind: "status",
             title: "Fast",
             phase: "update",
-            summary: formatFastModeAutoProgressText(payload),
+            summary,
           },
           ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
         });
+        await params.onToolResult?.({ text: summary });
       };
       const announceFastModeAutoOff = (payload: {
         enabled: boolean;
