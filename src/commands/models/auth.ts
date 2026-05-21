@@ -572,8 +572,8 @@ export async function modelsAuthPasteTokenCommand(
     provider?: string;
     profileId?: string;
     expiresIn?: string;
-    agent?: string;
     token?: string;
+    agent?: string;
   },
   runtime: RuntimeEnv,
 ) {
