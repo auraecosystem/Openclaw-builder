@@ -466,7 +466,9 @@ describe("control UI routing", () => {
 
     expect([...section.classList]).toContain("nav-section--collapsed");
     expect(
-      section.querySelector<HTMLButtonElement>(".nav-section__label")?.getAttribute("aria-expanded"),
+      section
+        .querySelector<HTMLButtonElement>(".nav-section__label")
+        ?.getAttribute("aria-expanded"),
     ).toBe("false");
   });
 
@@ -579,6 +581,23 @@ describe("control UI routing", () => {
     expect(app.chatMobileControlsOpen).toBe(true);
     expect([...openDropdown.classList]).toEqual(["chat-controls-dropdown", "open"]);
 
+    const composer = expectElement(app, "textarea", HTMLTextAreaElement);
+    composer.focus();
+    const editableEscape = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+    composer.dispatchEvent(editableEscape);
+    await app.updateComplete;
+
+    expect(editableEscape.defaultPrevented).toBe(false);
+    expect(app.chatMobileControlsOpen).toBe(true);
+    expect([...expectElement(app, ".chat-controls-dropdown", HTMLElement).classList]).toEqual([
+      "chat-controls-dropdown",
+      "open",
+    ]);
+
     document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, composed: true }));
     await app.updateComplete;
 
@@ -593,6 +612,88 @@ describe("control UI routing", () => {
     app.setTab("channels");
     await app.updateComplete;
     expect(app.chatMobileControlsOpen).toBe(false);
+  });
+
+  it("routes guarded dashboard shortcuts to chat actions", async () => {
+    const app = mountApp("/sessions");
+    await app.updateComplete;
+
+    const slash = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
+    document.dispatchEvent(slash);
+    await app.updateComplete;
+    await nextFrame();
+
+    expect(slash.defaultPrevented).toBe(true);
+    expect(app.tab).toBe("chat");
+    const composer = expectElement(app, "textarea", HTMLTextAreaElement);
+    expect(document.activeElement).toBe(composer);
+    composer.blur();
+
+    const scrollToBottom = vi.spyOn(app, "scrollToBottom").mockImplementation(() => undefined);
+    app.chatNewMessagesBelow = true;
+    await app.updateComplete;
+
+    const jump = new KeyboardEvent("keydown", { key: "n", bubbles: true, cancelable: true });
+    document.dispatchEvent(jump);
+
+    expect(jump.defaultPrevented).toBe(true);
+    expect(scrollToBottom).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not dispatch dashboard shortcuts from editable targets", async () => {
+    const app = mountApp("/sessions");
+    await app.updateComplete;
+
+    const input = document.createElement("input");
+    document.body.append(input);
+    input.focus();
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true }),
+    );
+
+    expect(app.tab).toBe("sessions");
+
+    app.chatNewMessagesBelow = true;
+    const scrollToBottom = vi.spyOn(app, "scrollToBottom").mockImplementation(() => undefined);
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "n", bubbles: true, cancelable: true }),
+    );
+
+    expect(scrollToBottom).not.toHaveBeenCalled();
+
+    const editable = document.createElement("div");
+    editable.contentEditable = "true";
+    document.body.append(editable);
+    editable.focus();
+    editable.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true }),
+    );
+
+    expect(app.tab).toBe("sessions");
+  });
+
+  it("dismisses dashboard transient state on Escape", async () => {
+    const app = mountApp("/chat");
+    await app.updateComplete;
+
+    app.paletteOpen = true;
+    app.paletteQuery = "agent";
+    await app.updateComplete;
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await app.updateComplete;
+
+    expect(app.paletteOpen).toBe(false);
+    expect(app.paletteQuery).toBe("");
+
+    app.applySettings({ ...app.settings, chatFocusMode: true });
+    await app.updateComplete;
+    expect(app.settings.chatFocusMode).toBe(true);
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await app.updateComplete;
+
+    expect(app.settings.chatFocusMode).toBe(false);
   });
 
   it("preserves session navigation and keeps focus mode scoped to chat", async () => {
