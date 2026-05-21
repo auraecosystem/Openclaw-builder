@@ -6,6 +6,14 @@ export type ConfigSchemaAnalysis = {
 };
 
 const META_KEYS = new Set(["title", "description", "default", "nullable", "tags", "x-tags"]);
+const RENDERABLE_UNION_TYPES = new Set([
+  "string",
+  "number",
+  "integer",
+  "boolean",
+  "object",
+  "array",
+]);
 
 function isAnySchema(schema: JsonSchema): boolean {
   const keys = Object.keys(schema ?? {}).filter((key) => !META_KEYS.has(key));
@@ -15,13 +23,17 @@ function isAnySchema(schema: JsonSchema): boolean {
 function normalizeEnum(values: unknown[]): { enumValues: unknown[]; nullable: boolean } {
   const filtered = values.filter((value) => value != null);
   const nullable = filtered.length !== values.length;
-  const enumValues: unknown[] = [];
-  for (const value of filtered) {
-    if (!enumValues.some((existing) => Object.is(existing, value))) {
-      enumValues.push(value);
+  return { enumValues: uniqueValues(filtered), nullable };
+}
+
+function uniqueValues(values: unknown[]): unknown[] {
+  const unique: unknown[] = [];
+  for (const value of values) {
+    if (!unique.some((existing) => Object.is(existing, value))) {
+      unique.push(value);
     }
   }
-  return { enumValues, nullable };
+  return unique;
 }
 
 export function analyzeConfigSchema(raw: unknown): ConfigSchemaAnalysis {
@@ -162,7 +174,7 @@ function normalizeSecretInputUnion(
     {
       ...schema,
       ...remaining[stringIndex],
-      nullable,
+      nullable: nullable || remaining[stringIndex].nullable,
       anyOf: undefined,
       oneOf: undefined,
       allOf: undefined,
@@ -214,15 +226,6 @@ function normalizeUnion(
     remaining.push(entry);
   }
 
-  // Filter out "any" schema branches ({} with no type constraints).
-  // These arise from unrepresentable Zod types (transforms) and provide
-  // no rendering value when typed branches are already present.
-  const typed = remaining.filter((entry) => !isAnySchema(entry));
-  if (typed.length > 0 && typed.length < remaining.length) {
-    remaining.length = 0;
-    remaining.push(...typed);
-  }
-
   // Config secrets accept either a raw key string or a structured secret ref object.
   // The form only supports editing the string path for now.
   const secretInput = normalizeSecretInputUnion(schema, path, remaining, nullable);
@@ -231,16 +234,10 @@ function normalizeUnion(
   }
 
   if (literals.length > 0 && remaining.length === 0) {
-    const unique: unknown[] = [];
-    for (const value of literals) {
-      if (!unique.some((existing) => Object.is(existing, value))) {
-        unique.push(value);
-      }
-    }
     return {
       schema: {
         ...schema,
-        enum: unique,
+        enum: uniqueValues(literals),
         nullable,
         anyOf: undefined,
         oneOf: undefined,
@@ -251,27 +248,25 @@ function normalizeUnion(
   }
 
   if (remaining.length === 1) {
-    const res = normalizeSchemaNode(remaining[0], path);
-    if (res.schema) {
-      res.schema.nullable = nullable || res.schema.nullable;
-    }
-    return res;
+    return normalizeSchemaNode(
+      {
+        ...schema,
+        ...remaining[0],
+        nullable: nullable || remaining[0].nullable,
+        anyOf: undefined,
+        oneOf: undefined,
+        allOf: undefined,
+      },
+      path,
+    );
   }
 
-  const renderableUnionTypes = new Set([
-    "string",
-    "number",
-    "integer",
-    "boolean",
-    "object",
-    "array",
-  ]);
   if (
     remaining.length > 0 &&
     literals.length === 0 &&
     remaining.every((entry) => {
       const type = schemaType(entry);
-      return Boolean(type) && renderableUnionTypes.has(String(type));
+      return Boolean(type) && RENDERABLE_UNION_TYPES.has(String(type));
     })
   ) {
     return {

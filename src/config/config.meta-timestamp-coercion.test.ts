@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
+import { computeBaseConfigSchemaResponse } from "./schema-base.js";
 import { validateConfigObject } from "./validation.js";
-import { OpenClawSchema } from "./zod-schema.js";
+
+type TestJsonSchema = {
+  anyOf?: Array<TestJsonSchema & { items?: TestJsonSchema }>;
+  items?: TestJsonSchema;
+  properties?: Record<string, TestJsonSchema>;
+  type?: unknown;
+};
+
+function schemaAt(schema: TestJsonSchema, path: string[]): TestJsonSchema {
+  return path.reduce((node, key) => node.properties?.[key] ?? {}, schema);
+}
 
 describe("meta.lastTouchedAt numeric timestamp coercion", () => {
   it("accepts a numeric Unix timestamp and coerces it to an ISO string", () => {
@@ -60,33 +71,28 @@ describe("meta.lastTouchedAt numeric timestamp coercion", () => {
     expect(res.ok).toBe(true);
   });
 
-  it("generates JSON Schema for lastTouchedAt with a representable type and no empty any-branches", () => {
-    const schema = OpenClawSchema.toJSONSchema({
-      target: "draft-07",
-      unrepresentable: "any",
-    }) as Record<string, unknown>;
-    const props = schema.properties as Record<string, Record<string, unknown>>;
-    const metaProps = props.meta.properties as Record<string, Record<string, unknown>>;
-    const lastTouchedAt = metaProps.lastTouchedAt;
+  it("generates public JSON Schema for transform-backed input branches", () => {
+    const schema = computeBaseConfigSchemaResponse({
+      generatedAt: "2026-05-05T00:00:00.000Z",
+    }).schema as TestJsonSchema;
+    const cases = [
+      { path: ["meta", "lastTouchedAt"], types: ["number", "string"] },
+      {
+        path: ["agents", "defaults", "sandbox", "docker", "setupCommand"],
+        types: ["array", "string"],
+        arrayItemsType: "string",
+      },
+    ];
 
-    // Whether or not the union de-duplicates into a single typed branch, the
-    // schema must not contain an empty any-schema (`{}`). Pre-fix, the output
-    // was `anyOf: [{ type: "string" }, {}]` because the numeric-transform
-    // branch's output type was unrepresentable. The .pipe(z.string()) fix
-    // makes both branches resolve to typed strings.
-    const branches = lastTouchedAt.anyOf as Record<string, unknown>[] | undefined;
-    if (branches !== undefined) {
-      // Union still present (no de-dup): every branch must be a typed schema.
-      expect(branches.length).toBeGreaterThan(0);
-      for (const branch of branches) {
-        expect(Object.keys(branch).length).toBeGreaterThan(0);
-        expect(branch).toHaveProperty("type");
+    for (const entry of cases) {
+      const branches = schemaAt(schema, entry.path).anyOf ?? [];
+      expect(branches.map((branch) => branch.type).toSorted()).toEqual(entry.types);
+      expect(branches.every((branch) => Object.keys(branch).length > 0)).toBe(true);
+      if (entry.arrayItemsType) {
+        expect(branches.find((branch) => branch.type === "array")?.items?.type).toBe(
+          entry.arrayItemsType,
+        );
       }
-    } else {
-      // De-duplicated into a single typed branch — must be a representable string.
-      expect(lastTouchedAt.type).toBe("string");
     }
-    // Belt-and-suspenders: serializing must never produce an empty-object branch.
-    expect(JSON.stringify(lastTouchedAt)).not.toMatch(/"anyOf":\s*\[[^\]]*\{\s*\}/);
   });
 });
