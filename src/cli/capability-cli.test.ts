@@ -134,6 +134,20 @@ const mocks = vi.hoisted(() => ({
   registerBuiltInMemoryEmbeddingProviders: vi.fn(),
   buildMediaUnderstandingRegistry: vi.fn(() => new Map()),
   convertHeicToJpeg: vi.fn(async () => Buffer.from("jpeg-normalized")),
+  saveMediaBuffer: vi.fn(
+    async (
+      buffer: Buffer,
+      contentType?: string,
+      subdir = "generated",
+      _maxBytes = Number.MAX_SAFE_INTEGER,
+      originalFilename?: string,
+    ) => ({
+      id: "media-test-id",
+      path: path.join(os.tmpdir(), subdir, originalFilename ?? "asset.bin"),
+      contentType,
+      size: buffer.byteLength,
+    }),
+  ),
   isWebSearchProviderConfigured: vi.fn(() => false),
   isWebFetchProviderConfigured: vi.fn(() => false),
   resolveCommandConfigWithSecrets: vi.fn(
@@ -251,6 +265,11 @@ vi.mock("../media/media-services.js", async (importOriginal) => {
       mocks.convertHeicToJpeg as typeof import("../media/media-services.js").convertHeicToJpeg,
   };
 });
+
+vi.mock("../media/store.js", () => ({
+  saveMediaBuffer:
+    mocks.saveMediaBuffer as unknown as typeof import("../media/store.js").saveMediaBuffer,
+}));
 
 vi.mock("../plugins/memory-embedding-providers.js", () => ({
   listMemoryEmbeddingProviders:
@@ -445,6 +464,7 @@ describe("capability cli", () => {
     mocks.resolveExplicitTtsOverrides.mockClear();
     mocks.buildMediaUnderstandingRegistry.mockReset().mockReturnValue(new Map());
     mocks.convertHeicToJpeg.mockClear();
+    mocks.saveMediaBuffer.mockClear();
     mocks.createEmbeddingProvider.mockClear();
     mocks.registerMemoryEmbeddingProvider.mockClear();
     mocks.registerBuiltInMemoryEmbeddingProviders.mockClear();
