@@ -62,9 +62,10 @@ export function getUsedPorts(
     }
     try {
       const parsed = new URL(rawUrl);
+      const parsedPort = parsed.port ? Number.parseInt(parsed.port, 10) : Number.NaN;
       const port =
-        parsed.port && Number.parseInt(parsed.port, 10) > 0
-          ? Number.parseInt(parsed.port, 10)
+        Number.isFinite(parsedPort) && parsedPort > 0
+          ? parsedPort
           : parsed.protocol === "https:"
             ? 443
             : 80;
@@ -92,9 +93,10 @@ export const PROFILE_COLORS = [
 ];
 
 export function allocateColor(usedColors: Set<string>): string {
+  const normalizedUsed = new Set(Array.from(usedColors, (color) => color.toUpperCase()));
   // Find first unused color from palette
   for (const color of PROFILE_COLORS) {
-    if (!usedColors.has(color.toUpperCase())) {
+    if (!normalizedUsed.has(color.toUpperCase())) {
       return color;
     }
   }
