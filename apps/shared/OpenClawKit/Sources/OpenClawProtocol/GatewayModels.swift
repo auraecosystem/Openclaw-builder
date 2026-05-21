@@ -6371,7 +6371,9 @@ public struct ChatSendParams: Codable, Sendable {
     public let sessionid: String?
     public let message: String
     public let thinking: String?
-    public let fastmode: Bool?
+    public let fastmode: AnyCodable?
+    public let fastSeconds: Int?
+    public let fastseconds: Int?
     public let deliver: Bool?
     public let originatingchannel: String?
     public let originatingto: String?
@@ -6388,7 +6390,9 @@ public struct ChatSendParams: Codable, Sendable {
         sessionid: String?,
         message: String,
         thinking: String?,
-        fastmode: Bool?,
+        fastmode: AnyCodable?,
+        fastSeconds: Int?,
+        fastseconds: Int?,
         deliver: Bool?,
         originatingchannel: String?,
         originatingto: String?,
@@ -6405,6 +6409,8 @@ public struct ChatSendParams: Codable, Sendable {
         self.message = message
         self.thinking = thinking
         self.fastmode = fastmode
+        self.fastSeconds = fastSeconds
+        self.fastseconds = fastseconds
         self.deliver = deliver
         self.originatingchannel = originatingchannel
         self.originatingto = originatingto
@@ -6423,6 +6429,8 @@ public struct ChatSendParams: Codable, Sendable {
         case message
         case thinking
         case fastmode = "fastMode"
+        case fastSeconds = "fast_seconds"
+        case fastseconds = "fastSeconds"
         case deliver
         case originatingchannel = "originatingChannel"
         case originatingto = "originatingTo"
