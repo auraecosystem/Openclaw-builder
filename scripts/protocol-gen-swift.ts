@@ -104,6 +104,24 @@ function safeName(name: string) {
   return cc;
 }
 
+function swiftStoredPropertyName(structName: string, key: string): string {
+  if (structName === "ChatSendParams" && key === "fastMode") {
+    return "fastmodevalue";
+  }
+  return safeName(key);
+}
+
+function swiftInitializerName(_structName: string, key: string): string {
+  return safeName(key);
+}
+
+function swiftCompatibilityPropertyLines(structName: string, key: string): string[] {
+  if (structName === "ChatSendParams" && key === "fastMode") {
+    return ["    public var fastmode: Bool? { fastmodevalue?.value as? Bool }"];
+  }
+  return [];
+}
+
 // filled later once schemas are loaded
 const schemaNameByObject = new Map<object, string>();
 const schemaNameBySignature = new Map<string, string>();
@@ -321,9 +339,10 @@ function emitStruct(name: string, schema: JsonSchema): string {
   lines.push(`public struct ${name}: Codable, Sendable {`);
   const codingKeys: string[] = [];
   for (const [key, propSchema] of Object.entries(props)) {
-    const propName = safeName(key);
+    const propName = swiftStoredPropertyName(name, key);
     const propType = swiftType(propSchema, required.has(key), true);
     lines.push(`    public let ${propName}: ${propType}`);
+    lines.push(...swiftCompatibilityPropertyLines(name, key));
     if (propName !== key) {
       codingKeys.push(`        case ${propName} = "${key}"`);
     } else {
@@ -334,7 +353,7 @@ function emitStruct(name: string, schema: JsonSchema): string {
     "\n    public init(\n" +
       Object.entries(props)
         .map(([key, prop]) => {
-          const propName = safeName(key);
+          const propName = swiftInitializerName(name, key);
           const req = required.has(key);
           return `        ${swiftInitializerParam({
             structName: name,
@@ -349,17 +368,67 @@ function emitStruct(name: string, schema: JsonSchema): string {
       "    {\n" +
       Object.entries(props)
         .map(([key]) => {
-          const propName = safeName(key);
-          return `        self.${propName} = ${propName}`;
+          const propName = swiftStoredPropertyName(name, key);
+          const paramName = swiftInitializerName(name, key);
+          return `        self.${propName} = ${paramName}`;
         })
         .join("\n") +
-      "\n    }\n\n" +
+      "\n    }" +
+      emitStructCompatibilityInitializer(name, props, required) +
+      "\n\n" +
       "    private enum CodingKeys: String, CodingKey {\n" +
       codingKeys.join("\n") +
       "\n    }\n}",
   );
   lines.push("");
   return lines.join("\n");
+}
+
+function emitStructCompatibilityInitializer(
+  name: string,
+  props: Record<string, JsonSchema>,
+  required: Set<string>,
+): string {
+  if (name !== "ChatSendParams" || !props.fastMode || !props.fast_seconds || !props.fastSeconds) {
+    return "";
+  }
+  const legacyKeys = Object.keys(props).filter(
+    (key) => key !== "fast_seconds" && key !== "fastSeconds",
+  );
+  const initializerParams = legacyKeys.map((key) => {
+    const prop = props[key]!;
+    const propName = swiftInitializerName(name, key);
+    if (key === "fastMode") {
+      return "        fastmode: Bool?";
+    }
+    return `        ${swiftInitializerParam({
+      structName: name,
+      key,
+      name: propName,
+      schema: prop,
+      required: required.has(key),
+    })}`;
+  });
+  const delegatedArgs = Object.keys(props).map((key) => {
+    const propName = swiftInitializerName(name, key);
+    if (key === "fastMode") {
+      return "            fastmode: fastmode.map { AnyCodable($0) }";
+    }
+    if (key === "fast_seconds" || key === "fastSeconds") {
+      return `            ${propName}: nil`;
+    }
+    return `            ${propName}: ${propName}`;
+  });
+  return (
+    "\n\n    public init(\n" +
+    initializerParams.join(",\n") +
+    ")\n" +
+    "    {\n" +
+    "        self.init(\n" +
+    delegatedArgs.join(",\n") +
+    ")\n" +
+    "    }"
+  );
 }
 
 function literalSchemaValue(schema: JsonSchema): boolean | number | string | null | undefined {

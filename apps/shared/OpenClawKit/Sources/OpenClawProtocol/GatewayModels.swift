@@ -6371,7 +6371,8 @@ public struct ChatSendParams: Codable, Sendable {
     public let sessionid: String?
     public let message: String
     public let thinking: String?
-    public let fastmode: AnyCodable?
+    public let fastmodevalue: AnyCodable?
+    public var fastmode: Bool? { fastmodevalue?.value as? Bool }
     public let fastSeconds: Int?
     public let fastseconds: Int?
     public let deliver: Bool?
@@ -6408,7 +6409,7 @@ public struct ChatSendParams: Codable, Sendable {
         self.sessionid = sessionid
         self.message = message
         self.thinking = thinking
-        self.fastmode = fastmode
+        self.fastmodevalue = fastmode
         self.fastSeconds = fastSeconds
         self.fastseconds = fastseconds
         self.deliver = deliver
@@ -6423,12 +6424,49 @@ public struct ChatSendParams: Codable, Sendable {
         self.idempotencykey = idempotencykey
     }
 
+    public init(
+        sessionkey: String,
+        sessionid: String?,
+        message: String,
+        thinking: String?,
+        fastmode: Bool?,
+        deliver: Bool?,
+        originatingchannel: String?,
+        originatingto: String?,
+        originatingaccountid: String?,
+        originatingthreadid: String?,
+        attachments: [AnyCodable]?,
+        timeoutms: Int?,
+        systeminputprovenance: [String: AnyCodable]?,
+        systemprovenancereceipt: String?,
+        idempotencykey: String)
+    {
+        self.init(
+            sessionkey: sessionkey,
+            sessionid: sessionid,
+            message: message,
+            thinking: thinking,
+            fastmode: fastmode.map { AnyCodable($0) },
+            fastSeconds: nil,
+            fastseconds: nil,
+            deliver: deliver,
+            originatingchannel: originatingchannel,
+            originatingto: originatingto,
+            originatingaccountid: originatingaccountid,
+            originatingthreadid: originatingthreadid,
+            attachments: attachments,
+            timeoutms: timeoutms,
+            systeminputprovenance: systeminputprovenance,
+            systemprovenancereceipt: systemprovenancereceipt,
+            idempotencykey: idempotencykey)
+    }
+
     private enum CodingKeys: String, CodingKey {
         case sessionkey = "sessionKey"
         case sessionid = "sessionId"
         case message
         case thinking
-        case fastmode = "fastMode"
+        case fastmodevalue = "fastMode"
         case fastSeconds = "fast_seconds"
         case fastseconds = "fastSeconds"
         case deliver
