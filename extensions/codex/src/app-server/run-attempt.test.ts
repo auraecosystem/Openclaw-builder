@@ -11265,6 +11265,7 @@ describe("runCodexAppServerAttempt", () => {
     const turnRequest = requests.find((request) => request.method === "turn/start");
     const turnRequestParams = turnRequest?.params as Record<string, unknown> | undefined;
     expect(turnRequestParams).not.toHaveProperty("serviceTier");
+    expect(fastMode).toHaveBeenCalledTimes(2);
   });
 
   it("keys plugin app inventory by websocket credentials without exposing them", () => {

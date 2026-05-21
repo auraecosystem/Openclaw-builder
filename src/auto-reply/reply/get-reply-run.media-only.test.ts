@@ -2346,10 +2346,16 @@ describe("runPreparedReply media-only handling", () => {
   });
 
   it("forwards resolved fast-mode overrides into the followup run", async () => {
-    await runPreparedReply(baseParams({ resolvedFastMode: "auto" }));
+    await runPreparedReply(
+      baseParams({
+        resolvedFastMode: "auto",
+        resolvedFastModeAutoSeconds: 2,
+      }),
+    );
 
     const call = requireRunReplyAgentCall();
     expect(call.followupRun.run.fastMode).toBe("auto");
+    expect(call.followupRun.run.fastModeAutoSeconds).toBe(2);
   });
 
   it("carries system events into followupRun.prompt for deferred turns", async () => {

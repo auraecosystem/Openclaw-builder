@@ -145,9 +145,11 @@ async function resolveHelloWithModelDefaults(params: {
   sessionEntry?: SessionEntry;
   agentCfg?: { reasoningDefault?: "off" | "on" | "stream" };
   commandAuthorized?: boolean;
+  hasOneTurnModelOverride?: boolean;
   provider?: string;
   model?: string;
   ctx?: Parameters<typeof buildTestCtx>[0];
+  opts?: Parameters<typeof resolveReplyDirectives>[0]["opts"];
 }) {
   const resolveDefaultThinkingLevel = vi.fn(async () => params.defaultThinking);
   const resolveDefaultReasoningLevel = vi.fn(async () => params.defaultReasoning);
@@ -194,9 +196,10 @@ async function resolveHelloWithModelDefaults(params: {
     aliasIndex: { byAlias: new Map(), byKey: new Map() },
     provider: params.provider ?? "openai",
     model: params.model ?? "gpt-4o-mini",
+    hasOneTurnModelOverride: params.hasOneTurnModelOverride,
     hasResolvedHeartbeatModelOverride: false,
     typing: makeTypingController(),
-    opts: undefined,
+    opts: params.opts,
     skillFilter: undefined,
   });
 
@@ -317,6 +320,37 @@ describe("resolveReplyDirectives", () => {
       fastSeconds: 60,
     }));
     mocks.resolveReplyExecOverrides.mockReturnValue(undefined);
+  });
+
+  it("passes one-turn model override state into model selection", async () => {
+    await resolveHelloWithModelDefaults({
+      defaultThinking: "off",
+      defaultReasoning: "on",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      hasOneTurnModelOverride: true,
+    });
+
+    const modelSelectionInput = mockCallInput(mocks.createModelSelectionState);
+    expect(modelSelectionInput.provider).toBe("openai");
+    expect(modelSelectionInput.model).toBe("gpt-4o-mini");
+    expect(modelSelectionInput.hasOneTurnModelOverride).toBe(true);
+  });
+
+  it("keeps one-turn fast auto seconds with the resolved fast mode", async () => {
+    const { result } = await resolveHelloWithModelDefaults({
+      defaultThinking: "off",
+      defaultReasoning: "on",
+      opts: {
+        fastModeOverride: "auto",
+        fastModeAutoSecondsOverride: 2,
+      },
+    });
+
+    expectContinueResult(result, {
+      resolvedFastMode: "auto",
+      resolvedFastModeAutoSeconds: 2,
+    });
   });
 
   it("prefers the target session entry from sessionStore for directive state", async () => {

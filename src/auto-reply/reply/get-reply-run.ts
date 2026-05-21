@@ -348,6 +348,7 @@ type RunPreparedReplyParams = {
   defaultActivation: Parameters<typeof buildGroupIntro>[0]["defaultActivation"];
   resolvedThinkLevel: ThinkLevel | undefined;
   resolvedFastMode?: FastMode;
+  resolvedFastModeAutoSeconds?: number;
   resolvedVerboseLevel: VerboseLevel | undefined;
   resolvedReasoningLevel: ReasoningLevel;
   resolvedElevatedLevel: ElevatedLevel;
@@ -1157,7 +1158,7 @@ export async function runPreparedReply(
             });
         return {
           fastMode: useFastReplyRuntime ? false : (params.resolvedFastMode ?? fastModeState.mode),
-          fastModeAutoSeconds: fastModeState.fastSeconds,
+          fastModeAutoSeconds: params.resolvedFastModeAutoSeconds ?? fastModeState.fastSeconds,
         };
       })(),
       verboseLevel: resolvedVerboseLevel,
