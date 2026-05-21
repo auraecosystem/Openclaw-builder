@@ -800,6 +800,18 @@ export const dispatchTelegramMessage = async ({
     if (!lineText || !reasoningLane.stream) {
       return false;
     }
+    // Honor the same tool-progress visibility gate that pushStreamToolProgress
+    // uses (resolveChannelStreamingPreviewToolProgress + the
+    // streamToolProgressSuppressed runtime flag). When a user has disabled
+    // tool-progress preview via streaming.preview.toolProgress: false, the
+    // interleaved render must ALSO suppress command / file_path / URL
+    // details — otherwise the interleave becomes a privacy bypass that
+    // surfaces tool args the user explicitly hid. Returning false signals
+    // the caller to fall back to pushStreamToolProgress, which applies the
+    // same gate at its own entry point so neither path leaks.
+    if (streamToolProgressSuppressed || !streamToolProgressEnabled) {
+      return false;
+    }
     await enqueueDraftLaneEvent(async () => {
       clearActiveTimer();
       const ts = formatTimerClock(new Date());
