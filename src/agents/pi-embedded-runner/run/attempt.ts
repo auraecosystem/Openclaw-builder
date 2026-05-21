@@ -3189,8 +3189,9 @@ export async function runEmbeddedAttempt(
         prompt: string,
         options?: Parameters<typeof activeSession.prompt>[1],
       ): Promise<void> =>
-        withOwnedSessionTranscriptWrites(ownedTranscriptWriteContext, async () =>
-          abortable(trackPromptSettlePromise(activeSession.prompt(prompt, options))),
+        withOwnedSessionTranscriptWrites(
+          ownedTranscriptWriteContext,
+          async () => abortable(trackPromptSettlePromise(activeSession.prompt(prompt, options))),
         );
       const onBlockReply = params.onBlockReply
         ? bindOwnedSessionTranscriptWrites(ownedTranscriptWriteContext, params.onBlockReply)
