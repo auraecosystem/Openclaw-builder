@@ -104,11 +104,72 @@ describe("install.ps1 failure handling", () => {
     );
   });
 
+  it("rejects OpenClaw GitHub source targets for npm installs", () => {
+    const npmInstallBody = extractFunctionBody(source, "Install-OpenClaw");
+    const sourceTargetBody = extractFunctionBody(source, "Test-OpenClawSourcePackageInstallSpec");
+    expect(sourceTargetBody).toContain('$normalizedTag -eq "main"');
+    expect(sourceTargetBody).toContain("^github:openclaw/openclaw");
+    expect(npmInstallBody).toContain("Test-OpenClawSourcePackageInstallSpec -RequestedTag $Tag");
+    expect(npmInstallBody).toContain("npm installs do not support OpenClaw GitHub source targets");
+    expect(npmInstallBody).toContain("-InstallMethod git -Tag main");
+  });
+
+  it("falls back to a user-local portable Node.js bootstrap when package managers are absent", () => {
+    const installNodeBody = extractFunctionBody(source, "Install-Node");
+    const portableNodeBody = extractFunctionBody(source, "Install-PortableNode");
+    const portableNodeRootBody = extractFunctionBody(source, "Get-PortableNodeRoot");
+    const portableNodePathBody = extractFunctionBody(source, "Ensure-PortableNodeOnUserPath");
+    const userPathBody = extractFunctionBody(source, "Add-ToUserPath");
+    const depsRootBody = extractFunctionBody(source, "Get-OpenClawDepsRoot");
+    const resolveNodeBody = extractFunctionBody(source, "Resolve-PortableNodeDownload");
+    const expandNodeBody = extractFunctionBody(source, "Expand-PortableNodeArchive");
+
+    expect(installNodeBody).toContain("Install-PortableNode");
+    expect(installNodeBody).toContain("Portable Node.js bootstrap failed");
+    expect(installNodeBody).toContain("Error: Could not install Node.js automatically.");
+    expect(depsRootBody).toContain("OpenClaw\\deps");
+    expect(portableNodeRootBody).toContain("portable-node");
+    expect(portableNodeBody).toContain("Ensure-PortableNodeOnUserPath");
+    expect(portableNodeBody).toContain(
+      "Expand-PortableNodeArchive -ZipPath $tmpZip -DestinationPath $portableRoot",
+    );
+    expect(portableNodeBody).not.toContain("Copy-Item");
+    expect(portableNodeBody).not.toContain('Join-Path $nodeDir.FullName "*"');
+    expect(portableNodePathBody).toContain("Add-ToUserPath $nodeDir");
+    expect(userPathBody).toContain(
+      '[Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")',
+    );
+    expect(portableNodeBody).toContain("Invoke-WebRequest -UseBasicParsing");
+    expect(portableNodeBody).toContain("Expand-PortableNodeArchive");
+    expect(portableNodeBody).not.toContain("Expand-Archive");
+    expect(portableNodeBody).not.toContain("New-Item -ItemType Directory -Force -Path $tmpExtract");
+    expect(expandNodeBody).toContain("Get-Command tar");
+    expect(expandNodeBody).toContain("-xf $ZipPath -C $DestinationPath --strip-components 1");
+    expect(expandNodeBody).toContain(
+      "Copy-Item -LiteralPath $nodeDir.FullName -Destination $DestinationPath -Recurse -Force",
+    );
+    expect(expandNodeBody).toContain("System.IO.Compression.ZipFile");
+    expect(resolveNodeBody).toContain("https://nodejs.org/dist/index.json");
+    expect(resolveNodeBody).toContain("win-$architecture-zip");
+    expect(resolveNodeBody).toContain("node-$($release.version)-win-$architecture.zip");
+  });
+
   it("cleans legacy git submodules only from the selected git checkout", () => {
     const gitInstallBody = extractFunctionBody(source, "Install-OpenClawFromGit");
     const mainBody = extractFunctionBody(source, "Main");
     expect(gitInstallBody).toContain("Remove-LegacySubmodule -RepoDir $RepoDir");
     expect(mainBody).not.toContain("Remove-LegacySubmodule");
+  });
+
+  it("launches interactive onboarding outside Main's captured output", () => {
+    const interactiveCommandBody = extractFunctionBody(source, "Invoke-InteractiveOpenClawCommand");
+    const mainBody = extractFunctionBody(source, "Main");
+    expect(interactiveCommandBody).toContain("Start-Process");
+    expect(interactiveCommandBody).toContain("-NoNewWindow");
+    expect(interactiveCommandBody).toContain("-Wait");
+    expect(interactiveCommandBody).toContain("-PassThru");
+    expect(mainBody).toContain('Write-Host "Starting setup..." -ForegroundColor Cyan');
+    expect(mainBody).toContain("Invoke-InteractiveOpenClawCommand onboard");
   });
 
   runIfPowerShell("exits non-zero when run as a script file", () => {
