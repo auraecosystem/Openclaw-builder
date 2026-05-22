@@ -22,3 +22,7 @@ export {
   type ResolvedRootPath,
   type RootPathAliasPolicy,
 } from "@openclaw/fs-safe/advanced";
+
+export function invalidateAncestorPathCache(): void {
+  ancestorPathCache.clear();
+}

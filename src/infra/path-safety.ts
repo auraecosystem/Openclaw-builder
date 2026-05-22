@@ -61,3 +61,7 @@ export {
   splitSafeRelativePath,
 } from "@openclaw/fs-safe/path";
 export { formatPosixMode } from "@openclaw/fs-safe/advanced";
+
+export function invalidateRealpathCaches(): void {
+  globalRealpathCache.clear();
+}

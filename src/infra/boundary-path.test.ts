@@ -1,8 +1,14 @@
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { withTempDir } from "../test-helpers/temp-dir.js";
-import { resolveRootPath, resolveRootPathSync } from "./boundary-path.js";
+import {
+  invalidateAncestorPathCache,
+  resolvePathViaExistingAncestorSync,
+  resolveRootPath,
+  resolveRootPathSync,
+} from "./boundary-path.js";
 import { isPathInside } from "./path-guards.js";
 
 function createSeededRandom(seed: number): () => number {
@@ -183,6 +189,52 @@ describe("resolveRootPath", () => {
           }),
         ).rejects.toThrow(/Symlink escapes sandbox root/i);
       }
+    });
+  });
+});
+
+describe("ancestor path cache", () => {
+  it("resolvePathViaExistingAncestorSync returns consistent results", async () => {
+    await withTempDir({ prefix: "openclaw-ancestor-cache-" }, async (base) => {
+      const existing = path.join(base, "dir");
+      fsSync.mkdirSync(existing);
+      const target = path.join(existing, "missing", "deep.txt");
+
+      invalidateAncestorPathCache();
+      const first = resolvePathViaExistingAncestorSync(target);
+      const second = resolvePathViaExistingAncestorSync(target);
+      expect(first).toBe(second);
+    });
+  });
+
+  it("invalidateAncestorPathCache allows detecting directory changes", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    await withTempDir({ prefix: "openclaw-ancestor-cache-" }, async (base) => {
+      const realTarget = path.join(base, "real");
+      const altTarget = path.join(base, "alt");
+      const link = path.join(base, "link");
+
+      fsSync.mkdirSync(realTarget);
+      fsSync.mkdirSync(altTarget);
+      fsSync.symlinkSync(realTarget, link);
+
+      const target = path.join(link, "file.txt");
+
+      invalidateAncestorPathCache();
+      const before = resolvePathViaExistingAncestorSync(target);
+      expect(before).toContain("real");
+
+      // Change symlink to point elsewhere
+      fsSync.unlinkSync(link);
+      fsSync.symlinkSync(altTarget, link);
+
+      // After invalidation, resolves through new symlink target
+      invalidateAncestorPathCache();
+      const after = resolvePathViaExistingAncestorSync(target);
+      expect(after).toContain("alt");
+      expect(after).not.toBe(before);
     });
   });
 });
