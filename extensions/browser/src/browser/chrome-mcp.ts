@@ -140,8 +140,16 @@ const CDP_URL_IN_TEXT_RE = /\b(?:https?|wss?):\/\/[^\s"'<>`]+/gi;
 const STALE_SELECTED_PAGE_ERROR =
   "The selected page has been closed. Call list_pages to see open pages.";
 
+type ChromeMcpTrackedEmulationState = {
+  networkConditions?: "Offline";
+  geolocation?: string;
+  colorScheme?: "dark" | "light";
+  extraHttpHeaders?: Record<string, string>;
+};
+
 const sessions = new Map<string, ChromeMcpSession>();
 const pendingSessions = new Map<string, Promise<ChromeMcpSession>>();
+const emulationStates = new Map<string, ChromeMcpTrackedEmulationState>();
 let sessionFactory: ChromeMcpSessionFactory | null = null;
 
 function asPages(value: unknown): ChromeMcpStructuredPage[] {
@@ -530,6 +538,21 @@ function buildChromeMcpSessionCacheKey(
   ]);
 }
 
+function buildChromeMcpPageStateKey(
+  profileName: string,
+  options: NormalizedChromeMcpProfileOptions,
+  targetId: string,
+): string {
+  return JSON.stringify([
+    profileName,
+    options.userDataDir ?? "",
+    options.browserUrl ?? "",
+    options.command,
+    options.extraArgs,
+    targetId,
+  ]);
+}
+
 function chromeMcpProfileOptionsFromParams(params: {
   profile?: ChromeMcpProfileOptions;
   userDataDir?: string;
@@ -541,6 +564,25 @@ function cacheKeyMatchesProfileName(cacheKey: string, profileName: string): bool
   try {
     const parsed = JSON.parse(cacheKey);
     return Array.isArray(parsed) && parsed[0] === profileName;
+  } catch {
+    return false;
+  }
+}
+
+function pageStateKeyMatchesProfileName(
+  stateKey: string,
+  profileName: string,
+  keepSessionKey?: string,
+): boolean {
+  try {
+    const parsed = JSON.parse(stateKey);
+    if (!Array.isArray(parsed) || parsed[0] !== profileName) {
+      return false;
+    }
+    if (!keepSessionKey) {
+      return true;
+    }
+    return JSON.stringify(parsed.slice(0, 5)) !== keepSessionKey;
   } catch {
     return false;
   }
@@ -564,6 +606,12 @@ async function closeChromeMcpSessionsForProfile(
       sessions.delete(key);
       closed = true;
       await session.client.close().catch(() => {});
+    }
+  }
+
+  for (const key of Array.from(emulationStates.keys())) {
+    if (pageStateKeyMatchesProfileName(key, profileName, keepKey)) {
+      emulationStates.delete(key);
     }
   }
 
@@ -1488,6 +1536,73 @@ export async function resizeChromeMcpPage(params: {
   });
 }
 
+export async function emulateChromeMcpPage(params: {
+  profileName: string;
+  profile?: ChromeMcpProfileOptions;
+  userDataDir?: string;
+  targetId: string;
+  offline?: boolean;
+  extraHttpHeaders?: Record<string, string>;
+  geolocation?: { latitude: number; longitude: number } | null;
+  colorScheme?: "dark" | "light" | "auto";
+}): Promise<void> {
+  const profileOptions = chromeMcpProfileOptionsFromParams(params);
+  const stateKey = buildChromeMcpPageStateKey(
+    params.profileName,
+    normalizeChromeMcpOptions(profileOptions),
+    params.targetId,
+  );
+  const nextState: ChromeMcpTrackedEmulationState = { ...(emulationStates.get(stateKey) ?? {}) };
+
+  if (params.offline !== undefined) {
+    if (params.offline) {
+      nextState.networkConditions = "Offline";
+    } else {
+      delete nextState.networkConditions;
+    }
+  }
+  if (params.extraHttpHeaders !== undefined) {
+    nextState.extraHttpHeaders = { ...params.extraHttpHeaders };
+  }
+  if (Object.hasOwn(params, "geolocation")) {
+    if (params.geolocation) {
+      nextState.geolocation = `${params.geolocation.latitude},${params.geolocation.longitude}`;
+    } else {
+      delete nextState.geolocation;
+    }
+  }
+  if (params.colorScheme !== undefined) {
+    if (params.colorScheme === "auto") {
+      delete nextState.colorScheme;
+    } else {
+      nextState.colorScheme = params.colorScheme;
+    }
+  }
+
+  await callTool(
+    params.profileName,
+    profileOptions,
+    "emulate",
+    {
+      pageId: parsePageId(params.targetId),
+      ...(nextState.networkConditions
+        ? { networkConditions: nextState.networkConditions }
+        : {}),
+      ...(nextState.geolocation ? { geolocation: nextState.geolocation } : {}),
+      ...(nextState.colorScheme ? { colorScheme: nextState.colorScheme } : {}),
+      ...(nextState.extraHttpHeaders !== undefined
+        ? { extraHttpHeaders: JSON.stringify(nextState.extraHttpHeaders) }
+        : {}),
+    },
+  );
+
+  if (Object.keys(nextState).length > 0) {
+    emulationStates.set(stateKey, nextState);
+  } else {
+    emulationStates.delete(stateKey);
+  }
+}
+
 export async function handleChromeMcpDialog(params: {
   profileName: string;
   profile?: ChromeMcpProfileOptions;
@@ -1638,5 +1753,6 @@ export function setChromeMcpSessionFactoryForTest(factory: ChromeMcpSessionFacto
 export async function resetChromeMcpSessionsForTest(): Promise<void> {
   sessionFactory = null;
   pendingSessions.clear();
+  emulationStates.clear();
   await stopAllChromeMcpSessions();
 }
