@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import {
   listAgentIds,
   resolveDefaultAgentId,
@@ -39,6 +40,8 @@ import {
   resolveAgentIdFromSessionKey,
   resolveExplicitAgentSessionKey,
   resolveAgentMainSessionKey,
+  resolveSessionFilePath,
+  resolveSessionFilePathOptions,
   resolveSessionLifecycleTimestamps,
   resolveSessionResetPolicy,
   resolveSessionResetType,
@@ -173,7 +176,7 @@ function logAttachmentFailure(
   });
 }
 
-function resolveSenderIsOwnerFromClient(client: GatewayRequestHandlerOptions["client"]): boolean {
+function clientHasAdminScope(client: GatewayRequestHandlerOptions["client"]): boolean {
   const scopes = Array.isArray(client?.connect?.scopes) ? client.connect.scopes : [];
   return scopes.includes(ADMIN_SCOPE);
 }
@@ -181,11 +184,11 @@ function resolveSenderIsOwnerFromClient(client: GatewayRequestHandlerOptions["cl
 function resolveAllowModelOverrideFromClient(
   client: GatewayRequestHandlerOptions["client"],
 ): boolean {
-  return resolveSenderIsOwnerFromClient(client) || client?.internal?.allowModelOverride === true;
+  return clientHasAdminScope(client) || client?.internal?.allowModelOverride === true;
 }
 
 function resolveCanResetSessionFromClient(client: GatewayRequestHandlerOptions["client"]): boolean {
-  return resolveSenderIsOwnerFromClient(client);
+  return clientHasAdminScope(client);
 }
 
 function resolveCanUseInternalRuntimeHandoff(
@@ -661,7 +664,6 @@ export const agentHandlers: GatewayRequestHandlers = {
       workspaceDir?: string;
       voiceWakeTrigger?: string;
     };
-    const senderIsOwner = resolveSenderIsOwnerFromClient(client);
     const allowModelOverride = resolveAllowModelOverrideFromClient(client);
     const canResetSession = resolveCanResetSessionFromClient(client);
     const canUseInternalRuntimeHandoff = resolveCanUseInternalRuntimeHandoff(client);
@@ -1080,7 +1082,24 @@ export const agentHandlers: GatewayRequestHandlers = {
               policy: resetPolicy,
             })
           : undefined;
-        const canReuseSession = Boolean(entry?.sessionId) && (freshness?.fresh ?? false);
+        let failedSessionTranscriptMissing = false;
+        if (entry?.status === "failed" && entry.sessionId?.trim()) {
+          try {
+            const sessionPathOpts = resolveSessionFilePathOptions({
+              storePath,
+              agentId: resolveAgentIdFromSessionKey(canonicalKey),
+            });
+            failedSessionTranscriptMissing = !existsSync(
+              resolveSessionFilePath(entry.sessionId, entry, sessionPathOpts),
+            );
+          } catch {
+            failedSessionTranscriptMissing = true;
+          }
+        }
+        const canReuseSession =
+          Boolean(entry?.sessionId) &&
+          (freshness?.fresh ?? false) &&
+          !failedSessionTranscriptMissing;
         const usableRequestedSessionId =
           requestedSessionId && (!entry?.sessionId || canReuseSession)
             ? requestedSessionId
@@ -1092,6 +1111,7 @@ export const agentHandlers: GatewayRequestHandlers = {
           !entry ||
           (!canReuseSession && !usableRequestedSessionId) ||
           Boolean(usableRequestedSessionId && entry?.sessionId !== usableRequestedSessionId);
+        const rotatedSessionId = Boolean(entry?.sessionId && entry.sessionId !== sessionId);
         const touchInteraction =
           request.bootstrapContextRunKind !== "cron" &&
           request.bootstrapContextRunKind !== "heartbeat" &&
@@ -1171,6 +1191,7 @@ export const agentHandlers: GatewayRequestHandlers = {
           requestDeliveryHint,
         );
         const effectiveDeliveryFields = normalizeSessionDeliveryFields({
+          route: deliveryFields.route,
           deliveryContext: effectiveDelivery,
         });
         const nextEntryPatch: SessionEntry = {
@@ -1193,6 +1214,7 @@ export const agentHandlers: GatewayRequestHandlers = {
           systemSent: entry?.systemSent,
           sendPolicy: entry?.sendPolicy,
           skillsSnapshot: entry?.skillsSnapshot,
+          route: effectiveDeliveryFields.route,
           deliveryContext: effectiveDeliveryFields.deliveryContext,
           lastChannel: effectiveDeliveryFields.lastChannel ?? entry?.lastChannel,
           lastTo: effectiveDeliveryFields.lastTo ?? entry?.lastTo,
@@ -1209,8 +1231,16 @@ export const agentHandlers: GatewayRequestHandlers = {
           groupChannel: resolvedGroupChannel,
           space: resolvedGroupSpace,
           ...(pluginOwnerId ? { pluginOwnerId } : {}),
-          sessionFile:
-            entry?.sessionId && entry.sessionId !== sessionId ? undefined : entry?.sessionFile,
+          ...(rotatedSessionId
+            ? {
+                status: undefined,
+                startedAt: undefined,
+                endedAt: undefined,
+                runtimeMs: undefined,
+                abortedLastRun: undefined,
+                sessionFile: undefined,
+              }
+            : { sessionFile: entry?.sessionFile }),
           cliSessionIds: entry?.cliSessionIds,
           cliSessionBindings: entry?.cliSessionBindings,
           claudeCliSessionId: entry?.claudeCliSessionId,
@@ -1624,7 +1654,6 @@ export const agentHandlers: GatewayRequestHandlers = {
                 spawnedBy: spawnedByValue,
                 workspaceDir: sessionEntry?.spawnedWorkspaceDir,
               }),
-              senderIsOwner,
               allowModelOverride,
             },
             runId,

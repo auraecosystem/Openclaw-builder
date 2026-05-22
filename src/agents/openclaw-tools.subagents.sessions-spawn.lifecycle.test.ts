@@ -14,7 +14,7 @@ import {
   waitForSessionsSpawnEvent,
 } from "./openclaw-tools.subagents.sessions-spawn.test-harness.js";
 import {
-  __testing as bundleMcpRuntimeTesting,
+  testing as bundleMcpRuntimeTesting,
   getOrCreateSessionMcpRuntime,
 } from "./pi-bundle-mcp-tools.js";
 import {
@@ -122,7 +122,10 @@ async function executeBoundAccountSpawn(params: {
   setSessionsSpawnConfigOverride({
     session: { mainKey: "main", scope: "per-sender" },
     messages: { queue: { debounceMs: 0 } },
-    agents: { defaults: { subagents: { allowAgents: ["bot-alpha"] } } },
+    agents: {
+      defaults: { subagents: { allowAgents: ["bot-alpha"] } },
+      list: [{ id: "main" }, { id: "bot-alpha" }],
+    },
     bindings: params.bindings,
   });
   setupSessionsSpawnGatewayMock({

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import {
   CODEX_APP_SERVER_CONFIG_KEYS,
+  CODEX_APP_SERVER_EXPERIMENTAL_CONFIG_KEYS,
   CODEX_COMPUTER_USE_CONFIG_KEYS,
   CODEX_PLUGIN_ENTRY_CONFIG_KEYS,
   CODEX_PLUGINS_CONFIG_KEYS,
@@ -67,7 +68,9 @@ describe("Codex app-server config", () => {
           sandbox: "danger-full-access",
           approvalsReviewer: "guardian_subagent",
           serviceTier: "flex",
+          codeModeOnly: true,
           turnCompletionIdleTimeoutMs: 120_000,
+          postToolRawAssistantCompletionIdleTimeoutMs: 180_000,
         },
       },
       env: {
@@ -81,7 +84,9 @@ describe("Codex app-server config", () => {
       sandbox: "danger-full-access",
       approvalsReviewer: "guardian_subagent",
       serviceTier: "flex",
+      codeModeOnly: true,
       turnCompletionIdleTimeoutMs: 120_000,
+      postToolRawAssistantCompletionIdleTimeoutMs: 180_000,
     });
     expectFields(runtime.start, "runtime start", {
       transport: "websocket",
@@ -164,6 +169,17 @@ describe("Codex app-server config", () => {
     ).toStrictEqual({});
   });
 
+  it("rejects unknown app-server fields", () => {
+    expect(
+      readCodexPluginConfig({
+        appServer: {
+          postToolRawAssistantCompletionIdleTimeoutMs: 180_000,
+          unknownTimeoutMs: 1,
+        },
+      }),
+    ).toStrictEqual({});
+  });
+
   it("requires a websocket url when websocket transport is configured", () => {
     expect(() =>
       resolveRuntimeForTest({
@@ -183,6 +199,7 @@ describe("Codex app-server config", () => {
       sandbox: "danger-full-access",
       approvalsReviewer: "user",
     });
+    expect(runtime.codeModeOnly).toBe(false);
     expectFields(runtime.start, "runtime start", {
       command: "codex",
       commandSource: "managed",
@@ -459,6 +476,18 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
       codexDynamicToolsLoading: "direct",
       codexDynamicToolsExclude: ["custom_tool"],
     });
+  });
+
+  it("parses app-server experimental flags", () => {
+    expect(
+      readCodexPluginConfig({
+        appServer: {
+          experimental: {
+            sandboxExecServer: true,
+          },
+        },
+      }).appServer?.experimental,
+    ).toEqual({ sandboxExecServer: true });
   });
 
   it("rejects the retired dynamic tool profile key", () => {
@@ -829,6 +858,17 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
     expect(manifestKeys).toEqual([...CODEX_APP_SERVER_CONFIG_KEYS].toSorted());
     for (const key of CODEX_APP_SERVER_CONFIG_KEYS) {
       expectUiHintLabel(manifest, `appServer.${key}`);
+    }
+    const appServerExperimentalProperties = (
+      manifest.configSchema.properties.appServer.properties.experimental as {
+        properties: Record<string, unknown>;
+      }
+    ).properties;
+    expect(Object.keys(appServerExperimentalProperties).toSorted()).toEqual([
+      ...CODEX_APP_SERVER_EXPERIMENTAL_CONFIG_KEYS,
+    ]);
+    for (const key of CODEX_APP_SERVER_EXPERIMENTAL_CONFIG_KEYS) {
+      expectUiHintLabel(manifest, `appServer.experimental.${key}`);
     }
     const computerUseManifestKeys = Object.keys(
       manifest.configSchema.properties.computerUse.properties,

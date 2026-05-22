@@ -86,12 +86,14 @@ function Check-Node {
     try {
         $nodeVersion = (node -v 2>$null)
         if ($nodeVersion) {
-            $version = [int]($nodeVersion -replace 'v(\d+)\..*', '$1')
-            if ($version -ge 22) {
+            $versionMatch = [regex]::Match($nodeVersion, '^v(?<major>\d+)\.(?<minor>\d+)\.')
+            $major = if ($versionMatch.Success) { [int]$versionMatch.Groups["major"].Value } else { 0 }
+            $minor = if ($versionMatch.Success) { [int]$versionMatch.Groups["minor"].Value } else { 0 }
+            if (($major -gt 22) -or (($major -eq 22) -and ($minor -ge 19))) {
                 Write-Host "[OK] Node.js $nodeVersion found" -ForegroundColor Green
                 return $true
             } else {
-                Write-Host "[!] Node.js $nodeVersion found, but v22+ required" -ForegroundColor Yellow
+                Write-Host "[!] Node.js $nodeVersion found, but v22.19+ required" -ForegroundColor Yellow
                 return $false
             }
         }
@@ -352,6 +354,20 @@ function Invoke-OpenClawCommand {
     & $commandPath @Arguments
 }
 
+function Invoke-InteractiveOpenClawCommand {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Arguments
+    )
+
+    $commandPath = Get-OpenClawCommandPath
+    if (-not $commandPath) {
+        throw "openclaw command not found on PATH."
+    }
+
+    $null = Start-Process -FilePath $commandPath -ArgumentList $Arguments -NoNewWindow -Wait -PassThru
+}
+
 function Resolve-CommandPath {
     param(
         [Parameter(Mandatory = $true)]
@@ -495,9 +511,44 @@ function Resolve-NpmOpenClawInstallSpec {
     return "$PackageName@$trimmedTag"
 }
 
+function Test-OpenClawSourcePackageInstallSpec {
+    param([string]$RequestedTag)
+
+    if ([string]::IsNullOrWhiteSpace($RequestedTag)) {
+        return $false
+    }
+
+    $normalizedTag = $RequestedTag.Trim().ToLowerInvariant()
+    if ($normalizedTag.StartsWith("openclaw@")) {
+        $normalizedTag = $normalizedTag.Substring("openclaw@".Length)
+    }
+
+    if ($normalizedTag -eq "main") {
+        return $true
+    }
+    if ($normalizedTag -match '^github:openclaw/openclaw($|[#/])') {
+        return $true
+    }
+
+    if ($normalizedTag.StartsWith("git+")) {
+        $normalizedTag = $normalizedTag.Substring("git+".Length)
+    }
+    return (
+        $normalizedTag -match '^https?://github\.com/openclaw/openclaw(\.git)?($|[?#])' -or
+        $normalizedTag -match '^ssh://git@github\.com[:/]openclaw/openclaw(\.git)?($|[?#])' -or
+        $normalizedTag -match '^git://github\.com/openclaw/openclaw(\.git)?($|[?#])' -or
+        $normalizedTag -match '^git@github\.com:openclaw/openclaw(\.git)?($|[?#])'
+    )
+}
+
 function Install-OpenClaw {
     if ([string]::IsNullOrWhiteSpace($Tag)) {
         $Tag = "latest"
+    }
+    if (Test-OpenClawSourcePackageInstallSpec -RequestedTag $Tag) {
+        Write-Host "Error: npm installs do not support OpenClaw GitHub source targets like '$Tag'." -ForegroundColor Red
+        Write-Host "Use -InstallMethod git -Tag main for the moving main checkout, or use latest, beta, an exact version, or a built .tgz package." -ForegroundColor Yellow
+        return $false
     }
     if (-not (Ensure-Git)) {
         return $false
@@ -873,7 +924,7 @@ function Main {
         } else {
             Write-Host "Starting setup..." -ForegroundColor Cyan
             Write-Host ""
-            Invoke-OpenClawCommand onboard
+            Invoke-InteractiveOpenClawCommand onboard
         }
     }
 

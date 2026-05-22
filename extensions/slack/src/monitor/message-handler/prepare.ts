@@ -852,7 +852,7 @@ export async function prepareSlackMessage(params: {
   const shouldRequireMention = isRoom
     ? (channelConfig?.requireMention ?? ctx.defaultRequireMention)
     : false;
-  if (message._ambiguousThreadReply) {
+  if (message["_ambiguousThreadReply"]) {
     ctx.logger.info(
       {
         channel: message.channel,
@@ -1116,8 +1116,6 @@ export async function prepareSlackMessage(params: {
   enqueueSystemEvent(`${inboundLabel}: ${preview}`, {
     sessionKey,
     contextKey: `slack:message:${message.channel}:${message.ts ?? "unknown"}`,
-    forceSenderIsOwnerFalse: true,
-    trusted: false,
   });
 
   const envelopeFrom =

@@ -161,12 +161,13 @@ afterEach(() => {
 });
 
 describe("createCodexDynamicToolBridge", () => {
-  it("defers OpenClaw dynamic tools behind Codex tool search by default", () => {
+  it("keeps turn-yield direct while deferring OpenClaw session spawn", () => {
     const bridge = createCodexDynamicToolBridge({
       tools: [
         createTool({ name: "web_search" }),
         createTool({ name: "message" }),
         createTool({ name: HEARTBEAT_RESPONSE_TOOL_NAME }),
+        createTool({ name: "sessions_spawn" }),
         createTool({ name: "sessions_yield" }),
       ],
       signal: new AbortController().signal,
@@ -175,6 +176,7 @@ describe("createCodexDynamicToolBridge", () => {
     const webSearch = bridge.specs.find((tool) => tool.name === "web_search");
     const message = bridge.specs.find((tool) => tool.name === "message");
     const heartbeat = bridge.specs.find((tool) => tool.name === HEARTBEAT_RESPONSE_TOOL_NAME);
+    const sessionsSpawn = bridge.specs.find((tool) => tool.name === "sessions_spawn");
     const sessionsYield = bridge.specs.find((tool) => tool.name === "sessions_yield");
 
     expectDynamicSpec(webSearch, {
@@ -189,6 +191,11 @@ describe("createCodexDynamicToolBridge", () => {
     });
     expectDynamicSpec(heartbeat, {
       name: HEARTBEAT_RESPONSE_TOOL_NAME,
+      namespace: CODEX_OPENCLAW_DYNAMIC_TOOL_NAMESPACE,
+      deferLoading: true,
+    });
+    expectDynamicSpec(sessionsSpawn, {
+      name: "sessions_spawn",
       namespace: CODEX_OPENCLAW_DYNAMIC_TOOL_NAMESPACE,
       deferLoading: true,
     });
@@ -722,7 +729,7 @@ describe("createCodexDynamicToolBridge", () => {
 
   it("passes raw tool failure state into agent tool result middleware", async () => {
     const registry = createEmptyPluginRegistry();
-    const handler = vi.fn(async (_event: { isError?: boolean }) => undefined);
+    const handler = vi.fn(async (eventValue: { isError?: boolean }) => undefined);
     registry.agentToolResultMiddlewares.push({
       pluginId: "tokenjuice",
       pluginName: "Tokenjuice",
@@ -751,9 +758,60 @@ describe("createCodexDynamicToolBridge", () => {
       success: false,
       contentItems: [{ type: "inputText", text: "failed output" }],
     });
+    expect(result.sideEffectEvidence).toBe(true);
     const event = requireRecord(callArg(handler, 0, 0, "middleware event"), "middleware event");
     expect(event.isError).toBe(true);
     expectContextFields(callArg(handler, 0, 1, "middleware context"), { runtime: "codex" });
+  });
+
+  it("marks executed dynamic tool results as side-effect evidence", async () => {
+    const bridge = createBridgeWithToolResult("exec", textToolResult("done"));
+
+    const result = await bridge.handleToolCall({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      callId: "call-1",
+      namespace: null,
+      tool: "exec",
+      arguments: { command: "pwd" },
+    });
+
+    expect(result).toEqual(expectInputText("done"));
+    expect(result.sideEffectEvidence).toBe(true);
+  });
+
+  it("does not mark pre-execution argument failures as side-effect evidence", async () => {
+    const execute = vi.fn(async () => textToolResult("should not run"));
+    const bridge = createCodexDynamicToolBridge({
+      tools: [
+        createTool({
+          name: "exec",
+          execute,
+          ...({
+            prepareArguments: () => {
+              throw new Error("invalid arguments");
+            },
+          } as { prepareArguments: () => never }),
+        }),
+      ],
+      signal: new AbortController().signal,
+    });
+
+    const result = await bridge.handleToolCall({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      callId: "call-1",
+      namespace: null,
+      tool: "exec",
+      arguments: {},
+    });
+
+    expect(result).toEqual({
+      success: false,
+      contentItems: [{ type: "inputText", text: "invalid arguments" }],
+    });
+    expect(result.sideEffectEvidence).toBeUndefined();
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("uses raw tool provenance for media trust after middleware rewrites details", async () => {
@@ -846,7 +904,7 @@ describe("createCodexDynamicToolBridge", () => {
     const registry = createEmptyPluginRegistry();
     const middlewareContexts: Record<string, unknown>[] = [];
     const legacyContexts: Record<string, unknown>[] = [];
-    const middleware = vi.fn(async (_event: unknown, ctx: Record<string, unknown>) => {
+    const middleware = vi.fn(async (eventValue: unknown, ctx: Record<string, unknown>) => {
       middlewareContexts.push(ctx);
       return undefined;
     });
@@ -859,7 +917,7 @@ describe("createCodexDynamicToolBridge", () => {
         ) => Promise<{ result: AgentToolResult<unknown> } | void>,
       ) => void;
     }) => {
-      codex.on("tool_result", async (_event, ctx) => {
+      codex.on("tool_result", async (eventValue, ctx) => {
         legacyContexts.push(ctx);
       });
     };
@@ -1075,6 +1133,7 @@ describe("createCodexDynamicToolBridge", () => {
       success: false,
       contentItems: [{ type: "inputText", text: "blocked by policy" }],
     });
+    expect(result.sideEffectEvidence).toBeUndefined();
     expect(execute).not.toHaveBeenCalled();
     expect(bridge.telemetry.didSendViaMessagingTool).toBe(false);
     await vi.waitFor(() => {

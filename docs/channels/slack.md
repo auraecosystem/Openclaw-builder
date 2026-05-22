@@ -743,6 +743,11 @@ The default manifest enables the Slack App Home **Home** tab and subscribes to `
       "usage_hint": "host=<auto|sandbox|gateway|node> security=<deny|allowlist|full> ask=<off|on-miss|always> node=<id>"
     },
     {
+      "command": "/approve",
+      "description": "Approve or deny pending approval requests",
+      "usage_hint": "<id> <decision>"
+    },
+    {
       "command": "/model",
       "description": "Show or set the model",
       "usage_hint": "[name|#|status]"
@@ -1283,13 +1288,15 @@ compact, redacted `Slack interaction: ...` system event. If the handler returns
 fields are included in that compact event so the agent can reference
 plugin-owned storage without seeing the complete form payload.
 
-## Exec approvals in Slack
+## Native approvals in Slack
 
 Slack can act as a native approval client with interactive buttons and interactions, instead of falling back to the Web UI or terminal.
 
-- Exec approvals use `channels.slack.execApprovals.*` for native DM/channel routing.
-- Plugin approvals can still resolve through the same Slack-native button surface when the request already lands in Slack and the approval id kind is `plugin:`.
-- Approver authorization is still enforced: only users identified as approvers can approve or deny requests through Slack.
+- Exec and plugin approvals can render as Slack-native Block Kit prompts.
+- `channels.slack.execApprovals.*` remains the native approval client enablement and DM/channel routing config.
+- Exec approval DMs use `channels.slack.execApprovals.approvers` or `commands.ownerAllowFrom`.
+- Plugin approval DMs use Slack plugin approvers from `channels.slack.allowFrom`, named-account `allowFrom`, or the account default route.
+- Approver authorization is still enforced: exec-only approvers cannot approve plugin requests unless they are also plugin approvers.
 
 This uses the same shared approval button surface as other channels. When `interactivity` is enabled in your Slack app settings, approval prompts render as Block Kit buttons directly in the conversation.
 When those buttons are present, they are the primary approval UX; OpenClaw
@@ -1336,8 +1343,8 @@ opt into origin-chat delivery:
 
 Shared `approvals.exec` forwarding is separate. Use it only when exec approval prompts must also
 route to other chats or explicit out-of-band targets. Shared `approvals.plugin` forwarding is also
-separate; Slack-native buttons can still resolve plugin approvals when those requests already land
-in Slack.
+separate; Slack native delivery suppresses that fallback only when Slack can handle the plugin
+approval request natively.
 
 Same-chat `/approve` also works in Slack channels and DMs that already support commands. See [Exec approvals](/tools/exec-approvals) for the full approval forwarding model.
 
@@ -1381,7 +1388,7 @@ Primary reference: [Configuration reference - Slack](/gateway/config-channels#sl
     - channel allowlist (`channels.slack.channels`) — **keys must be channel IDs** (`C12345678`), not names (`#channel-name`). Name-based keys silently fail under `groupPolicy: "allowlist"` because channel routing is ID-first by default. To find an ID: right-click the channel in Slack → **Copy link** — the `C...` value at the end of the URL is the channel ID.
     - `requireMention`
     - per-channel `users` allowlist
-    - `messages.groupChat.visibleReplies`: if it is `"message_tool"` and logs show assistant text with no `message(action=send)` call, the model missed the visible message-tool path. Final text stays private in this mode; inspect the gateway verbose log for suppressed payload metadata, or set it to `"automatic"` if you want every normal assistant final reply posted through the legacy path.
+    - `messages.groupChat.visibleReplies`: normal group/channel requests default to `"automatic"`. If you opted into `"message_tool"` and logs show assistant text with no `message(action=send)` call, the model missed the visible message-tool path. Final text stays private in this mode; inspect the gateway verbose log for suppressed payload metadata, or set it to `"automatic"` if you want every normal assistant final reply posted through the legacy path.
     - `messages.groupChat.unmentionedInbound`: if it is `"room_event"`, unmentioned allowed channel chatter is ambient context and stays silent unless the agent calls the `message` tool. See [Ambient room events](/channels/ambient-room-events).
 
 ```json5
