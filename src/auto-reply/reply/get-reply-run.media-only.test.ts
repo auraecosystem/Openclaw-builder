@@ -2417,4 +2417,29 @@ describe("runPreparedReply rawBody hook gating", () => {
     expect(capturedRawBody()).toBe("!cmd");
     expect(capturedFollowupRawBody()).toBe("!cmd");
   });
+
+  it("threads rawBody through steer path for non-telegram channels", async () => {
+    const queueSettings = await import("./queue/settings-runtime.js");
+    const piRuntime = await import("../../agents/pi-embedded.runtime.js");
+    vi.mocked(queueSettings.resolveQueueSettings).mockReturnValueOnce({
+      mode: "steer",
+      debounceMs: 500,
+      cap: 20,
+      dropPolicy: "summarize",
+    });
+    vi.mocked(piRuntime.resolveActiveEmbeddedRunSessionId)
+      .mockReturnValueOnce("active-session")
+      .mockReturnValueOnce("active-session");
+    vi.mocked(piRuntime.isEmbeddedPiRunActive).mockReturnValueOnce(true);
+    vi.mocked(piRuntime.isEmbeddedPiRunStreaming).mockReturnValueOnce(true);
+
+    await runPreparedReply(paramsForProvider("discord", { body: "INTERRUPT" }));
+
+    const call = vi.mocked(runReplyAgent).mock.calls.at(-1)?.[0];
+    expect(call).toMatchObject({
+      shouldSteer: true,
+      isStreaming: true,
+    });
+    expect(call?.followupRun.rawBody).toBe("INTERRUPT");
+  });
 });

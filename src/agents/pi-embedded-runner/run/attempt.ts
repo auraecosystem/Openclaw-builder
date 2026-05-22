@@ -3320,6 +3320,13 @@ export async function runEmbeddedAttempt(
         }
       };
 
+      // PR #52664: track the latest user-input rawBody for hook events.
+      // The initial value is captured at run start; steered injections
+      // (queueMessage with options.rawBody) refresh it so subsequent
+      // before_prompt_build / agent_end hook events reflect the most
+      // recent user message rather than the original turn's text.
+      let currentRawBody: string | undefined = params.rawBody;
+
       const queueHandle: EmbeddedPiQueueHandle & {
         kind: "embedded";
         cancel: (reason?: "user_abort" | "restart" | "superseded") => void;
@@ -3328,6 +3335,9 @@ export async function runEmbeddedAttempt(
         queueMessage: async (text: string, options) => {
           if (options?.steeringMode) {
             activeSession.agent.steeringMode = options.steeringMode;
+          }
+          if (options?.rawBody !== undefined) {
+            currentRawBody = options.rawBody;
           }
           await steerActiveSessionWithOptionalDeliveryWait(activeSession, text, options);
         },
@@ -3539,7 +3549,7 @@ export async function runEmbeddedAttempt(
               config: params.config ?? getRuntimeConfig(),
               prompt: params.prompt,
               messages: promptBuildMessages,
-              rawBody: params.rawBody,
+              rawBody: currentRawBody,
               hookCtx,
               hookRunner,
               legacyBeforeAgentStartResult: params.legacyBeforeAgentStartResult,
@@ -4507,7 +4517,7 @@ export async function runEmbeddedAttempt(
                 success: !aborted && !promptError,
                 error: promptError ? formatErrorMessage(promptError) : undefined,
                 durationMs: Date.now() - promptStartedAt,
-                rawBody: params.rawBody,
+                rawBody: currentRawBody,
               },
               {
                 runId: params.runId,
