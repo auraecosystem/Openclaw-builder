@@ -316,10 +316,6 @@ The fallback path is intentional. It is better to send a fresh final answer than
 to lose text, mis-thread a reply, or overwrite a draft with a payload the channel
 cannot represent safely.
 
-Telegram clears progress drafts at completion by default. Set
-`streaming.progress.keepLog: true` when you want the compact tool log to remain
-visible beside the final answer.
-
 ## Troubleshooting
 
 **I only see the final answer.**

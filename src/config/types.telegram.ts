@@ -1,5 +1,4 @@
 import type {
-  ChannelStreamingProgressConfig,
   ChannelPreviewStreamingConfig,
   ChannelStreamingPreviewConfig,
   ContextVisibilityMode,
@@ -71,17 +70,8 @@ export type TelegramStreamingPreviewConfig = ChannelStreamingPreviewConfig & {
   nativeToolProgressAllowFrom?: Array<string | number>;
 };
 
-export type TelegramStreamingProgressConfig = ChannelStreamingProgressConfig & {
-  /** Keep the progress draft visible after the final answer is sent. Default: false. */
-  keepLog?: boolean;
-};
-
-export type TelegramPreviewStreamingConfig = Omit<
-  ChannelPreviewStreamingConfig,
-  "preview" | "progress"
-> & {
+export type TelegramPreviewStreamingConfig = Omit<ChannelPreviewStreamingConfig, "preview"> & {
   preview?: TelegramStreamingPreviewConfig;
-  progress?: TelegramStreamingProgressConfig;
 };
 
 export type TelegramExecApprovalConfig = {

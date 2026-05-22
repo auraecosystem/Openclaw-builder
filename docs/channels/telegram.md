@@ -313,7 +313,6 @@ curl "https://api.telegram.org/bot<bot_token>/getUpdates"
 
     - `channels.telegram.streaming` is `off | partial | block | progress` (default: `partial`)
     - `progress` keeps one editable status draft for tool progress, clears it at completion, and sends the final answer as a normal message
-    - `streaming.progress.keepLog: true` keeps that progress draft visible after the final answer
     - `streaming.preview.toolProgress` controls whether tool/progress updates reuse the same edited preview message (default: `true` when preview streaming is active)
     - `streaming.preview.commandText` controls command/exec detail inside those tool-progress lines: `raw` (default, preserves released behavior) or `status` (tool label only)
     - legacy `channels.telegram.streamMode` and boolean `streaming` values are detected; run `openclaw doctor --fix` to migrate them to `channels.telegram.streaming.mode`
@@ -383,8 +382,7 @@ curl "https://api.telegram.org/bot<bot_token>/getUpdates"
             "mode": "progress",
             "progress": {
               "toolProgress": true,
-              "commandText": "status",
-              "keepLog": true
+              "commandText": "status"
             }
           }
         }
@@ -402,7 +400,7 @@ curl "https://api.telegram.org/bot<bot_token>/getUpdates"
 
     - short DM/group/topic previews: OpenClaw keeps the same preview message and performs the final edit in place
     - long text finals that split into multiple Telegram messages reuse the existing preview as the first final chunk when possible, then send only the remaining chunks
-    - progress-mode finals clear the status draft and use normal final delivery instead of editing the draft into the answer unless `streaming.progress.keepLog` is true
+    - progress-mode finals clear the status draft and use normal final delivery instead of editing the draft into the answer
     - if the final edit fails before the completed text is confirmed, OpenClaw uses normal final delivery and cleans up the stale preview
 
     For complex replies (for example media payloads), OpenClaw falls back to normal final delivery and then cleans up the preview message.
