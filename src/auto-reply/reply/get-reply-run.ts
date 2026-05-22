@@ -6,7 +6,7 @@ import {
 } from "../../agents/agent-scope.js";
 import { resolveSessionAuthProfileOverride } from "../../agents/auth-profiles/session-override.js";
 import type { ExecToolDefaults } from "../../agents/bash-tools.js";
-import { DEFAULT_FAST_MODE_AUTO_SECONDS, resolveFastModeState } from "../../agents/fast-mode.js";
+import { resolveFastModeState } from "../../agents/fast-mode.js";
 import { resolveAgentHarnessPolicy } from "../../agents/harness/selection.js";
 import { listOpenAIAuthProfileProvidersForAgentRuntime } from "../../agents/openai-codex-routing.js";
 import { resolveEmbeddedFullAccessState } from "../../agents/pi-embedded-runner/sandbox-info.js";
@@ -348,7 +348,6 @@ type RunPreparedReplyParams = {
   defaultActivation: Parameters<typeof buildGroupIntro>[0]["defaultActivation"];
   resolvedThinkLevel: ThinkLevel | undefined;
   resolvedFastMode?: FastMode;
-  resolvedFastModeAutoSeconds?: number;
   resolvedVerboseLevel: VerboseLevel | undefined;
   resolvedReasoningLevel: ReasoningLevel;
   resolvedElevatedLevel: ElevatedLevel;
@@ -1148,7 +1147,7 @@ export async function runPreparedReply(
       thinkLevel: resolvedThinkLevel,
       ...(() => {
         const fastModeState = useFastReplyRuntime
-          ? { mode: false as const, fastSeconds: DEFAULT_FAST_MODE_AUTO_SECONDS }
+          ? { mode: false as const }
           : resolveFastModeState({
               cfg,
               provider,
@@ -1158,7 +1157,6 @@ export async function runPreparedReply(
             });
         return {
           fastMode: useFastReplyRuntime ? false : (params.resolvedFastMode ?? fastModeState.mode),
-          fastModeAutoSeconds: params.resolvedFastModeAutoSeconds ?? fastModeState.fastSeconds,
         };
       })(),
       verboseLevel: resolvedVerboseLevel,

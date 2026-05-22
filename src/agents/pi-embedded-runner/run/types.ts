@@ -35,7 +35,6 @@ type EmbeddedRunAttemptBase = Omit<
   | "authProfileIdSource"
   | "thinkLevel"
   | "fastMode"
-  | "fastModeAutoSeconds"
   | "lane"
   | "enqueue"
 >;

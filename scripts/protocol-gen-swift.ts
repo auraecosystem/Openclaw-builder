@@ -395,7 +395,7 @@ function emitStructCompatibilityInitializer(
   props: Record<string, JsonSchema>,
   required: Set<string>,
 ): string {
-  if (name !== "ChatSendParams" || !props.fastMode || !props.fast_seconds) {
+  if (name !== "ChatSendParams" || !props.fastMode) {
     return "";
   }
   const legacyKeys = Object.keys(props).filter((key) => key !== "fast_seconds");

@@ -211,16 +211,12 @@ export async function handleDirectiveOnly(
             : "";
       const statusText = `Current fast mode: ${formatFastModeStatusValue({
         mode: effectiveFastMode,
-        fastSeconds: fastModeState.fastSeconds,
       })}${sourceSuffix}.`;
       if (normalizeLowercaseStringOrEmpty(directives.rawFastMode) === "status") {
         return { text: statusText };
       }
       return {
-        text: withOptions(
-          statusText,
-          `status, ${formatFastModeAutoLabel(fastModeState.fastSeconds)}, on, off, default`,
-        ),
+        text: withOptions(statusText, `status, ${formatFastModeAutoLabel()}, on, off, default`),
       };
     }
     return {

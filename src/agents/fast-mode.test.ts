@@ -4,7 +4,6 @@ import {
   formatFastModeAutoLabel,
   formatFastModeAutoProgressText,
   formatFastModeStatusValue,
-  resolveFastModeAutoSeconds,
   resolveFastModeForElapsed,
   resolveFastModeState,
 } from "./fast-mode.js";
@@ -33,7 +32,6 @@ describe("resolveFastModeState", () => {
 
     expect(state.mode).toBe("auto");
     expect(state.enabled).toBe(true);
-    expect(state.fastSeconds).toBe(60);
   });
 
   it("uses agent fastModeDefault when present", () => {
@@ -75,35 +73,12 @@ describe("resolveFastModeState", () => {
     expect(state.source).toBe("config");
   });
 
-  it("uses configured auto threshold from fast_seconds", () => {
-    const cfg = {
-      agents: {
-        defaults: {
-          models: {
-            "openai/gpt-5.5": { params: { fastMode: "auto", fast_seconds: 45 } },
-          },
-        },
-      },
-    } as OpenClawConfig;
-
-    const state = resolveFastModeState({
-      cfg,
-      provider: "openai",
-      model: "gpt-5.5",
-    });
-
-    expect(state.mode).toBe("auto");
-    expect(state.enabled).toBe(true);
-    expect(state.fastSeconds).toBe(45);
-    expect(state.source).toBe("config");
-  });
-
   it("does not use another provider's bare model config", () => {
     const cfg = {
       agents: {
         defaults: {
           models: {
-            "openai/gpt-5.5": { params: { fastMode: "auto", fast_seconds: 15 } },
+            "openai/gpt-5.5": { params: { fastMode: "auto" } },
           },
         },
       },
@@ -117,29 +92,12 @@ describe("resolveFastModeState", () => {
     });
 
     expect(state.mode).toBe("auto");
-    expect(state.fastSeconds).toBe(60);
   });
 
-  it("formats auto mode with the active threshold", () => {
-    const cfg = {
-      agents: {
-        defaults: {
-          models: {
-            "openai-codex/gpt-5.5": { params: { fastMode: "auto", fast_seconds: 2 } },
-          },
-        },
-      },
-    } as OpenClawConfig;
-    const fastSeconds = resolveFastModeAutoSeconds({
-      cfg,
-      provider: "openai-codex",
-      model: "gpt-5.5",
-    });
-
-    expect(fastSeconds).toBe(2);
-    expect(formatFastModeAutoLabel(fastSeconds)).toBe("auto (2 sec)");
-    expect(formatFastModeStatusValue({ mode: "auto", fastSeconds })).toBe("auto (2 sec)");
-    expect(formatFastModeStatusValue({ mode: true, fastSeconds })).toBe("on");
+  it("formats auto mode with the fixed threshold", () => {
+    expect(formatFastModeAutoLabel()).toBe("auto (60 sec)");
+    expect(formatFastModeStatusValue({ mode: "auto" })).toBe("auto (60 sec)");
+    expect(formatFastModeStatusValue({ mode: true })).toBe("on");
   });
 
   it("uses model config when the runtime passes a provider-qualified model ref", () => {
@@ -222,7 +180,6 @@ describe("resolveFastModeForElapsed", () => {
     expect(
       resolveFastModeForElapsed({
         mode: "auto",
-        fastSeconds: 60,
         startedAtMs: 1_000,
         nowMs: 61_000,
       }),
@@ -230,7 +187,6 @@ describe("resolveFastModeForElapsed", () => {
       mode: "auto",
       enabled: true,
       elapsedSeconds: 60,
-      fastSeconds: 60,
     });
   });
 
@@ -238,7 +194,6 @@ describe("resolveFastModeForElapsed", () => {
     expect(
       resolveFastModeForElapsed({
         mode: "auto",
-        fastSeconds: 60,
         startedAtMs: 1_000,
         nowMs: 76_000,
       }),
@@ -246,7 +201,6 @@ describe("resolveFastModeForElapsed", () => {
       mode: "auto",
       enabled: false,
       elapsedSeconds: 75,
-      fastSeconds: 60,
     });
   });
 
@@ -254,15 +208,13 @@ describe("resolveFastModeForElapsed", () => {
     expect(
       resolveFastModeForElapsed({
         mode: "auto",
-        fastSeconds: 15,
         startedAtMs: 1_000,
-        nowMs: 16_001,
+        nowMs: 61_001,
       }),
     ).toMatchObject({
       mode: "auto",
       enabled: false,
-      elapsedSeconds: 15,
-      fastSeconds: 15,
+      elapsedSeconds: 60,
     });
   });
 
@@ -271,14 +223,12 @@ describe("resolveFastModeForElapsed", () => {
       formatFastModeAutoProgressText({
         enabled: false,
         elapsedSeconds: 75,
-        fastSeconds: 60,
       }),
     ).toBe("💨Fast: auto-off(75s>=60s)");
     expect(
       formatFastModeAutoProgressText({
         enabled: true,
         elapsedSeconds: 0,
-        fastSeconds: 60,
       }),
     ).toBe("💨Fast: auto-on");
   });

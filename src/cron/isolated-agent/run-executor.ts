@@ -264,7 +264,6 @@ export function createCronPromptExecutor(params: {
             });
             return {
               fastMode: fastModeState.mode,
-              fastModeAutoSeconds: fastModeState.fastSeconds,
             };
           })(),
           verboseLevel: params.resolvedVerboseLevel,

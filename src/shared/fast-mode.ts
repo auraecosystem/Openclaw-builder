@@ -31,19 +31,6 @@ function modelConfigKey(provider: string, model: string): string {
     : `${providerId}/${modelId}`;
 }
 
-export function normalizeFastSeconds(raw: unknown): number | undefined {
-  const value =
-    typeof raw === "number"
-      ? raw
-      : typeof raw === "string" && raw.trim()
-        ? Number(raw.trim())
-        : undefined;
-  if (value === undefined || !Number.isFinite(value) || value <= 0) {
-    return undefined;
-  }
-  return Math.ceil(value);
-}
-
 export function resolveFastModeModelParams(params: {
   cfg: FastModeConfig | undefined;
   provider: string;
@@ -54,41 +41,27 @@ export function resolveFastModeModelParams(params: {
   return modelConfig?.params;
 }
 
-export function resolveFastModeAutoSeconds(params: {
-  cfg: FastModeConfig | undefined;
-  provider: string;
-  model: string;
-}): number {
-  const modelParams = resolveFastModeModelParams(params);
-  return normalizeFastSeconds(modelParams?.fast_seconds) ?? DEFAULT_FAST_MODE_AUTO_SECONDS;
-}
-
 export function formatFastModeAutoProgressText(params: {
   enabled: boolean;
   elapsedSeconds: number;
-  fastSeconds: number;
 }): string {
   if (params.enabled) {
     return "💨Fast: auto-on";
   }
-  return `💨Fast: auto-off(${params.elapsedSeconds}s>=${params.fastSeconds}s)`;
+  return `💨Fast: auto-off(${params.elapsedSeconds}s>=${DEFAULT_FAST_MODE_AUTO_SECONDS}s)`;
 }
 
 export function formatFastModeValue(mode: FastMode | undefined): "auto" | "on" | "off" {
   return mode === "auto" ? "auto" : mode === true ? "on" : "off";
 }
 
-export function formatFastModeAutoLabel(fastSeconds?: number): string {
-  const seconds = normalizeFastSeconds(fastSeconds) ?? DEFAULT_FAST_MODE_AUTO_SECONDS;
-  return `auto (${seconds} sec)`;
+export function formatFastModeAutoLabel(): string {
+  return `auto (${DEFAULT_FAST_MODE_AUTO_SECONDS} sec)`;
 }
 
-export function formatFastModeStatusValue(params: {
-  mode: FastMode | undefined;
-  fastSeconds?: number;
-}): string {
+export function formatFastModeStatusValue(params: { mode: FastMode | undefined }): string {
   if (params.mode === "auto") {
-    return formatFastModeAutoLabel(params.fastSeconds);
+    return formatFastModeAutoLabel();
   }
   return formatFastModeValue(params.mode);
 }

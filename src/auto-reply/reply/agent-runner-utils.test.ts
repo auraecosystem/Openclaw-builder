@@ -128,7 +128,6 @@ describe("agent-runner-utils", () => {
     const run = makeRun({
       enforceFinalTag: true,
       fastMode: "auto",
-      fastModeAutoSeconds: 45,
     });
     const authProfile = resolveProviderScopedAuthProfile({
       provider: "openai",
@@ -158,7 +157,6 @@ describe("agent-runner-utils", () => {
     expect(resolved.authProfileIdSource).toBe("user");
     expect(resolved.thinkLevel).toBe(run.thinkLevel);
     expect(resolved.fastMode).toBe("auto");
-    expect(resolved.fastModeAutoSeconds).toBe(45);
     expect(resolved.verboseLevel).toBe(run.verboseLevel);
     expect(resolved.reasoningLevel).toBe(run.reasoningLevel);
     expect(resolved.execOverrides).toBe(run.execOverrides);

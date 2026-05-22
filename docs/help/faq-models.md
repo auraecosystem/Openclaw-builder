@@ -174,7 +174,7 @@ troubleshooting, see the main [FAQ](/help/faq).
 
     - **Per session:** send `/fast on` while the session is using `openai/gpt-5.5`.
     - **Per model default:** set `agents.defaults.models["openai/gpt-5.5"].params.fastMode` to `true`.
-    - **Automatic cutoff:** use `/fast auto` or `params.fastMode: "auto"` to start new model calls fast for the first 60 seconds of a run, then start later retry, fallback, tool-result, or continuation calls without fast mode. Set `params.fast_seconds` to change the threshold.
+    - **Automatic cutoff:** use `/fast auto` or `params.fastMode: "auto"` to start new model calls fast for the first 60 seconds of a run, then start later retry, fallback, tool-result, or continuation calls without fast mode.
 
     Example:
 
@@ -186,7 +186,6 @@ troubleshooting, see the main [FAQ](/help/faq).
             "openai/gpt-5.5": {
               params: {
                 fastMode: "auto",
-                fast_seconds: 60,
               },
             },
           },

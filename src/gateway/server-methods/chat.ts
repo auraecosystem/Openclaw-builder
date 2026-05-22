@@ -2306,7 +2306,6 @@ export const chatHandlers: GatewayRequestHandlers = {
       message: string;
       thinking?: string;
       fastMode?: FastMode;
-      fast_seconds?: number;
       deliver?: boolean;
       originatingChannel?: string;
       originatingTo?: string;
@@ -2941,7 +2940,6 @@ export const chatHandlers: GatewayRequestHandlers = {
               imageOrder: imageOrder.length > 0 ? imageOrder : undefined,
               thinkingLevelOverride: p.thinking,
               fastModeOverride: p.fastMode,
-              fastModeAutoSecondsOverride: p.fast_seconds,
               onAgentRunStart: (runId) => {
                 agentRunStarted = true;
                 if (!hasBeforeAgentRunGate) {

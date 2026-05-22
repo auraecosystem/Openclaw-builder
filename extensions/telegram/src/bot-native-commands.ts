@@ -406,7 +406,6 @@ function resolveTelegramFastMenuCurrentStatus(params: { state: FastModeState }):
           : "";
   return `Current fast mode: ${formatFastModeStatusValue({
     mode: params.state.mode,
-    fastSeconds: params.state.fastSeconds,
   })}${suffix}.`;
 }
 
@@ -1200,7 +1199,6 @@ export const registerTelegramNativeCommands = ({
               args: commandArgs,
               cfg: runtimeCfg,
               ...menuModelContext,
-              ...(fastCommandState ? { fastSeconds: fastCommandState.fastSeconds } : {}),
             })
           : null;
         if (menu && commandDefinition) {

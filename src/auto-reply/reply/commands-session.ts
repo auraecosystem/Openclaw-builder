@@ -416,7 +416,6 @@ export const handleFastCommand: CommandHandler = async (params, allowTextCommand
       reply: {
         text: `⚙️ Current fast mode: ${formatFastModeStatusValue({
           mode: state.mode,
-          fastSeconds: state.fastSeconds,
         })}${suffix}.`,
       },
     };

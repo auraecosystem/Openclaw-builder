@@ -1365,7 +1365,6 @@ async function agentCommandInternal(
               isFallbackRetry,
               resolvedThinkLevel,
               fastMode: fastModeState.mode,
-              fastModeAutoSeconds: fastModeState.fastSeconds,
               timeoutMs,
               runId,
               opts,

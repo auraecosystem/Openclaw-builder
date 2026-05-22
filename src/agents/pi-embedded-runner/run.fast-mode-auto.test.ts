@@ -83,7 +83,6 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
       model: "glm-5.1:cloud",
       runId: "run-fast-auto-retry",
       fastMode: "auto",
-      fastModeAutoSeconds: 1,
       onAgentEvent: (event) => {
         events.push(event);
       },
@@ -95,7 +94,7 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
     await vi.waitFor(() => {
       expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
     });
-    await vi.advanceTimersByTimeAsync(1100);
+    await vi.advanceTimersByTimeAsync(61_000);
 
     expect(events.map((event) => event.data?.summary).filter(Boolean)).toHaveLength(0);
     expect(toolResults).toHaveLength(0);
@@ -163,7 +162,6 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
         model: "glm-5.1:cloud",
         runId: `run-fast-auto-reset-${failureTarget}`,
         fastMode: "auto",
-        fastModeAutoSeconds: 1,
         onAgentEvent: (event) => {
           events.push(event);
           if (failureTarget === "agent-event" && event.data?.summary === "💨Fast: auto-on") {
@@ -181,7 +179,7 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
       await vi.waitFor(() => {
         expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
       });
-      await vi.advanceTimersByTimeAsync(1100);
+      await vi.advanceTimersByTimeAsync(61_000);
       await attemptParams?.onAgentEvent?.({
         stream: "tool",
         data: { phase: "result", name: "exec" },

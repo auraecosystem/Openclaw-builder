@@ -39,6 +39,7 @@ export const ChatSendParamsSchema = Type.Object(
     message: Type.String(),
     thinking: Type.Optional(Type.String()),
     fastMode: Type.Optional(Type.Union([Type.Boolean(), Type.Literal("auto")])),
+    // Protocol-4 compatibility only. The runtime ignores this deprecated cutoff override.
     fast_seconds: Type.Optional(Type.Integer({ minimum: 1 })),
     deliver: Type.Optional(Type.Boolean()),
     originatingChannel: Type.Optional(Type.String()),

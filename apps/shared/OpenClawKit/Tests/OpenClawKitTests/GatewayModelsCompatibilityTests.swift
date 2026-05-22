@@ -39,7 +39,7 @@ struct GatewayModelsCompatibilityTests {
             message: "hello",
             thinking: nil,
             fastmode: AnyCodable("auto"),
-            fastseconds: 2,
+            fastseconds: nil,
             deliver: nil,
             originatingchannel: nil,
             originatingto: nil,
@@ -57,6 +57,6 @@ struct GatewayModelsCompatibilityTests {
         let data = try JSONEncoder().encode(params)
         let raw = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(raw["fastMode"] as? String == "auto")
-        #expect(raw["fast_seconds"] as? Int == 2)
+        #expect(raw["fast_seconds"] == nil)
     }
 }

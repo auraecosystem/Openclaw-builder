@@ -506,7 +506,6 @@ export async function runEmbeddedPiAgent(
       const emitFastModeAutoProgress = async (payload: {
         enabled: boolean;
         elapsedSeconds: number;
-        fastSeconds: number;
       }) => {
         const summary = formatFastModeAutoProgressText(payload);
         await params.onAgentEvent?.({
@@ -530,7 +529,6 @@ export async function runEmbeddedPiAgent(
         }
         const next = resolveFastModeForElapsed({
           mode: "auto",
-          fastSeconds: params.fastModeAutoSeconds,
           startedAtMs: started,
         });
         if (next.enabled) {
@@ -561,7 +559,6 @@ export async function runEmbeddedPiAgent(
       const resolveAttemptFastMode = (): boolean | undefined => {
         const resolved = resolveFastModeForElapsed({
           mode: params.fastMode,
-          fastSeconds: params.fastModeAutoSeconds,
           startedAtMs: started,
         });
         return resolved.mode === undefined ? undefined : resolved.enabled;
@@ -577,16 +574,9 @@ export async function runEmbeddedPiAgent(
           return;
         }
         fastModeAutoResetAnnounced = true;
-        const resetState = resolveFastModeForElapsed({
-          mode: "auto",
-          fastSeconds: params.fastModeAutoSeconds,
-          startedAtMs: started,
-          nowMs: started,
-        });
         await emitFastModeAutoProgress({
           enabled: true,
           elapsedSeconds: 0,
-          fastSeconds: resetState.fastSeconds,
         });
       };
       const maybeEmitFastModeAutoResetBestEffort = async () => {

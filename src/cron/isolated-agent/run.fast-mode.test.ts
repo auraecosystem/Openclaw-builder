@@ -73,7 +73,6 @@ async function runFastModeCase(params: {
         mode: sessionFastMode,
         enabled: sessionFastMode === "auto" ? true : sessionFastMode,
         source: "session",
-        fastSeconds: 60,
       };
     }
     const enabled = Boolean(cfg.agents?.defaults?.models?.[OPENAI_GPT4_MODEL]?.params?.fastMode);
@@ -81,7 +80,6 @@ async function runFastModeCase(params: {
       mode: enabled,
       enabled,
       source: "config",
-      fastSeconds: 60,
     };
   });
 

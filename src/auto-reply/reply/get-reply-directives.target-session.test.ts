@@ -319,11 +319,11 @@ describe("resolveReplyDirectives", () => {
       mode: sessionEntry?.sessionId === "target-session",
       enabled: sessionEntry?.sessionId === "target-session",
       source: "session",
-      fastSeconds: 60,
     }));
     mocks.resolveReplyExecOverrides.mockReturnValue(undefined);
   });
 
+<<<<<<< HEAD
   it("passes one-turn model override state into model selection", async () => {
     await resolveHelloWithModelDefaults({
       defaultThinking: "off",
@@ -339,19 +339,17 @@ describe("resolveReplyDirectives", () => {
     expect(modelSelectionInput.hasOneTurnModelOverride).toBe(true);
   });
 
-  it("keeps one-turn fast auto seconds with the resolved fast mode", async () => {
+  it("keeps one-turn fast mode with the resolved fast mode", async () => {
     const { result } = await resolveHelloWithModelDefaults({
       defaultThinking: "off",
       defaultReasoning: "on",
       opts: {
         fastModeOverride: "auto",
-        fastModeAutoSecondsOverride: 2,
       },
     });
 
     expectContinueResult(result, {
       resolvedFastMode: "auto",
-      resolvedFastModeAutoSeconds: 2,
     });
   });
 
@@ -361,7 +359,6 @@ describe("resolveReplyDirectives", () => {
         mode: provider === "openai" && model === "gpt-5.5" ? "auto" : false,
         enabled: provider === "openai" && model === "gpt-5.5",
         source: "config",
-        fastSeconds: provider === "openai" && model === "gpt-5.5" ? 15 : 60,
       }),
     );
 
@@ -382,7 +379,6 @@ describe("resolveReplyDirectives", () => {
       provider: "openai",
       model: "gpt-5.5",
       resolvedFastMode: "auto",
-      resolvedFastModeAutoSeconds: 15,
     });
   });
 

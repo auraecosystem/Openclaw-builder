@@ -419,7 +419,7 @@ describe("commands registry", () => {
             model: "openai-codex/gpt-5.5",
             models: {
               "openai-codex/gpt-5.5": {
-                params: { fastMode: "auto", fast_seconds: 2 },
+                params: { fastMode: "auto" },
               },
             },
           },
@@ -428,7 +428,7 @@ describe("commands registry", () => {
     });
     expect(menu.choices).toEqual([
       { label: "status", value: "status" },
-      { label: "auto (2 sec)", value: "auto" },
+      { label: "auto (60 sec)", value: "auto" },
       { label: "on", value: "on" },
       { label: "off", value: "off" },
       { label: "default", value: "default" },
