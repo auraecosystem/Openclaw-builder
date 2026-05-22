@@ -29,6 +29,7 @@ import {
   resolveCanonicalRootMemoryFile,
   shouldSkipRootMemoryAuxiliaryPath,
 } from "./openclaw-runtime-memory.js";
+import { retryTransientMemoryRead } from "./read-retry.js";
 
 export { hashText } from "./hash.js";
 import { hashText } from "./hash.js";
@@ -246,10 +247,14 @@ export async function buildFileEntry(
     let buffer: Buffer;
     try {
       buffer = (
-        await readRegularFile({
-          filePath: absPath,
-          maxBytes: multimodalSettings.maxFileBytes,
-        })
+        await retryTransientMemoryRead(
+          () =>
+            readRegularFile({
+              filePath: absPath,
+              maxBytes: multimodalSettings.maxFileBytes,
+            }),
+          `read multimodal memory file ${absPath}`,
+        )
       ).buffer;
     } catch (err) {
       if (isFileMissingError(err)) {
@@ -286,7 +291,12 @@ export async function buildFileEntry(
   }
   let content: string;
   try {
-    content = (await readRegularFile({ filePath: absPath })).buffer.toString("utf-8");
+    content = (
+      await retryTransientMemoryRead(
+        () => readRegularFile({ filePath: absPath }),
+        `read memory index file ${absPath}`,
+      )
+    ).buffer.toString("utf-8");
   } catch (err) {
     if (isFileMissingError(err)) {
       return null;
@@ -323,7 +333,12 @@ async function loadMultimodalEmbeddingInput(
   }
   let buffer: Buffer;
   try {
-    buffer = (await readRegularFile({ filePath: entry.absPath, maxBytes: entry.size })).buffer;
+    buffer = (
+      await retryTransientMemoryRead(
+        () => readRegularFile({ filePath: entry.absPath, maxBytes: entry.size }),
+        `read multimodal indexing file ${entry.absPath}`,
+      )
+    ).buffer;
   } catch (err) {
     if (isFileMissingError(err)) {
       return null;
