@@ -395,9 +395,9 @@ describe("channel-streaming", () => {
         event: "item",
         itemKind: "status",
         title: "Fast",
-        summary: "💨Fast: auto-off(75s>60s)",
+        summary: "💨Fast: auto-off(75s>=60s)",
       }),
-    ).toBe("💨Fast: auto-off(75s>60s)");
+    ).toBe("💨Fast: auto-off(75s>=60s)");
     expect(
       formatChannelProgressDraftLine({
         event: "patch",

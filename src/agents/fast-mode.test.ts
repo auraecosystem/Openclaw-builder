@@ -251,7 +251,7 @@ describe("resolveFastModeForElapsed", () => {
         elapsedSeconds: 75,
         fastSeconds: 60,
       }),
-    ).toBe("💨Fast: auto-off(75s>60s)");
+    ).toBe("💨Fast: auto-off(75s>=60s)");
     expect(
       formatFastModeAutoProgressText({
         enabled: true,

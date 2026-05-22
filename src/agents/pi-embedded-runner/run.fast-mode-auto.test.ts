@@ -54,7 +54,7 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
     vi.useRealTimers();
   });
 
-  it("does not emit auto-off before real progress is visible", async () => {
+  it("emits auto-off after a tool execution boundary crosses the threshold", async () => {
     vi.useFakeTimers();
 
     const events: Array<{
@@ -97,7 +97,7 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
     });
     await vi.advanceTimersByTimeAsync(1100);
 
-    expect(events).toHaveLength(0);
+    expect(events.map((event) => event.data?.summary).filter(Boolean)).toHaveLength(0);
     expect(toolResults).toHaveLength(0);
 
     attemptParams?.onRunProgress?.({ reason: "model-progress" });
@@ -108,6 +108,15 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
     await attemptParams?.onAgentEvent?.({
       stream: "tool",
       data: { phase: "start", name: "exec" },
+    });
+    await vi.advanceTimersByTimeAsync(2);
+
+    expect(events.map((event) => event.data?.summary).filter(Boolean)).toHaveLength(0);
+    expect(toolResults).toHaveLength(0);
+
+    await attemptParams?.onAgentEvent?.({
+      stream: "tool",
+      data: { phase: "result", name: "exec" },
     });
     await vi.advanceTimersByTimeAsync(2);
 

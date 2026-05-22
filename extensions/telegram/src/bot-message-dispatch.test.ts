@@ -2439,7 +2439,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
         kind: "status",
         title: "Fast",
         phase: "update",
-        summary: "💨Fast: auto-off(20s>3s)",
+        summary: "💨Fast: auto-off(20s>=3s)",
       });
       return { queuedFinal: false };
     });
@@ -2451,7 +2451,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
     });
 
     expect(draftStream.update).toHaveBeenCalledWith(
-      "Shelling\n\n`🛠️ Exec`\n`💨Fast: auto-off(20s>3s)`",
+      "Shelling\n\n`🛠️ Exec`\n`💨Fast: auto-off(20s>=3s)`",
     );
   });
 
@@ -2465,7 +2465,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
         await replyOptions?.onToolStart?.({ name: "exec", phase: "start" });
         await dispatcherOptions.deliver(
           {
-            text: "💨Fast: auto-off(20s>3s)",
+            text: "💨Fast: auto-off(20s>=3s)",
             channelData: { openclawProgressKind: "fast-mode-auto" },
           },
           { kind: "tool" },
@@ -2481,7 +2481,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
     });
 
     expect(draftStream.update).toHaveBeenCalledWith(
-      "Shelling\n\n`🛠️ Exec`\n`💨Fast: auto-off(20s>3s)`",
+      "Shelling\n\n`🛠️ Exec`\n`💨Fast: auto-off(20s>=3s)`",
     );
     expect(deliverReplies).not.toHaveBeenCalled();
   });
@@ -2494,7 +2494,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
       await replyOptions?.onAssistantMessageStart?.();
       await replyOptions?.onToolStart?.({ name: "exec", phase: "start" });
       await replyOptions?.onToolResult?.({
-        text: "💨Fast: auto-off(5s>3s)",
+        text: "💨Fast: auto-off(5s>=3s)",
         channelData: { openclawProgressKind: "fast-mode-auto" },
       });
       await replyOptions?.onToolResult?.({
@@ -2511,7 +2511,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
     });
 
     expect(draftStream.update).toHaveBeenCalledWith(
-      "Shelling\n\n`🛠️ Exec`\n`💨Fast: auto-off(5s>3s)`\n`💨Fast: auto-on`",
+      "Shelling\n\n`🛠️ Exec`\n`💨Fast: auto-off(5s>=3s)`\n`💨Fast: auto-on`",
     );
     expect(deliverReplies).not.toHaveBeenCalled();
   });

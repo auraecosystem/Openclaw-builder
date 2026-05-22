@@ -98,7 +98,7 @@ export function formatFastModeAutoProgressText(params: {
   if (params.enabled) {
     return "💨Fast: auto-on";
   }
-  return `💨Fast: auto-off(${params.elapsedSeconds}s>${params.fastSeconds}s)`;
+  return `💨Fast: auto-off(${params.elapsedSeconds}s>=${params.fastSeconds}s)`;
 }
 
 export function formatFastModeValue(mode: FastMode | undefined): "auto" | "on" | "off" {

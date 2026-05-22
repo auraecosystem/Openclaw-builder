@@ -6325,7 +6325,7 @@ describe("sendPolicy deny — suppress delivery, not processing (#53328)", () =>
     const dispatcher = createDispatcher();
     const replyResolver = vi.fn(async (_ctx: MsgContext, opts?: GetReplyOptions) => {
       await opts?.onToolResult?.({
-        text: "💨Fast: auto-off(75s>60s)",
+        text: "💨Fast: auto-off(75s>=60s)",
         channelData: { openclawProgressKind: "fast-mode-auto" },
       });
       return { text: "NO_REPLY" } satisfies ReplyPayload;
@@ -6347,7 +6347,7 @@ describe("sendPolicy deny — suppress delivery, not processing (#53328)", () =>
     expect(result.sourceReplyDeliveryMode).toBe("message_tool_only");
     expect(dispatcher.sendToolResult).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: "💨Fast: auto-off(75s>60s)",
+        text: "💨Fast: auto-off(75s>=60s)",
         channelData: { openclawProgressKind: "fast-mode-auto" },
       }),
     );
