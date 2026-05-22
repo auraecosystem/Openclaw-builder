@@ -1,4 +1,4 @@
-import { evaluateChromeMcpScript, uploadChromeMcpFile } from "../chrome-mcp.js";
+import { evaluateChromeMcpScript, handleChromeMcpDialog, uploadChromeMcpFile } from "../chrome-mcp.js";
 import { getBrowserProfileCapabilities } from "../profile-capabilities.js";
 import type { BrowserRouteContext } from "../server-context.js";
 import {
@@ -18,6 +18,10 @@ import {
   toStringArray,
   toStringOrEmpty,
 } from "./utils.js";
+
+function isChromeMcpNoOpenDialogError(error: unknown): boolean {
+  return error instanceof Error && /no open dialog/i.test(error.message);
+}
 
 export function registerBrowserAgentActHookRoutes(
   app: BrowserRouteRegistrar,
@@ -134,6 +138,21 @@ export function registerBrowserAgentActHookRoutes(
             if (dialogId) {
               return jsonError(res, 501, EXISTING_SESSION_LIMITS.hooks.dialogId);
             }
+            try {
+              await handleChromeMcpDialog({
+                profileName: profileCtx.profile.name,
+                profile: profileCtx.profile,
+                targetId: tab.targetId,
+                action: accept ? "accept" : "dismiss",
+                promptText,
+              });
+              return res.json({ ok: true });
+            } catch (error) {
+              if (!isChromeMcpNoOpenDialogError(error)) {
+                throw error;
+              }
+            }
+
             await evaluateChromeMcpScript({
               profileName: profileCtx.profile.name,
               profile: profileCtx.profile,
