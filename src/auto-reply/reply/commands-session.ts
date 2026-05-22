@@ -1,5 +1,5 @@
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
-import { formatFastModeValue, resolveFastModeState } from "../../agents/fast-mode.js";
+import { formatFastModeStatusValue, resolveFastModeState } from "../../agents/fast-mode.js";
 import {
   setChannelConversationBindingIdleTimeoutBySessionKey,
   setChannelConversationBindingMaxAgeBySessionKey,
@@ -413,7 +413,12 @@ export const handleFastCommand: CommandHandler = async (params, allowTextCommand
             : "";
     return {
       shouldContinue: false,
-      reply: { text: `⚙️ Current fast mode: ${formatFastModeValue(state.mode)}${suffix}.` },
+      reply: {
+        text: `⚙️ Current fast mode: ${formatFastModeStatusValue({
+          mode: state.mode,
+          fastSeconds: state.fastSeconds,
+        })}${suffix}.`,
+      },
     };
   }
 

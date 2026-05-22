@@ -22,7 +22,7 @@ let resolveTelegramNativeCommandDisableBlockStreaming: typeof import("./bot-nati
 
 type CommandBotHarness = ReturnType<typeof createCommandBot>;
 type TelegramInlineKeyboardReplyMarkup = {
-  inline_keyboard?: Array<Array<{ callback_data?: string }>>;
+  inline_keyboard?: Array<Array<{ text?: string; callback_data?: string }>>;
 };
 type PlugCommandHarnessParams = {
   botHarness?: CommandBotHarness;
@@ -344,9 +344,21 @@ describe("registerTelegramNativeCommands", () => {
 
   it("prefixes native command menu callback data so callback handlers can preserve native routing", async () => {
     const { bot, commandHandlers, sendMessage } = createCommandBot();
+    const cfg = {
+      agents: {
+        defaults: {
+          model: "openai-codex/gpt-5.5",
+          models: {
+            "openai-codex/gpt-5.5": {
+              params: { fastMode: "auto", fast_seconds: 2 },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
 
     registerTelegramNativeCommands({
-      ...createNativeCommandTestParams({}, { bot, allowFrom: [200] }),
+      ...createNativeCommandTestParams(cfg, { bot, allowFrom: [200] }),
     });
 
     const handler = commandHandlers.get("fast");
@@ -358,6 +370,9 @@ describe("registerTelegramNativeCommands", () => {
     const replyMarkup = (firstCall(sendMessage)[2] as { reply_markup?: unknown } | undefined)
       ?.reply_markup as TelegramInlineKeyboardReplyMarkup | undefined;
     const callbackData = collectCallbackData(replyMarkup);
+    const labels = (replyMarkup?.inline_keyboard ?? []).flatMap((row) =>
+      row.map((button) => button.text),
+    );
 
     expect(callbackData).toEqual([
       "tgcmd:/fast status",
@@ -366,6 +381,7 @@ describe("registerTelegramNativeCommands", () => {
       "tgcmd:/fast off",
       "tgcmd:/fast default",
     ]);
+    expect(labels).toEqual(["status", "auto (2 sec)", "on", "off", "default"]);
     expect(parseTelegramNativeCommandCallbackData("tgcmd:/fast status")).toBe("/fast status");
     expect(parseTelegramNativeCommandCallbackData("tgcmd:/fast auto")).toBe("/fast auto");
     expect(parseTelegramNativeCommandCallbackData("tgcmd:/fast default")).toBe("/fast default");

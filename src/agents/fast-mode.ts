@@ -61,6 +61,14 @@ function resolveConfiguredFastSeconds(params: {
   );
 }
 
+export function resolveFastModeAutoSeconds(params: {
+  cfg: OpenClawConfig | undefined;
+  provider: string;
+  model: string;
+}): number {
+  return resolveConfiguredFastSeconds(params);
+}
+
 export function resolveFastModeForElapsed(params: {
   mode?: FastMode;
   fastSeconds?: number;
@@ -99,6 +107,21 @@ export function formatFastModeAutoProgressText(params: {
 
 export function formatFastModeValue(mode: FastMode | undefined): "auto" | "on" | "off" {
   return mode === "auto" ? "auto" : mode === true ? "on" : "off";
+}
+
+export function formatFastModeAutoLabel(fastSeconds?: number): string {
+  const seconds = normalizeFastSeconds(fastSeconds) ?? DEFAULT_FAST_MODE_AUTO_SECONDS;
+  return `auto (${seconds} sec)`;
+}
+
+export function formatFastModeStatusValue(params: {
+  mode: FastMode | undefined;
+  fastSeconds?: number;
+}): string {
+  if (params.mode === "auto") {
+    return formatFastModeAutoLabel(params.fastSeconds);
+  }
+  return formatFastModeValue(params.mode);
 }
 
 export function resolveFastModeState(params: {

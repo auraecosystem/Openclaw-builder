@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import {
+  formatFastModeAutoLabel,
   formatFastModeAutoProgressText,
+  formatFastModeStatusValue,
+  resolveFastModeAutoSeconds,
   resolveFastModeForElapsed,
   resolveFastModeState,
 } from "./fast-mode.js";
@@ -93,6 +96,28 @@ describe("resolveFastModeState", () => {
     expect(state.enabled).toBe(true);
     expect(state.fastSeconds).toBe(45);
     expect(state.source).toBe("config");
+  });
+
+  it("formats auto mode with the active threshold", () => {
+    const cfg = {
+      agents: {
+        defaults: {
+          models: {
+            "openai-codex/gpt-5.5": { params: { fastMode: "auto", fast_seconds: 2 } },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const fastSeconds = resolveFastModeAutoSeconds({
+      cfg,
+      provider: "openai-codex",
+      model: "gpt-5.5",
+    });
+
+    expect(fastSeconds).toBe(2);
+    expect(formatFastModeAutoLabel(fastSeconds)).toBe("auto (2 sec)");
+    expect(formatFastModeStatusValue({ mode: "auto", fastSeconds })).toBe("auto (2 sec)");
+    expect(formatFastModeStatusValue({ mode: true, fastSeconds })).toBe("on");
   });
 
   it("uses model config when the runtime passes a provider-qualified model ref", () => {

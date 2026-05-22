@@ -1,7 +1,12 @@
 import { resolveAgentDir, resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { renderExecTargetLabel } from "../../agents/bash-tools.exec-runtime.js";
 import { resolveExecDefaults } from "../../agents/exec-defaults.js";
-import { formatFastModeValue, resolveFastModeState } from "../../agents/fast-mode.js";
+import {
+  formatFastModeAutoLabel,
+  formatFastModeStatusValue,
+  formatFastModeValue,
+  resolveFastModeState,
+} from "../../agents/fast-mode.js";
 import { resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
 import { updateSessionStore } from "../../config/sessions.js";
 import { triggerSessionPatchHook } from "../../gateway/session-patch-hooks.js";
@@ -204,10 +209,17 @@ export async function handleDirectiveOnly(
           : effectiveFastModeSource === "default"
             ? " (default)"
             : "";
+      const statusText = `Current fast mode: ${formatFastModeStatusValue({
+        mode: effectiveFastMode,
+        fastSeconds: fastModeState.fastSeconds,
+      })}${sourceSuffix}.`;
+      if (normalizeLowercaseStringOrEmpty(directives.rawFastMode) === "status") {
+        return { text: statusText };
+      }
       return {
         text: withOptions(
-          `Current fast mode: ${formatFastModeValue(effectiveFastMode)}${sourceSuffix}.`,
-          "status, auto, on, off, default",
+          statusText,
+          `status, ${formatFastModeAutoLabel(fastModeState.fastSeconds)}, on, off, default`,
         ),
       };
     }

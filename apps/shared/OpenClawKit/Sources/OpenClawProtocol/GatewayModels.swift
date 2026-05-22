@@ -6373,7 +6373,6 @@ public struct ChatSendParams: Codable, Sendable {
     public let thinking: String?
     public let fastmodevalue: AnyCodable?
     public var fastmode: Bool? { fastmodevalue?.value as? Bool }
-    public let fastSeconds: Int?
     public let fastseconds: Int?
     public let deliver: Bool?
     public let originatingchannel: String?
@@ -6392,7 +6391,6 @@ public struct ChatSendParams: Codable, Sendable {
         message: String,
         thinking: String?,
         fastmode: AnyCodable?,
-        fastSeconds: Int?,
         fastseconds: Int?,
         deliver: Bool?,
         originatingchannel: String?,
@@ -6410,7 +6408,6 @@ public struct ChatSendParams: Codable, Sendable {
         self.message = message
         self.thinking = thinking
         self.fastmodevalue = fastmode
-        self.fastSeconds = fastSeconds
         self.fastseconds = fastseconds
         self.deliver = deliver
         self.originatingchannel = originatingchannel
@@ -6447,7 +6444,6 @@ public struct ChatSendParams: Codable, Sendable {
             message: message,
             thinking: thinking,
             fastmode: fastmode.map { AnyCodable($0) },
-            fastSeconds: nil,
             fastseconds: nil,
             deliver: deliver,
             originatingchannel: originatingchannel,
@@ -6467,8 +6463,7 @@ public struct ChatSendParams: Codable, Sendable {
         case message
         case thinking
         case fastmodevalue = "fastMode"
-        case fastSeconds = "fast_seconds"
-        case fastseconds = "fastSeconds"
+        case fastseconds = "fast_seconds"
         case deliver
         case originatingchannel = "originatingChannel"
         case originatingto = "originatingTo"

@@ -409,7 +409,30 @@ describe("commands registry", () => {
     expect(fast.textAliases).toEqual(["/fast"]);
     expect(fast.category).toBe("options");
     const modeArg = requireCommandArg(fast, "mode");
-    expect(modeArg.choices).toEqual(["status", "auto", "on", "off", "default"]);
+    expect(typeof modeArg.choices).toBe("function");
+    const menu = requireCommandArgMenu({
+      command: fast,
+      args: undefined,
+      cfg: {
+        agents: {
+          defaults: {
+            model: "openai-codex/gpt-5.5",
+            models: {
+              "openai-codex/gpt-5.5": {
+                params: { fastMode: "auto", fast_seconds: 2 },
+              },
+            },
+          },
+        },
+      } as never,
+    });
+    expect(menu.choices).toEqual([
+      { label: "status", value: "status" },
+      { label: "auto (2 sec)", value: "auto" },
+      { label: "on", value: "on" },
+      { label: "off", value: "off" },
+      { label: "default", value: "default" },
+    ]);
   });
 
   it("detects known text commands", () => {

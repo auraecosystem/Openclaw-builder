@@ -69,7 +69,7 @@ title: "Thinking levels"
   3. Per-agent default (`agents.list[].fastModeDefault`)
   4. Per-model config: `agents.defaults.models["<provider>/<model>"].params.fastMode`
   5. Fallback: `off`
-- `auto` keeps the session/config mode as auto but resolves each new model call independently. Calls that start before `params.fast_seconds` seconds have fast mode enabled; later retry, fallback, tool-result, or continuation calls start with fast mode disabled. The default threshold is `60` seconds; `params.fastSeconds` is the camelCase alias.
+- `auto` keeps the session/config mode as auto but resolves each new model call independently. Calls that start before `params.fast_seconds` seconds have fast mode enabled; later retry, fallback, tool-result, or continuation calls start with fast mode disabled. The default threshold is `60` seconds.
 - For `openai/*`, fast mode maps to OpenAI priority processing by sending `service_tier=priority` on supported Responses requests.
 - For `openai-codex/*`, fast mode sends the same `service_tier=priority` flag on Codex Responses. Native Codex app-server turns receive the tier only on `turn/start` or thread start/resume, so `auto` cannot retier one already-running app-server turn; it applies to the next model turn OpenClaw starts.
 - For direct public `anthropic/*` requests, including OAuth-authenticated traffic sent to `api.anthropic.com`, fast mode maps to Anthropic service tiers: `/fast on` sets `service_tier=auto`, `/fast off` sets `service_tier=standard_only`.

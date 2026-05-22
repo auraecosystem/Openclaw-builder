@@ -52,6 +52,13 @@ vi.mock("../../infra/session-cost-usage.js", () => ({
 }));
 
 vi.mock("../../agents/fast-mode.js", () => ({
+  formatFastModeStatusValue: ({
+    mode,
+    fastSeconds,
+  }: {
+    mode: boolean | "auto" | undefined;
+    fastSeconds?: number;
+  }) => (mode === "auto" ? `auto (${fastSeconds ?? 60} sec)` : mode === true ? "on" : "off"),
   formatFastModeValue: (mode: boolean | "auto" | undefined) =>
     mode === "auto" ? "auto" : mode === true ? "on" : "off",
   resolveFastModeState: resolveFastModeStateMock,
@@ -234,6 +241,23 @@ describe("handleFastCommand", () => {
     expect(args.provider).toBe("openai");
     expect(args.model).toBe("gpt-5.4");
     expect(result?.reply?.text).toContain("Current fast mode: on");
+  });
+
+  it("shows the configured auto threshold for /fast status", async () => {
+    resolveFastModeStateMock.mockReturnValue({
+      mode: "auto",
+      enabled: true,
+      source: "config",
+      fastSeconds: 2,
+    });
+    const params = buildUsageParams();
+    params.command.commandBodyNormalized = "/fast status";
+    params.provider = "openai-codex";
+    params.model = "gpt-5.5";
+
+    const result = await handleFastCommand(params, true);
+
+    expect(result?.reply?.text).toContain("Current fast mode: auto (2 sec) (config)");
   });
 
   it("prefers the target session entry from sessionStore for /fast status", async () => {

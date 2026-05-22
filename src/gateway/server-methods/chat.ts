@@ -1696,23 +1696,6 @@ function normalizeOptionalText(value?: string | null): string | undefined {
   return trimmed || undefined;
 }
 
-function resolveChatSendFastSeconds(params: {
-  fastSeconds?: number;
-  fast_seconds?: number;
-}): { ok: true; value?: number } | { ok: false; error: string } {
-  if (
-    params.fastSeconds !== undefined &&
-    params.fast_seconds !== undefined &&
-    params.fastSeconds !== params.fast_seconds
-  ) {
-    return {
-      ok: false,
-      error: "fastSeconds and fast_seconds must match when both are provided",
-    };
-  }
-  return { ok: true, value: params.fastSeconds ?? params.fast_seconds };
-}
-
 function normalizeExplicitChatSendOrigin(
   params: ChatSendExplicitOrigin,
 ): { ok: true; value?: ChatSendExplicitOrigin } | { ok: false; error: string } {
@@ -2323,7 +2306,6 @@ export const chatHandlers: GatewayRequestHandlers = {
       message: string;
       thinking?: string;
       fastMode?: FastMode;
-      fastSeconds?: number;
       fast_seconds?: number;
       deliver?: boolean;
       originatingChannel?: string;
@@ -2341,14 +2323,6 @@ export const chatHandlers: GatewayRequestHandlers = {
       systemProvenanceReceipt?: string;
       idempotencyKey: string;
     };
-    const fastSecondsResult = resolveChatSendFastSeconds({
-      fastSeconds: p.fastSeconds,
-      fast_seconds: p.fast_seconds,
-    });
-    if (!fastSecondsResult.ok) {
-      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, fastSecondsResult.error));
-      return;
-    }
     const explicitOriginResult = normalizeExplicitChatSendOrigin({
       originatingChannel: p.originatingChannel,
       originatingTo: p.originatingTo,
@@ -2967,7 +2941,7 @@ export const chatHandlers: GatewayRequestHandlers = {
               imageOrder: imageOrder.length > 0 ? imageOrder : undefined,
               thinkingLevelOverride: p.thinking,
               fastModeOverride: p.fastMode,
-              fastModeAutoSecondsOverride: fastSecondsResult.value,
+              fastModeAutoSecondsOverride: p.fast_seconds,
               onAgentRunStart: (runId) => {
                 agentRunStarted = true;
                 if (!hasBeforeAgentRunGate) {

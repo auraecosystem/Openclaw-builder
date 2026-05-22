@@ -608,7 +608,7 @@ describe("validateChatEvent", () => {
 });
 
 describe("validateChatSendParams", () => {
-  it("accepts fast:auto cutoff aliases", () => {
+  it("accepts the canonical fast:auto cutoff field", () => {
     const base = {
       sessionKey: "agent:main:main",
       message: "hello",
@@ -617,7 +617,7 @@ describe("validateChatSendParams", () => {
     };
 
     expect(validateChatSendParams({ ...base, fast_seconds: 2 })).toBe(true);
-    expect(validateChatSendParams({ ...base, fastSeconds: 2 })).toBe(true);
+    expect(validateChatSendParams({ ...base, fastSeconds: 2 })).toBe(false);
   });
 });
 

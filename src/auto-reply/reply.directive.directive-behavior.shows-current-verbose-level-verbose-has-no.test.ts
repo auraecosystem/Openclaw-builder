@@ -80,15 +80,15 @@ describe("directive behavior", () => {
             workspace: "/tmp/openclaw",
             models: {
               "anthropic/claude-opus-4-6": {
-                params: { fastMode: true },
+                params: { fastMode: "auto", fast_seconds: 2 },
               },
             },
           },
         },
       } as OpenClawConfig,
     });
-    expect(fastText).toContain("Current fast mode: on (config)");
-    expect(fastText).toContain("Options: status, auto, on, off, default.");
+    expect(fastText).toContain("Current fast mode: auto (2 sec) (config)");
+    expect(fastText).toContain("Options: status, auto (2 sec), on, off, default.");
 
     const { text: verboseText } = await runDirectiveStatus("/verbose", {
       currentVerboseLevel: "on",
@@ -135,7 +135,7 @@ describe("directive behavior", () => {
     );
     expect(runEmbeddedPiAgentMock).not.toHaveBeenCalled();
   });
-  it("treats /fast status like the no-argument status query", async () => {
+  it("reports concise fast status for explicit status queries", async () => {
     const { text: statusText } = await runDirectiveStatus("/fast status", {
       cfg: {
         commands: { text: true },
@@ -145,7 +145,7 @@ describe("directive behavior", () => {
             workspace: "/tmp/openclaw",
             models: {
               "anthropic/claude-opus-4-6": {
-                params: { fastMode: true },
+                params: { fastMode: "auto", fast_seconds: 2 },
               },
             },
           },
@@ -153,8 +153,8 @@ describe("directive behavior", () => {
       } as OpenClawConfig,
     });
 
-    expect(statusText).toContain("Current fast mode: on (config)");
-    expect(statusText).toContain("Options: status, auto, on, off, default.");
+    expect(statusText).toContain("Current fast mode: auto (2 sec) (config)");
+    expect(statusText).not.toContain("Options:");
     expect(runEmbeddedPiAgentMock).not.toHaveBeenCalled();
   });
   it("enforces per-agent elevated restrictions and status visibility", async () => {
