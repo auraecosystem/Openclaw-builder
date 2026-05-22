@@ -1011,8 +1011,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
                 ? roomConfig?.requireMention
                 : true
           : false;
-        const inThreadReply =
-          bypassMentionInBoundThreads && threadRootId !== undefined && threadRootId !== messageId;
+        const inThreadReply = bypassMentionInBoundThreads && thread.threadId !== undefined;
         let threadSessionExists = false;
         if (inThreadReply) {
           try {
