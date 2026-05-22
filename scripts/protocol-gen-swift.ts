@@ -396,7 +396,10 @@ function emitStructCompatibilityInitializer(
     (key) => key !== "fast_seconds" && key !== "fastSeconds",
   );
   const initializerParams = legacyKeys.map((key) => {
-    const prop = props[key]!;
+    const prop = props[key];
+    if (!prop) {
+      throw new Error(`missing ${name}.${key} schema`);
+    }
     const propName = swiftInitializerName(name, key);
     if (key === "fastMode") {
       return "        fastmode: Bool?";
