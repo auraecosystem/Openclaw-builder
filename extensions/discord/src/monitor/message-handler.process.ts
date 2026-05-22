@@ -555,10 +555,7 @@ export async function processDiscordMessage(
           }
         }
         const shouldFinalizeDraftPreview =
-          draftStream &&
-          isFinal &&
-          (!draftPreview.isProgressMode || draftPreview.hasProgressDraftStarted) &&
-          !payload.isError;
+          draftStream && isFinal && !draftPreview.isProgressMode && !payload.isError;
         if (shouldFinalizeDraftPreview) {
           const reply = resolveSendableOutboundReplyParts(effectivePayload);
           const hasMedia = reply.hasMedia;
@@ -702,6 +699,9 @@ export async function processDiscordMessage(
           return;
         }
 
+        if (isFinal && draftPreview.isProgressMode && draftStream?.messageId()) {
+          await draftStream.clear();
+        }
         const replyToId = replyReference.use();
         if (isFinal) {
           notifyFinalReplyStart();
