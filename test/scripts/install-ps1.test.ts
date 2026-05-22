@@ -121,12 +121,16 @@ describe("install.ps1 failure handling", () => {
     expect(commandSafeBody).toContain("Pop-Location");
     expect(npmCommandBody).toContain("Invoke-CommandFromWindowsSafeDirectory");
     expect(corepackCommandBody).toContain("Invoke-CommandFromWindowsSafeDirectory");
-    expect(openClawPathBody).toContain('Invoke-NpmCommand -Arguments @("config", "get", "prefix")');
+    expect(openClawPathBody).toContain(
+      'Invoke-NpmCommand -Arguments @("config", "get", "prefix")',
+    );
     expect(ensurePnpmBody).toContain(
       'Invoke-CorepackCommand -Arguments @("prepare", $pnpmSpec, "--activate")',
     );
     expect(ensurePnpmBody).toContain('Invoke-NpmCommand -Arguments @("install", "-g", $pnpmSpec)');
-    expect(mainBody).toContain('Invoke-NpmCommand -Arguments @("uninstall", "-g", "openclaw")');
+    expect(mainBody).toContain(
+      'Invoke-NpmCommand -Arguments @("uninstall", "-g", "openclaw")',
+    );
     expect(mainBody).toContain(
       'Invoke-NpmCommand -Arguments @("list", "-g", "--depth", "0", "--json")',
     );
@@ -225,9 +229,7 @@ describe("install.ps1 failure handling", () => {
     const gitInstallBody = extractFunctionBody(source, "Install-OpenClawFromGit");
 
     expect(pnpmVersionBody).toContain("package.json");
-    expect(pnpmVersionBody).toContain(
-      "$packageJson.packageManager -match '^pnpm@(?<version>[^+]+)'",
-    );
+    expect(pnpmVersionBody).toContain("$packageJson.packageManager -match '^pnpm@(?<version>[^+]+)'");
     expect(pnpmVersionMatchBody).toContain("Push-Location -LiteralPath $RepoDir");
     expect(pnpmVersionMatchBody).toContain("$currentVersion.Trim() -eq $PnpmVersion");
     expect(ensurePnpmBody).toContain("Get-RepoPnpmVersion -RepoDir $RepoDir");
