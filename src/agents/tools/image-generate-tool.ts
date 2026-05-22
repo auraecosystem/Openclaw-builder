@@ -39,6 +39,10 @@ import {
   formatGeneratedAttachmentLines,
   type AgentGeneratedAttachment,
 } from "../generated-attachments.js";
+import {
+  buildMediaGenerationRequestKey,
+  recordRecentMediaGenerationTaskStartForSession,
+} from "../media-generation-task-status-shared.js";
 import { optionalStringEnum } from "../schema/string-enum.js";
 import { ToolInputError, readNumberParam, readStringParam } from "./common.js";
 import {
@@ -58,7 +62,9 @@ import { decodeDataUrl } from "./image-tool.helpers.js";
 import {
   buildMediaGenerationStartedToolResult,
   createDefaultMediaGenerateBackgroundScheduler,
+  notifyMediaGenerationAsyncTaskStarted,
   scheduleMediaGenerationTaskCompletion,
+  type MediaGenerateAsyncStartCallback,
   type MediaGenerateBackgroundScheduler,
 } from "./media-generate-background-shared.js";
 import {
@@ -763,6 +769,7 @@ export function createImageGenerateTool(options?: {
   fsPolicy?: ToolFsPolicy;
   scheduleBackgroundWork?: MediaGenerateBackgroundScheduler;
   availabilityResolved?: boolean;
+  onAsyncTaskStarted?: MediaGenerateAsyncStartCallback;
 }): AnyAgentTool | null {
   const cfg = options?.config ?? getRuntimeConfig();
   if (
@@ -823,12 +830,12 @@ export function createImageGenerateTool(options?: {
       const remoteMediaSsrfPolicy = resolveRemoteMediaSsrfPolicy(effectiveCfg);
       const prompt = readStringParam(params, "prompt", { required: true });
 
-      const duplicateGuardResult = createImageGenerateDuplicateGuardResult(
+      const activeDuplicateGuardResult = createImageGenerateDuplicateGuardResult(
         options?.agentSessionKey,
         { prompt },
       );
-      if (duplicateGuardResult) {
-        return duplicateGuardResult;
+      if (activeDuplicateGuardResult) {
+        return activeDuplicateGuardResult;
       }
 
       const imageInputs = normalizeReferenceImages(params);
@@ -847,7 +854,37 @@ export function createImageGenerateTool(options?: {
         imageGenerationModelConfig,
         modelOverride: model,
       });
+      const explicitModelRef = parseImageGenerationModelRef(model);
+      const primaryModelRef = parseImageGenerationModelRef(imageGenerationModelConfig.primary);
       const count = resolveRequestedCount(params);
+      const requestKey = buildMediaGenerationRequestKey({
+        tool: "image_generate",
+        prompt,
+        provider: selectedProvider?.id ?? explicitModelRef?.provider ?? primaryModelRef?.provider,
+        model:
+          model !== undefined
+            ? (explicitModelRef?.model ?? model)
+            : (primaryModelRef?.model ??
+              imageGenerationModelConfig.primary ??
+              selectedProvider?.defaultModel),
+        count,
+        imageInputs,
+        size,
+        aspectRatio,
+        resolution: explicitResolution,
+        quality,
+        outputFormat,
+        background,
+        filename,
+        providerOptions,
+      });
+      const duplicateGuardResult = createImageGenerateDuplicateGuardResult(
+        options?.agentSessionKey,
+        { prompt, requestKey },
+      );
+      if (duplicateGuardResult) {
+        return duplicateGuardResult;
+      }
       const configuredMediaMaxBytes = resolveConfiguredMediaMaxBytes(effectiveCfg);
       const loadedReferenceImages = await loadReferenceImages({
         imageInputs,
@@ -885,7 +922,18 @@ export function createImageGenerateTool(options?: {
       });
       const shouldDetach = Boolean(taskHandle && options?.agentSessionKey?.trim());
 
-      if (shouldDetach) {
+      if (shouldDetach && taskHandle) {
+        recordRecentMediaGenerationTaskStartForSession({
+          sessionKey: options?.agentSessionKey,
+          taskKind: "image_generation",
+          sourcePrefix: "image_generate",
+          taskId: taskHandle.taskId,
+          runId: taskHandle.runId,
+          taskLabel: prompt,
+          requestKey,
+          providerId: selectedProvider?.id,
+          progressSummary: "Generating image",
+        });
         scheduleMediaGenerationTaskCompletion({
           lifecycle: imageGenerationTaskLifecycle,
           handle: taskHandle,
@@ -916,6 +964,14 @@ export function createImageGenerateTool(options?: {
               taskHandle,
               autoProviderFallback: explicitModelConfig ? false : undefined,
             }),
+        });
+
+        await notifyMediaGenerationAsyncTaskStarted({
+          callback: options?.onAsyncTaskStarted,
+          message: "Image generation started; wait for the generated image completion event.",
+          toolName: "image_generate",
+          handle: taskHandle,
+          onFailure: (message, meta) => log.warn(message, meta),
         });
 
         return buildMediaGenerationStartedToolResult({
