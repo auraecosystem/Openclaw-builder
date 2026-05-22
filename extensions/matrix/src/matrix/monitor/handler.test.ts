@@ -1040,13 +1040,6 @@ describe("matrix monitor handler pairing account scope", () => {
   });
 
   it("bypasses requireMention for in-thread replies when a session record already exists for the thread", async () => {
-    // Natural continuation path: user mentions the bot at thread root → bot
-    // replies → recordInboundSession persists the thread-suffixed session
-    // key → on the follow-up in-thread reply, readSessionUpdatedAt returns
-    // a timestamp, the bypass fires, and the message is processed without
-    // a re-mention. This is the dominant case in real deployments because
-    // the bot's natural threadBindings flow does NOT create a runtime
-    // binding — it just records the session via recordInboundSession.
     const { handler, recordInboundSession } = createMatrixHandlerTestHarness({
       isDirectMessage: false,
       threadReplies: "always",
@@ -1055,8 +1048,6 @@ describe("matrix monitor handler pairing account scope", () => {
         "!room:example.org": { requireMention: true },
       },
       mentionRegexes: [/@bot/i],
-      // The session store shows a prior recorded session for the thread
-      // sessionKey. Returning any number signals "bot has been here".
       readSessionUpdatedAt: () => Date.now() - 5_000,
       client: {
         getEvent: async () =>
@@ -1086,10 +1077,6 @@ describe("matrix monitor handler pairing account scope", () => {
   });
 
   it("bypasses requireMention for in-thread replies when an explicit runtime binding exists (e.g. /focus)", async () => {
-    // Companion path to the session-store case: explicit ACP/user-managed
-    // bindings (created by /focus, /acp bind, etc.) also signal that the
-    // bot is engaged in this thread. Either signal is sufficient for the
-    // bypass to fire.
     registerSessionBindingAdapter({
       channel: "matrix",
       accountId: "ops",
@@ -1121,8 +1108,6 @@ describe("matrix monitor handler pairing account scope", () => {
         "!room:example.org": { requireMention: true },
       },
       mentionRegexes: [/@bot/i],
-      // Important: no session record (default undefined) — exercises the
-      // runtime-binding-only branch of the OR.
       readSessionUpdatedAt: () => undefined,
       client: {
         getEvent: async () =>
@@ -1152,11 +1137,6 @@ describe("matrix monitor handler pairing account scope", () => {
   });
 
   it("still drops in-thread replies without mention when bypassMentionInBoundThreads is off (default)", async () => {
-    // Same shape as above but no session-binding-adapter registration (so
-    // resolveByConversation returns null and runtimeBindingId is null). This
-    // pins the legacy behavior — bots that haven't been engaged in a thread
-    // do not start replying just because someone is having a thread
-    // conversation in their requireMention room.
     const { handler, recordInboundSession } = createMatrixHandlerTestHarness({
       isDirectMessage: false,
       threadReplies: "always",
