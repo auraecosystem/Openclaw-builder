@@ -36,10 +36,14 @@ export function isPathInsideWithRealpath(
   candidatePath: string,
   opts?: { requireRealpath?: boolean; cache?: Map<string, string> },
 ): boolean {
-  if (!_isPathInside(basePath, candidatePath)) return false;
+  if (!_isPathInside(basePath, candidatePath)) {
+    return false;
+  }
   const baseReal = safeRealpathSync(basePath, opts?.cache);
   const candidateReal = safeRealpathSync(candidatePath, opts?.cache);
-  if (!baseReal || !candidateReal) return opts?.requireRealpath === false;
+  if (!baseReal || !candidateReal) {
+    return opts?.requireRealpath === false;
+  }
   return _isPathInside(baseReal, candidateReal);
 }
 

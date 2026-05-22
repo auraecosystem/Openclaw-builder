@@ -7,7 +7,9 @@ const ancestorPathCache = new Map<string, string>();
 
 export function resolvePathViaExistingAncestorSync(targetPath: string): string {
   const cached = ancestorPathCache.get(targetPath);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    return cached;
+  }
   const result = _resolvePathViaExistingAncestorSync(targetPath);
   ancestorPathCache.set(targetPath, result);
   return result;
