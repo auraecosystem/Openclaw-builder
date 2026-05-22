@@ -13,6 +13,7 @@ import {
   shouldDeferProviderSyntheticProfileAuthWithPlugin,
 } from "../plugins/provider-runtime.js";
 import { resolveOwningPluginIdsForProvider } from "../plugins/providers.js";
+import { resolveRuntimeSyntheticAuthProviderRefState } from "../plugins/synthetic-auth.runtime.js";
 import { resolveDefaultSecretProviderAlias } from "../secrets/ref-contract.js";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -33,7 +34,15 @@ import {
   resolveInlineProviderApiKeyUnusableUntil,
 } from "./auth-profiles.js";
 import * as cliCredentials from "./cli-credentials.js";
-import { resolveEnvApiKey, type EnvApiKeyResult } from "./model-auth-env.js";
+import {
+  resolveProviderEnvApiKeyCandidates,
+  resolveProviderEnvAuthEvidence,
+} from "./model-auth-env-vars.js";
+import {
+  resolveEnvApiKey,
+  type EnvApiKeyLookupOptions,
+  type EnvApiKeyResult,
+} from "./model-auth-env.js";
 import {
   CUSTOM_LOCAL_AUTH_MARKER,
   isKnownEnvApiKeyMarker,
@@ -42,6 +51,7 @@ import {
 } from "./model-auth-markers.js";
 import { type ResolvedProviderAuth } from "./model-auth-runtime-shared.js";
 import { normalizeProviderId } from "./model-selection.js";
+import { resolveProviderAuthAliasMap } from "./provider-auth-aliases.js";
 
 export {
   ensureAuthProfileStore,
@@ -55,6 +65,11 @@ export {
 } from "./model-auth-runtime-shared.js";
 export type { ResolvedProviderAuth } from "./model-auth-runtime-shared.js";
 export type ProviderCredentialPrecedence = "profile-first" | "env-first";
+
+export type RuntimeProviderAuthLookup = {
+  envApiKey: Pick<EnvApiKeyLookupOptions, "aliasMap" | "candidateMap" | "authEvidenceMap">;
+  syntheticAuthProviderRefs?: readonly string[];
+};
 
 const log = createSubsystemLogger("model-auth");
 
@@ -86,6 +101,30 @@ function resolveProviderConfig(
     (providers[normalized] as ModelProviderConfig | undefined) ??
     Object.entries(providers).find(([key]) => normalizeProviderId(key) === normalized)?.[1]
   );
+}
+
+export function createRuntimeProviderAuthLookup(params: {
+  cfg?: OpenClawConfig;
+  workspaceDir?: string;
+  env?: NodeJS.ProcessEnv;
+}): RuntimeProviderAuthLookup {
+  const env = params.env ?? process.env;
+  const lookupParams = {
+    config: params.cfg,
+    workspaceDir: params.workspaceDir,
+    env,
+  };
+  const syntheticAuthProviderRefs = resolveRuntimeSyntheticAuthProviderRefState(lookupParams);
+  return {
+    envApiKey: {
+      aliasMap: resolveProviderAuthAliasMap(lookupParams),
+      candidateMap: resolveProviderEnvApiKeyCandidates(lookupParams),
+      authEvidenceMap: resolveProviderEnvAuthEvidence(lookupParams),
+    },
+    syntheticAuthProviderRefs: syntheticAuthProviderRefs.complete
+      ? syntheticAuthProviderRefs.refs
+      : undefined,
+  };
 }
 
 export function getCustomProviderApiKey(
@@ -370,12 +409,51 @@ export function hasSyntheticLocalProviderAuthConfig(params: {
   return Boolean(providerConfig.baseUrl && isLocalBaseUrl(providerConfig.baseUrl));
 }
 
+function listProviderSyntheticAuthRefs(params: {
+  cfg: OpenClawConfig | undefined;
+  provider: string;
+  modelApi?: string;
+}): string[] {
+  const refs = [params.provider];
+  const providerConfig = resolveProviderConfig(params.cfg, params.provider);
+  if (params.modelApi) {
+    refs.push(params.modelApi);
+  }
+  if (providerConfig?.api) {
+    refs.push(providerConfig.api);
+  }
+  return [...new Set(refs.map((ref) => normalizeProviderId(ref)).filter(Boolean))];
+}
+
+function shouldResolvePluginSyntheticAuth(params: {
+  cfg: OpenClawConfig | undefined;
+  provider: string;
+  modelApi?: string;
+  runtimeLookup?: RuntimeProviderAuthLookup;
+}): boolean {
+  const syntheticAuthProviderRefs = params.runtimeLookup?.syntheticAuthProviderRefs;
+  if (!syntheticAuthProviderRefs) {
+    return true;
+  }
+  if (resolveProviderConfig(params.cfg, params.provider)) {
+    return true;
+  }
+  const eligibleRefs = new Set(
+    syntheticAuthProviderRefs.map((ref) => normalizeProviderId(ref)).filter(Boolean),
+  );
+  if (eligibleRefs.size === 0) {
+    return false;
+  }
+  return listProviderSyntheticAuthRefs(params).some((ref) => eligibleRefs.has(ref));
+}
+
 export function hasRuntimeAvailableProviderAuth(params: {
   provider: string;
   cfg?: OpenClawConfig;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
   allowPluginSyntheticAuth?: boolean;
+  runtimeLookup?: RuntimeProviderAuthLookup;
 }): boolean {
   const provider = normalizeProviderId(params.provider);
   const authOverride = resolveProviderAuthOverride(params.cfg, provider);
@@ -389,6 +467,7 @@ export function hasRuntimeAvailableProviderAuth(params: {
     resolveEnvApiKey(provider, params.env, {
       config: params.cfg,
       workspaceDir: params.workspaceDir,
+      ...params.runtimeLookup?.envApiKey,
     })
   ) {
     return true;
@@ -401,6 +480,11 @@ export function hasRuntimeAvailableProviderAuth(params: {
   }
   if (
     params.allowPluginSyntheticAuth !== false &&
+    shouldResolvePluginSyntheticAuth({
+      cfg: params.cfg,
+      provider,
+      runtimeLookup: params.runtimeLookup,
+    }) &&
     resolveSyntheticLocalProviderAuth({ cfg: params.cfg, provider })
   ) {
     return true;
@@ -416,6 +500,7 @@ type SyntheticProviderAuthResolution = {
 function resolveProviderSyntheticRuntimeAuth(params: {
   cfg: OpenClawConfig | undefined;
   provider: string;
+  modelApi?: string;
 }): SyntheticProviderAuthResolution {
   const resolveFromConfig = (
     config: OpenClawConfig | undefined,
@@ -430,6 +515,7 @@ function resolveProviderSyntheticRuntimeAuth(params: {
           provider: params.provider,
           providerConfig,
         },
+        modelApi: params.modelApi,
       }) ?? undefined
     );
   };
@@ -460,6 +546,7 @@ function resolveProviderSyntheticRuntimeAuth(params: {
 function resolveSyntheticLocalProviderAuth(params: {
   cfg: OpenClawConfig | undefined;
   provider: string;
+  modelApi?: string;
 }): ResolvedProviderAuth | null {
   const syntheticProviderAuth = resolveProviderSyntheticRuntimeAuth(params);
   if (syntheticProviderAuth.auth) {
@@ -537,12 +624,14 @@ function shouldDeferSyntheticProfileAuth(params: {
   cfg: OpenClawConfig | undefined;
   provider: string;
   resolvedApiKey: string | undefined;
+  modelApi?: string;
 }): boolean {
   const providerConfig = resolveProviderConfig(params.cfg, params.provider);
   return (
     shouldDeferProviderSyntheticProfileAuthWithPlugin({
       provider: params.provider,
       config: params.cfg,
+      modelApi: params.modelApi,
       context: {
         config: params.cfg,
         provider: params.provider,
@@ -578,6 +667,7 @@ export async function resolveApiKeyForProvider(params: {
   lockedProfile?: boolean;
   forceRefresh?: boolean;
   credentialPrecedence?: ProviderCredentialPrecedence;
+  modelApi?: string;
 }): Promise<ResolvedProviderAuth> {
   const { provider, cfg, profileId, preferredProfile } = params;
   const agentDir = params.agentDir?.trim() || (cfg ? resolveDefaultAgentDir(cfg) : undefined);
@@ -626,6 +716,7 @@ export async function resolveApiKeyForProvider(params: {
         cfg,
         provider,
         resolvedApiKey: resolved.apiKey,
+        modelApi: params.modelApi,
       })
     ) {
       return resolveApiKeyForProvider({ ...params, profileId: undefined, lockedProfile: true }) //
@@ -765,6 +856,7 @@ export async function resolveApiKeyForProvider(params: {
             cfg,
             provider,
             resolvedApiKey: resolved.apiKey,
+            modelApi: params.modelApi,
           })
         ) {
           deferredAuthProfileResult ??= result;
@@ -801,7 +893,11 @@ export async function resolveApiKeyForProvider(params: {
     return deferredAuthProfileResult;
   }
 
-  const syntheticLocalAuth = resolveSyntheticLocalProviderAuth({ cfg, provider });
+  const syntheticLocalAuth = resolveSyntheticLocalProviderAuth({
+    cfg,
+    provider,
+    modelApi: params.modelApi,
+  });
   if (syntheticLocalAuth) {
     return syntheticLocalAuth;
   }
@@ -1002,6 +1098,7 @@ export async function getApiKeyForModel(params: {
     workspaceDir: params.workspaceDir,
     lockedProfile: params.lockedProfile,
     credentialPrecedence: params.credentialPrecedence,
+    modelApi: params.model.api,
   });
 }
 

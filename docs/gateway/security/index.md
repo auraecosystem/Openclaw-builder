@@ -25,6 +25,10 @@ OpenClaw security guidance assumes a **personal assistant** deployment: one trus
 
 This page explains hardening **within that model**. It does not claim hostile multi-tenant isolation on one shared gateway.
 
+Before changing remote access, DM policy, reverse proxy, or public exposure,
+use the [Gateway exposure runbook](/gateway/security/exposure-runbook) as a
+pre-flight and rollback checklist.
+
 ## Quick check: `openclaw security audit`
 
 See also: [Formal Verification (Security Models)](/security/formal-verification)
@@ -87,6 +91,10 @@ OpenClaw-owned published plugin package changes its published dependency graph:
 pnpm deps:shrinkwrap:generate
 pnpm deps:shrinkwrap:check
 ```
+
+The generator resolves npm's publishable lock format but rejects generated
+package versions that are not already present in `pnpm-lock.yaml`, preserving
+the pnpm dependency age, override, and patch review boundary.
 
 Use `pnpm deps:shrinkwrap:root:generate` and
 `pnpm deps:shrinkwrap:root:check` only when you intentionally want to refresh
