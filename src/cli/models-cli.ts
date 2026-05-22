@@ -332,6 +332,7 @@ export function registerModelsCli(program: Command) {
     .description("Run a provider plugin auth flow (OAuth/API key)")
     .option("--provider <id>", "Provider id registered by a plugin")
     .option("--method <id>", "Provider auth method id")
+    .option("--device-code", "Use the provider device-code auth method", false)
     .option("--set-default", "Apply the provider's default model recommendation", false)
     .option(
       "--force",
@@ -339,13 +340,18 @@ export function registerModelsCli(program: Command) {
       false,
     )
     .action(async (opts, command) => {
+      if (opts.deviceCode && typeof opts.method === "string" && opts.method !== "device-code") {
+        throw new Error(
+          "--device-code cannot be combined with --method unless method is device-code.",
+        );
+      }
       await withModelsRuntime(async ({ defaultRuntime, resolveModelAgentOption }) => {
         const agent = resolveModelAgentOption(command);
         const { modelsAuthLoginCommand } = await import("../commands/models/auth.js");
         await modelsAuthLoginCommand(
           {
             provider: opts.provider as string | undefined,
-            method: opts.method as string | undefined,
+            method: opts.deviceCode ? "device-code" : (opts.method as string | undefined),
             setDefault: Boolean(opts.setDefault),
             force: Boolean(opts.force),
             agent,
