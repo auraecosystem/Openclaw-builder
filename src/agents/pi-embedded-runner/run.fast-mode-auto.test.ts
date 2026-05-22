@@ -27,6 +27,7 @@ function successAttempt(provider: string, model: string): EmbeddedRunAttemptResu
 
 type FastModeAttemptParams = {
   fastMode?: unknown;
+  onAgentEvent?: (event: { stream: string; data: Record<string, unknown> }) => unknown;
   onRunProgress?: (payload: { reason: string }) => unknown;
   onToolResult?: (payload: { text?: string; channelData?: Record<string, unknown> }) => unknown;
 };
@@ -104,8 +105,10 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
     expect(events).toHaveLength(0);
     expect(toolResults).toHaveLength(0);
 
-    await attemptParams?.onToolResult?.({ text: "tool running" });
-    expect(toolResults.map((payload) => payload.text)).toEqual(["tool running"]);
+    await attemptParams?.onAgentEvent?.({
+      stream: "tool",
+      data: { phase: "start", name: "exec" },
+    });
     await vi.advanceTimersByTimeAsync(2);
 
     const summaries = events.map((event) => event.data?.summary).filter(Boolean);

@@ -597,6 +597,14 @@ export async function runEmbeddedPiAgent(
           markFastModeAutoProgressObserved();
         }
       };
+      const notifyAgentEvent = async (
+        event: Parameters<NonNullable<RunEmbeddedPiAgentParams["onAgentEvent"]>>[0],
+      ) => {
+        await params.onAgentEvent?.(event);
+        if (event.stream === "tool") {
+          markFastModeAutoProgressObserved();
+        }
+      };
       const resolveAttemptFastMode = (): boolean | undefined => {
         const resolved = resolveFastModeForElapsed({
           mode: params.fastMode,
@@ -1637,7 +1645,7 @@ export async function runEmbeddedPiAgent(
             onReasoningStream: params.onReasoningStream,
             onReasoningEnd: params.onReasoningEnd,
             onToolResult: notifyToolResult,
-            onAgentEvent: params.onAgentEvent,
+            onAgentEvent: notifyAgentEvent,
             onExecutionPhase: params.onExecutionPhase,
             extraSystemPrompt: params.extraSystemPrompt,
             sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
