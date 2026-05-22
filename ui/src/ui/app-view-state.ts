@@ -5,6 +5,7 @@ import type { ChatInputHistoryKeyInput, ChatInputHistoryKeyResult } from "./chat
 import type { RealtimeTalkStatus } from "./chat/realtime-talk.ts";
 import type { ChatRunUiStatus } from "./chat/run-lifecycle.ts";
 import type { ChatSideResult } from "./chat/side-result.ts";
+import type { AgentCreateDraft } from "./controllers/agents.ts";
 import type { CronModelSuggestionsState, CronState } from "./controllers/cron.ts";
 import type { DevicePairingList } from "./controllers/devices.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
@@ -244,9 +245,15 @@ export type AppViewState = {
   presenceError: string | null;
   presenceStatus: string | null;
   agentsLoading: boolean;
+  agentsLoadRequestId: number;
   agentsList: AgentsListResult | null;
   agentsError: string | null;
   agentsSelectedId: string | null;
+  agentCreateOpen: boolean;
+  agentCreateDraft: AgentCreateDraft;
+  agentCreateWorkspaceTouched: boolean;
+  agentCreateSubmitting: boolean;
+  agentCreateError: string | null;
   toolsCatalogLoading: boolean;
   toolsCatalogError: string | null;
   toolsCatalogResult: ToolsCatalogResult | null;

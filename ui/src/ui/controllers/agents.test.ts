@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadAgents, loadToolsCatalog, loadToolsEffective, saveAgentsConfig } from "./agents.ts";
+import {
+  buildDefaultCreateAgentWorkspace,
+  createAgentFromDraft,
+  loadAgents,
+  loadToolsCatalog,
+  loadToolsEffective,
+  saveAgentsConfig,
+  validateAgentCreateDraft,
+} from "./agents.ts";
 import type { AgentsConfigSaveState, AgentsState } from "./agents.ts";
 
 function createState(): { state: AgentsState; request: ReturnType<typeof vi.fn> } {
@@ -149,6 +157,170 @@ describe("loadAgents", () => {
     await loadAgents(state);
 
     expect(state.agentsSelectedId).toBe("main");
+  });
+
+  it("ignores stale responses when a forced refresh starts later", async () => {
+    const { state, request } = createState();
+    const resolvers: Array<(value: unknown) => void> = [];
+    request.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+
+    const staleRefresh = loadAgents(state);
+    expect(state.agentsLoading).toBe(true);
+    const forcedRefresh = loadAgents(state, { force: true });
+
+    resolvers[0]?.({
+      defaultId: "main",
+      mainKey: "main",
+      scope: "per-sender",
+      agents: [{ id: "main", name: "main" }],
+    });
+    await staleRefresh;
+
+    expect(state.agentsList).toBeNull();
+    expect(state.agentsLoading).toBe(true);
+
+    resolvers[1]?.({
+      defaultId: "main",
+      mainKey: "main",
+      scope: "per-sender",
+      agents: [
+        { id: "main", name: "main" },
+        { id: "ops-agent", name: "Ops Agent" },
+      ],
+    });
+    await forcedRefresh;
+
+    expect(state.agentsList?.agents.map((entry) => entry.id)).toEqual(["main", "ops-agent"]);
+    expect(state.agentsLoading).toBe(false);
+  });
+});
+
+describe("createAgentFromDraft", () => {
+  it("calls agents.create, refreshes the list, and selects the created agent", async () => {
+    const { state, request } = createState();
+    request
+      .mockResolvedValueOnce({
+        ok: true,
+        agentId: "ops-agent",
+        name: "Ops Agent",
+        workspace: "/tmp/workspace-ops-agent",
+        model: "openai/gpt-5.5",
+      })
+      .mockResolvedValueOnce({
+        defaultId: "main",
+        mainKey: "main",
+        scope: "per-sender",
+        agents: [
+          { id: "main", name: "main" },
+          { id: "ops-agent", name: "Ops Agent" },
+        ],
+      });
+
+    const result = await createAgentFromDraft(state, {
+      name: "Ops Agent",
+      workspace: "/tmp/workspace-ops-agent",
+      model: "openai/gpt-5.5",
+      emoji: "O",
+      avatar: "",
+    });
+
+    expect(result.agentId).toBe("ops-agent");
+    expect(request).toHaveBeenNthCalledWith(1, "agents.create", {
+      name: "Ops Agent",
+      workspace: "/tmp/workspace-ops-agent",
+      model: "openai/gpt-5.5",
+      emoji: "O",
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "agents.list", {});
+    expect(state.agentsSelectedId).toBe("ops-agent");
+  });
+
+  it("forces the post-create list refresh even when another refresh is in flight", async () => {
+    const { state, request } = createState();
+    state.agentsLoading = true;
+    request
+      .mockResolvedValueOnce({
+        ok: true,
+        agentId: "ops-agent",
+        name: "Ops Agent",
+        workspace: "/tmp/workspace-ops-agent",
+      })
+      .mockResolvedValueOnce({
+        defaultId: "main",
+        mainKey: "main",
+        scope: "per-sender",
+        agents: [
+          { id: "main", name: "main" },
+          { id: "ops-agent", name: "Ops Agent" },
+        ],
+      });
+
+    await createAgentFromDraft(state, {
+      name: "Ops Agent",
+      workspace: "/tmp/workspace-ops-agent",
+      model: "",
+      emoji: "",
+      avatar: "",
+    });
+
+    expect(request).toHaveBeenNthCalledWith(2, "agents.list", {});
+    expect(state.agentsLoading).toBe(false);
+    expect(state.agentsSelectedId).toBe("ops-agent");
+  });
+
+  it("rejects duplicate agent ids before calling the gateway", async () => {
+    const { state, request } = createState();
+    state.agentsList = {
+      defaultId: "main",
+      mainKey: "main",
+      scope: "per-sender",
+      agents: [
+        { id: "main", name: "main" },
+        { id: "ops-agent", name: "Ops Agent" },
+      ],
+    };
+
+    await expect(
+      createAgentFromDraft(state, {
+        name: "Ops Agent",
+        workspace: "/tmp/workspace-ops-agent",
+        model: "",
+        emoji: "",
+        avatar: "",
+      }),
+    ).rejects.toThrow('Agent "ops-agent" already exists.');
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("rejects names that do not produce a valid id", () => {
+    expect(
+      validateAgentCreateDraft({
+        name: "!!!",
+        workspace: "/tmp/workspace-ops-agent",
+        model: "",
+        emoji: "",
+        avatar: "",
+      }),
+    ).toEqual({ key: "agents.create.errors.invalidName" });
+  });
+
+  it("derives new workspaces next to the default workspace", () => {
+    expect(
+      buildDefaultCreateAgentWorkspace(
+        {
+          defaultId: "main",
+          mainKey: "main",
+          scope: "per-sender",
+          agents: [{ id: "main", workspace: "/Users/val/.openclaw/workspace" }],
+        },
+        "ops-agent",
+      ),
+    ).toBe("/Users/val/.openclaw/workspace-ops-agent");
   });
 });
 

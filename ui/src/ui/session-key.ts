@@ -40,21 +40,23 @@ function normalizeMainKey(value: string | undefined | null): string {
   return normalizeOptionalLowercaseString(value) ?? DEFAULT_MAIN_KEY;
 }
 
-export function normalizeAgentId(value: string | undefined | null): string {
+export function deriveAgentId(value: string | undefined | null): string {
   const trimmed = normalizeOptionalString(value) ?? "";
   if (!trimmed) {
-    return DEFAULT_AGENT_ID;
+    return "";
   }
   if (VALID_ID_RE.test(trimmed)) {
     return normalizeLowercaseStringOrEmpty(trimmed);
   }
-  return (
-    normalizeLowercaseStringOrEmpty(trimmed)
-      .replace(INVALID_CHARS_RE, "-")
-      .replace(LEADING_DASH_RE, "")
-      .replace(TRAILING_DASH_RE, "")
-      .slice(0, 64) || DEFAULT_AGENT_ID
-  );
+  return normalizeLowercaseStringOrEmpty(trimmed)
+    .replace(INVALID_CHARS_RE, "-")
+    .replace(LEADING_DASH_RE, "")
+    .replace(TRAILING_DASH_RE, "")
+    .slice(0, 64);
+}
+
+export function normalizeAgentId(value: string | undefined | null): string {
+  return deriveAgentId(value) || DEFAULT_AGENT_ID;
 }
 
 export function buildAgentMainSessionKey(params: {

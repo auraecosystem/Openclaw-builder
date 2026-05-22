@@ -636,7 +636,7 @@ export function parseFallbackList(value: string): string[] {
     .filter(Boolean);
 }
 
-type ConfiguredModelOption = {
+export type ConfiguredModelOption = {
   value: string;
   label: string;
 };
@@ -689,13 +689,8 @@ export function buildModelOptions(
     addOption(opt.value, opt.label);
   }
 
-  if (catalog) {
-    for (const entry of catalog) {
-      const provider = entry.provider?.trim();
-      const value = buildQualifiedChatModelValue(entry.id, provider);
-      const label = provider ? `${entry.id} · ${provider}` : entry.id;
-      addOption(value, label);
-    }
+  for (const option of buildCatalogModelOptions(catalog)) {
+    addOption(option.value, option.label);
   }
 
   if (current && !seen.has(normalizeLowercaseStringOrEmpty(current))) {
@@ -715,6 +710,25 @@ export function buildModelOptions(
       </option>
     `,
   );
+}
+
+export function buildCatalogModelOptions(catalog?: ModelCatalogEntry[]): ConfiguredModelOption[] {
+  if (!catalog) {
+    return [];
+  }
+  const options: ConfiguredModelOption[] = [];
+  for (const entry of catalog) {
+    const model = entry.id.trim();
+    if (!model) {
+      continue;
+    }
+    const provider = entry.provider?.trim();
+    options.push({
+      value: buildQualifiedChatModelValue(model, provider),
+      label: provider ? `${model} · ${provider}` : model,
+    });
+  }
+  return options;
 }
 
 type CompiledPattern =

@@ -1,6 +1,9 @@
 import { html, nothing } from "lit";
 import { keyed } from "lit/directives/keyed.js";
 import { t } from "../../i18n/index.ts";
+import { type AgentCreateDraft, validateAgentCreateDraft } from "../controllers/agents.ts";
+import { icons } from "../icons.ts";
+import { deriveAgentId } from "../session-key.ts";
 import type {
   AgentIdentityResult,
   AgentsFilesListResult,
@@ -21,7 +24,12 @@ import {
 } from "./agents-panels-status-files.ts";
 export type { AgentsPanel } from "./agents.types.ts";
 import { renderAgentTools, renderAgentSkills } from "./agents-panels-tools-skills.ts";
-import { agentBadgeText, buildAgentContext, normalizeAgentLabel } from "./agents-utils.ts";
+import {
+  agentBadgeText,
+  buildAgentContext,
+  buildCatalogModelOptions,
+  normalizeAgentLabel,
+} from "./agents-utils.ts";
 import type { AgentsPanel } from "./agents.types.ts";
 
 export type ConfigState = {
@@ -95,7 +103,20 @@ export type AgentsProps = {
   runtimeSessionKey: string;
   runtimeSessionMatchesSelectedAgent: boolean;
   modelCatalog: ModelCatalogEntry[];
+  create: {
+    open: boolean;
+    draft: AgentCreateDraft;
+    submitting: boolean;
+    error: string | null;
+  };
   onRefresh: () => void;
+  onCreateOpen: () => void;
+  onCreateCancel: () => void;
+  onCreateDraftChange: (
+    patch: Partial<AgentCreateDraft>,
+    options?: { workspaceTouched?: boolean },
+  ) => void;
+  onCreateSubmit: () => void;
   onSelectAgent: (agentId: string) => void;
   onSelectPanel: (panel: AgentsPanel) => void;
   onLoadFiles: (agentId: string) => void;
@@ -196,6 +217,15 @@ export function renderAgents(props: AgentsProps) {
                 `
               : nothing}
             <button
+              type="button"
+              class="btn btn--sm btn--icon-label"
+              @click=${props.onCreateOpen}
+              title=${t("agents.create.openTitle")}
+            >
+              <span class="btn__icon" aria-hidden="true">${icons.plus}</span>
+              ${t("agents.create.open")}
+            </button>
+            <button
               class="btn btn--sm agents-refresh-btn"
               ?disabled=${props.loading}
               @click=${props.onRefresh}
@@ -208,6 +238,7 @@ export function renderAgents(props: AgentsProps) {
           ? html`<div class="callout danger" style="margin-top: 8px;">${props.error}</div>`
           : nothing}
       </section>
+      ${renderAgentCreateDialog(props)}
       <section class="agents-main">
         ${!selectedAgent
           ? html`
@@ -345,6 +376,156 @@ export function renderAgents(props: AgentsProps) {
             `}
       </section>
     </div>
+  `;
+}
+
+function renderAgentCreateDialog(props: AgentsProps) {
+  if (!props.create.open) {
+    return nothing;
+  }
+  const draft = props.create.draft;
+  const normalizedId = deriveAgentId(draft.name);
+  const validationError = props.config.dirty
+    ? { key: "agents.create.pendingConfigError" }
+    : validateAgentCreateDraft(draft, props.agentsList);
+  const disableSubmit = Boolean(validationError || props.create.submitting);
+  const validationText = validationError ? t(validationError.key, validationError.vars ?? {}) : null;
+  const modelOptions = buildCatalogModelOptions(props.modelCatalog);
+
+  return html`
+    <section
+      class="agent-create-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="agent-create-title"
+    >
+      <form
+        class="agent-create-card"
+        @submit=${(event: SubmitEvent) => {
+          event.preventDefault();
+          if (!disableSubmit) {
+            props.onCreateSubmit();
+          }
+        }}
+      >
+        <div class="agent-create-header">
+          <div>
+            <h2 id="agent-create-title">${t("agents.create.title")}</h2>
+            ${normalizedId
+              ? html`<div class="muted">${t("agents.create.normalizedId", { id: normalizedId })}</div>`
+              : nothing}
+          </div>
+          <button
+            type="button"
+            class="btn btn--icon"
+            @click=${props.onCreateCancel}
+            ?disabled=${props.create.submitting}
+            aria-label=${t("common.close")}
+            title=${t("common.close")}
+          >
+            ${icons.x}
+          </button>
+        </div>
+        <label class="agent-create-field">
+          <span>${t("agents.create.name")}</span>
+          <input
+            class="input"
+            name="agent-name"
+            autocomplete="off"
+            .value=${draft.name}
+            ?disabled=${props.create.submitting}
+            @input=${(event: Event) =>
+              props.onCreateDraftChange({ name: (event.target as HTMLInputElement).value })}
+          />
+        </label>
+        <label class="agent-create-field">
+          <span>${t("agents.create.workspace")}</span>
+          <input
+            class="input"
+            name="agent-workspace"
+            autocomplete="off"
+            .value=${draft.workspace}
+            ?disabled=${props.create.submitting}
+            @input=${(event: Event) =>
+              props.onCreateDraftChange(
+                { workspace: (event.target as HTMLInputElement).value },
+                { workspaceTouched: true },
+              )}
+          />
+        </label>
+        ${modelOptions.length > 0
+          ? html`
+              <label class="agent-create-field">
+                <span>${t("agents.create.model")}</span>
+                <select
+                  class="agents-select"
+                  .value=${draft.model}
+                  ?disabled=${props.create.submitting}
+                  @change=${(event: Event) =>
+                    props.onCreateDraftChange({
+                      model: (event.target as HTMLSelectElement).value,
+                    })}
+                >
+                  <option value="" ?selected=${!draft.model}>
+                    ${t("agents.create.modelDefault")}
+                  </option>
+                  ${modelOptions.map(
+                    (option) => html`
+                      <option value=${option.value} ?selected=${option.value === draft.model}>
+                        ${option.label}
+                      </option>
+                    `,
+                  )}
+                </select>
+              </label>
+            `
+          : nothing}
+        <div class="agent-create-grid">
+          <label class="agent-create-field">
+            <span>${t("agents.create.emoji")}</span>
+            <input
+              class="input"
+              name="agent-emoji"
+              autocomplete="off"
+              .value=${draft.emoji}
+              ?disabled=${props.create.submitting}
+              @input=${(event: Event) =>
+                props.onCreateDraftChange({ emoji: (event.target as HTMLInputElement).value })}
+            />
+          </label>
+          <label class="agent-create-field">
+            <span>${t("agents.create.avatar")}</span>
+            <input
+              class="input"
+              name="agent-avatar"
+              autocomplete="off"
+              .value=${draft.avatar}
+              ?disabled=${props.create.submitting}
+              @input=${(event: Event) =>
+                props.onCreateDraftChange({ avatar: (event.target as HTMLInputElement).value })}
+            />
+          </label>
+        </div>
+        ${props.create.error
+          ? html`<div class="callout danger">${props.create.error}</div>`
+          : validationText
+            ? html`<div class="callout info">${validationText}</div>`
+            : nothing}
+        <div class="agent-create-actions">
+          <button
+            type="button"
+            class="btn btn--sm"
+            @click=${props.onCreateCancel}
+            ?disabled=${props.create.submitting}
+          >
+            ${t("common.cancel")}
+          </button>
+          <button type="submit" class="btn btn--sm primary" ?disabled=${disableSubmit}>
+            ${props.create.submitting ? t("common.loading") : t("agents.create.submit")}
+          </button>
+        </div>
+      </form>
+    </section>
   `;
 }
 

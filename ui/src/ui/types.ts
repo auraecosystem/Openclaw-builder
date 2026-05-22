@@ -343,6 +343,14 @@ export type AgentsListResult = {
   agents: GatewayAgentRow[];
 };
 
+export type AgentsCreateResult = {
+  ok: true;
+  agentId: string;
+  name: string;
+  workspace: string;
+  model?: string;
+};
+
 export type AgentIdentityResult = {
   agentId: string;
   name: string;

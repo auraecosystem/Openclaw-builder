@@ -75,6 +75,7 @@ import {
 import type { ChatRunUiStatus } from "./chat/run-lifecycle.ts";
 import type { ChatSideResult } from "./chat/side-result.ts";
 import {
+  createDefaultAgentCreateDraft,
   loadToolsEffective as loadToolsEffectiveInternal,
   refreshVisibleToolsEffectiveForCurrentSession as refreshVisibleToolsEffectiveForCurrentSessionInternal,
 } from "./controllers/agents.ts";
@@ -371,9 +372,15 @@ export class OpenClawApp extends LitElement {
   @state() presenceStatus: string | null = null;
 
   @state() agentsLoading = false;
+  agentsLoadRequestId = 0;
   @state() agentsList: AgentsListResult | null = null;
   @state() agentsError: string | null = null;
   @state() agentsSelectedId: string | null = null;
+  @state() agentCreateOpen = false;
+  @state() agentCreateDraft = createDefaultAgentCreateDraft();
+  @state() agentCreateWorkspaceTouched = false;
+  @state() agentCreateSubmitting = false;
+  @state() agentCreateError: string | null = null;
   @state() toolsCatalogLoading = false;
   @state() toolsCatalogError: string | null = null;
   @state() toolsCatalogResult: ToolsCatalogResult | null = null;

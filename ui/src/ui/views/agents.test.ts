@@ -115,7 +115,23 @@ function createProps(overrides: Partial<AgentsProps> = {}): AgentsProps {
     runtimeSessionKey: "main",
     runtimeSessionMatchesSelectedAgent: false,
     modelCatalog: [],
+    create: {
+      open: false,
+      draft: {
+        name: "",
+        workspace: "~/.openclaw/workspace-agent",
+        model: "",
+        emoji: "",
+        avatar: "",
+      },
+      submitting: false,
+      error: null,
+    },
     onRefresh: () => undefined,
+    onCreateOpen: () => undefined,
+    onCreateCancel: () => undefined,
+    onCreateDraftChange: () => undefined,
+    onCreateSubmit: () => undefined,
     onSelectAgent: () => undefined,
     onSelectPanel: () => undefined,
     onLoadFiles: () => undefined,
@@ -357,6 +373,118 @@ describe("renderAgents", () => {
       await i18n.setLocale("en");
       vi.unstubAllGlobals();
     }
+  });
+
+  it("shows a New Agent action and provider-qualified model options", async () => {
+    const container = document.createElement("div");
+    const onCreateOpen = vi.fn();
+    render(renderAgents(createProps({ onCreateOpen })), container);
+    await Promise.resolve();
+
+    const button = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+      (candidate) => candidate.textContent?.includes("New Agent"),
+    );
+    expect(button).toBeTruthy();
+    button?.click();
+    expect(onCreateOpen).toHaveBeenCalledOnce();
+
+    render(
+      renderAgents(
+        createProps({
+          create: {
+            open: true,
+            draft: {
+              name: "Ops Agent",
+              workspace: "/tmp/workspace-ops-agent",
+              model: "openai/gpt-5.5",
+              emoji: "",
+              avatar: "",
+            },
+            submitting: false,
+            error: null,
+          },
+          modelCatalog: [{ id: "gpt-5.5", name: "GPT-5.5", provider: "openai" }],
+        }),
+      ),
+      container,
+    );
+    await Promise.resolve();
+
+    expect(container.querySelector('[role="dialog"]')).toBeTruthy();
+    expect(container.querySelector<HTMLInputElement>('input[name="agent-name"]')?.value).toBe(
+      "Ops Agent",
+    );
+    expect(
+      container.querySelector<HTMLSelectElement>(".agent-create-field select.agents-select")?.value,
+    ).toBe("openai/gpt-5.5");
+    expect(
+      Array.from(
+        container.querySelectorAll<HTMLOptionElement>(".agent-create-field select option"),
+      ).some(
+        (option) => option.value === "openai/gpt-5.5" && option.textContent?.includes("openai"),
+      ),
+    ).toBe(true);
+  });
+
+  it("shows duplicate agent validation and blocks create submit", async () => {
+    const container = document.createElement("div");
+    const onCreateSubmit = vi.fn();
+    render(
+      renderAgents(
+        createProps({
+          create: {
+            open: true,
+            draft: {
+              name: "Beta",
+              workspace: "/tmp/workspace-beta",
+              model: "",
+              emoji: "",
+              avatar: "",
+            },
+            submitting: false,
+            error: null,
+          },
+          onCreateSubmit,
+        }),
+      ),
+      container,
+    );
+    await Promise.resolve();
+
+    const submit = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+      (candidate) => candidate.textContent?.includes("Create Agent"),
+    );
+    expect(container.textContent).toContain('Agent "beta" already exists.');
+    expect(submit?.disabled).toBe(true);
+    submit?.click();
+    expect(onCreateSubmit).not.toHaveBeenCalled();
+  });
+
+  it("hides normalized id preview when name does not derive an id", async () => {
+    const container = document.createElement("div");
+    render(
+      renderAgents(
+        createProps({
+          create: {
+            open: true,
+            draft: {
+              name: "!!!",
+              workspace: "/tmp/workspace-agent",
+              model: "",
+              emoji: "",
+              avatar: "",
+            },
+            submitting: false,
+            error: null,
+          },
+        }),
+      ),
+      container,
+    );
+    await Promise.resolve();
+
+    expect(container.textContent).not.toContain("ID:");
+    expect(container.textContent).toContain("Agent name must contain at least one valid ID character.");
   });
 });
 
