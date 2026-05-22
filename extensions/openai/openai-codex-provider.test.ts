@@ -170,23 +170,23 @@ describe("openai codex provider", () => {
     const apiKey = requireAuthMethod(provider, "api-key");
 
     expectRecordFields(oauth.wizard, "oauth wizard", {
-      choiceLabel: "OpenAI Codex Browser Login",
-      groupId: "openai-codex",
-      groupLabel: "OpenAI Codex",
-      groupHint: "ChatGPT/Codex sign-in",
+      choiceLabel: "ChatGPT/Codex Browser Login",
+      groupId: "openai",
+      groupLabel: "OpenAI",
+      groupHint: "ChatGPT/Codex sign-in or API key",
     });
     expectRecordFields(deviceCode.wizard, "device-code wizard", {
-      choiceLabel: "OpenAI Codex Device Pairing",
-      groupId: "openai-codex",
-      groupLabel: "OpenAI Codex",
-      groupHint: "ChatGPT/Codex sign-in",
+      choiceLabel: "ChatGPT/Codex Device Pairing",
+      groupId: "openai",
+      groupLabel: "OpenAI",
+      groupHint: "ChatGPT/Codex sign-in or API key",
     });
     expectRecordFields(apiKey.wizard, "api-key wizard", {
       choiceLabel: "OpenAI API Key Backup",
       choiceHint: "Use an OpenAI API key when your Codex subscription is unavailable",
-      groupId: "openai-codex",
-      groupLabel: "OpenAI Codex",
-      groupHint: "ChatGPT/Codex sign-in",
+      groupId: "openai",
+      groupLabel: "OpenAI",
+      groupHint: "ChatGPT/Codex sign-in or API key",
     });
   });
 
@@ -222,19 +222,20 @@ describe("openai codex provider", () => {
     const deviceCode = requireAuthMethod(provider, "device-code");
 
     expect(provider.auth?.map((method) => method.id)).toEqual(["oauth", "device-code", "api-key"]);
-    expect(oauth.label).toBe("OpenAI Codex Browser Login");
+    expect(oauth.label).toBe("ChatGPT/Codex Browser Login");
     expect(oauth.hint).toBe("Sign in with OpenAI in your browser");
     expectRecordFields(oauth.wizard, "oauth wizard", {
       choiceId: "openai-codex",
-      choiceLabel: "OpenAI Codex Browser Login",
+      choiceLabel: "ChatGPT/Codex Browser Login",
       assistantPriority: -30,
+      onboardingFeatured: true,
     });
-    expect(deviceCode.label).toBe("OpenAI Codex Device Pairing");
+    expect(deviceCode.label).toBe("ChatGPT/Codex Device Pairing");
     expect(deviceCode.hint).toBe("Pair in browser with a device code");
     expect(deviceCode.kind).toBe("device_code");
     expectRecordFields(deviceCode.wizard, "device-code wizard", {
       choiceId: "openai-codex-device-code",
-      choiceLabel: "OpenAI Codex Device Pairing",
+      choiceLabel: "ChatGPT/Codex Device Pairing",
       assistantPriority: -10,
     });
   });
@@ -443,6 +444,7 @@ describe("openai codex provider", () => {
       id: "gpt-5.5",
       api: "openai-codex-responses",
       baseUrl: "https://chatgpt.com/backend-api",
+      input: ["text", "image"],
       contextWindow: 400_000,
       contextTokens: 272_000,
       maxTokens: 128_000,
@@ -456,6 +458,40 @@ describe("openai codex provider", () => {
       contextTokens: 272_000,
       maxTokens: 128_000,
       cost: { input: 30, output: 180, cacheRead: 0, cacheWrite: 0 },
+    });
+  });
+
+  it("repairs sparse configured gpt-5.5 catalog rows to remain image-capable", () => {
+    const provider = buildOpenAICodexProviderPlugin();
+    const sparseConfiguredModel = {
+      id: "gpt-5.5",
+      name: "gpt-5.5",
+      provider: "openai-codex",
+      api: "openai-codex-responses",
+      baseUrl: "https://chatgpt.com/backend-api/codex",
+      reasoning: false,
+      input: ["text"] as const,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 200_000,
+      maxTokens: 8_192,
+    };
+
+    const model = provider.resolveDynamicModel?.({
+      provider: "openai-codex",
+      modelId: "gpt-5.5",
+      modelRegistry: {
+        find: (providerId: string, modelId: string) =>
+          providerId === "openai-codex" && modelId === "gpt-5.5" ? sparseConfiguredModel : null,
+      } as never,
+    });
+
+    expectModelFields(model, {
+      id: "gpt-5.5",
+      api: "openai-codex-responses",
+      input: ["text", "image"],
+      contextWindow: 400_000,
+      contextTokens: 200_000,
+      maxTokens: 8_192,
     });
   });
 

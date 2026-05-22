@@ -291,8 +291,12 @@ function withDefaultCodexContextMetadata(params: {
       : typeof params.model.contextWindow === "number" && params.model.contextWindow > 0
         ? Math.min(params.contextTokens, params.model.contextWindow)
         : params.contextTokens;
+  const input = params.model.input?.includes("image")
+    ? params.model.input
+    : ([...new Set([...(params.model.input ?? ["text"]), "image"])] as ("text" | "image")[]);
   return {
     ...params.model,
+    input,
     contextWindow: params.contextWindow,
     contextTokens,
   };
@@ -489,6 +493,7 @@ export function buildOpenAICodexProviderPlugin(): ProviderPlugin {
           choiceLabel: OPENAI_CODEX_LOGIN_LABEL,
           choiceHint: OPENAI_CODEX_LOGIN_HINT,
           assistantPriority: OPENAI_CODEX_LOGIN_ASSISTANT_PRIORITY,
+          onboardingFeatured: true,
           ...OPENAI_CODEX_WIZARD_GROUP,
         },
         run: async (ctx) => await runOpenAICodexOAuth(ctx),
@@ -525,6 +530,7 @@ export function buildOpenAICodexProviderPlugin(): ProviderPlugin {
           choiceLabel: OPENAI_CODEX_API_KEY_BACKUP_LABEL,
           choiceHint: OPENAI_CODEX_API_KEY_BACKUP_HINT,
           assistantPriority: 5,
+          assistantVisibility: "manual-only",
           ...OPENAI_CODEX_WIZARD_GROUP,
         },
       }),

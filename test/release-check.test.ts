@@ -18,6 +18,7 @@ import {
   collectForbiddenPackPaths,
   collectMissingPackPaths,
   collectPackUnpackedSizeErrors,
+  collectPackedInstalledPackageVerificationErrors,
   createPackedCompletionSmokeEnv,
   createPackedCliSmokeEnv,
   createPackedBundledPluginPostinstallEnv,
@@ -507,6 +508,7 @@ describe("collectMissingPackPaths", () => {
   it("accepts the shipped upgrade surface when optional bundled metadata is present", () => {
     expect(
       collectMissingPackPaths([
+        "npm-shrinkwrap.json",
         "dist/index.js",
         "dist/entry.js",
         "dist/control-ui/index.html",
@@ -531,6 +533,33 @@ describe("collectMissingPackPaths", () => {
         PACKAGE_DIST_INVENTORY_RELATIVE_PATH,
       ]),
     ).toStrictEqual([]);
+  });
+
+  it("runs postpublish package integrity checks against the packed install before publish", () => {
+    const root = mkdtempSync(join(tmpdir(), "release-check-packed-install-"));
+    try {
+      const packageRoot = join(root, "openclaw");
+      const distDir = join(packageRoot, "dist");
+      mkdirSync(distDir, { recursive: true });
+      writeFileSync(
+        join(packageRoot, "package.json"),
+        `${JSON.stringify({ name: "openclaw", version: "2026.5.14-beta.3", dependencies: {} })}\n`,
+      );
+      writeFileSync(join(distDir, "typescript-compiler.js"), "x".repeat(6 * 1024 * 1024 + 1));
+
+      expect(
+        collectPackedInstalledPackageVerificationErrors({
+          expectedVersion: "2026.5.14-beta.3",
+          installedBinaryVersion: "openclaw 2026.5.14-beta.3",
+          packageRoot,
+        }),
+      ).toEqual([
+        "installed package is missing required plugin SDK artifact: dist/plugin-sdk/zod.js",
+        "installed package root dist file 'typescript-compiler.js' is invalid or exceeds 6291456 bytes.",
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("requires bundled plugin runtime sidecars that dynamic plugin boundaries resolve at runtime", () => {

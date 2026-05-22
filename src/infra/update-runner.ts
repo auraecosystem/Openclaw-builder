@@ -25,6 +25,7 @@ import {
   cleanupGlobalRenameDirs,
   createGlobalInstallEnv,
   detectGlobalInstallManagerForRoot,
+  isOpenClawSourcePackageInstallSpec,
   resolveGlobalInstallTarget,
   resolveGlobalInstallSpec,
   type GlobalInstallManager,
@@ -126,6 +127,7 @@ type UpdateRunnerOptions = {
   tag?: string;
   channel?: UpdateChannel;
   devTargetRef?: string;
+  deferConfiguredPluginInstallRepair?: boolean;
   timeoutMs?: number;
   runCommand?: CommandRunner;
   progress?: UpdateStepProgress;
@@ -168,6 +170,8 @@ const MAX_LOG_CHARS = 8000;
 const PREFLIGHT_MAX_COMMITS = 10;
 const DEFAULT_PACKAGE_NAME = "openclaw";
 const CORE_PACKAGE_NAMES = new Set([DEFAULT_PACKAGE_NAME]);
+const UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR_ENV =
+  "OPENCLAW_UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR";
 const UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE_ENV =
   "OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE";
 const PREFLIGHT_TEMP_PREFIX =
@@ -223,7 +227,12 @@ function buildStartDirs(opts: UpdateRunnerOptions): string[] {
       dirs.push(packageRoot);
     }
   }
-  const proc = normalizeDir(process.cwd());
+  let proc: string | null = null;
+  try {
+    proc = normalizeDir(process.cwd());
+  } catch {
+    proc = null;
+  }
   if (proc) {
     dirs.push(proc);
   }
@@ -1318,6 +1327,9 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
       const doctorStep = await runStep(
         step("openclaw doctor", doctorArgv, gitRoot, {
           OPENCLAW_UPDATE_IN_PROGRESS: "1",
+          ...(opts.deferConfiguredPluginInstallRepair
+            ? { [UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR_ENV]: "1" }
+            : {}),
           [UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE_ENV]: "1",
         }),
       );
@@ -1447,6 +1459,30 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
       tag,
       env: globalInstallEnv,
     });
+    if (isOpenClawSourcePackageInstallSpec(spec)) {
+      const durationMs = Date.now() - startedAt;
+      return {
+        status: "error",
+        mode: globalManager,
+        root: pkgRoot,
+        reason: "unsupported-package-target",
+        before: { version: beforeVersion },
+        after: { version: beforeVersion },
+        steps: [
+          {
+            name: "package target validation",
+            command: `validate package target ${spec}`,
+            cwd: pkgRoot,
+            durationMs,
+            exitCode: 1,
+            stdoutTail: null,
+            stderrTail:
+              "OpenClaw package updates use published npm artifacts or built tarballs; use the dev channel for GitHub main.",
+          },
+        ],
+        durationMs,
+      };
+    }
     const packageUpdate = await runGlobalPackageUpdateSteps({
       installTarget,
       installSpec: spec,
@@ -1471,6 +1507,7 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
           return null;
         }
         const doctorNodePath = await resolveStableNodePath(process.execPath);
+        const candidateHostVersion = await readPackageVersion(verifiedPackageRoot);
         return await runStep({
           runCommand,
           name: "openclaw doctor",
@@ -1480,6 +1517,9 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
           env: {
             OPENCLAW_UPDATE_IN_PROGRESS: "1",
             [UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE_ENV]: "1",
+            ...(candidateHostVersion === null
+              ? {}
+              : { OPENCLAW_COMPATIBILITY_HOST_VERSION: candidateHostVersion }),
           },
           progress,
           stepIndex: 0,

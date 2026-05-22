@@ -32,6 +32,7 @@ export {
   dedupeProfileIds,
   listProfilesForProvider,
   markAuthProfileSuccess,
+  removeProviderAuthProfilesWithLock,
   setAuthProfileOrder,
   upsertAuthProfile,
   upsertAuthProfileWithLock,
@@ -88,4 +89,5 @@ export {
   resolveInlineProviderApiKeyUsageId,
   resolveProfilesUnavailableReason,
   resolveProfileUnusableUntilForDisplay,
+  setAuthProfileFailureHook,
 } from "./auth-profiles/usage.js";

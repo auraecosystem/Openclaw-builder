@@ -86,12 +86,14 @@ function Check-Node {
     try {
         $nodeVersion = (node -v 2>$null)
         if ($nodeVersion) {
-            $version = [int]($nodeVersion -replace 'v(\d+)\..*', '$1')
-            if ($version -ge 22) {
+            $versionMatch = [regex]::Match($nodeVersion, '^v(?<major>\d+)\.(?<minor>\d+)\.')
+            $major = if ($versionMatch.Success) { [int]$versionMatch.Groups["major"].Value } else { 0 }
+            $minor = if ($versionMatch.Success) { [int]$versionMatch.Groups["minor"].Value } else { 0 }
+            if (($major -gt 22) -or (($major -eq 22) -and ($minor -ge 19))) {
                 Write-Host "[OK] Node.js $nodeVersion found" -ForegroundColor Green
                 return $true
             } else {
-                Write-Host "[!] Node.js $nodeVersion found, but v22+ required" -ForegroundColor Yellow
+                Write-Host "[!] Node.js $nodeVersion found, but v22.19+ required" -ForegroundColor Yellow
                 return $false
             }
         }
@@ -100,6 +102,144 @@ function Check-Node {
         return $false
     }
     return $false
+}
+
+function Get-WindowsNodeArchitecture {
+    foreach ($architecture in @($env:PROCESSOR_ARCHITEW6432, $env:PROCESSOR_ARCHITECTURE)) {
+        if ($architecture -match "ARM64") {
+            return "arm64"
+        }
+    }
+    return "x64"
+}
+
+function Get-OpenClawDepsRoot {
+    $localAppData = $env:LOCALAPPDATA
+    if ([string]::IsNullOrWhiteSpace($localAppData)) {
+        $localAppData = [Environment]::GetFolderPath("LocalApplicationData")
+    }
+    if ([string]::IsNullOrWhiteSpace($localAppData)) {
+        $localAppData = Join-Path ([Environment]::GetFolderPath("UserProfile")) "AppData\Local"
+    }
+    return (Join-Path $localAppData "OpenClaw\deps")
+}
+
+function Get-PortableNodeRoot {
+    return (Join-Path (Get-OpenClawDepsRoot) "portable-node")
+}
+
+function Get-PortableNodeCommandPath {
+    $root = Get-PortableNodeRoot
+    $candidate = Join-Path $root "node.exe"
+    if (Test-Path $candidate) {
+        return $candidate
+    }
+    return $null
+}
+
+function Use-PortableNodeIfPresent {
+    $nodeExe = Get-PortableNodeCommandPath
+    if (-not $nodeExe) {
+        return $false
+    }
+
+    Add-ToProcessPath (Split-Path -Parent $nodeExe)
+    return (Check-Node)
+}
+
+function Ensure-PortableNodeOnUserPath {
+    $nodeExe = Get-PortableNodeCommandPath
+    if (-not $nodeExe) {
+        return
+    }
+
+    $nodeDir = Split-Path -Parent $nodeExe
+    if (Add-ToUserPath $nodeDir) {
+        Write-Host "[!] Added $nodeDir to user PATH (restart terminal if node or openclaw is not found)" -ForegroundColor Yellow
+    }
+}
+
+function Resolve-PortableNodeDownload {
+    $architecture = Get-WindowsNodeArchitecture
+    $index = Invoke-RestMethod -Uri "https://nodejs.org/dist/index.json"
+    $release = $index |
+        Where-Object { $_.version -match '^v24\.' } |
+        Select-Object -First 1
+
+    if (-not $release -or -not $release.version) {
+        throw "Could not resolve latest Node.js 24 release metadata."
+    }
+
+    $fileKey = "win-$architecture-zip"
+    if ($release.files -and -not ($release.files -contains $fileKey)) {
+        throw "Node.js $($release.version) does not publish $fileKey."
+    }
+
+    $name = "node-$($release.version)-win-$architecture.zip"
+    return @{
+        Version = $release.version
+        Name = $name
+        Url = "https://nodejs.org/dist/$($release.version)/$name"
+    }
+}
+
+function Install-PortableNode {
+    if (Use-PortableNodeIfPresent) {
+        Ensure-PortableNodeOnUserPath
+        $nodeVersion = (& node -v 2>$null)
+        if ($nodeVersion) {
+            Write-Host "[OK] User-local Node.js already available: $nodeVersion" -ForegroundColor Green
+        }
+        return
+    }
+
+    Write-Host "  No package manager found; bootstrapping user-local portable Node.js..." -ForegroundColor Gray
+
+    $download = Resolve-PortableNodeDownload
+    $portableRoot = Get-PortableNodeRoot
+    $portableParent = Split-Path -Parent $portableRoot
+    $tmpZip = Join-Path $env:TEMP $download.Name
+    $tmpExtract = Join-Path $env:TEMP ("openclaw-portable-node-" + [guid]::NewGuid().ToString("N"))
+
+    New-Item -ItemType Directory -Force -Path $portableParent | Out-Null
+    if (Test-Path $portableRoot) {
+        Remove-Item -Recurse -Force $portableRoot
+    }
+    if (Test-Path $tmpExtract) {
+        Remove-Item -Recurse -Force $tmpExtract
+    }
+    New-Item -ItemType Directory -Force -Path $tmpExtract | Out-Null
+
+    try {
+        Write-Host "  Downloading Node.js $($download.Version)..." -ForegroundColor Gray
+        Invoke-WebRequest -UseBasicParsing -Uri $download.Url -OutFile $tmpZip
+        Expand-Archive -Path $tmpZip -DestinationPath $tmpExtract -Force
+
+        $nodeDir = Get-ChildItem -Path $tmpExtract -Directory |
+            Where-Object { Test-Path (Join-Path $_.FullName "node.exe") } |
+            Select-Object -First 1
+        if (-not $nodeDir) {
+            throw "Node.js archive did not contain node.exe."
+        }
+
+        New-Item -ItemType Directory -Force -Path $portableRoot | Out-Null
+        Move-Item -Path (Join-Path $nodeDir.FullName "*") -Destination $portableRoot -Force
+    } finally {
+        if (Test-Path $tmpZip) {
+            Remove-Item -Force $tmpZip
+        }
+        if (Test-Path $tmpExtract) {
+            Remove-Item -Recurse -Force $tmpExtract
+        }
+    }
+
+    if (-not (Use-PortableNodeIfPresent)) {
+        throw "Portable Node.js bootstrap completed, but node is still unavailable."
+    }
+    Ensure-PortableNodeOnUserPath
+
+    $nodeVersion = (& node -v 2>$null)
+    Write-Host "[OK] User-local Node.js ready: $nodeVersion" -ForegroundColor Green
 }
 
 # Install Node.js
@@ -141,9 +281,18 @@ function Install-Node {
         return $true
     }
 
+    try {
+        Install-PortableNode
+        if (Check-Node) {
+            return $true
+        }
+    } catch {
+        Write-Host "[!] Portable Node.js bootstrap failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
     # Manual download fallback
     Write-Host ""
-    Write-Host "Error: Could not find a package manager (winget, choco, or scoop)" -ForegroundColor Red
+    Write-Host "Error: Could not install Node.js automatically." -ForegroundColor Red
     Write-Host ""
     Write-Host "Please install Node.js 22+ manually:" -ForegroundColor Yellow
     Write-Host "  https://nodejs.org/en/download/" -ForegroundColor Cyan
@@ -186,6 +335,33 @@ function Add-ToProcessPath {
     }
 
     $env:Path = "$PathEntry;$env:Path"
+}
+
+function Add-ToUserPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PathEntry
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathEntry)) {
+        return $false
+    }
+
+    Add-ToProcessPath $PathEntry
+
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $userEntries = @($userPath -split ";" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($userEntries | Where-Object { $_ -ieq $PathEntry }) {
+        return $false
+    }
+
+    $newUserPath = if ([string]::IsNullOrWhiteSpace($userPath)) {
+        $PathEntry
+    } else {
+        "$userPath;$PathEntry"
+    }
+    [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+    return $true
 }
 
 function Get-PortableGitRoot {
@@ -352,6 +528,20 @@ function Invoke-OpenClawCommand {
     & $commandPath @Arguments
 }
 
+function Invoke-InteractiveOpenClawCommand {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Arguments
+    )
+
+    $commandPath = Get-OpenClawCommandPath
+    if (-not $commandPath) {
+        throw "openclaw command not found on PATH."
+    }
+
+    $null = Start-Process -FilePath $commandPath -ArgumentList $Arguments -NoNewWindow -Wait -PassThru
+}
+
 function Resolve-CommandPath {
     param(
         [Parameter(Mandatory = $true)]
@@ -495,9 +685,44 @@ function Resolve-NpmOpenClawInstallSpec {
     return "$PackageName@$trimmedTag"
 }
 
+function Test-OpenClawSourcePackageInstallSpec {
+    param([string]$RequestedTag)
+
+    if ([string]::IsNullOrWhiteSpace($RequestedTag)) {
+        return $false
+    }
+
+    $normalizedTag = $RequestedTag.Trim().ToLowerInvariant()
+    if ($normalizedTag.StartsWith("openclaw@")) {
+        $normalizedTag = $normalizedTag.Substring("openclaw@".Length)
+    }
+
+    if ($normalizedTag -eq "main") {
+        return $true
+    }
+    if ($normalizedTag -match '^github:openclaw/openclaw($|[#/])') {
+        return $true
+    }
+
+    if ($normalizedTag.StartsWith("git+")) {
+        $normalizedTag = $normalizedTag.Substring("git+".Length)
+    }
+    return (
+        $normalizedTag -match '^https?://github\.com/openclaw/openclaw(\.git)?($|[?#])' -or
+        $normalizedTag -match '^ssh://git@github\.com[:/]openclaw/openclaw(\.git)?($|[?#])' -or
+        $normalizedTag -match '^git://github\.com/openclaw/openclaw(\.git)?($|[?#])' -or
+        $normalizedTag -match '^git@github\.com:openclaw/openclaw(\.git)?($|[?#])'
+    )
+}
+
 function Install-OpenClaw {
     if ([string]::IsNullOrWhiteSpace($Tag)) {
         $Tag = "latest"
+    }
+    if (Test-OpenClawSourcePackageInstallSpec -RequestedTag $Tag) {
+        Write-Host "Error: npm installs do not support OpenClaw GitHub source targets like '$Tag'." -ForegroundColor Red
+        Write-Host "Use -InstallMethod git -Tag main for the moving main checkout, or use latest, beta, an exact version, or a built .tgz package." -ForegroundColor Yellow
+        return $false
     }
     if (-not (Ensure-Git)) {
         return $false
@@ -510,20 +735,32 @@ function Install-OpenClaw {
     }
     $installSpec = Resolve-NpmOpenClawInstallSpec -PackageName $packageName -RequestedTag $Tag
     Write-Host "[*] Installing OpenClaw ($installSpec)..." -ForegroundColor Yellow
+    $freshnessArgs = @("--min-release-age=0")
+    $minReleaseAge = (& (Get-NpmCommandPath) config get min-release-age 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $minReleaseAge -or $minReleaseAge.Trim() -eq "null" -or $minReleaseAge.Trim() -eq "undefined") {
+        $beforeValue = (& (Get-NpmCommandPath) config get before 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $beforeValue -and $beforeValue.Trim() -ne "null" -and $beforeValue.Trim() -ne "undefined") {
+            $freshnessArgs = @("--before=$((Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ"))")
+        }
+    }
     $prevLogLevel = $env:NPM_CONFIG_LOGLEVEL
     $prevUpdateNotifier = $env:NPM_CONFIG_UPDATE_NOTIFIER
     $prevFund = $env:NPM_CONFIG_FUND
     $prevAudit = $env:NPM_CONFIG_AUDIT
     $prevScriptShell = $env:NPM_CONFIG_SCRIPT_SHELL
     $prevNodeLlamaSkipDownload = $env:NODE_LLAMA_CPP_SKIP_DOWNLOAD
+    $prevBefore = $env:NPM_CONFIG_BEFORE
+    $prevMinReleaseAge = $env:NPM_CONFIG_MIN_RELEASE_AGE
     $env:NPM_CONFIG_LOGLEVEL = "error"
     $env:NPM_CONFIG_UPDATE_NOTIFIER = "false"
     $env:NPM_CONFIG_FUND = "false"
     $env:NPM_CONFIG_AUDIT = "false"
     $env:NPM_CONFIG_SCRIPT_SHELL = "cmd.exe"
     $env:NODE_LLAMA_CPP_SKIP_DOWNLOAD = "1"
+    Remove-Item Env:NPM_CONFIG_BEFORE -ErrorAction SilentlyContinue
+    Remove-Item Env:NPM_CONFIG_MIN_RELEASE_AGE -ErrorAction SilentlyContinue
     try {
-        $npmOutput = & (Get-NpmCommandPath) install -g "$installSpec" 2>&1
+        $npmOutput = & (Get-NpmCommandPath) install -g @freshnessArgs "$installSpec" 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[!] npm install failed" -ForegroundColor Red
             if ($npmOutput -match "spawn git" -or $npmOutput -match "ENOENT.*git") {
@@ -544,6 +781,8 @@ function Install-OpenClaw {
         $env:NPM_CONFIG_AUDIT = $prevAudit
         $env:NPM_CONFIG_SCRIPT_SHELL = $prevScriptShell
         $env:NODE_LLAMA_CPP_SKIP_DOWNLOAD = $prevNodeLlamaSkipDownload
+        $env:NPM_CONFIG_BEFORE = $prevBefore
+        $env:NPM_CONFIG_MIN_RELEASE_AGE = $prevMinReleaseAge
     }
     Write-Host "[OK] OpenClaw installed" -ForegroundColor Green
     return $true
@@ -859,7 +1098,7 @@ function Main {
         } else {
             Write-Host "Starting setup..." -ForegroundColor Cyan
             Write-Host ""
-            Invoke-OpenClawCommand onboard
+            Invoke-InteractiveOpenClawCommand onboard
         }
     }
 

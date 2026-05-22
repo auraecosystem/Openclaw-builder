@@ -324,16 +324,19 @@ lives on the [First-run FAQ](/help/faq-first-run).
     openclaw skills install <skill-slug>
     openclaw skills install <skill-slug> --version <version>
     openclaw skills install <skill-slug> --force
+    openclaw skills install <skill-slug> --global
     openclaw skills update --all
+    openclaw skills update --all --global
     openclaw skills list --eligible
     openclaw skills check
     ```
 
     Native `openclaw skills install` writes into the active workspace `skills/`
-    directory. Install the separate `clawhub` CLI only if you want to publish or
-    sync your own skills. For shared installs across agents, put the skill under
-    `~/.openclaw/skills` and use `agents.defaults.skills` or
-    `agents.list[].skills` if you want to narrow which agents can see it.
+    directory by default. Add `--global` to install into the shared managed
+    skills directory for all local agents. Install the separate `clawhub` CLI
+    only if you want to publish or sync your own skills. Use
+    `agents.defaults.skills` or `agents.list[].skills` if you want to narrow
+    which agents can see shared skills.
 
   </Accordion>
 
@@ -409,7 +412,7 @@ lives on the [First-run FAQ](/help/faq-first-run).
     openclaw skills update --all
     ```
 
-    Native installs land in the active workspace `skills/` directory. For shared skills across agents, place them in `~/.openclaw/skills/<name>/SKILL.md`. If only some agents should see a shared install, configure `agents.defaults.skills` or `agents.list[].skills`. Some skills expect binaries installed via Homebrew; on Linux that means Linuxbrew (see the Homebrew Linux FAQ entry above). See [Skills](/tools/skills), [Skills config](/tools/skills-config), and [ClawHub](/clawhub).
+    Native installs land in the active workspace `skills/` directory. For shared skills across all local agents, use `openclaw skills install <slug> --global` (or place them manually in `~/.openclaw/skills/<name>/SKILL.md`). If only some agents should see a shared install, configure `agents.defaults.skills` or `agents.list[].skills`. Some skills expect binaries installed via Homebrew; on Linux that means Linuxbrew (see the Homebrew Linux FAQ entry above). See [Skills](/tools/skills), [Skills config](/tools/skills-config), and [ClawHub](/tools/clawhub).
 
   </Accordion>
 
@@ -451,7 +454,7 @@ lives on the [First-run FAQ](/help/faq-first-run).
     include system packages, Homebrew, or bundled browsers. For a fuller setup:
 
     - Persist `/home/node` with `OPENCLAW_HOME_VOLUME` so caches survive.
-    - Bake system deps into the image with `OPENCLAW_DOCKER_APT_PACKAGES`.
+    - Bake system deps into the image with `OPENCLAW_IMAGE_APT_PACKAGES`.
     - Install Playwright browsers via the bundled CLI:
       `node /app/node_modules/playwright-core/cli.js install chromium`
     - Set `PLAYWRIGHT_BROWSERS_PATH` and ensure the path is persisted.
@@ -733,7 +736,8 @@ lives on the [First-run FAQ](/help/faq-first-run).
     `web_fetch` works without an API key. `web_search` depends on your selected
     provider:
 
-    - API-backed providers such as Brave, Exa, Firecrawl, Gemini, Grok, Kimi, MiniMax Search, Perplexity, and Tavily require their normal API key setup.
+    - API-backed providers such as Brave, Exa, Firecrawl, Gemini, Kimi, MiniMax Search, Perplexity, and Tavily require their normal API key setup.
+    - Grok can reuse xAI OAuth from model auth, or fall back to `XAI_API_KEY` / plugin web-search config.
     - Ollama Web Search is key-free, but it uses your configured Ollama host and requires `ollama signin`.
     - DuckDuckGo is key-free, but it is an unofficial HTML-based integration.
     - SearXNG is key-free/self-hosted; configure `SEARXNG_BASE_URL` or `plugins.entries.searxng.config.webSearch.baseUrl`.
@@ -745,7 +749,7 @@ lives on the [First-run FAQ](/help/faq-first-run).
     - Exa: `EXA_API_KEY`
     - Firecrawl: `FIRECRAWL_API_KEY`
     - Gemini: `GEMINI_API_KEY`
-    - Grok: `XAI_API_KEY`
+    - Grok: xAI OAuth, `XAI_API_KEY`
     - Kimi: `KIMI_API_KEY` or `MOONSHOT_API_KEY`
     - MiniMax Search: `MINIMAX_CODE_PLAN_KEY`, `MINIMAX_CODING_API_KEY`, or `MINIMAX_API_KEY`
     - Perplexity: `PERPLEXITY_API_KEY` or `OPENROUTER_API_KEY`
@@ -823,7 +827,7 @@ lives on the [First-run FAQ](/help/faq-first-run).
     - Use `openclaw configure` for interactive edits.
     - Use `config.schema.lookup` first when you are not sure about an exact path or field shape; it returns a shallow schema node plus immediate child summaries for drill-down.
     - Use `config.patch` for partial RPC edits; keep `config.apply` for full-config replacement only.
-    - If you are using the owner-only `gateway` tool from an agent run, it will still reject writes to `tools.exec.ask` / `tools.exec.security` (including legacy `tools.bash.*` aliases that normalize to the same protected exec paths).
+    - If you are using the agent-facing `gateway` tool from an agent run, it will still reject writes to `tools.exec.ask` / `tools.exec.security` (including legacy `tools.bash.*` aliases that normalize to the same protected exec paths).
 
     Docs: [Config](/cli/config), [Configure](/cli/configure), [Gateway troubleshooting](/gateway/troubleshooting#gateway-rejected-invalid-config), [Doctor](/gateway/doctor).
 
@@ -999,7 +1003,7 @@ lives on the [First-run FAQ](/help/faq-first-run).
     - `config.get`: fetch the current snapshot + hash
     - `config.patch`: safe partial update (preferred for most RPC edits); hot-reloads when possible and restarts when required
     - `config.apply`: validate + replace the full config; hot-reloads when possible and restarts when required
-    - The owner-only `gateway` runtime tool still refuses to rewrite `tools.exec.ask` / `tools.exec.security`; legacy `tools.bash.*` aliases normalize to the same protected exec paths
+    - The agent-facing `gateway` runtime tool still refuses to rewrite `tools.exec.ask` / `tools.exec.security`; legacy `tools.bash.*` aliases normalize to the same protected exec paths
 
   </Accordion>
 
@@ -1560,7 +1564,7 @@ lives on the [Models FAQ](/help/faq-models).
 
     Service/supervisor logs (when the gateway runs via launchd/systemd):
 
-    - macOS: `$OPENCLAW_STATE_DIR/logs/gateway.log` and `gateway.err.log` (default: `~/.openclaw/logs/...`; profiles use `~/.openclaw-<profile>/logs/...`)
+    - macOS launchd stdout: `~/Library/Logs/openclaw/gateway.log` (profiles use `gateway-<profile>.log`; stderr is suppressed)
     - Linux: `journalctl --user -u openclaw-gateway[-<profile>].service -n 200 --no-pager`
     - Windows: `schtasks /Query /TN "OpenClaw Gateway (<profile>)" /V /FO LIST`
 

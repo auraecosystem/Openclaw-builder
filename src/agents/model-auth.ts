@@ -19,6 +19,7 @@ import {
   normalizeOptionalLowercaseString,
 } from "../shared/string-coerce.js";
 import { normalizeOptionalSecretInput } from "../utils/normalize-secret-input.js";
+import { resolveDefaultAgentDir } from "./agent-scope-config.js";
 import {
   type AuthProfileCredential,
   type AuthProfileStore,
@@ -47,7 +48,11 @@ export {
   ensureAuthProfileStoreWithoutExternalProfiles,
   resolveAuthProfileOrder,
 } from "./auth-profiles.js";
-export { requireApiKey, resolveAwsSdkEnvVarName } from "./model-auth-runtime-shared.js";
+export {
+  formatMissingAuthError,
+  requireApiKey,
+  resolveAwsSdkEnvVarName,
+} from "./model-auth-runtime-shared.js";
 export type { ResolvedProviderAuth } from "./model-auth-runtime-shared.js";
 export type ProviderCredentialPrecedence = "profile-first" | "env-first";
 
@@ -290,6 +295,9 @@ function isLocalBaseUrl(baseUrl: string): boolean {
       host === "::1" ||
       host === "::ffff:7f00:1" ||
       host === "::ffff:127.0.0.1" ||
+      host === "docker.orb.internal" ||
+      host === "host.docker.internal" ||
+      host === "host.orb.internal" ||
       host.endsWith(".local") ||
       isPrivateIpv4Host(host)
     );
@@ -568,9 +576,11 @@ export async function resolveApiKeyForProvider(params: {
   /** When true, treat profileId as a user-locked selection that must not be
    *  silently overridden by env/config credentials. */
   lockedProfile?: boolean;
+  forceRefresh?: boolean;
   credentialPrecedence?: ProviderCredentialPrecedence;
 }): Promise<ResolvedProviderAuth> {
   const { provider, cfg, profileId, preferredProfile } = params;
+  const agentDir = params.agentDir?.trim() || (cfg ? resolveDefaultAgentDir(cfg) : undefined);
   let scopedStore: AuthProfileStore | undefined = params.store;
 
   if (profileId) {
@@ -581,7 +591,7 @@ export async function resolveApiKeyForProvider(params: {
     const store =
       params.store ??
       resolveScopedAuthProfileStore({
-        agentDir: params.agentDir,
+        agentDir,
         cfg,
         provider,
         profileId,
@@ -591,16 +601,18 @@ export async function resolveApiKeyForProvider(params: {
       cfg,
       store,
       profileId,
-      agentDir: params.agentDir,
+      agentDir,
+      forceRefresh: params.forceRefresh,
     });
     if (!resolved) {
       throw new Error(`No credentials found for profile "${profileId}".`);
     }
-    const mode = store.profiles[profileId]?.type;
+    const resolvedProfileId = resolved.profileId ?? profileId;
+    const mode = resolved.profileType ?? store.profiles[resolvedProfileId]?.type;
     const result: ResolvedProviderAuth = {
       apiKey: resolved.apiKey,
-      profileId,
-      source: `profile:${profileId}`,
+      profileId: resolvedProfileId,
+      source: `profile:${resolvedProfileId}`,
       mode: mode ? profileTypeToAuthMode(mode) : "api-key",
     };
     // When the resolved key is a provider-owned synthetic profile marker and
@@ -624,7 +636,7 @@ export async function resolveApiKeyForProvider(params: {
 
   if (cfg?.auth?.profiles || cfg?.auth?.order) {
     scopedStore ??= resolveScopedAuthProfileStore({
-      agentDir: params.agentDir,
+      agentDir,
       cfg,
       provider,
       preferredProfile,
@@ -707,7 +719,7 @@ export async function resolveApiKeyForProvider(params: {
   const store =
     scopedStore ??
     resolveScopedAuthProfileStore({
-      agentDir: params.agentDir,
+      agentDir,
       cfg,
       provider,
       preferredProfile,
@@ -733,17 +745,19 @@ export async function resolveApiKeyForProvider(params: {
         cfg,
         store,
         profileId: candidate,
-        agentDir: params.agentDir,
+        agentDir,
+        forceRefresh: params.forceRefresh,
       });
       if (resolved) {
-        const mode = store.profiles[candidate]?.type;
+        const resolvedProfileId = resolved.profileId ?? candidate;
+        const mode = resolved.profileType ?? store.profiles[resolvedProfileId]?.type;
         const resolvedMode: ResolvedProviderAuth["mode"] = mode
           ? profileTypeToAuthMode(mode)
           : "api-key";
         const result: ResolvedProviderAuth = {
           apiKey: resolved.apiKey,
-          profileId: candidate,
-          source: `profile:${candidate}`,
+          profileId: resolvedProfileId,
+          source: `profile:${resolvedProfileId}`,
           mode: resolvedMode,
         };
         if (
@@ -806,7 +820,7 @@ export async function resolveApiKeyForProvider(params: {
       config: cfg,
       context: {
         config: cfg,
-        agentDir: params.agentDir,
+        agentDir,
         env: process.env,
         provider,
         listProfileIds: (providerId) => listProfilesForProvider(store, providerId),
@@ -817,7 +831,7 @@ export async function resolveApiKeyForProvider(params: {
     }
   }
 
-  const authStorePath = resolveAuthStorePathForDisplay(params.agentDir);
+  const authStorePath = resolveAuthStorePathForDisplay(agentDir);
   const resolvedAgentDir = path.dirname(authStorePath);
   throw new Error(
     [

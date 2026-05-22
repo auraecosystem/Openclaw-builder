@@ -1,16 +1,11 @@
 {
-  "fallbackKeys": [
-    "chat.autoScrollAlways",
-    "chat.autoScrollMode",
-    "chat.autoScrollNearBottom",
-    "chat.autoScrollOff"
-  ],
-  "generatedAt": "2026-05-14T02:57:16.363Z",
+  "fallbackKeys": [],
+  "generatedAt": "2026-05-22T09:11:56.512Z",
   "locale": "fa",
-  "model": "gpt-5.5",
-  "provider": "openai",
-  "sourceHash": "21a3e182cf575ee49da8100200441d290766012efb17685445098f21d46dcab7",
-  "totalKeys": 1112,
-  "translatedKeys": 1108,
+  "model": "claude-opus-4-7",
+  "provider": "anthropic",
+  "sourceHash": "e6749bdaf859097428ca6bcd98bdb46915c6a8660ba50656ebd2e6be9d655821",
+  "totalKeys": 1120,
+  "translatedKeys": 1120,
   "workflow": 1
 }
