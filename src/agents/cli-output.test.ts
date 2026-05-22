@@ -713,6 +713,242 @@ describe("createCliJsonlStreamingParser", () => {
     expect(deltas).toEqual([{ text: "ok", delta: "ok" }]);
   });
 
+  it("emits tool_use start with parsed args from accumulated input_json_delta chunks when no assistant snapshot arrives", () => {
+    const starts: Array<CliToolUseStartDelta> = [];
+    const parser = createCliJsonlStreamingParser({
+      backend: {
+        command: "local-cli",
+        output: "jsonl",
+        jsonlDialect: "claude-stream-json",
+        sessionIdFields: ["session_id"],
+      },
+      providerId: "claude-cli",
+      onAssistantDelta: () => undefined,
+      onToolUseStart: (delta) => starts.push(delta),
+    });
+
+    // Streaming-only path: claude-cli sends content_block_start, several
+    // input_json_delta chunks that together reconstitute the tool input,
+    // and content_block_stop, with no `type: "assistant"` snapshot. The
+    // parser must reassemble the chunks and emit real args, not `{}`.
+    parser.push(
+      [
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "tool_use", id: "toolu_chunked", name: "Bash", input: {} },
+          },
+        }),
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "input_json_delta", partial_json: '{"command":' },
+          },
+        }),
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "input_json_delta", partial_json: ' "echo hi"' },
+          },
+        }),
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "input_json_delta", partial_json: "}" },
+          },
+        }),
+        JSON.stringify({
+          type: "stream_event",
+          event: { type: "content_block_stop", index: 0 },
+        }),
+      ].join("\n") + "\n",
+    );
+    parser.finish();
+
+    expect(starts).toEqual([
+      { toolCallId: "toolu_chunked", name: "Bash", args: { command: "echo hi" } },
+    ]);
+  });
+
+  it("falls through to empty args when accumulated input_json_delta chunks do not reconstitute valid JSON", () => {
+    const starts: Array<CliToolUseStartDelta> = [];
+    const parser = createCliJsonlStreamingParser({
+      backend: {
+        command: "local-cli",
+        output: "jsonl",
+        jsonlDialect: "claude-stream-json",
+        sessionIdFields: ["session_id"],
+      },
+      providerId: "claude-cli",
+      onAssistantDelta: () => undefined,
+      onToolUseStart: (delta) => starts.push(delta),
+    });
+
+    // Truncated mid-chunk: the joined chunks `{"command": "ls` are not
+    // valid JSON. Parser must catch the SyntaxError and emit start with
+    // empty args rather than crash.
+    parser.push(
+      [
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "tool_use", id: "toolu_truncated", name: "Bash", input: {} },
+          },
+        }),
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "input_json_delta", partial_json: '{"command": "ls' },
+          },
+        }),
+        JSON.stringify({
+          type: "stream_event",
+          event: { type: "content_block_stop", index: 0 },
+        }),
+      ].join("\n") + "\n",
+    );
+    parser.finish();
+
+    expect(starts).toEqual([{ toolCallId: "toolu_truncated", name: "Bash", args: {} }]);
+  });
+
+  it("recognises server_tool_use and mcp_tool_use blocks alongside tool_use", () => {
+    const starts: Array<CliToolUseStartDelta> = [];
+    const parser = createCliJsonlStreamingParser({
+      backend: {
+        command: "local-cli",
+        output: "jsonl",
+        jsonlDialect: "claude-stream-json",
+        sessionIdFields: ["session_id"],
+      },
+      providerId: "claude-cli",
+      onAssistantDelta: () => undefined,
+      onToolUseStart: (delta) => starts.push(delta),
+    });
+
+    // Anthropic hosted tools surface as `server_tool_use`; native MCP
+    // integration surfaces as `mcp_tool_use`. Both must travel the same
+    // accumulator path as `tool_use`.
+    parser.push(
+      [
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_start",
+            index: 0,
+            content_block: {
+              type: "server_tool_use",
+              id: "toolu_server",
+              name: "web_search",
+              input: {},
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "input_json_delta", partial_json: '{"query": "openclaw"}' },
+          },
+        }),
+        JSON.stringify({
+          type: "stream_event",
+          event: { type: "content_block_stop", index: 0 },
+        }),
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_start",
+            index: 1,
+            content_block: {
+              type: "mcp_tool_use",
+              id: "toolu_mcp",
+              name: "fetch_doc",
+              input: {},
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            index: 1,
+            delta: { type: "input_json_delta", partial_json: '{"path": "/spec.md"}' },
+          },
+        }),
+        JSON.stringify({
+          type: "stream_event",
+          event: { type: "content_block_stop", index: 1 },
+        }),
+      ].join("\n") + "\n",
+    );
+    parser.finish();
+
+    expect(starts).toEqual([
+      { toolCallId: "toolu_server", name: "web_search", args: { query: "openclaw" } },
+      { toolCallId: "toolu_mcp", name: "fetch_doc", args: { path: "/spec.md" } },
+    ]);
+  });
+
+  it("recognises server_tool_use and mcp_tool_use blocks in the assistant snapshot path", () => {
+    const starts: Array<CliToolUseStartDelta> = [];
+    const parser = createCliJsonlStreamingParser({
+      backend: {
+        command: "local-cli",
+        output: "jsonl",
+        jsonlDialect: "claude-stream-json",
+        sessionIdFields: ["session_id"],
+      },
+      providerId: "claude-cli",
+      onAssistantDelta: () => undefined,
+      onToolUseStart: (delta) => starts.push(delta),
+    });
+
+    parser.push(
+      [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "server_tool_use",
+                id: "toolu_server_snap",
+                name: "web_search",
+                input: { query: "snap" },
+              },
+              {
+                type: "mcp_tool_use",
+                id: "toolu_mcp_snap",
+                name: "fetch_doc",
+                input: { path: "/snap.md" },
+              },
+            ],
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+    parser.finish();
+
+    expect(starts).toEqual([
+      { toolCallId: "toolu_server_snap", name: "web_search", args: { query: "snap" } },
+      { toolCallId: "toolu_mcp_snap", name: "fetch_doc", args: { path: "/snap.md" } },
+    ]);
+  });
+
   it("surfaces tool args and results unredacted at the parser boundary; sanitization is the consumer's responsibility before bus emission", () => {
     // Locks in the privacy contract for callers: the parser is a pure
     // transform that carries claude-cli's raw `tool_use.input` and
