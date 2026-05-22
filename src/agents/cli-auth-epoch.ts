@@ -177,6 +177,7 @@ export async function resolveCliAuthEpoch(params: {
   provider: string;
   authProfileId?: string;
   skipLocalCredential?: boolean;
+  skipProfileCredential?: boolean;
 }): Promise<string | undefined> {
   const provider = params.provider.trim();
   const authProfileId = normalizeOptionalString(params.authProfileId);
@@ -189,7 +190,7 @@ export async function resolveCliAuthEpoch(params: {
     }
   }
 
-  if (authProfileId) {
+  if (authProfileId && params.skipProfileCredential !== true) {
     const store = cliAuthEpochDeps.loadAuthProfileStoreForRuntime(undefined, {
       readOnly: true,
       allowKeychainPrompt: false,
