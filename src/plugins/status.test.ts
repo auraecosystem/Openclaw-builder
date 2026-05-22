@@ -5,6 +5,7 @@ import {
   createPluginLoadResult,
   createPluginRecord,
   createTypedHook,
+  DEPRECATED_MEMORY_EMBEDDING_PROVIDER_API_MESSAGE,
   HOOK_ONLY_MESSAGE,
   LEGACY_BEFORE_AGENT_START_MESSAGE,
 } from "./status.test-helpers.js";
@@ -834,6 +835,41 @@ describe("plugin status reports", () => {
     expectCompatibilityOutput({
       warnings: [`lca ${LEGACY_BEFORE_AGENT_START_MESSAGE}`, `lca ${HOOK_ONLY_MESSAGE}`],
     });
+  });
+
+  it("warns external plugins off deprecated memory embedding provider registration", () => {
+    setSinglePluginLoadResult(
+      createPluginRecord({
+        id: "legacy-memory-provider",
+        name: "Legacy Memory Provider",
+        memoryEmbeddingProviderIds: ["legacy-memory-provider"],
+        contracts: { memoryEmbeddingProviders: ["legacy-memory-provider"] },
+      }),
+    );
+
+    expectCompatibilityOutput({
+      notices: [
+        createCompatibilityNotice({
+          pluginId: "legacy-memory-provider",
+          code: "deprecated-memory-embedding-provider-api",
+        }),
+      ],
+      warnings: [`legacy-memory-provider ${DEPRECATED_MEMORY_EMBEDDING_PROVIDER_API_MESSAGE}`],
+    });
+  });
+
+  it("does not surface bundled memory embedding migration debt as user warnings", () => {
+    setSinglePluginLoadResult(
+      createPluginRecord({
+        id: "bundled-memory-provider",
+        name: "Bundled Memory Provider",
+        origin: "bundled",
+        memoryEmbeddingProviderIds: ["bundled-memory-provider"],
+        contracts: { memoryEmbeddingProviders: ["bundled-memory-provider"] },
+      }),
+    );
+
+    expectNoCompatibilityWarnings();
   });
 
   it("builds structured compatibility notices with deterministic ordering", () => {
