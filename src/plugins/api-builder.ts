@@ -62,6 +62,7 @@ export type BuildPluginApiParams = {
       | "registerTrustedToolPolicy"
       | "registerToolMetadata"
       | "registerControlUiDescriptor"
+      | "registerControlUiEntryPoint"
       | "registerRuntimeLifecycle"
       | "registerAgentEventSubscription"
       | "emitAgentEvent"
@@ -143,6 +144,7 @@ const noopEnqueueNextTurnInjection: OpenClawPluginApi["enqueueNextTurnInjection"
 const noopRegisterTrustedToolPolicy: OpenClawPluginApi["registerTrustedToolPolicy"] = () => {};
 const noopRegisterToolMetadata: OpenClawPluginApi["registerToolMetadata"] = () => {};
 const noopRegisterControlUiDescriptor: OpenClawPluginApi["registerControlUiDescriptor"] = () => {};
+const noopRegisterControlUiEntryPoint: OpenClawPluginApi["registerControlUiEntryPoint"] = () => {};
 const noopRegisterRuntimeLifecycle: OpenClawPluginApi["registerRuntimeLifecycle"] = () => {};
 const noopRegisterAgentEventSubscription: OpenClawPluginApi["registerAgentEventSubscription"] =
   () => {};
@@ -255,6 +257,8 @@ export function buildPluginApi(params: BuildPluginApiParams): OpenClawPluginApi 
     registerToolMetadata: handlers.registerToolMetadata ?? noopRegisterToolMetadata,
     registerControlUiDescriptor:
       handlers.registerControlUiDescriptor ?? noopRegisterControlUiDescriptor,
+    registerControlUiEntryPoint:
+      handlers.registerControlUiEntryPoint ?? noopRegisterControlUiEntryPoint,
     registerRuntimeLifecycle: handlers.registerRuntimeLifecycle ?? noopRegisterRuntimeLifecycle,
     registerAgentEventSubscription:
       handlers.registerAgentEventSubscription ?? noopRegisterAgentEventSubscription,

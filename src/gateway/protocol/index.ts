@@ -200,6 +200,10 @@ import {
   PluginsSessionActionResultSchema,
   type PluginsUiDescriptorsParams,
   PluginsUiDescriptorsParamsSchema,
+  type PluginsUiEntryPointLaunchParams,
+  PluginsUiEntryPointLaunchParamsSchema,
+  type PluginsUiEntryPointsParams,
+  PluginsUiEntryPointsParamsSchema,
   ErrorCodes,
   type EnvironmentSummary,
   EnvironmentSummarySchema,
@@ -789,6 +793,12 @@ export const validatePluginApprovalResolveParams = lazyCompile<PluginApprovalRes
 export const validatePluginsUiDescriptorsParams = lazyCompile<PluginsUiDescriptorsParams>(
   PluginsUiDescriptorsParamsSchema,
 );
+export const validatePluginsUiEntryPointsParams = lazyCompile<PluginsUiEntryPointsParams>(
+  PluginsUiEntryPointsParamsSchema,
+);
+export const validatePluginsUiEntryPointLaunchParams = lazyCompile<PluginsUiEntryPointLaunchParams>(
+  PluginsUiEntryPointLaunchParamsSchema,
+);
 export const validatePluginsSessionActionParams = lazyCompile<PluginsSessionActionParams>(
   PluginsSessionActionParamsSchema,
 );
@@ -994,6 +1004,8 @@ export {
   PluginsSessionActionParamsSchema,
   PluginsSessionActionResultSchema,
   PluginsUiDescriptorsParamsSchema,
+  PluginsUiEntryPointLaunchParamsSchema,
+  PluginsUiEntryPointsParamsSchema,
   ModelsListParamsSchema,
   SkillsStatusParamsSchema,
   ToolsCatalogParamsSchema,
