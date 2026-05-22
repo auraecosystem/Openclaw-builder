@@ -108,10 +108,16 @@ function swiftStoredPropertyName(structName: string, key: string): string {
   if (structName === "ChatSendParams" && key === "fastMode") {
     return "fastmodevalue";
   }
+  if (structName === "ChatSendParams" && key === "fast_seconds") {
+    return "fastseconds";
+  }
   return safeName(key);
 }
 
-function swiftInitializerName(_structName: string, key: string): string {
+function swiftInitializerName(structName: string, key: string): string {
+  if (structName === "ChatSendParams" && key === "fast_seconds") {
+    return "fastseconds";
+  }
   return safeName(key);
 }
 
@@ -389,12 +395,10 @@ function emitStructCompatibilityInitializer(
   props: Record<string, JsonSchema>,
   required: Set<string>,
 ): string {
-  if (name !== "ChatSendParams" || !props.fastMode || !props.fast_seconds || !props.fastSeconds) {
+  if (name !== "ChatSendParams" || !props.fastMode || !props.fast_seconds) {
     return "";
   }
-  const legacyKeys = Object.keys(props).filter(
-    (key) => key !== "fast_seconds" && key !== "fastSeconds",
-  );
+  const legacyKeys = Object.keys(props).filter((key) => key !== "fast_seconds");
   const initializerParams = legacyKeys.map((key) => {
     const prop = props[key];
     if (!prop) {
@@ -417,7 +421,7 @@ function emitStructCompatibilityInitializer(
     if (key === "fastMode") {
       return "            fastmode: fastmode.map { AnyCodable($0) }";
     }
-    if (key === "fast_seconds" || key === "fastSeconds") {
+    if (key === "fast_seconds") {
       return `            ${propName}: nil`;
     }
     return `            ${propName}: ${propName}`;

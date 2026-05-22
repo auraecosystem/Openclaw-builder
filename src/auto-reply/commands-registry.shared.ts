@@ -1,4 +1,4 @@
-import { formatFastModeAutoLabel, resolveFastModeAutoSeconds } from "../agents/fast-mode.js";
+import { formatFastModeAutoLabel, resolveFastModeAutoSeconds } from "../shared/fast-mode.js";
 import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 import { COMMAND_ARG_FORMATTERS } from "./commands-args.js";
 import type {
