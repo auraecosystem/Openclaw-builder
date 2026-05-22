@@ -32,6 +32,7 @@ import {
 } from "./subagent-attachments.js";
 import { resolveSubagentCapabilities } from "./subagent-capabilities.js";
 import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
+import { isGatewayLifecycleTransientError } from "./subagent-gateway-lifecycle.js";
 import { buildSubagentInitialUserMessage } from "./subagent-initial-user-message.js";
 import { countActiveRunsForSession, registerSubagentRun } from "./subagent-registry.js";
 import { resolveSubagentSpawnAcceptedNote } from "./subagent-spawn-accepted-note.js";
@@ -616,17 +617,6 @@ function summarizeError(err: unknown): string {
   return "error";
 }
 
-function isGatewayLifecycleReadinessError(error: unknown): boolean {
-  const message = summarizeError(error).toLowerCase();
-  return (
-    message.includes("gateway timeout") ||
-    message.includes("gateway closed") ||
-    message.includes("handshake timeout") ||
-    message.includes("closed before connect") ||
-    message.includes("not yet ready to accept connections")
-  );
-}
-
 async function waitForGatewayReadinessRetryDelay(ms: number): Promise<void> {
   if (!Number.isFinite(ms) || ms <= 0) {
     return;
@@ -652,7 +642,7 @@ async function ensureGatewayReadyForSubagentSpawn(): Promise<void> {
       return;
     } catch (err) {
       const delayMs = getSubagentGatewayReadinessRetryDelaysMs()[attempt];
-      if (delayMs == null || !isGatewayLifecycleReadinessError(err)) {
+      if (delayMs == null || !isGatewayLifecycleTransientError(err)) {
         throw err;
       }
       attempt += 1;

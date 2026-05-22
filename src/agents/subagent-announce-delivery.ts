@@ -56,6 +56,7 @@ import {
 } from "./subagent-announce-dispatch.js";
 import type { DeliveryContext } from "./subagent-announce-origin.js";
 import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
+import { isGatewayLifecycleTransientError } from "./subagent-gateway-lifecycle.js";
 import { resolveRequesterStoreKey } from "./subagent-requester-store-key.js";
 import type { SpawnSubagentMode } from "./subagent-spawn.types.js";
 
@@ -272,7 +273,10 @@ export function isTransientAnnounceDeliveryError(error: unknown): boolean {
   if (PERMANENT_ANNOUNCE_DELIVERY_ERROR_PATTERNS.some((re) => re.test(message))) {
     return false;
   }
-  return TRANSIENT_ANNOUNCE_DELIVERY_ERROR_PATTERNS.some((re) => re.test(message));
+  return (
+    isGatewayLifecycleTransientError(error) ||
+    TRANSIENT_ANNOUNCE_DELIVERY_ERROR_PATTERNS.some((re) => re.test(message))
+  );
 }
 
 function isPermanentAnnounceDeliveryError(error: unknown): boolean {

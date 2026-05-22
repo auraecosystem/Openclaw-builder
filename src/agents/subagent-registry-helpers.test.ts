@@ -97,8 +97,8 @@ describe("logAnnounceGiveUp", () => {
 });
 
 describe("deleteSubagentSessionWithRetry", () => {
-  function makeTransientError() {
-    const err = new Error("gateway closed (1006): transport close");
+  function makeTransientError(message = "gateway closed (1006): transport close") {
+    const err = new Error(message);
     return err;
   }
 
@@ -149,6 +149,23 @@ describe("deleteSubagentSessionWithRetry", () => {
         sessionKey: "agent:main:subagent:abc",
       }),
     ).rejects.toThrow("transport close");
+    expect(callGateway).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries lifecycle readiness failures shared with subagent spawn", async () => {
+    const callGateway = vi
+      .fn()
+      .mockRejectedValueOnce(makeTransientError("WebSocket handshake timeout after 10000ms"))
+      .mockRejectedValueOnce(
+        makeTransientError("Gateway not yet ready to accept connections (retry after a moment)"),
+      )
+      .mockResolvedValueOnce({});
+
+    await deleteSubagentSessionWithRetry({
+      callGateway,
+      sessionKey: "agent:main:subagent:abc",
+    });
+
     expect(callGateway).toHaveBeenCalledTimes(3);
   });
 });
