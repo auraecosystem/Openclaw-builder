@@ -81,6 +81,7 @@ export type ModelCompatConfig = SupportedOpenAICompatFields &
     supportsPromptCacheKey?: boolean;
     requiresStringContent?: boolean;
     strictMessageKeys?: boolean;
+    legacyFunctionCallStreaming?: boolean;
     toolSchemaProfile?: string;
     unsupportedToolSchemaKeywords?: string[];
     nativeWebSearchTool?: boolean;
