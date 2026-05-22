@@ -409,7 +409,7 @@ describe("commands registry", () => {
     expect(fast.textAliases).toEqual(["/fast"]);
     expect(fast.category).toBe("options");
     const modeArg = requireCommandArg(fast, "mode");
-    expect(modeArg.choices).toEqual(["status", "on", "off", "default"]);
+    expect(modeArg.choices).toEqual(["status", "auto", "on", "off", "default"]);
   });
 
   it("detects known text commands", () => {

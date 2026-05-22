@@ -361,11 +361,13 @@ describe("registerTelegramNativeCommands", () => {
 
     expect(callbackData).toEqual([
       "tgcmd:/fast status",
+      "tgcmd:/fast auto",
       "tgcmd:/fast on",
       "tgcmd:/fast off",
       "tgcmd:/fast default",
     ]);
     expect(parseTelegramNativeCommandCallbackData("tgcmd:/fast status")).toBe("/fast status");
+    expect(parseTelegramNativeCommandCallbackData("tgcmd:/fast auto")).toBe("/fast auto");
     expect(parseTelegramNativeCommandCallbackData("tgcmd:/fast default")).toBe("/fast default");
     expect(parseTelegramNativeCommandCallbackData("tgcmd:fast status")).toBeNull();
   });

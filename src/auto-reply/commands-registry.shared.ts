@@ -787,9 +787,9 @@ export function buildBuiltinChatCommands(
       args: [
         {
           name: "mode",
-          description: "status, on, off, or default",
+          description: "status, auto, on, off, or default",
           type: "string",
-          choices: ["status", "on", "off", "default"],
+          choices: ["status", "auto", "on", "off", "default"],
         },
       ],
       argsMenu: "auto",
