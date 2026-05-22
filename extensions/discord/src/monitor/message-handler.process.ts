@@ -521,6 +521,7 @@ export async function processDiscordMessage(
     draftPreview.markFinalReplyStarted();
     observer?.onFinalReplyStart?.();
   };
+  let visibleFinalReplyQueuedOrStarted = false;
 
   const { dispatcher, replyOptions, markDispatchIdle, markRunComplete } =
     createReplyDispatcherWithTyping({
@@ -533,6 +534,10 @@ export async function processDiscordMessage(
         const isFinal = info.kind === "final";
         if (payload.isReasoning) {
           // Reasoning/thinking payloads should not be delivered to Discord.
+          return;
+        }
+        if (isFinal && payload.isError === true && visibleFinalReplyQueuedOrStarted) {
+          logVerbose("discord: suppressing late error final after visible final reply delivery");
           return;
         }
         if (isFinal) {
@@ -608,6 +613,7 @@ export async function processDiscordMessage(
               onPreviewFinalized: () => {
                 draftPreview.markFinalReplyDelivered();
                 draftPreview.markPreviewFinalized();
+                visibleFinalReplyQueuedOrStarted = true;
                 replyReference.markSent();
                 observer?.onFinalReplyDelivered?.();
               },
@@ -664,6 +670,7 @@ export async function processDiscordMessage(
                   : effectivePayload;
               const replyToId = replyReference.use();
               notifyFinalReplyStart();
+              visibleFinalReplyQueuedOrStarted = true;
               await deliverDiscordReply({
                 cfg,
                 replies: [fallbackPayload],
@@ -705,6 +712,9 @@ export async function processDiscordMessage(
         const replyToId = replyReference.use();
         if (isFinal) {
           notifyFinalReplyStart();
+          if (payload.isError !== true) {
+            visibleFinalReplyQueuedOrStarted = true;
+          }
         }
         await deliverDiscordReply({
           cfg,
@@ -751,6 +761,20 @@ export async function processDiscordMessage(
         await statusReactions.setThinking();
       },
     });
+  const visibleReplyDispatcher: typeof dispatcher = {
+    ...dispatcher,
+    sendFinalReply: (payload) => {
+      if (payload.isError === true && visibleFinalReplyQueuedOrStarted) {
+        logVerbose("discord: suppressing late error final after visible final reply was queued");
+        return false;
+      }
+      const queued = dispatcher.sendFinalReply(payload);
+      if (queued && payload.isError !== true) {
+        visibleFinalReplyQueuedOrStarted = true;
+      }
+      return queued;
+    },
+  };
 
   const resolvedBlockStreamingEnabled = resolveChannelStreamingBlockEnabled(discordConfig);
   let dispatchResult: Awaited<ReturnType<typeof dispatchInboundMessage>> | null = null;
@@ -794,7 +818,7 @@ export async function processDiscordMessage(
         await dispatchInboundMessage({
           ctx: ctxPayload,
           cfg,
-          dispatcher,
+          dispatcher: visibleReplyDispatcher,
           replyOptions: {
             ...replyOptions,
             abortSignal,

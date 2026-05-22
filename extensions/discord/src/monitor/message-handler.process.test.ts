@@ -2138,7 +2138,7 @@ describe("processDiscordMessage draft streaming", () => {
     expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps finalized previews when later tool warning finals are delivered", async () => {
+  it("keeps finalized previews and suppresses later tool warning finals", async () => {
     const draftStream = createMockDraftStreamForTest();
     dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
       await params?.dispatcher.sendFinalReply({ text: "delivery survived" });
@@ -2158,15 +2158,7 @@ describe("processDiscordMessage draft streaming", () => {
     expectPreviewEditContent("delivery survived");
     expect(draftStream.clear).not.toHaveBeenCalled();
     expect(draftStream.messageId()).toBe("preview-1");
-    expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
-    expect(firstMockArg(deliverDiscordReply, "deliverDiscordReply")).toMatchObject({
-      replies: [
-        {
-          text: "⚠️ 🛠️ `run openclaw definitely-not-a-real-subcommand (agent)` failed",
-          isError: true,
-        },
-      ],
-    });
+    expect(deliverDiscordReply).not.toHaveBeenCalled();
   });
 
   it("keeps draft previews when tool warning finals arrive before recovered replies", async () => {
@@ -2353,7 +2345,7 @@ describe("processDiscordMessage draft streaming", () => {
     });
   });
 
-  it("clears Discord progress drafts before recovered replies and later tool warnings", async () => {
+  it("clears Discord progress drafts before recovered replies and suppresses later tool warnings", async () => {
     const draftStream = createMockDraftStreamForTest();
 
     dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
@@ -2384,20 +2376,50 @@ describe("processDiscordMessage draft streaming", () => {
     expect(editMessageDiscord).not.toHaveBeenCalled();
     expect(draftStream.clear).toHaveBeenCalledTimes(1);
     expect(draftStream.messageId()).toBeUndefined();
-    expect(deliverDiscordReply).toHaveBeenCalledTimes(2);
-    expect(deliverDiscordReply.mock.calls.map((call) => call[0])).toEqual([
-      expect.objectContaining({
-        replies: [{ text: "delivery survived" }],
-      }),
-      expect.objectContaining({
-        replies: [
-          {
-            text: "⚠️ 🛠️ `run openclaw definitely-not-a-real-subcommand (agent)` failed",
-            isError: true,
+    expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
+    expect(firstMockArg(deliverDiscordReply, "deliverDiscordReply")).toMatchObject({
+      replies: [{ text: "delivery survived" }],
+    });
+  });
+
+  it("still delivers Discord error finals when no visible final reply was delivered first", async () => {
+    const draftStream = createMockDraftStreamForTest();
+
+    dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
+      await params?.replyOptions?.onToolStart?.({ name: "exec", phase: "start" });
+      await params?.replyOptions?.onItemEvent?.({ progressText: "exec failed" });
+      await params?.dispatcher.sendFinalReply({
+        text: "⚠️ 🛠️ `run openclaw definitely-not-a-real-subcommand (agent)` failed",
+        isError: true,
+      } as never);
+      return { queuedFinal: true, counts: { final: 1, tool: 0, block: 0 } };
+    });
+
+    const ctx = await createAutomaticSourceDeliveryContext({
+      discordConfig: {
+        streaming: {
+          mode: "progress",
+          progress: {
+            label: "Shelling",
           },
-        ],
-      }),
-    ]);
+        },
+      },
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    expect(draftStream.update).toHaveBeenCalledWith("Shelling\n\n🛠️ Exec\n• exec failed");
+    expect(editMessageDiscord).not.toHaveBeenCalled();
+    expect(draftStream.clear).toHaveBeenCalledTimes(1);
+    expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
+    expect(firstMockArg(deliverDiscordReply, "deliverDiscordReply")).toMatchObject({
+      replies: [
+        {
+          text: "⚠️ 🛠️ `run openclaw definitely-not-a-real-subcommand (agent)` failed",
+          isError: true,
+        },
+      ],
+    });
   });
 
   it("uses raw tool-progress detail in Discord progress drafts", async () => {
