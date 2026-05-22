@@ -2486,7 +2486,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
     expect(deliverReplies).not.toHaveBeenCalled();
   });
 
-  it("merges fast auto-on callbacks into the existing Telegram progress draft", async () => {
+  it("keeps fast auto callbacks inside a mixed Telegram progress draft", async () => {
     const draftStream = createSequencedDraftStream(2001);
     createTelegramDraftStream.mockReturnValue(draftStream);
     dispatchReplyWithBufferedBlockDispatcher.mockImplementation(async ({ replyOptions }) => {
@@ -2497,10 +2497,12 @@ describe("dispatchTelegramMessage draft streaming", () => {
         text: "💨Fast: auto-off(5s>=3s)",
         channelData: { openclawProgressKind: "fast-mode-auto" },
       });
+      await replyOptions?.onToolStart?.({ name: "web_search", phase: "start" });
       await replyOptions?.onToolResult?.({
         text: "💨Fast: auto-on",
         channelData: { openclawProgressKind: "fast-mode-auto" },
       });
+      await replyOptions?.onToolStart?.({ name: "code_execution", phase: "start" });
       return { queuedFinal: false };
     });
 
@@ -2511,7 +2513,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
     });
 
     expect(draftStream.update).toHaveBeenCalledWith(
-      "Shelling\n\n`🛠️ Exec`\n`💨Fast: auto-off(5s>=3s)`\n`💨Fast: auto-on`",
+      "Shelling\n\n`🛠️ Exec`\n`💨Fast: auto-off(5s>=3s)`\n`🔎 Web Search`\n`💨Fast: auto-on`\n`🧮 Code Execution`",
     );
     expect(deliverReplies).not.toHaveBeenCalled();
   });
