@@ -71,6 +71,79 @@ describe("embedding provider runtime resolution", () => {
     });
   });
 
+  it("resolves configured provider aliases through their api owner", () => {
+    const registered = {
+      id: "openai-compatible",
+      create: async () => ({ provider: null }),
+    } satisfies EmbeddingProviderAdapter;
+    registerEmbeddingProvider(registered);
+
+    expect(
+      runtimeModule.getEmbeddingProvider("tenant-embeddings", {
+        models: {
+          providers: {
+            "tenant-embeddings": {
+              api: "openai-completions",
+              baseUrl: "http://127.0.0.1:11434/v1",
+              models: [],
+            },
+          },
+        },
+      })?.id,
+    ).toBe("openai-compatible");
+  });
+
+  it("loads declared capability adapters through configured provider aliases", () => {
+    const adapter = createCapabilityAdapter("openai-compatible");
+    mocks.resolvePluginCapabilityProvider.mockImplementation(({ providerId }) =>
+      providerId === "openai-compatible" ? adapter : undefined,
+    );
+
+    expect(
+      runtimeModule.getEmbeddingProvider("tenant-embeddings", {
+        models: {
+          providers: {
+            "tenant-embeddings": {
+              api: "openai-completions",
+              baseUrl: "http://127.0.0.1:11434/v1",
+              models: [],
+            },
+          },
+        },
+      })?.id,
+    ).toBe("openai-compatible");
+    expect(mocks.resolvePluginCapabilityProvider).toHaveBeenCalledWith({
+      key: "embeddingProviders",
+      providerId: "tenant-embeddings",
+      cfg: expect.any(Object),
+    });
+    expect(mocks.resolvePluginCapabilityProvider).toHaveBeenCalledWith({
+      key: "embeddingProviders",
+      providerId: "openai-compatible",
+      cfg: expect.any(Object),
+    });
+  });
+
+  it("maps baseUrl-only configured provider aliases to OpenAI-compatible embeddings", () => {
+    const adapter = createCapabilityAdapter("openai-compatible");
+    mocks.resolvePluginCapabilityProvider.mockImplementation(({ providerId }) =>
+      providerId === "openai-compatible" ? adapter : undefined,
+    );
+
+    expect(
+      runtimeModule.getEmbeddingProvider("tenant-embeddings", {
+        models: {
+          providers: {
+            "tenant-embeddings": {
+              baseUrl: "http://127.0.0.1:11434/v1",
+              models: [],
+            },
+          },
+        },
+      })?.id,
+    ).toBe("openai-compatible");
+  });
+
   it("prefers registered adapters over declared capability fallback adapters with the same id", () => {
     const registered = {
       id: "openai",
