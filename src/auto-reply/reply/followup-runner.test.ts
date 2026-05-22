@@ -1287,7 +1287,12 @@ describe("createFollowupRunner progress forwarding", () => {
         });
         await args.onAgentEvent?.({
           stream: "command_output",
-          data: { phase: "chunk", output: "queued output" },
+          data: {
+            phase: "chunk",
+            output: "queued output",
+            outcomeClassification: "benign_no_result",
+            statusLabel: "No matches found",
+          },
         });
         await args.onToolResult?.({ text: "🛠️ Exec: echo queued-suppressed-preview" });
         return { payloads: [], meta: { agentMeta: {} } };
@@ -1311,7 +1316,12 @@ describe("createFollowupRunner progress forwarding", () => {
       detailMode: "raw",
     });
     expect(onCommandOutput).toHaveBeenCalledWith(
-      expect.objectContaining({ phase: "chunk", output: "queued output" }),
+      expect.objectContaining({
+        phase: "chunk",
+        output: "queued output",
+        outcomeClassification: "benign_no_result",
+        statusLabel: "No matches found",
+      }),
     );
     expect(routeReplyMock).toHaveBeenCalledTimes(1);
     expect(routeReplyMock).toHaveBeenCalledWith(
