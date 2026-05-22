@@ -147,7 +147,6 @@ describe("handleClickClackInbound", () => {
       agentId: "service-bot",
       replyMode: "model",
       model: "openai/gpt-5.4-mini",
-      senderIsOwner: false,
       toolsAllow: [],
       defaultTo: "channel:general",
       allowFrom: ["*"],

@@ -58,6 +58,11 @@ export type EmbeddedRunAttemptParams = EmbeddedRunAttemptBase & {
   authStorage: AuthStorage;
   /** Auth profile store already resolved during startup for this attempt. */
   authProfileStore: AuthProfileStore;
+  /**
+   * Full auth profile store for OpenClaw tool availability.
+   * Plugin-owned harnesses may scope `authProfileStore` to model transport credentials.
+   */
+  toolAuthProfileStore?: AuthProfileStore;
   modelRegistry: ModelRegistry;
   thinkLevel: ThinkLevel;
   legacyBeforeAgentStartResult?: PluginHookBeforeAgentStartResult;
@@ -103,6 +108,11 @@ export type EmbeddedRunAttemptResult = {
   diagnosticTrace?: DiagnosticTraceContext;
   agentHarnessId?: string;
   agentHarnessResultClassification?: "empty" | "reasoning-only" | "planning-only";
+  promptTimeoutOutcome?: {
+    message?: string;
+    replayInvalid?: boolean;
+    livenessState?: EmbeddedRunLivenessState;
+  };
   bootstrapPromptWarningSignaturesSeen?: string[];
   bootstrapPromptWarningSignature?: string;
   systemPromptReport?: SessionSystemPromptReport;
