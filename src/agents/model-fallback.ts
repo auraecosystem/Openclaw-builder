@@ -53,6 +53,7 @@ import {
 } from "./model-selection-resolve.js";
 import { isLikelyContextOverflowError } from "./pi-embedded-helpers/errors.js";
 import type { FailoverReason } from "./pi-embedded-helpers/types.js";
+import { isOpenClawAbortableWrapper } from "./pi-embedded-runner/run/abortable.js";
 import { resolveSessionSuspensionReason, suspendSession } from "./session-suspension.js";
 
 const log = createSubsystemLogger("model-fallback");
@@ -242,22 +243,28 @@ function isTerminalAbort(signal: AbortSignal | undefined): boolean {
  * not the caller signal — `abortable()` then wraps the rejection in an
  * outer AbortError whose `.cause` is the original TimeoutError. Closes #60388.
  *
- * IMPORTANT: only walks the `.cause` chain of an **AbortError wrapper**, never
- * the top-level error itself. A bare provider `TimeoutError` (e.g. from an HTTP
- * SDK that times out on its own) is NOT terminal — those must continue
- * cascading through the configured fallback chain via the normal
- * `coerceToFailoverError` path. Flagged by clawsweeper review on
- * openclaw/openclaw#62682: seeding candidates with `err` itself broke
- * pre-existing provider-timeout fallback semantics.
+ * IMPORTANT: positive identification via the `OPENCLAW_ABORTABLE_WRAPPER`
+ * symbol marker set by `pi-embedded-runner/run/abortable.ts`'s `makeAbortError`.
+ * Without this marker check, a provider/SDK that throws an
+ * `AbortError(cause: TimeoutError)` for its own per-request timeout would be
+ * misclassified as a terminal abort and stop the configured fallback chain.
+ * The marker proves the wrapper originated from `abortable()` (which only
+ * fires for signals aborted by OpenClaw's own terminal sources — run-budget
+ * timer, cron timer, HTTP client disconnect). Flagged by clawsweeper review
+ * on openclaw/openclaw#62682.
  */
 function isTerminalAbortFromError(err: unknown): boolean {
   if (!(err instanceof Error)) {
     return false;
   }
-  // Only abort wrappers carry terminal context in their cause chain. Direct
-  // provider errors (e.g. a `TimeoutError` thrown by an HTTP SDK that timed out
-  // on its own) flow through the normal retryable-failover path.
+  // Only abort wrappers from `pi-embedded-runner/run/abortable.ts` carry
+  // terminal context in their cause chain. Provider/SDK-wrapped abort errors
+  // (even with TimeoutError as cause) flow through the normal
+  // retryable-failover path.
   if (err.name !== "AbortError") {
+    return false;
+  }
+  if (!isOpenClawAbortableWrapper(err)) {
     return false;
   }
   const candidates: unknown[] = [];

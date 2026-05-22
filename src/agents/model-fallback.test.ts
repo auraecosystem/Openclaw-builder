@@ -22,6 +22,7 @@ import {
   runWithModelFallback,
 } from "./model-fallback.js";
 import { classifyEmbeddedPiRunResultForModelFallback } from "./pi-embedded-runner/result-fallback-classifier.js";
+import { OPENCLAW_ABORTABLE_WRAPPER } from "./pi-embedded-runner/run/abortable.js";
 import type { EmbeddedPiRunResult } from "./pi-embedded-runner/types.js";
 import { SessionWriteLockTimeoutError } from "./session-write-lock-error.js";
 import { makeModelFallbackCfg } from "./test-helpers/model-fallback-config-fixture.js";
@@ -2365,6 +2366,20 @@ describe("runWithModelFallback", () => {
       return err;
     }
 
+    // Construct the exact error shape that `pi-embedded-runner/run/abortable.ts`
+    // `makeAbortError(signal)` produces: an outer Error named "AbortError" whose
+    // `.cause` is the signal's reason AND which carries the
+    // `OPENCLAW_ABORTABLE_WRAPPER` symbol marker. The marker is what proves the
+    // wrapper originated from OpenClaw's terminal-signal abort path (vs. a
+    // provider/SDK that happens to throw `AbortError(cause: TimeoutError)` for
+    // its own per-request timeout, which must stay retryable).
+    function makeAbortableWrapper(reason: Error): Error {
+      const err = new Error(reason.message, { cause: reason });
+      err.name = "AbortError";
+      (err as Error & { [OPENCLAW_ABORTABLE_WRAPPER]?: true })[OPENCLAW_ABORTABLE_WRAPPER] = true;
+      return err;
+    }
+
     function makeTaggedAbortController(reason: Error): AbortController {
       const controller = new AbortController();
       controller.abort(reason);
@@ -2426,8 +2441,7 @@ describe("runWithModelFallback", () => {
 
       const innerTimeout = new Error("request timed out");
       innerTimeout.name = "TimeoutError";
-      const outerWrap = new Error("aborted", { cause: innerTimeout });
-      outerWrap.name = "AbortError";
+      const outerWrap = makeAbortableWrapper(innerTimeout);
       const controller = makeTaggedAbortController(outerWrap);
 
       await expect(
@@ -2453,8 +2467,7 @@ describe("runWithModelFallback", () => {
       const cfg = makeCfg();
       const innerTimeout = new Error("request timed out");
       innerTimeout.name = "TimeoutError";
-      const outerAbort = new Error("aborted", { cause: innerTimeout });
-      outerAbort.name = "AbortError";
+      const outerAbort = makeAbortableWrapper(innerTimeout);
       const run = vi.fn().mockRejectedValue(outerAbort);
 
       // Note: NO abortSignal passed — caller signal is irrelevant for this
@@ -2479,8 +2492,7 @@ describe("runWithModelFallback", () => {
       const cfg = makeCfg();
       const innerDisconnect = new Error("client disconnected");
       innerDisconnect.name = "ClientDisconnectError";
-      const outerAbort = new Error("aborted", { cause: innerDisconnect });
-      outerAbort.name = "AbortError";
+      const outerAbort = makeAbortableWrapper(innerDisconnect);
       const run = vi.fn().mockRejectedValue(outerAbort);
 
       await expect(
@@ -2493,6 +2505,38 @@ describe("runWithModelFallback", () => {
       ).rejects.toBe(outerAbort);
 
       expect(run).toHaveBeenCalledTimes(1);
+    });
+
+    it("falls back normally when a provider wraps its own timeout as AbortError(cause: TimeoutError) WITHOUT the abortable() marker", async () => {
+      // Regression: clawsweeper flagged that a provider/SDK that throws an
+      // `AbortError` whose `.cause` is a `TimeoutError` (i.e., shape matches
+      // what `pi-embedded-runner/run/abortable.ts` produces, but is actually a
+      // per-request provider timeout) would be misclassified as terminal and
+      // would stop the configured fallback chain instead of cascading to the
+      // next candidate. The fix tags every error produced by `abortable()`
+      // with the `OPENCLAW_ABORTABLE_WRAPPER` symbol so `isTerminalAbortFromError`
+      // can require positive identification before short-circuiting.
+      const cfg = makeCfg();
+      const providerInnerTimeout = new Error("provider request timed out after 60s");
+      providerInnerTimeout.name = "TimeoutError";
+      // Construct the exact shape `abortable()` produces — name=AbortError +
+      // cause=TimeoutError — but DELIBERATELY OMIT the marker. This is the
+      // hypothetical provider/SDK pattern the bot warned about.
+      const unmarkedAbortError = new Error("aborted", { cause: providerInnerTimeout });
+      unmarkedAbortError.name = "AbortError";
+      const run = vi.fn().mockRejectedValueOnce(unmarkedAbortError).mockResolvedValueOnce("ok");
+
+      const result = await runWithModelFallback({
+        cfg,
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        run,
+      });
+
+      // Cascaded successfully — without the marker, the AbortError(cause: TimeoutError)
+      // is treated as a retryable per-provider timeout (NOT a terminal run abort).
+      expect(result.result).toBe("ok");
+      expect(run).toHaveBeenCalledTimes(2);
     });
 
     it("falls back normally when a top-level provider TimeoutError is thrown (not an AbortError wrapper)", async () => {
