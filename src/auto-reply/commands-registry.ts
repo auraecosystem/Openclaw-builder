@@ -279,6 +279,7 @@ export function resolveCommandArgChoices(params: {
   cfg?: OpenClawConfig;
   provider?: string;
   model?: string;
+  fastSeconds?: number;
   catalog?: ThinkingCatalogEntry[];
 }): ResolvedCommandArgChoice[] {
   const { command, arg, cfg } = params;
@@ -294,6 +295,7 @@ export function resolveCommandArgChoices(params: {
           cfg,
           provider: params.provider ?? defaults.provider,
           model: params.model ?? defaults.model,
+          fastSeconds: params.fastSeconds,
           catalog: params.catalog ?? (cfg ? buildConfiguredModelCatalog({ cfg }) : undefined),
           command,
           arg,
@@ -311,9 +313,10 @@ export function resolveCommandArgMenu(params: {
   cfg?: OpenClawConfig;
   provider?: string;
   model?: string;
+  fastSeconds?: number;
   catalog?: ThinkingCatalogEntry[];
 }): { arg: CommandArgDefinition; choices: ResolvedCommandArgChoice[]; title?: string } | null {
-  const { command, args, cfg, provider, model, catalog } = params;
+  const { command, args, cfg, provider, model, fastSeconds, catalog } = params;
   if (!command.args || !command.argsMenu) {
     return null;
   }
@@ -332,6 +335,7 @@ export function resolveCommandArgMenu(params: {
               cfg,
               provider,
               model,
+              fastSeconds,
               catalog: resolvedCatalog,
             }).length > 0,
         )?.name
@@ -355,6 +359,7 @@ export function resolveCommandArgMenu(params: {
     cfg,
     provider,
     model,
+    fastSeconds,
     catalog: resolvedCatalog,
   });
   if (choices.length === 0) {

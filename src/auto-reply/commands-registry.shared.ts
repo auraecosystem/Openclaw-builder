@@ -795,11 +795,12 @@ export function buildBuiltinChatCommands(
             {
               value: "auto",
               label: formatFastModeAutoLabel(
-                resolveFastModeAutoSeconds({
-                  cfg: context.cfg,
-                  provider: context.provider ?? "",
-                  model: context.model ?? "",
-                }),
+                context.fastSeconds ??
+                  resolveFastModeAutoSeconds({
+                    cfg: context.cfg,
+                    provider: context.provider ?? "",
+                    model: context.model ?? "",
+                  }),
               ),
             },
             "on",

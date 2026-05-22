@@ -98,6 +98,28 @@ describe("resolveFastModeState", () => {
     expect(state.source).toBe("config");
   });
 
+  it("does not use another provider's bare model config", () => {
+    const cfg = {
+      agents: {
+        defaults: {
+          models: {
+            "openai/gpt-5.5": { params: { fastMode: "auto", fast_seconds: 15 } },
+          },
+        },
+      },
+    } as OpenClawConfig;
+
+    const state = resolveFastModeState({
+      cfg,
+      provider: "openai-codex",
+      model: "gpt-5.5",
+      sessionEntry: { fastMode: "auto" },
+    });
+
+    expect(state.mode).toBe("auto");
+    expect(state.fastSeconds).toBe(60);
+  });
+
   it("formats auto mode with the active threshold", () => {
     const cfg = {
       agents: {

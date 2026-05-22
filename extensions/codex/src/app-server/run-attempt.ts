@@ -656,13 +656,6 @@ function resolveCodexAppServerForFastMode(params: {
       serviceTier: "priority",
     };
   }
-  if (typeof params.fastMode === "function" && resolved === false) {
-    return {
-      ...params.appServer,
-      serviceTier:
-        params.appServer.serviceTier === "priority" ? undefined : params.appServer.serviceTier,
-    };
-  }
   return params.appServer;
 }
 
