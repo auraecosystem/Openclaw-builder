@@ -41,6 +41,7 @@ import {
 } from "./model-auth-markers.js";
 import { type ResolvedProviderAuth } from "./model-auth-runtime-shared.js";
 import { normalizeProviderId } from "./model-selection.js";
+import type { ResolvedModelRuntimeAuth } from "./resolved-model-runtime.types.js";
 
 export {
   ensureAuthProfileStore,
@@ -390,6 +391,7 @@ function resolveProviderSyntheticRuntimeAuth(params: {
   cfg: OpenClawConfig | undefined;
   provider: string;
   modelApi?: string;
+  modelRuntimeAuth?: ResolvedModelRuntimeAuth;
 }): SyntheticProviderAuthResolution {
   const resolveFromConfig = (
     config: OpenClawConfig | undefined,
@@ -403,8 +405,11 @@ function resolveProviderSyntheticRuntimeAuth(params: {
           config,
           provider: params.provider,
           providerConfig,
+          modelApi: params.modelRuntimeAuth?.modelApi ?? params.modelApi,
+          modelBaseUrl: params.modelRuntimeAuth?.modelBaseUrl,
         },
         modelApi: params.modelApi,
+        providerRefs: params.modelRuntimeAuth?.providerRefs,
       }) ?? undefined
     );
   };
@@ -436,6 +441,7 @@ function resolveSyntheticLocalProviderAuth(params: {
   cfg: OpenClawConfig | undefined;
   provider: string;
   modelApi?: string;
+  modelRuntimeAuth?: ResolvedModelRuntimeAuth;
 }): ResolvedProviderAuth | null {
   const syntheticProviderAuth = resolveProviderSyntheticRuntimeAuth(params);
   if (syntheticProviderAuth.auth) {
@@ -514,6 +520,7 @@ function shouldDeferSyntheticProfileAuth(params: {
   provider: string;
   resolvedApiKey: string | undefined;
   modelApi?: string;
+  modelRuntimeAuth?: ResolvedModelRuntimeAuth;
 }): boolean {
   const providerConfig = resolveProviderConfig(params.cfg, params.provider);
   return (
@@ -521,11 +528,14 @@ function shouldDeferSyntheticProfileAuth(params: {
       provider: params.provider,
       config: params.cfg,
       modelApi: params.modelApi,
+      providerRefs: params.modelRuntimeAuth?.providerRefs,
       context: {
         config: params.cfg,
         provider: params.provider,
         providerConfig,
         resolvedApiKey: params.resolvedApiKey,
+        modelApi: params.modelRuntimeAuth?.modelApi ?? params.modelApi,
+        modelBaseUrl: params.modelRuntimeAuth?.modelBaseUrl,
       },
     }) === true
   );
@@ -557,6 +567,7 @@ export async function resolveApiKeyForProvider(params: {
   forceRefresh?: boolean;
   credentialPrecedence?: ProviderCredentialPrecedence;
   modelApi?: string;
+  modelRuntimeAuth?: ResolvedModelRuntimeAuth;
 }): Promise<ResolvedProviderAuth> {
   const { provider, cfg, profileId, preferredProfile } = params;
   const agentDir = params.agentDir?.trim() || (cfg ? resolveDefaultAgentDir(cfg) : undefined);
@@ -606,6 +617,7 @@ export async function resolveApiKeyForProvider(params: {
         provider,
         resolvedApiKey: resolved.apiKey,
         modelApi: params.modelApi,
+        modelRuntimeAuth: params.modelRuntimeAuth,
       })
     ) {
       return resolveApiKeyForProvider({ ...params, profileId: undefined, lockedProfile: true }) //
@@ -739,6 +751,7 @@ export async function resolveApiKeyForProvider(params: {
             provider,
             resolvedApiKey: resolved.apiKey,
             modelApi: params.modelApi,
+            modelRuntimeAuth: params.modelRuntimeAuth,
           })
         ) {
           deferredAuthProfileResult ??= result;
@@ -774,7 +787,12 @@ export async function resolveApiKeyForProvider(params: {
     return deferredAuthProfileResult;
   }
 
-  const syntheticLocalAuth = resolveSyntheticLocalProviderAuth({ cfg, provider, modelApi: params.modelApi });
+  const syntheticLocalAuth = resolveSyntheticLocalProviderAuth({
+    cfg,
+    provider,
+    modelApi: params.modelApi,
+    modelRuntimeAuth: params.modelRuntimeAuth,
+  });
   if (syntheticLocalAuth) {
     return syntheticLocalAuth;
   }
@@ -961,6 +979,7 @@ export async function getApiKeyForModel(params: {
   workspaceDir?: string;
   lockedProfile?: boolean;
   credentialPrecedence?: ProviderCredentialPrecedence;
+  modelRuntimeAuth?: ResolvedModelRuntimeAuth;
 }): Promise<ResolvedProviderAuth> {
   return resolveApiKeyForProvider({
     provider: params.model.provider,
@@ -973,6 +992,7 @@ export async function getApiKeyForModel(params: {
     lockedProfile: params.lockedProfile,
     credentialPrecedence: params.credentialPrecedence,
     modelApi: params.model.api,
+    modelRuntimeAuth: params.modelRuntimeAuth,
   });
 }
 
