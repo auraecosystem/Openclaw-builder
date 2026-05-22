@@ -27,6 +27,7 @@ function successAttempt(provider: string, model: string): EmbeddedRunAttemptResu
 
 type FastModeAttemptParams = {
   fastMode?: unknown;
+  onRunProgress?: (payload: { reason: string }) => unknown;
   onToolResult?: (payload: { text?: string; channelData?: Record<string, unknown> }) => unknown;
 };
 
@@ -95,6 +96,11 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
     });
     await vi.advanceTimersByTimeAsync(1100);
 
+    expect(events).toHaveLength(0);
+    expect(toolResults).toHaveLength(0);
+
+    attemptParams?.onRunProgress?.({ reason: "model-progress" });
+    await vi.advanceTimersByTimeAsync(2);
     expect(events).toHaveLength(0);
     expect(toolResults).toHaveLength(0);
 

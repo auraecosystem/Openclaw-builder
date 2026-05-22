@@ -505,7 +505,6 @@ export async function runEmbeddedPiAgent(
       ) => {
         noteLaneTaskProgress();
         params.onRunProgress?.(info);
-        markFastModeAutoProgressObserved();
       };
       const emitFastModeAutoProgress = async (payload: {
         enabled: boolean;
