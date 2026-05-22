@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { mergeRetryFailoverReason, resolveRunFailoverDecision } from "./failover-policy.js";
+import {
+  isTransientFailoverReason,
+  mergeRetryFailoverReason,
+  resolveRunFailoverDecision,
+} from "./failover-policy.js";
 
 describe("resolveRunFailoverDecision", () => {
   it("escalates retry-limit exhaustion for replay-safe failover reasons", () => {
@@ -464,5 +468,36 @@ describe("mergeRetryFailoverReason", () => {
         timedOut: true,
       }),
     ).toBe("timeout");
+  });
+});
+
+describe("isTransientFailoverReason", () => {
+  it("returns true for overloaded", () => {
+    expect(isTransientFailoverReason("overloaded")).toBe(true);
+  });
+
+  it("returns true for rate_limit", () => {
+    expect(isTransientFailoverReason("rate_limit")).toBe(true);
+  });
+
+  it("returns true for server_error", () => {
+    expect(isTransientFailoverReason("server_error")).toBe(true);
+  });
+
+  it("returns false for auth reasons", () => {
+    expect(isTransientFailoverReason("auth")).toBe(false);
+    expect(isTransientFailoverReason("auth_permanent")).toBe(false);
+  });
+
+  it("returns false for billing", () => {
+    expect(isTransientFailoverReason("billing")).toBe(false);
+  });
+
+  it("returns false for timeout", () => {
+    expect(isTransientFailoverReason("timeout")).toBe(false);
+  });
+
+  it("returns false for null", () => {
+    expect(isTransientFailoverReason(null)).toBe(false);
   });
 });

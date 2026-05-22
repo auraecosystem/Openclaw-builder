@@ -118,6 +118,96 @@ describe("handleAssistantFailover", () => {
       expect(outcome.action).toBe("retry");
       expect(warn).not.toHaveBeenCalled();
     });
+
+    it("retries without profile rotation for overloaded when no fallback is configured (#84236)", async () => {
+      const backoff = vi.fn(async () => {});
+      const warn = vi.fn();
+      const outcome = await handleAssistantFailover(
+        makeParams({
+          initialDecision: { action: "rotate_profile", reason: "overloaded" },
+          fallbackConfigured: false,
+          failoverReason: "overloaded",
+          billingFailure: false,
+          advanceAuthProfile: vi.fn(async () => false),
+          maybeBackoffBeforeOverloadFailover: backoff,
+          warn,
+        }),
+      );
+
+      expect(outcome.action).toBe("retry");
+      if (outcome.action !== "retry") {
+        return;
+      }
+      expect(outcome.retryKind).toBe("same_profile_transient");
+      expect(backoff).toHaveBeenCalledWith("overloaded");
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("assistant-side transient overloaded"),
+      );
+    });
+
+    it("retries without profile rotation for rate_limit when no fallback is configured (#84236)", async () => {
+      const outcome = await handleAssistantFailover(
+        makeParams({
+          initialDecision: { action: "rotate_profile", reason: "rate_limit" },
+          fallbackConfigured: false,
+          failoverReason: "rate_limit",
+          billingFailure: false,
+          rateLimitFailure: true,
+          advanceAuthProfile: vi.fn(async () => false),
+        }),
+      );
+
+      expect(outcome.action).toBe("retry");
+    });
+
+    it("retries without profile rotation for server_error when no fallback is configured (#84236)", async () => {
+      const outcome = await handleAssistantFailover(
+        makeParams({
+          initialDecision: { action: "rotate_profile", reason: "server_error" },
+          fallbackConfigured: false,
+          failoverReason: "server_error",
+          billingFailure: false,
+          advanceAuthProfile: vi.fn(async () => false),
+        }),
+      );
+
+      expect(outcome.action).toBe("retry");
+    });
+
+    it("does not retry without rotation for non-transient reasons (auth)", async () => {
+      const outcome = await handleAssistantFailover(
+        makeParams({
+          initialDecision: { action: "rotate_profile", reason: "auth" },
+          fallbackConfigured: false,
+          failoverReason: "auth",
+          billingFailure: false,
+          authFailure: true,
+          advanceAuthProfile: vi.fn(async () => false),
+        }),
+      );
+
+      expect(outcome.action).toBe("throw");
+    });
+
+    it("does not retry without rotation when fallback is configured", async () => {
+      const outcome = await handleAssistantFailover(
+        makeParams({
+          initialDecision: { action: "rotate_profile", reason: "overloaded" },
+          fallbackConfigured: true,
+          failoverReason: "overloaded",
+          billingFailure: false,
+          advanceAuthProfile: vi.fn(async () => false),
+        }),
+      );
+
+      // Should escalate to fallback_model via re-resolve, not retry same profile
+      expect(outcome.action).toBe("throw");
+      if (outcome.action !== "throw") {
+        return;
+      }
+      expect(outcome.error).toBeInstanceOf(FailoverError);
+      expect(outcome.error.reason).toBe("overloaded");
+    });
   });
 
   describe("surface_error branch (openclaw#70124)", () => {

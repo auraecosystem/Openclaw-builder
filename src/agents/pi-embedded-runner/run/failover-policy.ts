@@ -110,6 +110,10 @@ function shouldRotateAssistant(params: AssistantDecisionParams): boolean {
   return (!params.aborted && params.failoverFailure) || isAssistantTimeoutFailure(params);
 }
 
+export function isTransientFailoverReason(reason: FailoverReason | null): boolean {
+  return reason === "overloaded" || reason === "rate_limit" || reason === "server_error";
+}
+
 export function mergeRetryFailoverReason(params: {
   previous: FailoverReason | null;
   failoverReason: FailoverReason | null;

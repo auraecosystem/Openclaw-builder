@@ -10,6 +10,7 @@ import {
   type FailoverReason,
 } from "../../pi-embedded-helpers.js";
 import {
+  isTransientFailoverReason,
   mergeRetryFailoverReason,
   resolveRunFailoverDecision,
   type AssistantFailoverDecision,
@@ -24,7 +25,7 @@ type AssistantFailoverOutcome =
       action: "retry";
       overloadProfileRotations: number;
       lastRetryFailoverReason: FailoverReason | null;
-      retryKind?: "same_model_idle_timeout";
+      retryKind?: "same_model_idle_timeout" | "same_profile_transient";
     }
   | {
       action: "throw";
@@ -181,6 +182,25 @@ export async function handleAssistantFailover(params: {
     await markFailedProfilePromise;
     if (params.idleTimedOut && params.allowSameModelIdleTimeoutRetry) {
       return sameModelIdleTimeoutRetry();
+    }
+
+    // When profile rotation fails for a transient reason without fallback,
+    // retry the same provider with backoff instead of giving up.
+    if (!params.fallbackConfigured && isTransientFailoverReason(params.failoverReason)) {
+      params.warn(
+        `assistant-side transient ${params.failoverReason} with no fallback; retrying same profile for ${sanitizeForLog(params.provider)}/${sanitizeForLog(params.modelId)}`,
+      );
+      await params.maybeBackoffBeforeOverloadFailover(params.failoverReason);
+      return {
+        action: "retry",
+        overloadProfileRotations,
+        retryKind: "same_profile_transient",
+        lastRetryFailoverReason: mergeRetryFailoverReason({
+          previous: params.previousRetryFailoverReason,
+          failoverReason: params.failoverReason,
+          timedOut: params.timedOut || params.idleTimedOut,
+        }),
+      };
     }
 
     decision = resolveRunFailoverDecision({

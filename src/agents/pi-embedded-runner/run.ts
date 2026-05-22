@@ -133,7 +133,11 @@ import { resolveAuthProfileFailureReason } from "./run/auth-profile-failure-poli
 import { runEmbeddedAttemptWithBackend } from "./run/backend.js";
 import { resolveCodexAppServerClientCloseRetry } from "./run/codex-app-server-recovery.js";
 import { createFailoverDecisionLogger } from "./run/failover-observation.js";
-import { mergeRetryFailoverReason, resolveRunFailoverDecision } from "./run/failover-policy.js";
+import {
+  isTransientFailoverReason,
+  mergeRetryFailoverReason,
+  resolveRunFailoverDecision,
+} from "./run/failover-policy.js";
 import { hasEmbeddedRunConfiguredModelFallbacks } from "./run/fallbacks.js";
 import {
   buildErrorAgentMeta,
@@ -2384,6 +2388,42 @@ export async function runEmbeddedPiAgent(
                 failoverReason: promptFailoverReason,
                 profileRotated: true,
               });
+              // When profile rotation fails for a transient reason without
+              // fallback, retry the same provider with backoff instead of
+              // giving up.
+              if (
+                promptFailoverDecision.action === "surface_error" &&
+                !fallbackConfigured &&
+                isTransientFailoverReason(promptFailoverReason)
+              ) {
+                if (failedPromptProfileId && promptProfileFailureReason) {
+                  try {
+                    await maybeMarkAuthProfileFailure({
+                      profileId: failedPromptProfileId,
+                      reason: promptProfileFailureReason,
+                      modelId,
+                    });
+                  } catch (err) {
+                    log.warn(`prompt profile failure mark failed: ${String(err)}`);
+                  }
+                }
+                traceAttempts.push({
+                  provider,
+                  model: modelId,
+                  result: "same_profile_retry",
+                  ...(promptFailoverReason ? { reason: promptFailoverReason } : {}),
+                  stage: "prompt",
+                });
+                lastRetryFailoverReason = mergeRetryFailoverReason({
+                  previous: lastRetryFailoverReason,
+                  failoverReason: promptFailoverReason,
+                });
+                log.warn(
+                  `prompt-side transient ${promptFailoverReason ?? "unknown"} with no fallback; retrying same profile for ${provider}/${modelId}`,
+                );
+                await maybeBackoffBeforeOverloadFailover(promptFailoverReason);
+                continue;
+              }
             }
             if (failedPromptProfileId && promptProfileFailureReason) {
               try {
@@ -2589,7 +2629,9 @@ export async function runEmbeddedPiAgent(
                 assistantFailoverOutcome.retryKind === "same_model_idle_timeout" ||
                 assistantFailoverReason === "timeout"
                   ? "timeout"
-                  : "rotate_profile",
+                  : assistantFailoverOutcome.retryKind === "same_profile_transient"
+                    ? "same_profile_retry"
+                    : "rotate_profile",
               ...(assistantFailoverReason ? { reason: assistantFailoverReason } : {}),
               stage: "assistant",
             });
