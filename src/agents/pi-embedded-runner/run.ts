@@ -485,7 +485,6 @@ export async function runEmbeddedPiAgent(
       const started = Date.now();
       let fastModeAutoOffAnnounced = false;
       let fastModeAutoResetAnnounced = false;
-      let fastModeAutoOffTimer: ReturnType<typeof setTimeout> | undefined;
       const startupStages = createEmbeddedRunStageTracker();
       let startupStagesEmitted = false;
       const notifyExecutionPhase = (
@@ -536,34 +535,6 @@ export async function runEmbeddedPiAgent(
         fastModeAutoOffAnnounced = true;
         void emitFastModeAutoProgress(payload);
       };
-      const clearFastModeAutoOffTimer = () => {
-        if (fastModeAutoOffTimer !== undefined) {
-          clearTimeout(fastModeAutoOffTimer);
-          fastModeAutoOffTimer = undefined;
-        }
-      };
-      const scheduleFastModeAutoOffTimer = () => {
-        if (params.fastMode !== "auto") {
-          return;
-        }
-        const resolved = resolveFastModeForElapsed({
-          mode: "auto",
-          fastSeconds: params.fastModeAutoSeconds,
-          startedAtMs: started,
-        });
-        const elapsedMs = Math.max(0, Date.now() - started);
-        const delayMs = Math.max(1, resolved.fastSeconds * 1000 - elapsedMs + 1);
-        clearFastModeAutoOffTimer();
-        fastModeAutoOffTimer = setTimeout(() => {
-          const next = resolveFastModeForElapsed({
-            mode: "auto",
-            fastSeconds: params.fastModeAutoSeconds,
-            startedAtMs: started,
-          });
-          announceFastModeAutoOff(next);
-        }, delayMs);
-        fastModeAutoOffTimer.unref?.();
-      };
       const resolveAttemptFastMode = (): boolean | undefined => {
         const resolved = resolveFastModeForElapsed({
           mode: params.fastMode,
@@ -598,7 +569,6 @@ export async function runEmbeddedPiAgent(
           fastSeconds: resetState.fastSeconds,
         });
       };
-      scheduleFastModeAutoOffTimer();
       const emitStartupStageSummary = (phase: string) => {
         const summary = startupStages.snapshot();
         const shouldWarn = shouldWarnEmbeddedRunStageSummary(summary);
@@ -3454,7 +3424,6 @@ export async function runEmbeddedPiAgent(
           };
         }
       } finally {
-        clearFastModeAutoOffTimer();
         await maybeEmitFastModeAutoReset();
         forgetPromptBuildDrainCacheForRun(params.runId);
         stopRuntimeAuthRefreshTimer();

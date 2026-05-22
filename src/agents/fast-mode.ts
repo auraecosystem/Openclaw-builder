@@ -85,7 +85,7 @@ export function resolveFastModeForElapsed(params: {
   const fastSeconds = normalizeFastSeconds(params.fastSeconds) ?? DEFAULT_FAST_MODE_AUTO_SECONDS;
   const thresholdMs = fastSeconds * 1000;
   const enabled = params.mode === "auto" ? elapsedMs <= thresholdMs : params.mode === true;
-  const elapsedSeconds = enabled ? Math.floor(elapsedMs / 1000) : Math.ceil(elapsedMs / 1000);
+  const elapsedSeconds = Math.floor(elapsedMs / 1000);
   return {
     mode: params.mode,
     enabled,

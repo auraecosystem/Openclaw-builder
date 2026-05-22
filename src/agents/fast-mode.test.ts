@@ -228,6 +228,22 @@ describe("resolveFastModeForElapsed", () => {
     });
   });
 
+  it("does not round elapsed auto-off seconds upward", () => {
+    expect(
+      resolveFastModeForElapsed({
+        mode: "auto",
+        fastSeconds: 15,
+        startedAtMs: 1_000,
+        nowMs: 16_001,
+      }),
+    ).toMatchObject({
+      mode: "auto",
+      enabled: false,
+      elapsedSeconds: 15,
+      fastSeconds: 15,
+    });
+  });
+
   it("formats auto transition progress", () => {
     expect(
       formatFastModeAutoProgressText({
