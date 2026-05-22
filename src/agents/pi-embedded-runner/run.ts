@@ -484,7 +484,10 @@ export async function runEmbeddedPiAgent(
       throwIfAborted();
       const started = Date.now();
       let fastModeAutoOffAnnounced = false;
+      let fastModeAutoOffPending = false;
       let fastModeAutoResetAnnounced = false;
+      let fastModeAutoProgressObserved = false;
+      let fastModeAutoOffTimer: ReturnType<typeof setTimeout> | undefined;
       const startupStages = createEmbeddedRunStageTracker();
       let startupStagesEmitted = false;
       const notifyExecutionPhase = (
@@ -502,6 +505,7 @@ export async function runEmbeddedPiAgent(
       ) => {
         noteLaneTaskProgress();
         params.onRunProgress?.(info);
+        markFastModeAutoProgressObserved();
       };
       const emitFastModeAutoProgress = async (payload: {
         enabled: boolean;
@@ -524,16 +528,75 @@ export async function runEmbeddedPiAgent(
           channelData: { openclawProgressKind: "fast-mode-auto" },
         });
       };
-      const announceFastModeAutoOff = (payload: {
+      function announceFastModeAutoOff(payload: {
         enabled: boolean;
         elapsedSeconds: number;
         fastSeconds: number;
-      }) => {
+      }) {
         if (payload.enabled || fastModeAutoOffAnnounced) {
           return;
         }
+        if (!fastModeAutoProgressObserved) {
+          fastModeAutoOffPending = true;
+          return;
+        }
         fastModeAutoOffAnnounced = true;
+        fastModeAutoOffPending = false;
+        clearFastModeAutoOffTimer();
         void emitFastModeAutoProgress(payload);
+      }
+      function resolveAndAnnounceFastModeAutoOff() {
+        if (params.fastMode !== "auto" || fastModeAutoOffAnnounced) {
+          return;
+        }
+        const next = resolveFastModeForElapsed({
+          mode: "auto",
+          fastSeconds: params.fastModeAutoSeconds,
+          startedAtMs: started,
+        });
+        announceFastModeAutoOff(next);
+      }
+      function clearFastModeAutoOffTimer() {
+        if (fastModeAutoOffTimer !== undefined) {
+          clearTimeout(fastModeAutoOffTimer);
+          fastModeAutoOffTimer = undefined;
+        }
+      }
+      function scheduleFastModeAutoOffTimer() {
+        if (
+          params.fastMode !== "auto" ||
+          fastModeAutoOffAnnounced ||
+          !fastModeAutoProgressObserved
+        ) {
+          return;
+        }
+        const resolved = resolveFastModeForElapsed({
+          mode: "auto",
+          fastSeconds: params.fastModeAutoSeconds,
+          startedAtMs: started,
+        });
+        const elapsedMs = Math.max(0, Date.now() - started);
+        const delayMs = Math.max(1, resolved.fastSeconds * 1000 - elapsedMs + 1);
+        clearFastModeAutoOffTimer();
+        fastModeAutoOffTimer = setTimeout(resolveAndAnnounceFastModeAutoOff, delayMs);
+        fastModeAutoOffTimer.unref?.();
+      }
+      function markFastModeAutoProgressObserved() {
+        if (fastModeAutoProgressObserved) {
+          return;
+        }
+        fastModeAutoProgressObserved = true;
+        if (fastModeAutoOffPending) {
+          resolveAndAnnounceFastModeAutoOff();
+          return;
+        }
+        scheduleFastModeAutoOffTimer();
+      }
+      const notifyToolResult = async (payload: ReplyPayload) => {
+        await params.onToolResult?.(payload);
+        if (payload.channelData?.openclawProgressKind !== "fast-mode-auto") {
+          markFastModeAutoProgressObserved();
+        }
       };
       const resolveAttemptFastMode = (): boolean | undefined => {
         const resolved = resolveFastModeForElapsed({
@@ -1574,7 +1637,7 @@ export async function runEmbeddedPiAgent(
             blockReplyChunking: params.blockReplyChunking,
             onReasoningStream: params.onReasoningStream,
             onReasoningEnd: params.onReasoningEnd,
-            onToolResult: params.onToolResult,
+            onToolResult: notifyToolResult,
             onAgentEvent: params.onAgentEvent,
             onExecutionPhase: params.onExecutionPhase,
             extraSystemPrompt: params.extraSystemPrompt,
@@ -3424,6 +3487,7 @@ export async function runEmbeddedPiAgent(
           };
         }
       } finally {
+        clearFastModeAutoOffTimer();
         await maybeEmitFastModeAutoReset();
         forgetPromptBuildDrainCacheForRun(params.runId);
         stopRuntimeAuthRefreshTimer();

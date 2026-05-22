@@ -12,19 +12,6 @@ import type { EmbeddedRunAttemptResult } from "./run/types.js";
 
 let runEmbeddedPiAgent: typeof import("./run.js").runEmbeddedPiAgent;
 
-function emptyErrorAttempt(provider: string, model: string): EmbeddedRunAttemptResult {
-  return makeAttemptResult({
-    assistantTexts: [],
-    lastAssistant: {
-      stopReason: "error",
-      provider,
-      model,
-      content: [],
-      usage: { input: 100, output: 0, totalTokens: 100 },
-    } as unknown as EmbeddedRunAttemptResult["lastAssistant"],
-  });
-}
-
 function successAttempt(provider: string, model: string): EmbeddedRunAttemptResult {
   return makeAttemptResult({
     assistantTexts: ["done"],
@@ -37,6 +24,11 @@ function successAttempt(provider: string, model: string): EmbeddedRunAttemptResu
     } as unknown as EmbeddedRunAttemptResult["lastAssistant"],
   });
 }
+
+type FastModeAttemptParams = {
+  fastMode?: unknown;
+  onToolResult?: (payload: { text?: string; channelData?: Record<string, unknown> }) => unknown;
+};
 
 function resolveAttemptFastMode(params: unknown): void {
   const fastMode = (params as { fastMode?: unknown }).fastMode;
@@ -60,7 +52,7 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
     vi.useRealTimers();
   });
 
-  it("emits auto-off only when a later attempt starts without fast mode", async () => {
+  it("does not emit auto-off before real progress is visible", async () => {
     vi.useFakeTimers();
 
     const events: Array<{
@@ -70,25 +62,17 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
       text?: string;
       channelData?: Record<string, unknown>;
     }> = [];
+    let attemptParams: FastModeAttemptParams | undefined;
     let completeAttempt: (() => void) | undefined;
-    let completeRetry: (() => void) | undefined;
     const attemptDone = new Promise<EmbeddedRunAttemptResult>((resolve) => {
       completeAttempt = () => {
-        resolve(emptyErrorAttempt("ollama", "glm-5.1:cloud"));
-      };
-    });
-    const retryDone = new Promise<EmbeddedRunAttemptResult>((resolve) => {
-      completeRetry = () => {
         resolve(successAttempt("ollama", "glm-5.1:cloud"));
       };
     });
     mockedRunEmbeddedAttempt.mockImplementationOnce(async (params) => {
+      attemptParams = params as FastModeAttemptParams;
       resolveAttemptFastMode(params);
       return attemptDone;
-    });
-    mockedRunEmbeddedAttempt.mockImplementationOnce(async (params) => {
-      resolveAttemptFastMode(params);
-      return retryDone;
     });
 
     const resultPromise = runEmbeddedPiAgent({
@@ -114,17 +98,16 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
     expect(events).toHaveLength(0);
     expect(toolResults).toHaveLength(0);
 
-    completeAttempt?.();
-    await vi.waitFor(() => {
-      expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
-    });
+    await attemptParams?.onToolResult?.({ text: "tool running" });
+    expect(toolResults.map((payload) => payload.text)).toEqual(["tool running"]);
+    await vi.advanceTimersByTimeAsync(2);
 
     const summaries = events.map((event) => event.data?.summary).filter(Boolean);
     expect(summaries.some((summary) => String(summary).startsWith("💨Fast: auto-off("))).toBe(true);
     expect(toolResults.some((payload) => payload.text?.startsWith("💨Fast: auto-off("))).toBe(true);
-    expect(toolResults.every((payload) => payload.channelData?.openclawProgressKind)).toBe(true);
+    expect(toolResults.at(-1)?.channelData?.openclawProgressKind).toBe("fast-mode-auto");
 
-    completeRetry?.();
+    completeAttempt?.();
     await resultPromise;
 
     expect(events.map((event) => event.data?.summary)).toContain("💨Fast: auto-on");
