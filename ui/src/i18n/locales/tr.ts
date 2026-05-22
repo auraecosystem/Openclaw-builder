@@ -1103,6 +1103,9 @@ export const tr: TranslationMap = {
     selectors: {
       agentFilter: "Oturumları ajana göre filtrele",
       session: "Chat session",
+      sessionSearch: "Oturumlarda ara",
+      clearSessionSearch: "Oturum aramasını temizle",
+      loadMoreSessions: "Daha fazla oturum yükle",
       model: "Chat model",
       thinkingLevel: "Chat thinking level",
     },

@@ -1110,6 +1110,9 @@ export const fr: TranslationMap = {
     selectors: {
       agentFilter: "Filtrer les sessions par agent",
       session: "Chat session",
+      sessionSearch: "Rechercher des sessions",
+      clearSessionSearch: "Effacer la recherche de sessions",
+      loadMoreSessions: "Charger plus de sessions",
       model: "Chat model",
       thinkingLevel: "Chat thinking level",
     },
