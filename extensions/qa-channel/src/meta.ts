@@ -1,4 +1,4 @@
-import type { ChannelMeta } from "openclaw/plugin-sdk/channel-core";
+import type { ChannelMeta } from "openclaw/plugin-sdk/channel-contract";
 
 export const QA_CHANNEL_ID = "qa-channel" as const;
 
