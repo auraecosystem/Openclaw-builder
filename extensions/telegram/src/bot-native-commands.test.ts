@@ -369,6 +369,9 @@ describe("registerTelegramNativeCommands", () => {
 
     const replyMarkup = (firstCall(sendMessage)[2] as { reply_markup?: unknown } | undefined)
       ?.reply_markup as TelegramInlineKeyboardReplyMarkup | undefined;
+    expect(firstCall(sendMessage)[1]).toContain(
+      "Current fast mode: auto (2 sec) (config).\nChoose mode for /fast.",
+    );
     const callbackData = collectCallbackData(replyMarkup);
     const labels = (replyMarkup?.inline_keyboard ?? []).flatMap((row) =>
       row.map((button) => button.text),

@@ -12,11 +12,13 @@ import { resolveNativeCommandSessionTargets } from "openclaw/plugin-sdk/command-
 import {
   buildCommandTextFromArgs,
   findCommandByNativeName,
+  formatFastModeStatusValue,
   formatCommandArgMenuTitle,
   listNativeCommandSpecs,
   listNativeCommandSpecsForConfig,
   parseCommandArgs,
   resolveCommandArgMenu,
+  resolveFastModeState,
   resolveStoredModelOverride,
   type CommandArgs,
 } from "openclaw/plugin-sdk/command-auth-native";
@@ -42,6 +44,7 @@ import {
   resolveSessionStoreEntry,
   resolveSessionTranscriptPathInDir,
   resolveStorePath,
+  type SessionEntry,
 } from "openclaw/plugin-sdk/session-store-runtime";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -209,7 +212,12 @@ function resolveTelegramCommandMenuModelContext(params: {
   cfg: OpenClawConfig;
   agentId: string;
   sessionKey: string;
-}): { provider?: string; model?: string; thinkingLevel?: string } {
+}): {
+  provider?: string;
+  model?: string;
+  thinkingLevel?: string;
+  fastMode?: SessionEntry["fastMode"];
+} {
   if (!params.sessionKey.trim()) {
     return {};
   }
@@ -222,11 +230,13 @@ function resolveTelegramCommandMenuModelContext(params: {
     const store = loadSessionStore(storePath);
     const entry = resolveSessionStoreEntry({ store, sessionKey: params.sessionKey }).existing;
     const thinkingLevel = normalizeOptionalString(entry?.thinkingLevel);
+    const fastMode = entry?.fastMode;
     if (entry?.modelOverrideSource === "auto" && normalizeOptionalString(entry.modelOverride)) {
       return {
         provider: defaultModel.provider,
         model: defaultModel.model,
         ...(thinkingLevel ? { thinkingLevel } : {}),
+        ...(fastMode !== undefined ? { fastMode } : {}),
       };
     }
     const override = resolveStoredModelOverride({
@@ -240,6 +250,7 @@ function resolveTelegramCommandMenuModelContext(params: {
         provider: override.provider || defaultModel.provider,
         model: override.model,
         ...(thinkingLevel ? { thinkingLevel } : {}),
+        ...(fastMode !== undefined ? { fastMode } : {}),
       };
     }
     const provider =
@@ -251,6 +262,7 @@ function resolveTelegramCommandMenuModelContext(params: {
       ...(provider ? { provider } : {}),
       ...(model ? { model } : {}),
       ...(thinkingLevel ? { thinkingLevel } : {}),
+      ...(fastMode !== undefined ? { fastMode } : {}),
     };
   } catch {
     return {};
@@ -302,12 +314,53 @@ function formatTelegramCommandArgMenuTitle(params: {
   command: NonNullable<ReturnType<typeof findCommandByNativeName>>;
   menu: NonNullable<ReturnType<typeof resolveCommandArgMenu>>;
   currentThinkingLevel?: string;
+  currentFastModeStatus?: string;
 }): string {
   const title = formatCommandArgMenuTitle({ command: params.command, menu: params.menu });
-  if (params.command.key !== "think" || !params.currentThinkingLevel) {
-    return title;
+  if (params.command.key === "think" && params.currentThinkingLevel) {
+    return `Current thinking level: ${params.currentThinkingLevel}.\n${title}`;
   }
-  return `Current thinking level: ${params.currentThinkingLevel}.\n${title}`;
+  if (params.command.key === "fast" && params.currentFastModeStatus) {
+    return `${params.currentFastModeStatus}\n${title}`;
+  }
+  return title;
+}
+
+function resolveTelegramFastMenuCurrentStatus(params: {
+  cfg: OpenClawConfig;
+  agentId: string;
+  provider?: string;
+  model?: string;
+  fastMode?: SessionEntry["fastMode"];
+}): string {
+  const defaultModel = resolveDefaultModelForAgent({
+    cfg: params.cfg,
+    agentId: params.agentId,
+  });
+  const state = resolveFastModeState({
+    cfg: params.cfg,
+    provider: params.provider ?? defaultModel.provider,
+    model: params.model ?? defaultModel.model,
+    agentId: params.agentId,
+    sessionEntry:
+      params.fastMode !== undefined
+        ? {
+            fastMode: params.fastMode,
+          }
+        : undefined,
+  });
+  const suffix =
+    state.source === "agent"
+      ? " (agent)"
+      : state.source === "config"
+        ? " (config)"
+        : state.source === "default"
+          ? " (default)"
+          : "";
+  return `Current fast mode: ${formatFastModeStatusValue({
+    mode: state.mode,
+    fastSeconds: state.fastSeconds,
+  })}${suffix}.`;
 }
 
 function resolveTelegramNativeReplyChannelData(
@@ -1099,6 +1152,14 @@ export const registerTelegramNativeCommands = ({
             currentThinkingLevel:
               commandDefinition.key === "think"
                 ? await resolveTelegramThinkMenuCurrentLevel({
+                    cfg: runtimeCfg,
+                    agentId: route.agentId,
+                    ...menuModelContext,
+                  })
+                : undefined,
+            currentFastModeStatus:
+              commandDefinition.key === "fast"
+                ? resolveTelegramFastMenuCurrentStatus({
                     cfg: runtimeCfg,
                     agentId: route.agentId,
                     ...menuModelContext,
