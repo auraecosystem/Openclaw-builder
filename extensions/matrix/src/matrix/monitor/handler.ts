@@ -1684,6 +1684,8 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
                 title: payload.title,
                 name: payload.name,
                 status: payload.status,
+                outcomeClassification: payload.outcomeClassification,
+                statusLabel: payload.statusLabel,
                 exitCode: payload.exitCode,
               }),
             );

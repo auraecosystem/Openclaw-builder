@@ -69,6 +69,10 @@
       "destination": "/help/gpt55-codex-agentic-parity-maintainers"
     },
     {
+      "source": "/reference/logs",
+      "destination": "/logging"
+    },
+    {
       "source": "/mcp",
       "destination": "/cli/mcp"
     },
