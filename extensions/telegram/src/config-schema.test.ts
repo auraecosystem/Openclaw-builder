@@ -106,6 +106,28 @@ describe("telegram custom commands schema", () => {
     });
   });
 
+  it("accepts Telegram progress log retention config", () => {
+    expectTelegramConfigValid({
+      streaming: {
+        mode: "progress",
+        progress: {
+          toolProgress: true,
+          keepLog: true,
+        },
+      },
+      accounts: {
+        ops: {
+          streaming: {
+            mode: "progress",
+            progress: {
+              keepLog: true,
+            },
+          },
+        },
+      },
+    });
+  });
+
   it("accepts DM thread reply policy overrides", () => {
     const res = TelegramConfigSchema.safeParse({
       dm: { threadReplies: "off" },

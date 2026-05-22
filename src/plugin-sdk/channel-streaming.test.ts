@@ -11,6 +11,7 @@ import {
   isPotentialTruncatedFinal,
   mergeChannelProgressDraftLine,
   resolveChannelPreviewStreamMode,
+  resolveChannelProgressDraftKeepLog,
   resolveChannelProgressDraftMaxLineChars,
   resolveChannelProgressDraftLabel,
   resolveChannelProgressDraftMaxLines,
@@ -70,6 +71,15 @@ describe("channel-streaming", () => {
     });
     expect(resolveChannelStreamingPreviewToolProgress(entry)).toBe(false);
     expect(resolveChannelStreamingPreviewCommandText(entry)).toBe("status");
+  });
+
+  it("reads Telegram progress draft log retention", () => {
+    expect(
+      resolveChannelProgressDraftKeepLog({
+        streaming: { mode: "progress", progress: { keepLog: true } },
+      }),
+    ).toBe(true);
+    expect(resolveChannelProgressDraftKeepLog({ streaming: { mode: "progress" } })).toBe(false);
   });
 
   it("keeps progress-only tool progress config out of normal preview modes", () => {

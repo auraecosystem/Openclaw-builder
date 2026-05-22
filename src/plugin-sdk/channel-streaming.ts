@@ -787,6 +787,14 @@ export function resolveChannelProgressDraftRender(
   return configured === "rich" || configured === "text" ? configured : defaultValue;
 }
 
+export function resolveChannelProgressDraftKeepLog(
+  entry: StreamingCompatEntry | null | undefined,
+  defaultValue = false,
+): boolean {
+  const progress = asObjectRecord(getChannelStreamingConfigObject(entry)?.progress);
+  return asBoolean(progress?.keepLog) ?? defaultValue;
+}
+
 function sliceCodePoints(value: string, start: number, end?: number): string {
   return Array.from(value).slice(start, end).join("");
 }

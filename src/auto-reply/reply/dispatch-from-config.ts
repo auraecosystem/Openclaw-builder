@@ -1619,6 +1619,13 @@ export async function dispatchReplyFromConfig(
       !sendPolicyDenied &&
       shouldEmitVerboseProgress() &&
       shouldSendVerboseProgressMessages();
+    const shouldDeliverForcedToolProgressDespiteSourceSuppression = () =>
+      suppressAutomaticSourceDelivery &&
+      sourceReplyDeliveryMode === "message_tool_only" &&
+      ctx.InboundEventKind !== "room_event" &&
+      !sendPolicyDenied &&
+      params.replyOptions?.forceToolResultProgress === true &&
+      shouldSendToolSummaries();
     let finalReplyDeliveryStarted = false;
     const hasExecApprovalPayload = (payload: ReplyPayload) => {
       const execApproval =
@@ -2115,13 +2122,23 @@ export async function dispatchReplyFromConfig(
                 }
                 markInboundDedupeReplayUnsafe();
                 const isFastModeAutoProgress = isFastModeAutoProgressPayload(payload);
-                if (!suppressAutomaticSourceDelivery) {
+                const progressCallbackForwarded = shouldForwardProgressCallback({
+                  forwardWhenSourceDeliverySuppressed: true,
+                });
+                if (progressCallbackForwarded) {
                   await onToolResultFromReplyOptions?.(payload);
                 }
                 if (isDispatchOperationAborted()) {
                   return;
                 }
-                if (shouldSuppressProgressDelivery() && !isFastModeAutoProgress) {
+                if (isFastModeAutoProgress && progressCallbackForwarded) {
+                  return;
+                }
+                if (
+                  shouldSuppressProgressDelivery() &&
+                  !isFastModeAutoProgress &&
+                  !shouldDeliverForcedToolProgressDespiteSourceSuppression()
+                ) {
                   return;
                 }
                 const visibleToolPayload = resolveToolDeliveryPayload(payload);

@@ -32,8 +32,19 @@ const loadCostUsageSummaryMock = vi.hoisted(() =>
     },
   })),
 );
+type FastModeStateMockResult = {
+  mode: boolean | "auto" | undefined;
+  enabled: boolean;
+  source: "session" | "agent" | "config" | "default";
+  fastSeconds: number;
+};
 const resolveFastModeStateMock = vi.hoisted(() =>
-  vi.fn(() => ({ mode: true, enabled: true, source: "agent", fastSeconds: 60 })),
+  vi.fn<() => FastModeStateMockResult>(() => ({
+    mode: true,
+    enabled: true,
+    source: "agent",
+    fastSeconds: 60,
+  })),
 );
 
 vi.mock("../../agents/agent-scope.js", async () => {

@@ -193,6 +193,8 @@ export type GetReplyOptions = {
   queuedFollowupLifecycle?: QueuedReplyLifecycle;
   /** Allow channel-owned progress UI while final/source reply delivery remains message-tool-only. */
   allowProgressCallbacksWhenSourceDeliverySuppressed?: boolean;
+  /** Emit tool result summaries for channel-owned progress UI even when verbose is off. */
+  forceToolResultProgress?: boolean;
   disableBlockStreaming?: boolean;
   /** Timeout for block reply delivery (ms). */
   blockReplyTimeoutMs?: number;

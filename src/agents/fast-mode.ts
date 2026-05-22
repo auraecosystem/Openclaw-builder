@@ -54,11 +54,7 @@ function resolveConfiguredFastSeconds(params: {
   model: string;
 }): number {
   const modelParams = resolveConfiguredModelParams(params);
-  return (
-    normalizeFastSeconds(modelParams?.fastSeconds) ??
-    normalizeFastSeconds(modelParams?.fast_seconds) ??
-    DEFAULT_FAST_MODE_AUTO_SECONDS
-  );
+  return normalizeFastSeconds(modelParams?.fast_seconds) ?? DEFAULT_FAST_MODE_AUTO_SECONDS;
 }
 
 export function resolveFastModeAutoSeconds(params: {
