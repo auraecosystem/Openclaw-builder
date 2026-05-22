@@ -1,4 +1,5 @@
 import type { ImageContent } from "@earendil-works/pi-ai";
+import type { ExecOutcomeClassification } from "../infra/exec-outcome-classification-types.js";
 import type { PromptImageOrderEntry } from "../media/prompt-image-order.js";
 import type { ReplyPayload } from "./reply-payload.js";
 import type { TypingController } from "./reply/typing.js";
@@ -143,7 +144,7 @@ export type GetReplyOptions = {
     name?: string;
     output?: string;
     status?: string;
-    outcomeClassification?: "success" | "benign_no_result" | "failure";
+    outcomeClassification?: ExecOutcomeClassification;
     statusLabel?: string;
     exitCode?: number | null;
     durationMs?: number;

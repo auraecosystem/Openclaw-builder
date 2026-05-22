@@ -9,6 +9,7 @@ import type {
   StreamingMode,
   TextChunkMode,
 } from "../config/types.base.js";
+import type { ExecOutcomeClassification } from "../infra/exec-outcome-classification-types.js";
 import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 
 export type {
@@ -179,7 +180,7 @@ export type ChannelProgressDraftLineInput =
       title?: string;
       name?: string;
       status?: string;
-      outcomeClassification?: "success" | "benign_no_result" | "failure";
+      outcomeClassification?: ExecOutcomeClassification;
       statusLabel?: string;
       exitCode?: number | null;
     }

@@ -42,6 +42,7 @@ import {
 import { logVerbose } from "../../globals.js";
 import { emitAgentEvent, onAgentEvent, registerAgentRunContext } from "../../infra/agent-events.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import type { ExecOutcomeClassification } from "../../infra/exec-outcome-classification-types.js";
 import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
 import { CommandLane } from "../../process/lanes.js";
 import { defaultRuntime } from "../../runtime.js";
@@ -99,9 +100,7 @@ function readApprovalScopeValue(value: unknown): "turn" | "session" | undefined 
   return value === "turn" || value === "session" ? value : undefined;
 }
 
-function readCommandOutputClassification(
-  value: unknown,
-): "success" | "benign_no_result" | "failure" | undefined {
+function readCommandOutputClassification(value: unknown): ExecOutcomeClassification | undefined {
   return value === "success" || value === "benign_no_result" || value === "failure"
     ? value
     : undefined;
