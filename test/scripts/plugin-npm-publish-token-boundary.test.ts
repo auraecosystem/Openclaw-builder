@@ -41,6 +41,26 @@ case "\${1:-}" in
     fi
     echo "dist-tag \${*}" >> "\${OPENCLAW_TEST_NPM_RECORD}"
     ;;
+  install)
+    if [[ "\${*}" != "install --package-lock-only --ignore-scripts --no-audit --no-fund" ]]; then
+      echo "unexpected npm install command: \${*}" >&2
+      exit 64
+    fi
+    ;;
+  shrinkwrap)
+    if [[ "\${*}" != "shrinkwrap --ignore-scripts --no-audit --no-fund" ]]; then
+      echo "unexpected npm shrinkwrap command: \${*}" >&2
+      exit 64
+    fi
+    node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from "node:fs";
+const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+writeFileSync(
+  "npm-shrinkwrap.json",
+  JSON.stringify({ lockfileVersion: 3, packages: { "": pkg } }, null, 2) + "\\n",
+);
+NODE
+    ;;
   *)
     echo "unexpected npm command: \${*}" >&2
     exit 64
@@ -51,9 +71,30 @@ esac
   );
 }
 
-function withFixture(
-  testBody: (fixture: { root: string; binDir: string; packageDir: string; record: string }) => void,
-) {
+type Fixture = { root: string; binDir: string; packageDir: string; record: string };
+
+function writeFixtureShrinkwrap({ binDir, packageDir, record }: Fixture) {
+  const result = spawnSync(
+    "node",
+    ["scripts/generate-npm-shrinkwrap.mjs", "--package-dir", packageDir],
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        OPENCLAW_TEST_NPM_RECORD: record,
+      },
+    },
+  );
+  expect(
+    result.status,
+    `${result.stdout}
+${result.stderr}`,
+  ).toBe(0);
+}
+
+function withFixture(testBody: (fixture: Fixture) => void) {
   const root = mkdtempSync(join(tmpdir(), "openclaw-plugin-npm-token-boundary-"));
   try {
     const binDir = join(root, "bin");
@@ -68,8 +109,10 @@ function withFixture(
 
 describe("plugin npm trusted-publishing token boundary", () => {
   it("keeps npm auth env out of the trusted-publishing package publish subprocess", () => {
-    withFixture(({ binDir, packageDir, record }) => {
+    withFixture((fixture) => {
+      const { binDir, packageDir, record } = fixture;
       writePackage(packageDir, "2026.4.1-beta.1");
+      writeFixtureShrinkwrap(fixture);
 
       const result = spawnSync("bash", [PUBLISH_SCRIPT, "--publish-package", packageDir], {
         cwd: process.cwd(),
@@ -116,8 +159,10 @@ describe("plugin npm trusted-publishing token boundary", () => {
   });
 
   it("allows stable trusted-publisher package publish with only mirror auth availability", () => {
-    withFixture(({ binDir, packageDir, record }) => {
+    withFixture((fixture) => {
+      const { binDir, packageDir, record } = fixture;
       writePackage(packageDir, "2026.4.1");
+      writeFixtureShrinkwrap(fixture);
 
       const result = spawnSync("bash", [PUBLISH_SCRIPT, "--publish-package", packageDir], {
         cwd: process.cwd(),
