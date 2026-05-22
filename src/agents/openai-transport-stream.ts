@@ -2721,6 +2721,9 @@ async function processOpenAICompletionsStream(
   if (output.stopReason === "toolUse" && !hasToolCalls) {
     output.stopReason = "stop";
   }
+  if (hasToolCalls && output.stopReason !== "toolUse") {
+    output.content = output.content.filter((block) => block.type !== "toolCall");
+  }
 }
 
 type CompletionsReasoningDelta =
