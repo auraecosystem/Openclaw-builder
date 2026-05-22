@@ -2722,6 +2722,7 @@ export function renderApp(state: AppViewState) {
                   realtimeTalkStatus: state.realtimeTalkStatus,
                   realtimeTalkDetail: state.realtimeTalkDetail,
                   realtimeTalkTranscript: state.realtimeTalkTranscript,
+                  realtimeTalkConversation: state.realtimeTalkConversation,
                   realtimeTalkOptionsOpen: state.realtimeTalkOptionsOpen,
                   realtimeTalkOptions: state.realtimeTalkOptions,
                   connected: state.connected,
