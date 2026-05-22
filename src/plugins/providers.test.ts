@@ -86,7 +86,6 @@ function setOwningProviderManifestPlugins() {
     createManifestProviderPlugin({
       id: "openai",
       providerIds: ["openai", "openai-codex"],
-      cliBackends: ["codex-cli"],
       modelSupport: {
         modelPrefixes: ["gpt-", "o1", "o3", "o4"],
       },
@@ -111,7 +110,6 @@ function setOwningProviderManifestPluginsWithWorkspace() {
     createManifestProviderPlugin({
       id: "openai",
       providerIds: ["openai", "openai-codex"],
-      cliBackends: ["codex-cli"],
       modelSupport: {
         modelPrefixes: ["gpt-", "o1", "o3", "o4"],
       },
@@ -516,7 +514,7 @@ describe("resolvePluginProviders", () => {
     setOwningProviderManifestPlugins();
 
     expectOwningPluginIds("claude-cli", ["anthropic"]);
-    expectOwningPluginIds("codex-cli", ["openai"]);
+    expectOwningPluginIds("codex-cli");
   });
 
   it("reflects provider ownership manifest changes on the next lookup", () => {
@@ -939,7 +937,7 @@ describe("resolvePluginProviders", () => {
     });
   });
 
-  it("loads all discovered provider plugins in setup mode for explicit compat configs", () => {
+  it("excludes untrusted workspace provider plugins from setup discovery by default", () => {
     resolvePluginProviders({
       config: {
         plugins: {
@@ -954,20 +952,36 @@ describe("resolvePluginProviders", () => {
     });
 
     expectLastSetupRegistryLoad({
-      onlyPluginIds: ["google", "kilocode", "moonshot", "workspace-provider"],
+      onlyPluginIds: ["google", "kilocode", "moonshot"],
     });
     expectPluginConfigState(getLastSetupLoadedPluginConfig(), {
-      allow: ["openrouter", "google", "kilocode", "moonshot", "workspace-provider"],
+      allow: ["openrouter", "google", "kilocode", "moonshot"],
       entries: {
         google: { enabled: false },
         kilocode: { enabled: true },
         moonshot: { enabled: true },
-        "workspace-provider": { enabled: true },
       },
     });
   });
 
-  it("excludes untrusted workspace provider plugins from setup discovery when requested", () => {
+  it("loads explicitly included untrusted workspace provider plugins in setup discovery", () => {
+    resolvePluginProviders({
+      config: {
+        plugins: {
+          allow: ["openrouter"],
+          bundledDiscovery: "compat",
+        },
+      },
+      mode: "setup",
+      includeUntrustedWorkspacePlugins: true,
+    });
+
+    expectLastSetupRegistryLoad({
+      onlyPluginIds: ["google", "kilocode", "moonshot", "workspace-provider"],
+    });
+  });
+
+  it("excludes untrusted workspace provider plugins from setup discovery when explicitly requested", () => {
     resolvePluginProviders({
       config: {
         plugins: {
