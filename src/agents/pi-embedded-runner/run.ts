@@ -121,6 +121,10 @@ import {
   type PostCompactionGuardObservation,
 } from "./post-compaction-loop-guard.js";
 import { createEmbeddedRunReplayState, observeReplayMetadata } from "./replay-state.js";
+import {
+  withResolvedModelRuntimeModel,
+  type ResolvedModelRuntime,
+} from "./resolved-model-runtime.js";
 import { handleAssistantFailover } from "./run/assistant-failover.js";
 import {
   createEmbeddedRunStageTracker,
@@ -671,7 +675,7 @@ export async function runEmbeddedPiAgent(
           modelResolution = runtimeModelResolution;
         }
       }
-      const { model, error, authStorage, modelRegistry } = modelResolution;
+      const { model, error, authStorage, modelRegistry, runtime } = modelResolution;
       if (!model) {
         throw new FailoverError(error ?? `Unknown model: ${provider}/${modelId}`, {
           reason: "model_not_found",
@@ -682,6 +686,7 @@ export async function runEmbeddedPiAgent(
         });
       }
       let runtimeModel = model;
+      let resolvedModelRuntime = runtime as ResolvedModelRuntime | undefined;
 
       const resolvedRuntimeModel = resolveEffectiveRuntimeModel({
         cfg: params.config,
@@ -695,6 +700,9 @@ export async function runEmbeddedPiAgent(
       });
       const ctxInfo = resolvedRuntimeModel.ctxInfo;
       let effectiveModel = resolvedRuntimeModel.effectiveModel;
+      if (resolvedModelRuntime) {
+        resolvedModelRuntime = withResolvedModelRuntimeModel(resolvedModelRuntime, effectiveModel);
+      }
       startupStages.mark("model-resolution");
       notifyExecutionPhase("model_resolution", { provider, model: modelId });
 
@@ -911,13 +919,20 @@ export async function runEmbeddedPiAgent(
         allowTransientCooldownProbe: params.allowTransientCooldownProbe === true,
         getProvider: () => provider,
         getModelId: () => modelId,
+        getResolvedModelRuntime: () => resolvedModelRuntime,
         getRuntimeModel: () => runtimeModel,
         setRuntimeModel: (next) => {
           runtimeModel = next;
+          if (resolvedModelRuntime) {
+            resolvedModelRuntime = withResolvedModelRuntimeModel(resolvedModelRuntime, next);
+          }
         },
         getEffectiveModel: () => effectiveModel,
         setEffectiveModel: (next) => {
           effectiveModel = next;
+          if (resolvedModelRuntime) {
+            resolvedModelRuntime = withResolvedModelRuntimeModel(resolvedModelRuntime, next);
+          }
         },
         getApiKeyInfo: () => apiKeyInfo,
         setApiKeyInfo: (next) => {
@@ -1343,10 +1358,10 @@ export async function runEmbeddedPiAgent(
             startupStages.mark(EMBEDDED_RUN_ATTEMPT_DISPATCH_STAGE.prompt);
           }
           const runtimePlan = buildAgentRuntimePlan({
-            provider,
-            modelId,
-            model: effectiveModel,
-            modelApi: effectiveModel.api,
+            provider: resolvedModelRuntime?.ref.provider ?? provider,
+            modelId: resolvedModelRuntime?.ref.modelId ?? modelId,
+            model: resolvedModelRuntime?.model ?? effectiveModel,
+            modelApi: resolvedModelRuntime?.transport.api ?? effectiveModel.api,
             harnessId: agentHarness.id,
             harnessRuntime: agentHarness.id,
             allowHarnessAuthProfileForwarding: pluginHarnessOwnsTransport,

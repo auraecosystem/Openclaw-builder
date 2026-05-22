@@ -8,7 +8,11 @@ vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => ({
   fetchWithSsrFGuard: fetchWithSsrFGuardMock,
 }));
 
-import { buildAssistantMessage, createOllamaStreamFn } from "./stream.js";
+import {
+  buildAssistantMessage,
+  createOllamaStreamFn,
+  resolveOllamaBaseUrlForRun,
+} from "./stream.js";
 
 function makeOllamaResponse(params: {
   content?: string;
@@ -248,5 +252,16 @@ describe("createOllamaStreamFn thinking events", () => {
       timeoutMs: 2500,
       auditContext: "ollama-stream.chat",
     });
+  });
+});
+
+describe("resolveOllamaBaseUrlForRun", () => {
+  it("prefers selected model baseUrl over provider baseUrl", () => {
+    expect(
+      resolveOllamaBaseUrlForRun({
+        modelBaseUrl: "http://127.0.0.1:11434",
+        providerBaseUrl: "https://router.example/v1",
+      }),
+    ).toBe("http://127.0.0.1:11434");
   });
 });

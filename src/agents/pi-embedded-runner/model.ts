@@ -44,6 +44,11 @@ import {
 } from "./model.inline-provider.js";
 import { normalizeResolvedProviderModel } from "./model.provider-normalization.js";
 import { resolveBundledStaticCatalogModel } from "./model.static-catalog.js";
+import {
+  createResolvedModelRuntime,
+  type ResolvedModelRuntime,
+  type ResolvedModelRuntimeSource,
+} from "./resolved-model-runtime.js";
 
 type ProviderRuntimeHooks = {
   applyProviderResolvedModelCompatWithPlugins?: (
@@ -66,6 +71,11 @@ type ProviderRuntimeHooks = {
     params: Parameters<typeof normalizeProviderResolvedModelWithPlugin>[0],
   ) => unknown;
   normalizeProviderTransportWithPlugin: typeof normalizeProviderTransportWithPlugin;
+};
+
+type ResolvedModelRuntimeResult = {
+  model: Model<Api>;
+  runtime: ResolvedModelRuntime;
 };
 
 const TARGET_PROVIDER_RUNTIME_HOOKS: ProviderRuntimeHooks = {
@@ -445,6 +455,59 @@ function findConfiguredProviderModel(
       modelId,
     }),
   );
+}
+
+function resolveConfiguredProviderModelSource(params: {
+  providerConfig: InlineProviderConfig | undefined;
+  provider: string;
+  modelId: string;
+}): ResolvedModelRuntimeSource {
+  if (!params.providerConfig) {
+    return { discoveredModel: true };
+  }
+  const source: ResolvedModelRuntimeSource = {
+    providerConfigPath: `models.providers.${params.provider}`,
+  };
+  const configuredIndex = params.providerConfig.models?.findIndex((candidate) =>
+    matchesProviderScopedModelId({
+      candidateId: candidate.id,
+      provider: params.provider,
+      modelId: params.modelId,
+    }),
+  );
+  if (configuredIndex !== undefined && configuredIndex >= 0) {
+    const configuredModel = params.providerConfig.models?.[configuredIndex];
+    source.modelConfigPath = configuredModel?.id
+      ? `models.providers.${params.provider}.models[${configuredModel.id}]`
+      : `models.providers.${params.provider}.models[${configuredIndex}]`;
+  } else {
+    source.discoveredModel = true;
+  }
+  return source;
+}
+
+function createResolvedModelRuntimeResult(params: {
+  provider: string;
+  modelId: string;
+  model: Model<Api>;
+  providerConfig?: InlineProviderConfig;
+  source?: ResolvedModelRuntimeSource;
+}): ResolvedModelRuntimeResult {
+  return {
+    model: params.model,
+    runtime: createResolvedModelRuntime({
+      provider: params.provider,
+      modelId: params.modelId,
+      model: params.model,
+      source:
+        params.source ??
+        resolveConfiguredProviderModelSource({
+          providerConfig: params.providerConfig,
+          provider: params.provider,
+          modelId: params.modelId,
+        }),
+    }),
+  };
 }
 
 function hasConfiguredFallbackSurface(params: {
@@ -913,7 +976,10 @@ function resolveConfiguredFallbackModel(params: {
   }
   const fallbackTransport = resolveProviderTransport({
     provider,
-    api: normalizeResolvedTransportApi(configuredModel?.api) ?? resolveConfiguredProviderDefaultApi(providerConfig) ?? "openai-responses",
+    api:
+      normalizeResolvedTransportApi(configuredModel?.api) ??
+      resolveConfiguredProviderDefaultApi(providerConfig) ??
+      "openai-responses",
     baseUrl: configuredModel?.baseUrl ?? providerConfig?.baseUrl,
     cfg,
     workspaceDir,
@@ -1011,7 +1077,7 @@ function preferProviderRuntimeResolvedModel(params: {
   return params.explicitModel;
 }
 
-export function resolveModelWithRegistry(params: {
+function resolveModelRuntimeWithRegistry(params: {
   provider: string;
   modelId: string;
   modelRegistry: ModelRegistry;
@@ -1019,7 +1085,7 @@ export function resolveModelWithRegistry(params: {
   agentDir?: string;
   workspaceDir?: string;
   runtimeHooks?: ProviderRuntimeHooks;
-}): Model<Api> | undefined {
+}): ResolvedModelRuntimeResult | undefined {
   const normalizedRef = {
     provider: params.provider,
     model: normalizeStaticProviderModelId(normalizeProviderId(params.provider), params.modelId),
@@ -1036,6 +1102,7 @@ export function resolveModelWithRegistry(params: {
     ...normalizedParams,
     ...(workspaceDir !== undefined ? { workspaceDir } : {}),
   };
+  const providerConfig = resolveConfiguredProviderConfig(scopedParams.cfg, scopedParams.provider);
   const explicitModel = resolveExplicitModelWithRegistry(scopedParams);
   if (explicitModel?.kind === "suppressed") {
     return undefined;
@@ -1051,20 +1118,56 @@ export function resolveModelWithRegistry(params: {
         runtimeHooks,
       })
     ) {
-      return explicitModel.model;
+      return createResolvedModelRuntimeResult({
+        provider: scopedParams.provider,
+        modelId: scopedParams.modelId,
+        model: explicitModel.model,
+        providerConfig,
+      });
     }
     const pluginDynamicModel = resolvePluginDynamicModelWithRegistry(scopedParams);
-    return preferProviderRuntimeResolvedModel({
+    const preferredModel = preferProviderRuntimeResolvedModel({
       explicitModel: explicitModel.model,
       runtimeResolvedModel: pluginDynamicModel,
+    });
+    return createResolvedModelRuntimeResult({
+      provider: scopedParams.provider,
+      modelId: scopedParams.modelId,
+      model: preferredModel,
+      providerConfig,
     });
   }
   const pluginDynamicModel = resolvePluginDynamicModelWithRegistry(scopedParams);
   if (pluginDynamicModel) {
-    return pluginDynamicModel;
+    return createResolvedModelRuntimeResult({
+      provider: scopedParams.provider,
+      modelId: scopedParams.modelId,
+      model: pluginDynamicModel,
+      providerConfig,
+    });
   }
 
-  return resolveConfiguredFallbackModel(scopedParams);
+  const fallbackModel = resolveConfiguredFallbackModel(scopedParams);
+  return fallbackModel
+    ? createResolvedModelRuntimeResult({
+        provider: scopedParams.provider,
+        modelId: scopedParams.modelId,
+        model: fallbackModel,
+        providerConfig,
+      })
+    : undefined;
+}
+
+export function resolveModelWithRegistry(params: {
+  provider: string;
+  modelId: string;
+  modelRegistry: ModelRegistry;
+  cfg?: OpenClawConfig;
+  agentDir?: string;
+  workspaceDir?: string;
+  runtimeHooks?: ProviderRuntimeHooks;
+}): Model<Api> | undefined {
+  return resolveModelRuntimeWithRegistry(params)?.model;
 }
 
 export function resolveModel(
@@ -1081,6 +1184,7 @@ export function resolveModel(
   },
 ): {
   model?: Model<Api>;
+  runtime?: ResolvedModelRuntime;
   error?: string;
   authStorage: AuthStorage;
   modelRegistry: ModelRegistry;
@@ -1102,7 +1206,7 @@ export function resolveModel(
     cachedStores?.modelRegistry ??
     discoverModels(authStorage, resolvedAgentDir);
   const runtimeHooks = resolveRuntimeHooks(options);
-  const model = resolveModelWithRegistry({
+  const modelResolution = resolveModelRuntimeWithRegistry({
     provider: normalizedRef.provider,
     modelId: normalizedRef.model,
     modelRegistry,
@@ -1111,8 +1215,13 @@ export function resolveModel(
     workspaceDir,
     runtimeHooks,
   });
-  if (model) {
-    return { model, authStorage, modelRegistry };
+  if (modelResolution) {
+    return {
+      model: modelResolution.model,
+      runtime: modelResolution.runtime,
+      authStorage,
+      modelRegistry,
+    };
   }
 
   return {
@@ -1146,6 +1255,7 @@ export async function resolveModelAsync(
   },
 ): Promise<{
   model?: Model<Api>;
+  runtime?: ResolvedModelRuntime;
   error?: string;
   authStorage: AuthStorage;
   modelRegistry: ModelRegistry;
@@ -1214,7 +1324,7 @@ export async function resolveModelAsync(
         providerConfig,
       },
     });
-    return resolveModelWithRegistry({
+    return resolveModelRuntimeWithRegistry({
       provider: normalizedRef.provider,
       modelId: normalizedRef.model,
       modelRegistry,
@@ -1224,7 +1334,7 @@ export async function resolveModelAsync(
       runtimeHooks,
     });
   };
-  let model =
+  let modelResolution =
     explicitModel?.kind === "resolved" &&
     !shouldCompareProviderRuntimeResolvedModel({
       provider: normalizedRef.provider,
@@ -1234,15 +1344,20 @@ export async function resolveModelAsync(
       workspaceDir,
       runtimeHooks,
     })
-      ? explicitModel.model
+      ? createResolvedModelRuntimeResult({
+          provider: normalizedRef.provider,
+          modelId: normalizedRef.model,
+          model: explicitModel.model,
+          providerConfig,
+        })
       : await resolveDynamicAttempt();
-  if (!model && !explicitModel && options?.retryTransientProviderRuntimeMiss) {
+  if (!modelResolution && !explicitModel && options?.retryTransientProviderRuntimeMiss) {
     // Startup can race the first provider-runtime snapshot load on a fresh
     // gateway boot. Retry once before surfacing a user-visible "Unknown model"
     // that disappears on the next message.
-    model = await resolveDynamicAttempt();
+    modelResolution = await resolveDynamicAttempt();
   }
-  if (!model && !explicitModel && options?.allowBundledStaticCatalogFallback) {
+  if (!modelResolution && !explicitModel && options?.allowBundledStaticCatalogFallback) {
     const staticCatalogModel = resolveBundledStaticCatalogModel({
       provider: normalizedRef.provider,
       modelId: normalizedRef.model,
@@ -1260,7 +1375,7 @@ export async function resolveModelAsync(
         workspaceDir,
         preferDiscoveredModelMetadata: true,
       });
-      model = normalizeResolvedModel({
+      const model = normalizeResolvedModel({
         provider: normalizedRef.provider,
         cfg,
         agentDir: resolvedAgentDir,
@@ -1268,10 +1383,21 @@ export async function resolveModelAsync(
         model: overriddenStaticCatalogModel,
         runtimeHooks,
       });
+      modelResolution = createResolvedModelRuntimeResult({
+        provider: normalizedRef.provider,
+        modelId: normalizedRef.model,
+        model,
+        providerConfig,
+      });
     }
   }
-  if (model) {
-    return { model, authStorage, modelRegistry };
+  if (modelResolution) {
+    return {
+      model: modelResolution.model,
+      runtime: modelResolution.runtime,
+      authStorage,
+      modelRegistry,
+    };
   }
 
   return {
