@@ -101,7 +101,7 @@ export async function handleAssistantFailover(params: {
     const timeoutFailure = params.timedOut || params.idleTimedOut;
     const failureReason = timeoutFailure ? "timeout" : params.assistantProfileFailureReason;
     const markFailedProfile = async () => {
-      if (!failureReason || failureReason === "timeout") {
+      if (!failedProfileId || !failureReason || failureReason === "timeout") {
         return;
       }
       try {

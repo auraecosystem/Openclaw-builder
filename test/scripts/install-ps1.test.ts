@@ -129,9 +129,7 @@ describe("install.ps1 failure handling", () => {
     expect(portableNodeBody).toContain("portable-node");
     expect(portableNodeBody).toContain("Ensure-PortableNodeOnUserPath");
     expect(portableNodePathBody).toContain("Add-ToUserPath $nodeDir");
-    expect(userPathBody).toContain(
-      '[Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")',
-    );
+    expect(userPathBody).toContain('[Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")');
     expect(portableNodeBody).toContain("Invoke-WebRequest -UseBasicParsing");
     expect(resolveNodeBody).toContain("https://nodejs.org/dist/index.json");
     expect(resolveNodeBody).toContain("win-$architecture-zip");

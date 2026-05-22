@@ -202,7 +202,9 @@ function hasGeminiThoughtSignatureTruncationFootprint(value: string): boolean {
   );
 }
 
-function sanitizeGeminiThoughtSignature(thoughtSignature: string | undefined): string | undefined {
+function sanitizeGeminiThoughtSignature(
+  thoughtSignature: string | undefined,
+): string | undefined {
   if (typeof thoughtSignature !== "string") {
     return undefined;
   }
@@ -550,7 +552,9 @@ function convertGoogleMessages(model: GoogleTransportModel, context: Context) {
             : undefined;
           parts.push({
             text: sanitizeTransportPayloadText(block.text),
-            ...(sanitizedTextSignature ? { thoughtSignature: sanitizedTextSignature } : {}),
+            ...(sanitizedTextSignature
+              ? { thoughtSignature: sanitizedTextSignature }
+              : {}),
           });
           continue;
         }

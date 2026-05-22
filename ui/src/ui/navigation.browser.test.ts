@@ -466,9 +466,7 @@ describe("control UI routing", () => {
 
     expect([...section.classList]).toContain("nav-section--collapsed");
     expect(
-      section
-        .querySelector<HTMLButtonElement>(".nav-section__label")
-        ?.getAttribute("aria-expanded"),
+      section.querySelector<HTMLButtonElement>(".nav-section__label")?.getAttribute("aria-expanded"),
     ).toBe("false");
   });
 
