@@ -437,17 +437,6 @@ export async function resolveReplyDirectives(params: {
     : (targetSessionEntry?.thinkingLevel as ThinkLevel | undefined);
   const resolvedThinkLevel =
     normalizeThinkLevel(opts?.thinkingLevelOverride) ?? directives.thinkLevel ?? sessionThinkLevel;
-  const resolvedFastModeState = resolveFastModeState({
-    cfg,
-    provider,
-    model,
-    agentId,
-    sessionEntry: directives.clearFastMode ? undefined : targetSessionEntry,
-  });
-  const resolvedFastMode =
-    opts?.fastModeOverride ?? directives.fastMode ?? resolvedFastModeState.mode;
-  const resolvedFastModeAutoSeconds =
-    opts?.fastModeAutoSecondsOverride ?? resolvedFastModeState.fastSeconds;
 
   const resolvedVerboseLevel =
     directives.verboseLevel ??
@@ -642,6 +631,17 @@ export async function resolveReplyDirectives(params: {
   model = applyResult.model;
   contextTokens = applyResult.contextTokens;
   const { directiveAck, perMessageQueueMode, perMessageQueueOptions } = applyResult;
+  const resolvedFastModeState = resolveFastModeState({
+    cfg,
+    provider,
+    model,
+    agentId,
+    sessionEntry: directives.clearFastMode ? undefined : targetSessionEntry,
+  });
+  const resolvedFastMode =
+    opts?.fastModeOverride ?? directives.fastMode ?? resolvedFastModeState.mode;
+  const resolvedFastModeAutoSeconds =
+    opts?.fastModeAutoSecondsOverride ?? resolvedFastModeState.fastSeconds;
   const execOverrides = resolveReplyExecOverrides({
     directives,
     sessionEntry: targetSessionEntry,

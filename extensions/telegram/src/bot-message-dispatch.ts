@@ -2102,12 +2102,8 @@ export const dispatchTelegramMessage = async ({
         return;
       }
       ({ queuedFinal } = turnResult.dispatchResult);
-      const deliveredViaToolMessage =
-        (turnResult.dispatchResult.counts?.tool ?? 0) > 0 &&
-        (turnResult.dispatchResult.counts?.final ?? 0) === 0;
       suppressSilentReplyFallback =
-        turnResult.dispatchResult.sourceReplyDeliveryMode === "message_tool_only" ||
-        deliveredViaToolMessage;
+        turnResult.dispatchResult.sourceReplyDeliveryMode === "message_tool_only";
     } catch (err) {
       dispatchError = err;
       runtime.error?.(danger(`telegram dispatch failed: ${String(err)}`));

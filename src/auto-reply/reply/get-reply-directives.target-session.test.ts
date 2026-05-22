@@ -146,6 +146,8 @@ async function resolveHelloWithModelDefaults(params: {
   agentCfg?: { reasoningDefault?: "off" | "on" | "stream" };
   commandAuthorized?: boolean;
   hasOneTurnModelOverride?: boolean;
+  selectedProvider?: string;
+  selectedModel?: string;
   provider?: string;
   model?: string;
   ctx?: Parameters<typeof buildTestCtx>[0];
@@ -154,8 +156,8 @@ async function resolveHelloWithModelDefaults(params: {
   const resolveDefaultThinkingLevel = vi.fn(async () => params.defaultThinking);
   const resolveDefaultReasoningLevel = vi.fn(async () => params.defaultReasoning);
   mocks.createModelSelectionState.mockResolvedValueOnce({
-    provider: "openai",
-    model: "gpt-4o-mini",
+    provider: params.selectedProvider ?? "openai",
+    model: params.selectedModel ?? "gpt-4o-mini",
     allowedModelKeys: new Set<string>(),
     allowedModelCatalog: [],
     resetModelOverride: false,
@@ -350,6 +352,37 @@ describe("resolveReplyDirectives", () => {
     expectContinueResult(result, {
       resolvedFastMode: "auto",
       resolvedFastModeAutoSeconds: 2,
+    });
+  });
+
+  it("resolves fast defaults after model selection updates provider and model", async () => {
+    mocks.resolveFastModeState.mockImplementation(
+      ({ provider, model }: { provider?: string; model?: string }) => ({
+        mode: provider === "openai" && model === "gpt-5.5" ? "auto" : false,
+        enabled: provider === "openai" && model === "gpt-5.5",
+        source: "config",
+        fastSeconds: provider === "openai" && model === "gpt-5.5" ? 15 : 60,
+      }),
+    );
+
+    const { result } = await resolveHelloWithModelDefaults({
+      defaultThinking: "off",
+      defaultReasoning: "on",
+      provider: "anthropic",
+      model: "claude-opus-4-6",
+      selectedProvider: "openai",
+      selectedModel: "gpt-5.5",
+    });
+
+    expect(mockCallInput(mocks.resolveFastModeState)).toMatchObject({
+      provider: "openai",
+      model: "gpt-5.5",
+    });
+    expectContinueResult(result, {
+      provider: "openai",
+      model: "gpt-5.5",
+      resolvedFastMode: "auto",
+      resolvedFastModeAutoSeconds: 15,
     });
   });
 

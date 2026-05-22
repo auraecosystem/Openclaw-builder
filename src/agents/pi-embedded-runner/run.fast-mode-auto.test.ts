@@ -131,4 +131,73 @@ describe("runEmbeddedPiAgent fast auto progress", () => {
     expect(events.map((event) => event.data?.summary)).toContain("💨Fast: auto-on");
     expect(toolResults.map((payload) => payload.text)).toContain("💨Fast: auto-on");
   });
+
+  it.each(["agent-event", "tool-result"] as const)(
+    "keeps successful runs when fast auto reset %s delivery fails",
+    async (failureTarget) => {
+      vi.useFakeTimers();
+
+      const events: Array<{
+        data?: { summary?: unknown };
+      }> = [];
+      const toolResults: Array<{
+        text?: string;
+        channelData?: Record<string, unknown>;
+      }> = [];
+      let attemptParams: FastModeAttemptParams | undefined;
+      let completeAttempt: (() => void) | undefined;
+      const attemptDone = new Promise<EmbeddedRunAttemptResult>((resolve) => {
+        completeAttempt = () => {
+          resolve(successAttempt("ollama", "glm-5.1:cloud"));
+        };
+      });
+      mockedRunEmbeddedAttempt.mockImplementationOnce(async (params) => {
+        attemptParams = params as FastModeAttemptParams;
+        resolveAttemptFastMode(params);
+        return attemptDone;
+      });
+
+      const resultPromise = runEmbeddedPiAgent({
+        ...overflowBaseRunParams,
+        provider: "ollama",
+        model: "glm-5.1:cloud",
+        runId: `run-fast-auto-reset-${failureTarget}`,
+        fastMode: "auto",
+        fastModeAutoSeconds: 1,
+        onAgentEvent: (event) => {
+          events.push(event);
+          if (failureTarget === "agent-event" && event.data?.summary === "💨Fast: auto-on") {
+            throw new Error("reset event delivery failed");
+          }
+        },
+        onToolResult: (payload) => {
+          toolResults.push(payload);
+          if (failureTarget === "tool-result" && payload.text === "💨Fast: auto-on") {
+            throw new Error("reset tool delivery failed");
+          }
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
+      });
+      await vi.advanceTimersByTimeAsync(1100);
+      await attemptParams?.onAgentEvent?.({
+        stream: "tool",
+        data: { phase: "result", name: "exec" },
+      });
+
+      expect(events.map((event) => event.data?.summary).filter(Boolean)).toContainEqual(
+        expect.stringMatching(/^💨Fast: auto-off\(/u),
+      );
+
+      completeAttempt?.();
+      await expect(resultPromise).resolves.toBeTruthy();
+
+      expect(events.map((event) => event.data?.summary)).toContain("💨Fast: auto-on");
+      if (failureTarget === "tool-result") {
+        expect(toolResults.map((payload) => payload.text)).toContain("💨Fast: auto-on");
+      }
+    },
+  );
 });

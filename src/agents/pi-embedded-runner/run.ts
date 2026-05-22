@@ -589,6 +589,15 @@ export async function runEmbeddedPiAgent(
           fastSeconds: resetState.fastSeconds,
         });
       };
+      const maybeEmitFastModeAutoResetBestEffort = async () => {
+        try {
+          await maybeEmitFastModeAutoReset();
+        } catch (error) {
+          log.warn(
+            `embedded run fast mode auto reset progress failed: ${formatErrorMessage(error)}`,
+          );
+        }
+      };
       const emitStartupStageSummary = (phase: string) => {
         const summary = startupStages.snapshot();
         const shouldWarn = shouldWarnEmbeddedRunStageSummary(summary);
@@ -3444,7 +3453,7 @@ export async function runEmbeddedPiAgent(
           };
         }
       } finally {
-        await maybeEmitFastModeAutoReset();
+        await maybeEmitFastModeAutoResetBestEffort();
         forgetPromptBuildDrainCacheForRun(params.runId);
         stopRuntimeAuthRefreshTimer();
         await runAgentCleanupStep({
