@@ -224,14 +224,14 @@ describe("commands registry", () => {
     ]);
   });
 
-  it("exposes /side as a BTW text and native alias", () => {
+  it("routes /side as a BTW alias without advertising it in native menus", () => {
     const btw = requireChatCommand("btw");
     expect(btw.nativeName).toBe("btw");
     expect(btw.nativeAliases).toEqual(["side"]);
     expect(btw.textAliases).toEqual(["/btw", "/side"]);
     expect(normalizeCommandBody("/side what changed?")).toBe("/btw what changed?");
     expect(requireNativeCommand("side").key).toBe("btw");
-    expect(requireNativeSpec(listNativeCommandSpecs(), "side").acceptsArgs).toBe(true);
+    expect(nativeNameSet(listNativeCommandSpecs())).not.toContain("side");
   });
 
   it("filters commands based on config flags", () => {
