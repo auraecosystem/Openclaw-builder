@@ -392,13 +392,20 @@ function parseClaudeCliStreamingDelta(params: {
   };
 }
 
-type PendingToolUse = { toolCallId: string; name: string };
+type PendingToolUse = {
+  toolCallId: string;
+  name: string;
+  inputJsonParts: string[];
+};
 
 type ToolUseTracker = {
-  // claude streams content_block_start (id + name, no args) before the
-  // post-block assistant snapshot carries the full input. start emission
-  // is held until args arrive so the event matches the embedded handler's
-  // `{phase: "start", name, toolCallId, args}` shape.
+  // claude streams content_block_start (id + name, no args), then a sequence
+  // of content_block_delta events with input_json_delta partial_json chunks,
+  // then content_block_stop. inputJsonParts collects the chunks so they can
+  // be reassembled into the tool's args at stop time. The post-block
+  // assistant snapshot carries the full input redundantly and the
+  // emit-once guard dedups; the snapshot remains the fallback when a turn
+  // aborts before any input_json_delta arrives.
   pendingByIndex: Map<number, PendingToolUse>;
   // retained so tool_result events can carry `name` like the embedded handler.
   nameById: Map<string, string>;
@@ -451,23 +458,47 @@ function dispatchClaudeCliStreamingToolEvent(params: {
       isRecord(event.content_block)
     ) {
       const block = event.content_block;
-      if (block.type === "tool_use") {
+      if (
+        block.type === "tool_use" ||
+        block.type === "server_tool_use" ||
+        block.type === "mcp_tool_use"
+      ) {
         const toolCallId = typeof block.id === "string" ? block.id.trim() : "";
         const name = typeof block.name === "string" ? block.name.trim() : "";
         if (toolCallId && name) {
-          tracker.pendingByIndex.set(event.index, { toolCallId, name });
+          tracker.pendingByIndex.set(event.index, { toolCallId, name, inputJsonParts: [] });
         }
       }
       return;
     }
+    if (
+      event.type === "content_block_delta" &&
+      typeof event.index === "number" &&
+      isRecord(event.delta)
+    ) {
+      if (event.delta.type === "input_json_delta" && typeof event.delta.partial_json === "string") {
+        const pending = tracker.pendingByIndex.get(event.index);
+        pending?.inputJsonParts.push(event.delta.partial_json);
+      }
+      return;
+    }
     if (event.type === "content_block_stop" && typeof event.index === "number") {
-      // fallback: emit start with empty args if the post-block assistant
-      // snapshot never arrived (turn aborted, etc.); well-formed runs emit
-      // via the assistant branch below first and dedup ignores this.
       const pending = tracker.pendingByIndex.get(event.index);
       tracker.pendingByIndex.delete(event.index);
       if (pending) {
-        emitToolStartOnce(tracker, pending.toolCallId, pending.name, {}, params.onToolUseStart);
+        let args: Record<string, unknown> = {};
+        if (pending.inputJsonParts.length > 0) {
+          try {
+            const parsed: unknown = JSON.parse(pending.inputJsonParts.join(""));
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              args = parsed as Record<string, unknown>;
+            }
+          } catch {
+            // Malformed/truncated partial JSON — fall through with empty
+            // args; assistant snapshot branch may still backfill below.
+          }
+        }
+        emitToolStartOnce(tracker, pending.toolCallId, pending.name, args, params.onToolUseStart);
       }
       return;
     }
@@ -478,7 +509,12 @@ function dispatchClaudeCliStreamingToolEvent(params: {
     const message = params.parsed.message;
     const content = Array.isArray(message.content) ? message.content : [];
     for (const block of content) {
-      if (!isRecord(block) || block.type !== "tool_use") {
+      if (
+        !isRecord(block) ||
+        (block.type !== "tool_use" &&
+          block.type !== "server_tool_use" &&
+          block.type !== "mcp_tool_use")
+      ) {
         continue;
       }
       const toolCallId = typeof block.id === "string" ? block.id.trim() : "";
