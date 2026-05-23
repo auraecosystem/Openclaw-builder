@@ -49,7 +49,11 @@ import {
   FailoverError,
   resolveFailoverStatus,
 } from "../failover-error.js";
-import { formatFastModeAutoProgressText, resolveFastModeForElapsed } from "../fast-mode.js";
+import {
+  DEFAULT_FAST_MODE_AUTO_ON_SECONDS,
+  formatFastModeAutoProgressText,
+  resolveFastModeForElapsed,
+} from "../fast-mode.js";
 import { ensureSelectedAgentHarnessPlugin } from "../harness/runtime-plugin.js";
 import { selectAgentHarness } from "../harness/selection.js";
 import { LiveSessionModelSwitchError } from "../live-model-switch-error.js";
@@ -484,6 +488,8 @@ export async function runEmbeddedPiAgent(
       throwIfAborted();
       const started = Date.now();
       const fastModeStarted = params.fastModeStartedAtMs ?? started;
+      const fastModeAutoOnSeconds =
+        params.fastModeAutoOnSeconds ?? DEFAULT_FAST_MODE_AUTO_ON_SECONDS;
       let fastModeAutoOffAnnounced = false;
       let fastModeAutoResetAnnounced = false;
       const startupStages = createEmbeddedRunStageTracker();
@@ -507,6 +513,7 @@ export async function runEmbeddedPiAgent(
       const emitFastModeAutoProgress = async (payload: {
         enabled: boolean;
         elapsedSeconds: number;
+        fastAutoOnSeconds?: number;
       }) => {
         const summary = formatFastModeAutoProgressText(payload);
         await params.onAgentEvent?.({
@@ -531,6 +538,7 @@ export async function runEmbeddedPiAgent(
         const next = resolveFastModeForElapsed({
           mode: "auto",
           startedAtMs: fastModeStarted,
+          fastAutoOnSeconds: fastModeAutoOnSeconds,
         });
         if (next.enabled) {
           return;
@@ -561,6 +569,7 @@ export async function runEmbeddedPiAgent(
         const resolved = resolveFastModeForElapsed({
           mode: params.fastMode,
           startedAtMs: fastModeStarted,
+          fastAutoOnSeconds: fastModeAutoOnSeconds,
         });
         return resolved.mode === undefined ? undefined : resolved.enabled;
       };
@@ -578,6 +587,7 @@ export async function runEmbeddedPiAgent(
         await emitFastModeAutoProgress({
           enabled: true,
           elapsedSeconds: 0,
+          fastAutoOnSeconds: fastModeAutoOnSeconds,
         });
       };
       const maybeEmitFastModeAutoResetBestEffort = async () => {

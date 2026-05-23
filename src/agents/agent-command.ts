@@ -1367,6 +1367,7 @@ async function agentCommandInternal(
               resolvedThinkLevel,
               fastMode: fastModeState.mode,
               fastModeStartedAtMs,
+              fastModeAutoOnSeconds: fastModeState.fastAutoOnSeconds,
               timeoutMs,
               runId,
               opts,

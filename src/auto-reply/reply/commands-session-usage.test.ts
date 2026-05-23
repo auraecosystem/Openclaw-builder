@@ -36,6 +36,7 @@ type FastModeStateMockResult = {
   mode: boolean | "auto" | undefined;
   enabled: boolean;
   source: "session" | "agent" | "config" | "default";
+  fastAutoOnSeconds?: number;
 };
 const resolveFastModeStateMock = vi.hoisted(() =>
   vi.fn<() => FastModeStateMockResult>(() => ({
@@ -61,8 +62,23 @@ vi.mock("../../infra/session-cost-usage.js", () => ({
 }));
 
 vi.mock("../../agents/fast-mode.js", () => ({
-  formatFastModeStatusValue: ({ mode }: { mode: boolean | "auto" | undefined }) =>
-    mode === "auto" ? "auto (60 sec)" : mode === true ? "on" : "off",
+  formatFastModeSourceSuffix: (source: FastModeStateMockResult["source"] | undefined) =>
+    source === "session"
+      ? " (session)"
+      : source === "agent"
+        ? " (default: agent)"
+        : source === "config"
+          ? " (default: model)"
+          : source === "default"
+            ? " (default)"
+            : "",
+  formatFastModeStatusValue: ({
+    mode,
+    fastAutoOnSeconds,
+  }: {
+    mode: boolean | "auto" | undefined;
+    fastAutoOnSeconds?: number;
+  }) => (mode === "auto" ? `auto (${fastAutoOnSeconds ?? 60} sec)` : mode === true ? "on" : "off"),
   formatFastModeValue: (mode: boolean | "auto" | undefined) =>
     mode === "auto" ? "auto" : mode === true ? "on" : "off",
   resolveFastModeState: resolveFastModeStateMock,
@@ -246,11 +262,12 @@ describe("handleFastCommand", () => {
     expect(result?.reply?.text).toContain("Current fast mode: on");
   });
 
-  it("shows the fixed auto threshold for /fast status", async () => {
+  it("shows the resolved auto threshold for /fast status", async () => {
     resolveFastModeStateMock.mockReturnValue({
       mode: "auto",
       enabled: true,
       source: "config",
+      fastAutoOnSeconds: 30,
     });
     const params = buildUsageParams();
     params.command.commandBodyNormalized = "/fast status";
@@ -259,7 +276,7 @@ describe("handleFastCommand", () => {
 
     const result = await handleFastCommand(params, true);
 
-    expect(result?.reply?.text).toContain("Current fast mode: auto (60 sec) (config)");
+    expect(result?.reply?.text).toContain("Current fast mode: auto (30 sec) (default: model)");
   });
 
   it("prefers the target session entry from sessionStore for /fast status", async () => {

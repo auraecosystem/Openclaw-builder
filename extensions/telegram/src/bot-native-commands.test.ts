@@ -350,7 +350,7 @@ describe("registerTelegramNativeCommands", () => {
           model: "openai-codex/gpt-5.5",
           models: {
             "openai-codex/gpt-5.5": {
-              params: { fastMode: "auto" },
+              params: { fastMode: "auto", fastAutoOnSeconds: 30 },
             },
           },
         },
@@ -370,7 +370,7 @@ describe("registerTelegramNativeCommands", () => {
     const replyMarkup = (firstCall(sendMessage)[2] as { reply_markup?: unknown } | undefined)
       ?.reply_markup as TelegramInlineKeyboardReplyMarkup | undefined;
     expect(firstCall(sendMessage)[1]).toContain(
-      "Current fast mode: auto (60 sec) (config).\nChoose mode for /fast.",
+      "Current fast mode: auto (30 sec) (default: model).\nOptions: on, off, auto (30 sec), default, status.",
     );
     const callbackData = collectCallbackData(replyMarkup);
     const labels = (replyMarkup?.inline_keyboard ?? []).flatMap((row) =>
@@ -378,13 +378,13 @@ describe("registerTelegramNativeCommands", () => {
     );
 
     expect(callbackData).toEqual([
-      "tgcmd:/fast status",
-      "tgcmd:/fast auto",
       "tgcmd:/fast on",
       "tgcmd:/fast off",
+      "tgcmd:/fast auto",
       "tgcmd:/fast default",
+      "tgcmd:/fast status",
     ]);
-    expect(labels).toEqual(["status", "auto (60 sec)", "on", "off", "default"]);
+    expect(labels).toEqual(["on", "off", "auto (30 sec)", "default", "status"]);
     expect(parseTelegramNativeCommandCallbackData("tgcmd:/fast status")).toBe("/fast status");
     expect(parseTelegramNativeCommandCallbackData("tgcmd:/fast auto")).toBe("/fast auto");
     expect(parseTelegramNativeCommandCallbackData("tgcmd:/fast default")).toBe("/fast default");

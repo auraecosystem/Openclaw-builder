@@ -117,6 +117,7 @@ export type ReplyDirectiveContinuation = {
   defaultActivation: ReturnType<typeof defaultGroupActivation>;
   resolvedThinkLevel: ThinkLevel | undefined;
   resolvedFastMode: FastMode;
+  resolvedFastModeAutoOnSeconds: number;
   resolvedVerboseLevel: VerboseLevel | undefined;
   resolvedReasoningLevel: ReasoningLevel;
   resolvedElevatedLevel: ElevatedLevel;
@@ -639,6 +640,8 @@ export async function resolveReplyDirectives(params: {
   });
   const resolvedFastMode =
     opts?.fastModeOverride ?? directives.fastMode ?? resolvedFastModeState.mode;
+  const resolvedFastModeAutoOnSeconds =
+    opts?.fastModeAutoOnSecondsOverride ?? resolvedFastModeState.fastAutoOnSeconds;
   const execOverrides = resolveReplyExecOverrides({
     directives,
     sessionEntry: targetSessionEntry,
@@ -661,6 +664,7 @@ export async function resolveReplyDirectives(params: {
       defaultActivation,
       resolvedThinkLevel: resolvedThinkLevelWithDefault,
       resolvedFastMode,
+      resolvedFastModeAutoOnSeconds,
       resolvedVerboseLevel,
       resolvedReasoningLevel,
       resolvedElevatedLevel,

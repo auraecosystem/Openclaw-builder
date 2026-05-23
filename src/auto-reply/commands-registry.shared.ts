@@ -1,4 +1,4 @@
-import { formatFastModeAutoLabel } from "../shared/fast-mode.js";
+import { formatFastModeAutoLabel, resolveFastModeModelAutoOnSeconds } from "../shared/fast-mode.js";
 import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 import { COMMAND_ARG_FORMATTERS } from "./commands-args.js";
 import type {
@@ -788,17 +788,19 @@ export function buildBuiltinChatCommands(
       args: [
         {
           name: "mode",
-          description: "status, auto, on, off, or default",
+          description: "on, off, auto, default, or status",
           type: "string",
-          choices: () => [
-            "status",
-            {
-              value: "auto",
-              label: formatFastModeAutoLabel(),
-            },
+          choices: ({ cfg, provider, model }) => [
             "on",
             "off",
+            {
+              value: "auto",
+              label: formatFastModeAutoLabel({
+                fastAutoOnSeconds: resolveFastModeModelAutoOnSeconds({ cfg, provider, model }),
+              }),
+            },
             "default",
+            "status",
           ],
         },
       ],

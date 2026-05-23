@@ -381,6 +381,7 @@ export function runAgentAttempt(params: {
   resolvedThinkLevel: ThinkLevel;
   fastMode?: FastMode;
   fastModeStartedAtMs?: number;
+  fastModeAutoOnSeconds?: number;
   timeoutMs: number;
   runId: string;
   opts: AgentCommandOpts;
@@ -667,6 +668,7 @@ export function runAgentAttempt(params: {
     thinkLevel: params.resolvedThinkLevel,
     fastMode: params.fastMode,
     fastModeStartedAtMs: params.fastModeStartedAtMs,
+    fastModeAutoOnSeconds: params.fastModeAutoOnSeconds,
     verboseLevel: params.resolvedVerboseLevel,
     bashElevated: params.opts.bashElevated,
     timeoutMs: params.timeoutMs,

@@ -348,6 +348,7 @@ type RunPreparedReplyParams = {
   defaultActivation: Parameters<typeof buildGroupIntro>[0]["defaultActivation"];
   resolvedThinkLevel: ThinkLevel | undefined;
   resolvedFastMode?: FastMode;
+  resolvedFastModeAutoOnSeconds?: number;
   resolvedVerboseLevel: VerboseLevel | undefined;
   resolvedReasoningLevel: ReasoningLevel;
   resolvedElevatedLevel: ElevatedLevel;
@@ -1146,17 +1147,23 @@ export async function runPreparedReply(
       authProfileIdSource,
       thinkLevel: resolvedThinkLevel,
       ...(() => {
-        const fastModeState = useFastReplyRuntime
-          ? { mode: false as const }
-          : resolveFastModeState({
-              cfg,
-              provider,
-              model,
-              agentId,
-              sessionEntry: preparedSessionState.sessionEntry,
-            });
+        if (useFastReplyRuntime) {
+          return {
+            fastMode: false,
+            fastModeAutoOnSeconds: undefined,
+          };
+        }
+        const fastModeState = resolveFastModeState({
+          cfg,
+          provider,
+          model,
+          agentId,
+          sessionEntry: preparedSessionState.sessionEntry,
+        });
         return {
-          fastMode: useFastReplyRuntime ? false : (params.resolvedFastMode ?? fastModeState.mode),
+          fastMode: params.resolvedFastMode ?? fastModeState.mode,
+          fastModeAutoOnSeconds:
+            params.resolvedFastModeAutoOnSeconds ?? fastModeState.fastAutoOnSeconds,
         };
       })(),
       verboseLevel: resolvedVerboseLevel,

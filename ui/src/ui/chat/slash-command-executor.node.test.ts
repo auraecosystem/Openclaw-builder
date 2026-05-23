@@ -703,7 +703,7 @@ describe("executeSlashCommand directives", () => {
       "",
     );
 
-    expect(result.content).toBe("Current fast mode: on.\nOptions: status, auto, on, off, default.");
+    expect(result.content).toBe("Current fast mode: on.\nOptions: on, off, auto, default, status.");
     expect(request).toHaveBeenNthCalledWith(1, "sessions.list", {});
   });
 
@@ -725,7 +725,7 @@ describe("executeSlashCommand directives", () => {
     );
 
     expect(result.content).toBe(
-      "Current fast mode: auto.\nOptions: status, auto, on, off, default.",
+      "Current fast mode: auto.\nOptions: on, off, auto, default, status.",
     );
   });
 

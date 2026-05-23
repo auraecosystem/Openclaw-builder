@@ -3,6 +3,7 @@ import { renderExecTargetLabel } from "../../agents/bash-tools.exec-runtime.js";
 import { resolveExecDefaults } from "../../agents/exec-defaults.js";
 import {
   formatFastModeAutoLabel,
+  formatFastModeSourceSuffix,
   formatFastModeStatusValue,
   formatFastModeValue,
   resolveFastModeState,
@@ -203,24 +204,23 @@ export async function handleDirectiveOnly(
       !directives.rawFastMode ||
       normalizeLowercaseStringOrEmpty(directives.rawFastMode) === "status"
     ) {
-      const sourceSuffix =
-        effectiveFastModeSource === "config"
-          ? " (config)"
-          : effectiveFastModeSource === "default"
-            ? " (default)"
-            : "";
+      const sourceSuffix = formatFastModeSourceSuffix(effectiveFastModeSource);
       const statusText = `Current fast mode: ${formatFastModeStatusValue({
         mode: effectiveFastMode,
+        fastAutoOnSeconds: fastModeState.fastAutoOnSeconds,
       })}${sourceSuffix}.`;
       if (normalizeLowercaseStringOrEmpty(directives.rawFastMode) === "status") {
         return { text: statusText };
       }
       return {
-        text: withOptions(statusText, `status, ${formatFastModeAutoLabel()}, on, off, default`),
+        text: withOptions(
+          statusText,
+          `on, off, ${formatFastModeAutoLabel({ fastAutoOnSeconds: fastModeState.fastAutoOnSeconds })}, default, status`,
+        ),
       };
     }
     return {
-      text: `Unrecognized fast mode "${directives.rawFastMode}". Valid levels: status, auto, on, off, default.`,
+      text: `Unrecognized fast mode "${directives.rawFastMode}". Valid levels: on, off, auto, default, status.`,
     };
   }
   if (directives.hasReasoningDirective && !directives.reasoningLevel) {

@@ -1523,8 +1523,8 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
       agents: {
         defaults: {
           models: {
-            "anthropic/claude": { params: { fastMode: "auto" } },
-            "openai/gpt-5.4": { params: { fastMode: "auto" } },
+            "anthropic/claude": { params: { fastMode: "auto", fastAutoOnSeconds: 30 } },
+            "openai/gpt-5.4": { params: { fastMode: "auto", fastAutoOnSeconds: 45 } },
           },
         },
       },
@@ -1557,6 +1557,8 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
     );
     expect(firstAttempt.fastMode).toBe("auto");
     expect(secondAttempt.fastMode).toBe("auto");
+    expect(firstAttempt.fastModeAutoOnSeconds).toBe(30);
+    expect(secondAttempt.fastModeAutoOnSeconds).toBe(45);
     expect(typeof firstAttempt.fastModeStartedAtMs).toBe("number");
     expect(secondAttempt.fastModeStartedAtMs).toBe(firstAttempt.fastModeStartedAtMs);
   });

@@ -80,15 +80,15 @@ describe("directive behavior", () => {
             workspace: "/tmp/openclaw",
             models: {
               "anthropic/claude-opus-4-6": {
-                params: { fastMode: "auto" },
+                params: { fastMode: "auto", fastAutoOnSeconds: 30 },
               },
             },
           },
         },
       } as OpenClawConfig,
     });
-    expect(fastText).toContain("Current fast mode: auto (60 sec) (config)");
-    expect(fastText).toContain("Options: status, auto (60 sec), on, off, default.");
+    expect(fastText).toContain("Current fast mode: auto (30 sec) (default: model)");
+    expect(fastText).toContain("Options: on, off, auto (30 sec), default, status.");
 
     const { text: verboseText } = await runDirectiveStatus("/verbose", {
       currentVerboseLevel: "on",
@@ -145,7 +145,7 @@ describe("directive behavior", () => {
             workspace: "/tmp/openclaw",
             models: {
               "anthropic/claude-opus-4-6": {
-                params: { fastMode: "auto" },
+                params: { fastMode: "auto", fastAutoOnSeconds: 30 },
               },
             },
           },
@@ -153,7 +153,7 @@ describe("directive behavior", () => {
       } as OpenClawConfig,
     });
 
-    expect(statusText).toContain("Current fast mode: auto (60 sec) (config)");
+    expect(statusText).toContain("Current fast mode: auto (30 sec) (default: model)");
     expect(statusText).not.toContain("Options:");
     expect(runEmbeddedPiAgentMock).not.toHaveBeenCalled();
   });

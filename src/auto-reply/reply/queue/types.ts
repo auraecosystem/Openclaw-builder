@@ -106,6 +106,7 @@ export type FollowupRun = {
     authProfileIdSource?: "auto" | "user";
     thinkLevel?: ThinkLevel;
     fastMode?: FastMode;
+    fastModeAutoOnSeconds?: number;
     verboseLevel?: VerboseLevel;
     reasoningLevel?: ReasoningLevel;
     elevatedLevel?: ElevatedLevel;

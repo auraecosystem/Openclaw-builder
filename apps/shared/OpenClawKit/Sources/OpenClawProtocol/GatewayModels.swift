@@ -6373,7 +6373,7 @@ public struct ChatSendParams: Codable, Sendable {
     public let thinking: String?
     public let fastmodevalue: AnyCodable?
     public var fastmode: Bool? { fastmodevalue?.value as? Bool }
-    public let fastseconds: Int?
+    public let fastautoonseconds: Int?
     public let deliver: Bool?
     public let originatingchannel: String?
     public let originatingto: String?
@@ -6391,7 +6391,7 @@ public struct ChatSendParams: Codable, Sendable {
         message: String,
         thinking: String?,
         fastmode: AnyCodable?,
-        fastseconds: Int?,
+        fastautoonseconds: Int?,
         deliver: Bool?,
         originatingchannel: String?,
         originatingto: String?,
@@ -6408,7 +6408,7 @@ public struct ChatSendParams: Codable, Sendable {
         self.message = message
         self.thinking = thinking
         self.fastmodevalue = fastmode
-        self.fastseconds = fastseconds
+        self.fastautoonseconds = fastautoonseconds
         self.deliver = deliver
         self.originatingchannel = originatingchannel
         self.originatingto = originatingto
@@ -6427,6 +6427,7 @@ public struct ChatSendParams: Codable, Sendable {
         message: String,
         thinking: String?,
         fastmode: Bool?,
+        fastautoonseconds: Int?,
         deliver: Bool?,
         originatingchannel: String?,
         originatingto: String?,
@@ -6444,7 +6445,7 @@ public struct ChatSendParams: Codable, Sendable {
             message: message,
             thinking: thinking,
             fastmode: fastmode.map { AnyCodable($0) },
-            fastseconds: nil,
+            fastautoonseconds: fastautoonseconds,
             deliver: deliver,
             originatingchannel: originatingchannel,
             originatingto: originatingto,
@@ -6463,7 +6464,7 @@ public struct ChatSendParams: Codable, Sendable {
         case message
         case thinking
         case fastmodevalue = "fastMode"
-        case fastseconds = "fast_seconds"
+        case fastautoonseconds = "fastAutoOnSeconds"
         case deliver
         case originatingchannel = "originatingChannel"
         case originatingto = "originatingTo"

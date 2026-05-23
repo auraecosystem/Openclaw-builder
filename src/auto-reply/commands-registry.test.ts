@@ -419,19 +419,21 @@ describe("commands registry", () => {
             model: "openai-codex/gpt-5.5",
             models: {
               "openai-codex/gpt-5.5": {
-                params: { fastMode: "auto" },
+                params: { fastMode: "auto", fastAutoOnSeconds: 30 },
               },
             },
           },
         },
       } as never,
+      provider: "openai-codex",
+      model: "gpt-5.5",
     });
     expect(menu.choices).toEqual([
-      { label: "status", value: "status" },
-      { label: "auto (60 sec)", value: "auto" },
       { label: "on", value: "on" },
       { label: "off", value: "off" },
+      { label: "auto (30 sec)", value: "auto" },
       { label: "default", value: "default" },
+      { label: "status", value: "status" },
     ]);
   });
 

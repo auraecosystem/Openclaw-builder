@@ -319,6 +319,7 @@ describe("resolveReplyDirectives", () => {
       mode: sessionEntry?.sessionId === "target-session",
       enabled: sessionEntry?.sessionId === "target-session",
       source: "session",
+      fastAutoOnSeconds: 60,
     }));
     mocks.resolveReplyExecOverrides.mockReturnValue(undefined);
   });
@@ -349,6 +350,7 @@ describe("resolveReplyDirectives", () => {
 
     expectContinueResult(result, {
       resolvedFastMode: "auto",
+      resolvedFastModeAutoOnSeconds: 60,
     });
   });
 
@@ -358,6 +360,7 @@ describe("resolveReplyDirectives", () => {
         mode: provider === "openai" && model === "gpt-5.5" ? "auto" : false,
         enabled: provider === "openai" && model === "gpt-5.5",
         source: "config",
+        fastAutoOnSeconds: provider === "openai" && model === "gpt-5.5" ? 30 : 60,
       }),
     );
 
@@ -378,6 +381,7 @@ describe("resolveReplyDirectives", () => {
       provider: "openai",
       model: "gpt-5.5",
       resolvedFastMode: "auto",
+      resolvedFastModeAutoOnSeconds: 30,
     });
   });
 

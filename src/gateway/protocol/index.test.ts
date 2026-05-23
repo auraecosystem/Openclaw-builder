@@ -608,7 +608,7 @@ describe("validateChatEvent", () => {
 });
 
 describe("validateChatSendParams", () => {
-  it("keeps the deprecated fast:auto cutoff field accepted for protocol 4", () => {
+  it("accepts one-turn fast:auto cutoff seconds", () => {
     const base = {
       sessionKey: "agent:main:main",
       message: "hello",
@@ -617,8 +617,8 @@ describe("validateChatSendParams", () => {
     };
 
     expect(validateChatSendParams(base)).toBe(true);
-    expect(validateChatSendParams({ ...base, fast_seconds: 2 })).toBe(true);
-    expect(validateChatSendParams({ ...base, fastSeconds: 2 })).toBe(false);
+    expect(validateChatSendParams({ ...base, fastAutoOnSeconds: 2 })).toBe(true);
+    expect(validateChatSendParams({ ...base, fastAutoOnSeconds: 0 })).toBe(false);
   });
 });
 

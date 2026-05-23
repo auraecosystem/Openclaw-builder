@@ -737,7 +737,7 @@ describe("registerTelegramNativeCommands — session metadata", () => {
     expect(replyMocks.dispatchReplyWithBufferedBlockDispatcher).not.toHaveBeenCalled();
   });
 
-  it("does not use runtime model metadata for the fast menu", async () => {
+  it("uses the current runtime model metadata for the fast menu", async () => {
     const cfg = {
       agents: {
         defaults: {
@@ -745,6 +745,9 @@ describe("registerTelegramNativeCommands — session metadata", () => {
           models: {
             "openai/gpt-5.5": {
               params: { fastMode: "auto" },
+            },
+            "openai-codex/gpt-5.5": {
+              params: { fastMode: "auto", fastAutoOnSeconds: 30 },
             },
           },
         },
@@ -776,11 +779,12 @@ describe("registerTelegramNativeCommands — session metadata", () => {
           params.command.key === "fast" &&
           (params.provider === "openai" || params.provider === "openai-codex"),
       ),
-    ).toBe(false);
+    ).toBe(true);
     const options = expectSendMessageCall({
       sendMessage,
       chatId: 100,
-      textIncludes: "Current fast mode: auto (60 sec).\nChoose mode for /fast.",
+      textIncludes:
+        "Current fast mode: auto (30 sec) (session).\nOptions: on, off, auto (30 sec), default, status.",
       requireReplyMarkup: true,
       label: "fast menu",
     });
@@ -790,7 +794,7 @@ describe("registerTelegramNativeCommands — session metadata", () => {
     const labels = (replyMarkup?.inline_keyboard ?? []).flatMap((row) =>
       row.map((button) => button.text),
     );
-    expect(labels).toContain("auto (60 sec)");
+    expect(labels).toContain("auto (30 sec)");
     expect(replyMocks.dispatchReplyWithBufferedBlockDispatcher).not.toHaveBeenCalled();
   });
 

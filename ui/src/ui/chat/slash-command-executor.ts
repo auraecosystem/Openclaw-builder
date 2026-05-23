@@ -369,7 +369,7 @@ async function executeFast(
       return {
         content: formatDirectiveOptions(
           `Current fast mode: ${resolveCurrentFastMode(session)}.`,
-          "status, auto, on, off, default",
+          "on, off, auto, default, status",
         ),
       };
     } catch (err) {
@@ -392,7 +392,7 @@ async function executeFast(
   const nextMode = normalizeFastMode(rawMode);
   if (nextMode === undefined) {
     return {
-      content: `Unrecognized fast mode "${args.trim()}". Valid levels: status, auto, on, off, default.`,
+      content: `Unrecognized fast mode "${args.trim()}". Valid levels: on, off, auto, default, status.`,
     };
   }
 

@@ -72,6 +72,8 @@ export type GetReplyOptions = {
   thinkingLevelOverride?: string;
   /** One-shot fast-mode override for this run; does not persist to the session. */
   fastModeOverride?: FastMode;
+  /** One-shot auto fast-mode cutoff override in seconds; does not persist to the session. */
+  fastModeAutoOnSecondsOverride?: number;
   /** Controls bootstrap workspace context injection (default: full). */
   bootstrapContextMode?: "full" | "lightweight";
   /** If true, suppress tool error warning payloads for this run. */
