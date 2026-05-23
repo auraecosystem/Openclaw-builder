@@ -368,6 +368,24 @@ describe("broadcast dispatch", () => {
     expect(mockGetChatInfo).not.toHaveBeenCalled();
   });
 
+  it("allows card-action synthetic messages to bypass requireMention in groups", async () => {
+    const cfg = createBroadcastConfig();
+    const event = createBroadcastEvent({
+      messageId: "card-action-test-token",
+      text: "execute_confirmed",
+    });
+
+    await handleFeishuMessage({
+      cfg,
+      event,
+      botOpenId: "ou_known_bot",
+      runtime: createRuntimeEnv(),
+    });
+
+    expect(mockDispatchReplyFromConfig).toHaveBeenCalledTimes(2);
+    expect(mockCreateFeishuReplyDispatcher).toHaveBeenCalledTimes(1);
+  });
+
   it("skips broadcast dispatch when bot identity is unknown (requireMention=true)", async () => {
     const cfg = createBroadcastConfig();
     const event = createBroadcastEvent({

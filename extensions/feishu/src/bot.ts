@@ -660,6 +660,12 @@ export async function handleFeishuMessage(params: {
       groupPolicy,
     }));
 
+    // Card action callbacks are direct responses to bot-initiated interactions;
+    // they should bypass requireMention since the user already engaged with the bot.
+    if (event.message.message_id?.startsWith("card-action-")) {
+      requireMention = false;
+    }
+
     const groupSenderActivationIngress = await resolveFeishuGroupSenderActivationIngressAccess({
       cfg,
       accountId: account.accountId,
