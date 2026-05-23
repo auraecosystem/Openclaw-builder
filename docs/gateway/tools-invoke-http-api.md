@@ -119,6 +119,7 @@ Gateway HTTP also applies a hard deny list by default (even if session policy al
 - `gateway` - gateway control plane; prevents reconfiguration via HTTP
 - `nodes` - node command relay can reach system.run on paired hosts
 - `whatsapp_login` - interactive setup requiring terminal QR scan; hangs on HTTP
+- `read` - workspace file read; the coding `read` tool is wired into `/tools/invoke` but default-denied because exposing workspace file contents over authenticated HTTP is a security boundary the operator must accept. Opt in via `gateway.tools.allow: ["read"]`. Unlike the entries above, this is data exposure (not RCE / session orchestration), so the appropriate review is "is this workspace's content safe to expose over this surface" rather than "should remote shell run".
 
 You can customize this deny list via `gateway.tools`:
 

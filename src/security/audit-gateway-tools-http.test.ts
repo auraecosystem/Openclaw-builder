@@ -56,4 +56,23 @@ describe("security audit gateway HTTP tool findings", () => {
       ).toBe(true);
     },
   );
+
+  it("emits a data-exposure finding (not RCE) when only `read` is opted in", () => {
+    // `read` is on DEFAULT_GATEWAY_HTTP_TOOL_DENY but its exposure shape is
+    // workspace data access, not RCE / session orchestration. The audit must
+    // emit a separate finding with appropriately scoped wording.
+    const cfg = {
+      gateway: {
+        bind: "loopback",
+        auth: { token: "secret" },
+        tools: { allow: ["read"] },
+      },
+    } satisfies OpenClawConfig;
+    const findings = collectGatewayConfigFindings(cfg, cfg, {});
+    expect(hasFinding(findings, "gateway.tools_invoke_http.workspace_read_allow", "warn")).toBe(
+      true,
+    );
+    // And the RCE-flavored finding should NOT fire for a read-only opt-in.
+    expect(hasFinding(findings, "gateway.tools_invoke_http.dangerous_allow")).toBe(false);
+  });
 });
