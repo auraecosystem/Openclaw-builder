@@ -54,6 +54,58 @@ function createAssistantTextBridge(params: {
   };
 }
 
+export type CliToolEventPayload = {
+  name: string | undefined;
+  phase: "start" | "update";
+  args: Record<string, unknown> | undefined;
+};
+
+function createToolEventBridge(params: {
+  runId: string;
+  suppressed?: boolean;
+  deliver?: (payload: CliToolEventPayload) => Promise<void>;
+}) {
+  const deliver = params.deliver;
+  if (!deliver) {
+    return {
+      unsubscribe: () => undefined,
+      drain: async (): Promise<void> => undefined,
+    };
+  }
+  let unsubscribed = false;
+  let delivery = Promise.resolve();
+  const rawUnsubscribe = onAgentEvent((evt) => {
+    if (evt.runId !== params.runId || evt.stream !== "tool") {
+      return;
+    }
+    if (params.suppressed) {
+      return;
+    }
+    const phase = typeof evt.data.phase === "string" ? evt.data.phase : "";
+    if (phase !== "start" && phase !== "update") {
+      return;
+    }
+    const name = typeof evt.data.name === "string" ? evt.data.name : undefined;
+    const args =
+      evt.data.args && typeof evt.data.args === "object"
+        ? (evt.data.args as Record<string, unknown>)
+        : undefined;
+    delivery = delivery.then(() => deliver({ name, phase, args })).catch(() => undefined);
+  });
+  return {
+    unsubscribe() {
+      if (unsubscribed) {
+        return;
+      }
+      unsubscribed = true;
+      rawUnsubscribe();
+    },
+    async drain(): Promise<void> {
+      await delivery;
+    },
+  };
+}
+
 export async function runCliAgentWithLifecycle(params: {
   runId: string;
   provider: string;
@@ -65,6 +117,7 @@ export async function runCliAgentWithLifecycle(params: {
   suppressAssistantBridge?: boolean;
   onAssistantText?: (text: string) => Promise<void>;
   onReasoningText?: (text: string) => Promise<void>;
+  onToolEvent?: (payload: CliToolEventPayload) => Promise<void>;
   onErrorBeforeLifecycle?: (err: unknown) => Promise<void>;
   transformResult?: (result: EmbeddedPiRunResult) => EmbeddedPiRunResult;
 }): Promise<EmbeddedPiRunResult> {
@@ -94,14 +147,27 @@ export async function runCliAgentWithLifecycle(params: {
       ? params.onReasoningText
       : undefined,
   });
+  // `suppressAssistantBridge` (= `silentExpected`) gates tool events too. The
+  // embedded native runtime does NOT gate tool events on `silentExpected`; only
+  // assistant + reasoning are gated there. We're stricter on the CLI side
+  // because silent-expected CLI runs are typically background/heartbeat turns
+  // where channel preview tool-progress would surface activity the channel did
+  // not subscribe to. Locked in by `agent-runner-execution.test.ts:1429`.
+  const toolBridge = createToolEventBridge({
+    runId: params.runId,
+    suppressed: params.suppressAssistantBridge,
+    deliver: params.onToolEvent,
+  });
   let lifecycleTerminalEmitted = false;
   try {
     const rawResult = await runCliAgent(params.runParams);
     const result = params.transformResult?.(rawResult) ?? rawResult;
     assistantBridge.unsubscribe();
     reasoningBridge.unsubscribe();
+    toolBridge.unsubscribe();
     await assistantBridge.drain();
     await reasoningBridge.drain();
+    await toolBridge.drain();
 
     const cliText = normalizeOptionalString(result.payloads?.[0]?.text);
     if (cliText) {
@@ -128,8 +194,10 @@ export async function runCliAgentWithLifecycle(params: {
   } catch (err) {
     assistantBridge.unsubscribe();
     reasoningBridge.unsubscribe();
+    toolBridge.unsubscribe();
     await assistantBridge.drain();
     await reasoningBridge.drain();
+    await toolBridge.drain();
     await params.onErrorBeforeLifecycle?.(err);
     if (emitLifecycleTerminal) {
       emitAgentEvent({
@@ -148,6 +216,7 @@ export async function runCliAgentWithLifecycle(params: {
   } finally {
     assistantBridge.unsubscribe();
     reasoningBridge.unsubscribe();
+    toolBridge.unsubscribe();
     if (emitLifecycleTerminal && !lifecycleTerminalEmitted) {
       emitAgentEvent({
         runId: params.runId,

@@ -1742,6 +1742,18 @@ export async function runAgentTurnWithFallback(params: {
               onReasoningText: async (text) => {
                 await params.opts?.onReasoningStream?.({ text });
               },
+              onToolEvent: async ({ name, phase, args }) => {
+                const toolStartProgressPromise = params.opts?.onToolStart?.({
+                  name,
+                  phase,
+                  args,
+                  detailMode: params.toolProgressDetail,
+                });
+                await Promise.all([
+                  params.typingSignals.signalToolStart(),
+                  toolStartProgressPromise,
+                ]);
+              },
               onErrorBeforeLifecycle: async () => {
                 if (!rollbackFallbackCandidateSelection) {
                   return;

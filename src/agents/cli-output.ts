@@ -26,6 +26,24 @@ export type CliStreamingDelta = {
   usage?: CliUsage;
 };
 
+export type CliToolUseStartDelta = {
+  toolCallId: string;
+  name: string;
+  args: Record<string, unknown>;
+};
+
+export type CliToolResultDelta = {
+  toolCallId: string;
+  name: string;
+  isError: boolean;
+  result?: unknown;
+};
+
+export type CliThinkingDelta = {
+  text: string;
+  delta: string;
+};
+
 function isClaudeCliProvider(providerId: string): boolean {
   return normalizeLowercaseStringOrEmpty(providerId) === "claude-cli";
 }
@@ -379,10 +397,281 @@ function parseClaudeCliStreamingDelta(params: {
   };
 }
 
+type PendingToolUse = {
+  toolCallId: string;
+  name: string;
+  inputJsonParts: string[];
+};
+
+type ToolUseTracker = {
+  // claude streams content_block_start (id + name, no args), then a sequence
+  // of content_block_delta events with input_json_delta partial_json chunks,
+  // then content_block_stop. inputJsonParts collects the chunks so they can
+  // be reassembled into the tool's args at stop time. The post-block
+  // assistant snapshot carries the full input redundantly and the
+  // emit-once guard dedups; the snapshot remains the fallback when a turn
+  // aborts before any input_json_delta arrives.
+  pendingByIndex: Map<number, PendingToolUse>;
+  // retained so tool_result events can carry `name` like the embedded handler.
+  nameById: Map<string, string>;
+  startedIds: Set<string>;
+  resultDeliveredIds: Set<string>;
+};
+
+function createToolUseTracker(): ToolUseTracker {
+  return {
+    pendingByIndex: new Map(),
+    nameById: new Map(),
+    startedIds: new Set(),
+    resultDeliveredIds: new Set(),
+  };
+}
+
+function emitToolStartOnce(
+  tracker: ToolUseTracker,
+  toolCallId: string,
+  name: string,
+  args: Record<string, unknown>,
+  onToolUseStart?: (delta: CliToolUseStartDelta) => void,
+): void {
+  if (tracker.startedIds.has(toolCallId)) {
+    return;
+  }
+  tracker.startedIds.add(toolCallId);
+  tracker.nameById.set(toolCallId, name);
+  onToolUseStart?.({ toolCallId, name, args });
+}
+
+function dispatchClaudeCliStreamingToolEvent(params: {
+  backend: CliBackendConfig;
+  providerId: string;
+  parsed: Record<string, unknown>;
+  tracker: ToolUseTracker;
+  onToolUseStart?: (delta: CliToolUseStartDelta) => void;
+  onToolResult?: (delta: CliToolResultDelta) => void;
+}): void {
+  if (!usesClaudeStreamJsonDialect(params)) {
+    return;
+  }
+  const tracker = params.tracker;
+
+  if (params.parsed.type === "stream_event" && isRecord(params.parsed.event)) {
+    const event = params.parsed.event;
+    if (
+      event.type === "content_block_start" &&
+      typeof event.index === "number" &&
+      isRecord(event.content_block)
+    ) {
+      const block = event.content_block;
+      if (
+        block.type === "tool_use" ||
+        block.type === "server_tool_use" ||
+        block.type === "mcp_tool_use"
+      ) {
+        const toolCallId = typeof block.id === "string" ? block.id.trim() : "";
+        const name = typeof block.name === "string" ? block.name.trim() : "";
+        if (toolCallId && name) {
+          tracker.pendingByIndex.set(event.index, { toolCallId, name, inputJsonParts: [] });
+        }
+      }
+      return;
+    }
+    if (
+      event.type === "content_block_delta" &&
+      typeof event.index === "number" &&
+      isRecord(event.delta)
+    ) {
+      if (event.delta.type === "input_json_delta" && typeof event.delta.partial_json === "string") {
+        const pending = tracker.pendingByIndex.get(event.index);
+        pending?.inputJsonParts.push(event.delta.partial_json);
+      }
+      return;
+    }
+    if (event.type === "content_block_stop" && typeof event.index === "number") {
+      const pending = tracker.pendingByIndex.get(event.index);
+      tracker.pendingByIndex.delete(event.index);
+      if (pending) {
+        let args: Record<string, unknown> = {};
+        if (pending.inputJsonParts.length > 0) {
+          try {
+            const parsed: unknown = JSON.parse(pending.inputJsonParts.join(""));
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              args = parsed as Record<string, unknown>;
+            }
+          } catch {
+            // Malformed/truncated partial JSON — fall through with empty
+            // args; assistant snapshot branch may still backfill below.
+          }
+        }
+        emitToolStartOnce(tracker, pending.toolCallId, pending.name, args, params.onToolUseStart);
+      }
+      return;
+    }
+    return;
+  }
+
+  if (params.parsed.type === "assistant" && isRecord(params.parsed.message)) {
+    const message = params.parsed.message;
+    const content = Array.isArray(message.content) ? message.content : [];
+    for (const block of content) {
+      if (
+        !isRecord(block) ||
+        (block.type !== "tool_use" &&
+          block.type !== "server_tool_use" &&
+          block.type !== "mcp_tool_use")
+      ) {
+        continue;
+      }
+      const toolCallId = typeof block.id === "string" ? block.id.trim() : "";
+      const name = typeof block.name === "string" ? block.name.trim() : "";
+      if (!toolCallId || !name) {
+        continue;
+      }
+      const args: Record<string, unknown> = isRecord(block.input) ? block.input : {};
+      emitToolStartOnce(tracker, toolCallId, name, args, params.onToolUseStart);
+    }
+    return;
+  }
+
+  if (params.parsed.type === "user" && isRecord(params.parsed.message)) {
+    const message = params.parsed.message;
+    const content = Array.isArray(message.content) ? message.content : [];
+    for (const block of content) {
+      if (!isRecord(block) || block.type !== "tool_result") {
+        continue;
+      }
+      const toolCallId = typeof block.tool_use_id === "string" ? block.tool_use_id.trim() : "";
+      if (!toolCallId || tracker.resultDeliveredIds.has(toolCallId)) {
+        continue;
+      }
+      tracker.resultDeliveredIds.add(toolCallId);
+      params.onToolResult?.({
+        toolCallId,
+        name: tracker.nameById.get(toolCallId) ?? "",
+        isError: block.is_error === true,
+        result: block.content,
+      });
+    }
+    return;
+  }
+}
+
+type PendingThinkingBlock = {
+  // Text accumulated from streaming thinking_delta chunks. Stays empty
+  // when the block is the single-block redacted shape and no chunks
+  // arrive between content_block_start and content_block_stop.
+  accumulated: string;
+  // Whether any thinking_delta event was observed for this index. Drives
+  // the single-block detection at content_block_stop time.
+  receivedDelta: boolean;
+  // Seed content captured from the content_block_start payload. On the
+  // adaptive single-block path the API returns the block fully-formed at
+  // start with the content under `text` or `thinking`; we surface it as
+  // one event at content_block_stop when no streaming delta arrived.
+  seedContent: string;
+};
+
+type ThinkingTracker = {
+  pendingByIndex: Map<number, PendingThinkingBlock>;
+};
+
+function createThinkingTracker(): ThinkingTracker {
+  return {
+    pendingByIndex: new Map(),
+  };
+}
+
+function readThinkingSeedContent(block: Record<string, unknown>): string {
+  if (typeof block.thinking === "string" && block.thinking) {
+    return block.thinking;
+  }
+  if (typeof block.text === "string" && block.text) {
+    return block.text;
+  }
+  return "";
+}
+
+function dispatchClaudeCliStreamingThinkingEvent(params: {
+  backend: CliBackendConfig;
+  providerId: string;
+  parsed: Record<string, unknown>;
+  tracker: ThinkingTracker;
+  onThinkingDelta?: (delta: CliThinkingDelta) => void;
+}): void {
+  if (!params.onThinkingDelta) {
+    return;
+  }
+  if (!usesClaudeStreamJsonDialect(params)) {
+    return;
+  }
+  if (params.parsed.type !== "stream_event" || !isRecord(params.parsed.event)) {
+    return;
+  }
+  const event = params.parsed.event;
+  const tracker = params.tracker;
+
+  if (
+    event.type === "content_block_start" &&
+    typeof event.index === "number" &&
+    isRecord(event.content_block) &&
+    event.content_block.type === "thinking"
+  ) {
+    tracker.pendingByIndex.set(event.index, {
+      accumulated: "",
+      receivedDelta: false,
+      seedContent: readThinkingSeedContent(event.content_block),
+    });
+    return;
+  }
+
+  if (
+    event.type === "content_block_delta" &&
+    typeof event.index === "number" &&
+    isRecord(event.delta) &&
+    event.delta.type === "thinking_delta" &&
+    typeof event.delta.thinking === "string"
+  ) {
+    const pending = tracker.pendingByIndex.get(event.index);
+    if (!pending) {
+      return;
+    }
+    const chunk = event.delta.thinking;
+    if (!chunk) {
+      return;
+    }
+    pending.receivedDelta = true;
+    pending.accumulated = `${pending.accumulated}${chunk}`;
+    params.onThinkingDelta({ text: pending.accumulated, delta: chunk });
+    return;
+  }
+
+  if (event.type === "content_block_stop" && typeof event.index === "number") {
+    const pending = tracker.pendingByIndex.get(event.index);
+    if (!pending) {
+      return;
+    }
+    tracker.pendingByIndex.delete(event.index);
+    if (pending.receivedDelta) {
+      return;
+    }
+    if (!pending.seedContent) {
+      // Redacted thinking with no surfaced content (encrypted-only blob,
+      // for example). Nothing useful to render; drop silently rather than
+      // emit an empty event.
+      return;
+    }
+    params.onThinkingDelta({ text: pending.seedContent, delta: pending.seedContent });
+    return;
+  }
+}
+
 export function createCliJsonlStreamingParser(params: {
   backend: CliBackendConfig;
   providerId: string;
   onAssistantDelta: (delta: CliStreamingDelta) => void;
+  onToolUseStart?: (delta: CliToolUseStartDelta) => void;
+  onToolResult?: (delta: CliToolResultDelta) => void;
+  onThinkingDelta?: (delta: CliThinkingDelta) => void;
 }) {
   let lineBuffer = "";
   let assistantText = "";
@@ -390,6 +679,8 @@ export function createCliJsonlStreamingParser(params: {
   let usage: CliUsage | undefined;
   let output: CliOutput | null = null;
   const texts: string[] = [];
+  const toolTracker = createToolUseTracker();
+  const thinkingTracker = createThinkingTracker();
 
   const handleParsedRecord = (parsed: Record<string, unknown>) => {
     sessionId = pickCliSessionId(parsed, params.backend) ?? sessionId;
@@ -416,6 +707,27 @@ export function createCliJsonlStreamingParser(params: {
       if (!type || type.includes("message")) {
         texts.push(item.text);
       }
+    }
+
+    if (params.onToolUseStart || params.onToolResult) {
+      dispatchClaudeCliStreamingToolEvent({
+        backend: params.backend,
+        providerId: params.providerId,
+        parsed,
+        tracker: toolTracker,
+        onToolUseStart: params.onToolUseStart,
+        onToolResult: params.onToolResult,
+      });
+    }
+
+    if (params.onThinkingDelta) {
+      dispatchClaudeCliStreamingThinkingEvent({
+        backend: params.backend,
+        providerId: params.providerId,
+        parsed,
+        tracker: thinkingTracker,
+        onThinkingDelta: params.onThinkingDelta,
+      });
     }
 
     const delta = parseClaudeCliStreamingDelta({
