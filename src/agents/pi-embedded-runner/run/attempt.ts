@@ -2224,6 +2224,9 @@ export async function runEmbeddedAttempt(
         provider: params.provider,
         modelId: params.modelId,
         model: params.model,
+        modelRegistry: params.modelRegistry,
+        agentDir,
+        workspaceDir: resolvedWorkspace,
       });
       const resourceLoader = createEmbeddedPiResourceLoader({
         cwd: resolvedWorkspace,
