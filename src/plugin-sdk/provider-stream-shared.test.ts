@@ -65,8 +65,9 @@ describe("isOpenAICompatibleThinkingEnabled", () => {
 });
 
 describe("createDeepSeekV4OpenAICompatibleThinkingWrapper", () => {
-  it("backfills reasoning_content on every replayed assistant message when thinking is enabled", () => {
+  it("removes the unsupported thinking field and backfills reasoning_content when thinking is enabled", () => {
     const payload = {
+      thinking: { type: "enabled" },
       messages: [
         { role: "user", content: "read file" },
         { role: "assistant", tool_calls: [{ id: "call_1", name: "read" }] },
@@ -84,14 +85,46 @@ describe("createDeepSeekV4OpenAICompatibleThinkingWrapper", () => {
       baseStreamFn,
       thinkingLevel: "high",
       shouldPatchModel: () => true,
+      emitThinkingField: false,
     });
     void wrapped?.({} as never, {} as never, {});
 
+    expect(payload).not.toHaveProperty("thinking");
+    expect(payload).toHaveProperty("reasoning_effort", "high");
     expect(payload.messages[0]).not.toHaveProperty("reasoning_content");
     expect(payload.messages[1]).toHaveProperty("reasoning_content", "");
     expect(payload.messages[2]).not.toHaveProperty("reasoning_content");
     expect(payload.messages[3]).toHaveProperty("reasoning_content", "");
     expect(payload.messages[4]).toHaveProperty("reasoning_content", "native reasoning");
+  });
+
+  it("removes thinking and strips reasoning fields when thinking is disabled", () => {
+    const payload = {
+      thinking: { type: "disabled" },
+      reasoning_effort: "high",
+      reasoning: "high",
+      messages: [
+        { role: "user", content: "read file" },
+        { role: "assistant", content: "done", reasoning_content: "should be stripped" },
+      ],
+    };
+    const baseStreamFn: StreamFn = (_model, _context, options) => {
+      options?.onPayload?.(payload as never, _model as never);
+      return {} as ReturnType<StreamFn>;
+    };
+
+    const wrapped = createDeepSeekV4OpenAICompatibleThinkingWrapper({
+      baseStreamFn,
+      thinkingLevel: "off",
+      shouldPatchModel: () => true,
+      emitThinkingField: false,
+    });
+    void wrapped?.({} as never, {} as never, {});
+
+    expect(payload).not.toHaveProperty("thinking");
+    expect(payload).not.toHaveProperty("reasoning_effort");
+    expect(payload).not.toHaveProperty("reasoning");
+    expect(payload.messages[1]).not.toHaveProperty("reasoning_content");
   });
 });
 

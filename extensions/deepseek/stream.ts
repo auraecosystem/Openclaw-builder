@@ -10,5 +10,6 @@ export function createDeepSeekV4ThinkingWrapper(
     baseStreamFn,
     thinkingLevel,
     shouldPatchModel: isDeepSeekV4ModelRef,
+    emitThinkingField: false,
   });
 }
