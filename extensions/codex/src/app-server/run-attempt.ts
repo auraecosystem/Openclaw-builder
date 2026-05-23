@@ -744,19 +744,6 @@ function maxFiniteNumber(values: Array<number | undefined>): number | undefined 
   return Math.max(...nums);
 }
 
-function resolveCodexStartupRotationCompactionConfig(
-  config: EmbeddedRunAttemptParams["config"] | undefined,
-  sessionAgentId?: string | null,
-) {
-  if (config && sessionAgentId) {
-    const agentEntry = config.agents?.list?.find((entry) => entry?.id === sessionAgentId);
-    if (agentEntry && Object.hasOwn(agentEntry, "compaction")) {
-      return agentEntry.compaction;
-    }
-  }
-  return resolveAgentCompactionConfig(config, sessionAgentId);
-}
-
 async function rotateOversizedCodexAppServerStartupBinding(params: {
   binding: CodexAppServerThreadBinding | undefined;
   sessionFile: string;
@@ -769,10 +756,7 @@ async function rotateOversizedCodexAppServerStartupBinding(params: {
   if (!binding?.threadId) {
     return binding;
   }
-  const compactionConfig = resolveCodexStartupRotationCompactionConfig(
-    params.config,
-    params.sessionAgentId,
-  );
+  const compactionConfig = resolveAgentCompactionConfig(params.config, params.sessionAgentId);
   if (compactionConfig?.truncateAfterCompaction !== true) {
     return binding;
   }
