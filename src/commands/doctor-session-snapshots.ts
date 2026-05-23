@@ -272,6 +272,7 @@ export async function noteSessionSnapshotHealth(params?: {
   bundledSkillsDir?: string;
   cfg?: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
+  shouldRepair?: boolean;
 }) {
   const bundledSkillsDir = params?.bundledSkillsDir ?? resolveBundledSkillsDir();
   if (!bundledSkillsDir) {
@@ -314,6 +315,46 @@ export async function noteSessionSnapshotHealth(params?: {
       findings.map((finding) => finding.sessionKey),
     ),
   );
+
+  // Auto-repair stale paths when --fix is used
+  if (params?.shouldRepair) {
+    let repairedStores = 0;
+    let totalReplacements = 0;
+    for (const [storePath, findings] of findingsByStore) {
+      try {
+        const raw = fs.readFileSync(storePath, "utf-8");
+        let fixed = raw;
+        for (const finding of findings) {
+          // Escape special regex characters in the cached path for a literal replacement
+          const escaped = finding.cachedPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const count = (fixed.match(new RegExp(escaped, "g")) ?? []).length;
+          if (count > 0) {
+            fixed = fixed.replaceAll(finding.cachedPath, finding.expectedPath);
+            totalReplacements += count;
+          }
+        }
+        if (fixed !== raw) {
+          // Create backup before writing
+          const backupPath = `${storePath}.bak.${Date.now()}`;
+          fs.writeFileSync(backupPath, raw, { mode: 0o600 });
+          fs.writeFileSync(storePath, fixed, { mode: 0o600 });
+          repairedStores++;
+        }
+      } catch (err) {
+        note(
+          `- Failed to repair session snapshot paths in ${shortenHomePath(storePath)}: ${String(err)}`,
+          "Session snapshots",
+        );
+      }
+    }
+    if (repairedStores > 0) {
+      note(
+        `- Repaired ${totalReplacements} stale path${totalReplacements === 1 ? "" : "s"} across ${repairedStores} store${repairedStores === 1 ? "" : "s"}.`,
+        "Session snapshots",
+      );
+      return;
+    }
+  }
   const lines = [
     `- Found ${affectedSessions.size} session${affectedSessions.size === 1 ? "" : "s"} with stale cached session metadata paths.`,
     `  Live bundled skills root is healthy: ${shortenHomePath(bundledSkillsDir)}`,
