@@ -193,6 +193,14 @@ export function resolveGatewayScopedTools(params: {
   //   adjusted-params state.
   // - Existing `gateway.tools.{allow,deny}` policy still applies; this only
   //   adds `read` to the candidate set the policy filters.
+  // Construction plan limits the factory to just the base coding tool family
+  // (read/write/edit/apply_patch) — no shell (exec/process), no channel,
+  // OpenClaw, or plugin tools. Then we filter to `read`. This addresses
+  // ClawSweeper's [P2] "Pass a read-only construction plan before filtering"
+  // finding: without the plan, the default factory materializes the full set
+  // (shell + channel + OpenClaw + plugins) only to throw them away in the
+  // filter, wasting work and unnecessarily exercising plugin/channel surfaces
+  // for a request that only wants `read`.
   const codingTools =
     surface === "http"
       ? createOpenClawCodingToolsRaw({
@@ -201,6 +209,13 @@ export function resolveGatewayScopedTools(params: {
           workspaceDir,
           agentDir: resolveAgentDir(params.cfg, agentId ?? resolveDefaultAgentId(params.cfg)),
           config: params.cfg,
+          toolConstructionPlan: {
+            includeBaseCodingTools: true,
+            includeShellTools: false,
+            includeChannelTools: false,
+            includeOpenClawTools: false,
+            includePluginTools: false,
+          },
         }).filter((tool) => tool.name === "read")
       : [];
 
