@@ -62,6 +62,7 @@ const hoisted = vi.hoisted(() => {
   const warmCurrentProviderAuthState = vi.fn(async (_cfg: unknown) => {});
   const disposeAllSessionMcpRuntimes = vi.fn(async () => {});
   const resolveOpenClawPackageRootSync = vi.fn((_params: unknown) => "/package");
+  const prepareSecretsRuntimeSnapshot = vi.fn();
 
   const providerManager = {
     getRuntimeSnapshot: vi.fn(() => ({
@@ -172,12 +173,21 @@ const hoisted = vi.hoisted(() => {
     createChannelManager,
     startGatewayConfigReloader,
     reloaderStop,
+    prepareSecretsRuntimeSnapshot,
     getOnHotReload: () => onHotReload,
     getOnRestart: () => onRestart,
     resetReloadCallbacks: () => {
       onHotReload = null;
       onRestart = null;
     },
+  };
+});
+
+vi.mock("../secrets/runtime.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../secrets/runtime.js")>();
+  return {
+    ...actual,
+    prepareSecretsRuntimeSnapshot: hoisted.prepareSecretsRuntimeSnapshot,
   };
 });
 
@@ -341,8 +351,11 @@ describe("gateway hot reload", () => {
   let prevSkipProviders: string | undefined;
   let prevOpenAiApiKey: string | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    const { prepareSecretsRuntimeSnapshot: originalFn } =
+      await vi.importActual<typeof import("../secrets/runtime.js")>("../secrets/runtime.js");
+    hoisted.prepareSecretsRuntimeSnapshot.mockImplementation(originalFn);
     prevSkipChannels = process.env.OPENCLAW_SKIP_CHANNELS;
     prevSkipGmail = process.env.OPENCLAW_SKIP_GMAIL_WATCHER;
     prevSkipProviders = process.env.OPENCLAW_SKIP_PROVIDERS;
@@ -549,6 +562,15 @@ describe("gateway hot reload", () => {
       hoisted.providerManager.startChannel.mockClear();
       hoisted.activeEmbeddedRunCount.value = 1;
       embeddedRunMock.activeIds.add("reload-indefinite");
+      hoisted.prepareSecretsRuntimeSnapshot.mockImplementation(async (params) => {
+        return {
+          sourceConfig: params.config,
+          config: params.config,
+          authStores: [],
+          warnings: [],
+          webTools: {},
+        };
+      });
       vi.useFakeTimers();
       const reloadPromise = onHotReload?.(
         {
@@ -602,6 +624,15 @@ describe("gateway hot reload", () => {
       hoisted.providerManager.startChannel.mockClear();
       hoisted.activeEmbeddedRunCount.value = 1;
       embeddedRunMock.activeIds.add("reload-default-timeout");
+      hoisted.prepareSecretsRuntimeSnapshot.mockImplementation(async (params) => {
+        return {
+          sourceConfig: params.config,
+          config: params.config,
+          authStores: [],
+          warnings: [],
+          webTools: {},
+        };
+      });
       vi.useFakeTimers();
       const reloadPromise = onHotReload?.(
         {
@@ -782,6 +813,15 @@ describe("gateway hot reload", () => {
       });
       const signalSpy = vi.fn();
       process.once("SIGUSR1", signalSpy);
+      hoisted.prepareSecretsRuntimeSnapshot.mockImplementation(async (params) => {
+        return {
+          sourceConfig: params.config,
+          config: params.config,
+          authStores: [],
+          warnings: [],
+          webTools: {},
+        };
+      });
       vi.useFakeTimers();
 
       try {
