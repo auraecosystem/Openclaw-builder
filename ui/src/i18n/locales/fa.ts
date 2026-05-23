@@ -391,6 +391,8 @@ export const fa: TranslationMap = {
     expand: "گسترش نوار کناری",
     collapse: "جمع کردن نوار کناری",
     resize: "تغییر اندازه نوار کناری",
+    recentSessionsExpand: "Expand recent sessions",
+    recentSessionsCollapse: "Collapse recent sessions",
   },
   tabs: {
     agents: "عامل‌ها",

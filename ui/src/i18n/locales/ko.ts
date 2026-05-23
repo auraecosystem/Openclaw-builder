@@ -389,6 +389,8 @@ export const ko: TranslationMap = {
     expand: "사이드바 펼치기",
     collapse: "사이드바 접기",
     resize: "사이드바 크기 조절",
+    recentSessionsExpand: "Expand recent sessions",
+    recentSessionsCollapse: "Collapse recent sessions",
   },
   tabs: {
     agents: "에이전트",

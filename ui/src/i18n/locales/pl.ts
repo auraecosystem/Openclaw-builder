@@ -391,6 +391,8 @@ export const pl: TranslationMap = {
     expand: "Rozwiń pasek boczny",
     collapse: "Zwiń pasek boczny",
     resize: "Zmień rozmiar paska bocznego",
+    recentSessionsExpand: "Expand recent sessions",
+    recentSessionsCollapse: "Collapse recent sessions",
   },
   tabs: {
     agents: "Agenci",

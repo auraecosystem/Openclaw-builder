@@ -392,6 +392,8 @@ export const tr: TranslationMap = {
     expand: "Kenar çubuğunu genişlet",
     collapse: "Kenar çubuğunu daralt",
     resize: "Kenar çubuğunu yeniden boyutlandır",
+    recentSessionsExpand: "Expand recent sessions",
+    recentSessionsCollapse: "Collapse recent sessions",
   },
   tabs: {
     agents: "Aracılar",

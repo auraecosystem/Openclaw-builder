@@ -392,6 +392,8 @@ export const nl: TranslationMap = {
     expand: "Zijbalk uitvouwen",
     collapse: "Zijbalk samenvouwen",
     resize: "Zijbalkgrootte aanpassen",
+    recentSessionsExpand: "Expand recent sessions",
+    recentSessionsCollapse: "Collapse recent sessions",
   },
   tabs: {
     agents: "Agents",

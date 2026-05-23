@@ -393,6 +393,8 @@ export const de: TranslationMap = {
     expand: "Seitenleiste ausklappen",
     collapse: "Seitenleiste einklappen",
     resize: "Seitenleiste in der Größe ändern",
+    recentSessionsExpand: "Expand recent sessions",
+    recentSessionsCollapse: "Collapse recent sessions",
   },
   tabs: {
     agents: "Agenten",
