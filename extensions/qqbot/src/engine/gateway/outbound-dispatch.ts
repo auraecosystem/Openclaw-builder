@@ -14,6 +14,7 @@ import type { FinalizedMsgContext } from "openclaw/plugin-sdk/reply-runtime";
 import {
   parseAndSendMediaTags,
   sendPlainReply,
+  sendTextOnlyReply,
   type DeliverDeps,
 } from "../messaging/outbound-deliver.js";
 import {
@@ -315,8 +316,7 @@ export async function dispatchOutbound(
                     if (toolOnlyTimeoutId || hasPendingToolFallbackPayload()) {
                       renewToolOnlyFallback();
                     }
-                    await sendPlainReply(
-                      { text: textOnlyProgress },
+                    await sendTextOnlyReply(
                       textOnlyProgress,
                       {
                         type: event.type,
@@ -329,7 +329,6 @@ export async function dispatchOutbound(
                       { account, qualifiedTarget, log },
                       sendWithRetry,
                       () => undefined,
-                      [],
                       deliverDeps,
                     );
                     recordOutbound();
