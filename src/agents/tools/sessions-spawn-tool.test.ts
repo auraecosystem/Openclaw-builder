@@ -842,6 +842,30 @@ describe("sessions_spawn tool", () => {
     expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
   });
 
+  it("rejects ACP attachments when ACP forwarding is disabled", async () => {
+    registerAcpBackendForTest();
+    const tool = createSessionsSpawnTool({
+      agentSessionKey: "agent:main:main",
+      config: {
+        tools: { sessions_spawn: { attachments: { enabled: true } } },
+      } as never,
+    });
+
+    const imageBase64 = Buffer.from("png-bytes").toString("base64");
+    const result = await tool.execute("call-acp-disabled", {
+      runtime: "acp",
+      task: "describe the image",
+      attachments: [
+        { name: "photo.png", content: imageBase64, encoding: "base64", mimeType: "image/png" },
+      ],
+    });
+
+    expectDetailFields(result.details, { status: "forbidden" });
+    expect(JSON.stringify(result.details)).toContain("tools.sessions_spawn.attachments.acpEnabled");
+    expect(hoisted.spawnAcpDirectMock).not.toHaveBeenCalled();
+    expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
+  });
+
   it("forwards validated image attachments for ACP runtime", async () => {
     registerAcpBackendForTest();
     const tool = createSessionsSpawnTool({
@@ -853,7 +877,13 @@ describe("sessions_spawn tool", () => {
       config: {
         tools: {
           sessions_spawn: {
-            attachments: { enabled: true, maxFiles: 1, maxFileBytes: 32, maxTotalBytes: 32 },
+            attachments: {
+              enabled: true,
+              acpEnabled: true,
+              maxFiles: 1,
+              maxFileBytes: 32,
+              maxTotalBytes: 32,
+            },
           },
         },
       } as never,
@@ -888,7 +918,7 @@ describe("sessions_spawn tool", () => {
     const tool = createSessionsSpawnTool({
       agentSessionKey: "agent:main:main",
       config: {
-        tools: { sessions_spawn: { attachments: { enabled: true } } },
+        tools: { sessions_spawn: { attachments: { enabled: true, acpEnabled: true } } },
       } as never,
     });
 
@@ -912,7 +942,13 @@ describe("sessions_spawn tool", () => {
       config: {
         tools: {
           sessions_spawn: {
-            attachments: { enabled: true, maxFiles: 1, maxFileBytes: 4, maxTotalBytes: 4 },
+            attachments: {
+              enabled: true,
+              acpEnabled: true,
+              maxFiles: 1,
+              maxFileBytes: 4,
+              maxTotalBytes: 4,
+            },
           },
         },
       } as never,
