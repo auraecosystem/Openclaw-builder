@@ -24,8 +24,8 @@ The Policy plugin contributes doctor health checks for policy-managed OpenClaw
 settings and governed workspace declarations. Policy currently covers channel
 conformance, governed tool metadata, MCP server posture, model-provider posture,
 private-network access posture, Gateway exposure posture, agent workspace/tool
-posture, configured global/per-agent tool posture, and OpenClaw config secret
-provider/auth profile posture.
+posture, configured global/per-agent tool posture, configured sandbox runtime
+posture, and OpenClaw config secret provider/auth profile posture.
 
 Policy stores authored requirements in `policy.jsonc`, observes existing
 OpenClaw settings and workspace declarations as evidence, and reports drift
@@ -40,11 +40,17 @@ additive `alsoAllow` entries because they can widen effective tool posture.
 These checks observe config conformance only; they do not read runtime approval
 state or add runtime enforcement.
 
+Sandbox posture rules can require approved sandbox modes/backends, deny host
+container networking, deny container namespace joins, require read-only container
+mounts, deny container runtime socket mounts and unconfined container profiles,
+and require sandbox browser CDP source ranges.
+These checks observe config conformance only; they do not read runtime approval
+state, inspect live containers, or add runtime enforcement.
+
 Named agent policy scopes under `scopes.<scopeName>` can add stricter
 normal policy sections for the runtime agent ids listed in `agentIds`. The
-initial scoped sections are `tools` and `agents.workspace`; future sections such
-as sandbox or ingress can join the same container after their evidence carries
-agent identity. Every scope present in `policy.jsonc` must be valid and
+supported scoped sections are `tools`, `agents.workspace`, and `sandbox`;
+ingress can join the same container after it has an enforceable selector. Every scope present in `policy.jsonc` must be valid and
 enforceable for its selector. Overlay rules are additional claims, so they do
 not weaken top-level policy and can produce their own findings when the same
 observed config violates both scopes. Runtime agent ids that are not explicitly
