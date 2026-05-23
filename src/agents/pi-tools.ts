@@ -343,6 +343,19 @@ export type OpenClawCodingToolConstructionPlan = {
   includePluginTools: boolean;
 };
 
+/**
+ * Internal-only marker. Set by `createOpenClawCodingToolsRaw()` to request
+ * that the returned tools NOT be wrapped with `wrapToolWithBeforeToolCallHook`,
+ * because the caller (the gateway `/tools/invoke` HTTP surface) runs
+ * `runBeforeToolCallHook` itself before dispatch.
+ *
+ * Module-private (not exported) so SDK consumers cannot pass it through the
+ * typed `createOpenClawCodingTools` parameters and bypass the hook system.
+ * The only call site that may set this is `createOpenClawCodingToolsRaw`
+ * below, which is the trusted internal HTTP-surface entry point.
+ */
+const SKIP_BEFORE_TOOL_CALL_HOOK = Symbol("openclaw.pi-tools.skip-before-tool-call-hook");
+
 export function createOpenClawCodingTools(options?: {
   agentId?: string;
   exec?: ExecToolDefaults & ProcessToolDefaults;
@@ -383,13 +396,6 @@ export function createOpenClawCodingTools(options?: {
   abortSignal?: AbortSignal;
   /** Disable hook-owned diagnostics when an outer runtime owns tool diagnostics. */
   emitBeforeToolCallDiagnostics?: boolean;
-  /**
-   * Skip `wrapToolWithBeforeToolCallHook` on the returned tools. Used by the
-   * gateway `/tools/invoke` HTTP surface, which calls `runBeforeToolCallHook`
-   * itself before dispatching. Wrapping here would double-fire the hook and
-   * leak adjusted-params state. See `createOpenClawCodingToolsRaw` below.
-   */
-  skipBeforeToolCallHook?: boolean;
   /**
    * Provider of the currently selected model (used for provider-specific tool quirks).
    * Example: "anthropic", "openai", "google", "openai-codex".
@@ -1076,7 +1082,14 @@ export function createOpenClawCodingTools(options?: {
     }),
   );
   options?.recordToolPrepStage?.("schema-normalization");
-  const withHooks = options?.skipBeforeToolCallHook
+  // Internal-only hook bypass: only `createOpenClawCodingToolsRaw` may pass
+  // this Symbol-keyed flag (see SKIP_BEFORE_TOOL_CALL_HOOK above). SDK
+  // consumers cannot reach this code path because the symbol is not exported.
+  const skipBeforeToolCallHook =
+    options !== undefined &&
+    Object.prototype.hasOwnProperty.call(options, SKIP_BEFORE_TOOL_CALL_HOOK) &&
+    (options as Record<symbol, unknown>)[SKIP_BEFORE_TOOL_CALL_HOOK] === true;
+  const withHooks = skipBeforeToolCallHook
     ? normalized
     : normalized.map((tool) =>
         wrapToolWithBeforeToolCallHook(
@@ -1128,5 +1141,12 @@ export { testing as __testing };
 export function createOpenClawCodingToolsRaw(
   options?: Parameters<typeof createOpenClawCodingTools>[0],
 ): AnyAgentTool[] {
-  return createOpenClawCodingTools({ ...options, skipBeforeToolCallHook: true });
+  // Internal call site: set the module-private Symbol so the factory skips
+  // the before-tool-call hook wrap step. SDK consumers cannot reach this
+  // path because the symbol is module-private (not exported).
+  const taggedOptions = {
+    ...(options ?? {}),
+    [SKIP_BEFORE_TOOL_CALL_HOOK]: true,
+  } as Parameters<typeof createOpenClawCodingTools>[0];
+  return createOpenClawCodingTools(taggedOptions);
 }
