@@ -469,8 +469,8 @@ describe("gateway send mirroring", () => {
     expect(response?.[0]).toBe(true);
   });
 
-  it("keeps the request context config for message.action when the active snapshot source does not match", async () => {
-    const contextConfig = {
+  it("keeps the post-auto-enable request config for message.action when the active snapshot source does not match", async () => {
+    const sourceConfig = {
       channels: {
         discord: {
           accounts: {
@@ -485,11 +485,28 @@ describe("gateway send mirroring", () => {
         },
       },
     };
-    mocks.applyPluginAutoEnable.mockImplementation(() => ({
-      config: contextConfig,
-      changes: [],
+    const autoEnabledRequestConfig = {
+      channels: {
+        discord: {
+          enabled: true,
+          accounts: {
+            drclaw: {
+              token: {
+                source: "env",
+                provider: "default",
+                id: "DISCORD_BOT_TOKEN_DRCLAW",
+              },
+            },
+          },
+        },
+      },
+      plugins: { allow: ["discord"] },
+    };
+    mocks.applyPluginAutoEnable.mockReturnValue({
+      config: autoEnabledRequestConfig,
+      changes: [{ path: "channels.discord.enabled", value: true }],
       autoEnabledReasons: {},
-    }));
+    });
     mocks.getActiveSecretsRuntimeConfigSnapshot.mockReturnValue({
       config: {
         channels: {
@@ -513,7 +530,7 @@ describe("gateway send mirroring", () => {
 
     const context = {
       ...makeContext(),
-      getRuntimeConfig: () => contextConfig,
+      getRuntimeConfig: () => sourceConfig,
     } as unknown as GatewayRequestContext;
     await sendHandlers["message.action"]({
       params: {
@@ -529,7 +546,7 @@ describe("gateway send mirroring", () => {
       isWebchatConnect: () => false,
     });
 
-    expect(lastDispatchChannelMessageActionCall()?.cfg).toBe(contextConfig);
+    expect(lastDispatchChannelMessageActionCall()?.cfg).toBe(autoEnabledRequestConfig);
   });
 
   it("does not read the active secrets runtime config snapshot for send requests", async () => {

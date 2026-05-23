@@ -188,27 +188,18 @@ function resolveMessageActionRuntimeConfig(params: {
   if (!activeRuntime) {
     return params.cfg;
   }
-  const selected =
-    selectApplicableRuntimeConfig({
-      inputConfig: params.sourceCfg,
-      runtimeConfig: activeRuntime.config,
-      runtimeSourceConfig: activeRuntime.sourceConfig,
-    }) ??
-    selectApplicableRuntimeConfig({
-      inputConfig: params.cfg,
-      runtimeConfig: activeRuntime.config,
-      runtimeSourceConfig: activeRuntime.sourceConfig,
-    });
-  if (!selected) {
-    return params.cfg;
-  }
+  const selected = selectApplicableRuntimeConfig({
+    inputConfig: params.sourceCfg,
+    runtimeConfig: activeRuntime.config,
+    runtimeSourceConfig: activeRuntime.sourceConfig,
+  });
   if (selected === activeRuntime.config && selected !== params.cfg) {
     return applyPluginAutoEnable({
       config: selected,
       env: process.env,
     }).config;
   }
-  return selected;
+  return params.cfg;
 }
 
 function buildGatewayDeliveryPayload(params: {
