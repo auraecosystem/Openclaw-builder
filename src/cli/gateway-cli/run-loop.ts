@@ -10,7 +10,6 @@ import {
 import type { startGatewayServer } from "../../gateway/server.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { acquireGatewayLock } from "../../infra/gateway-lock.js";
-import { detectRespawnSupervisor } from "../../infra/supervisor-markers.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import type { RuntimeEnv } from "../../runtime.js";
 import { clearRuntimeConfigSnapshot } from "../../config/runtime-snapshot.js";
@@ -718,7 +717,7 @@ export async function runGatewayLoop(params: {
     gatewayLog.info("signal SIGINT received");
     request("stop", "SIGINT");
   };
-  const supervisor = detectRespawnSupervisor();
+  const supervisor = eagerLifecycleRuntime.detectRespawnSupervisor();
   const onSighup = () => {
     gatewayLog.info(
       `signal SIGHUP received; ignoring (${supervisor} supervised daemon survives terminal hangup)`,
