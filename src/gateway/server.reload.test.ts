@@ -479,7 +479,7 @@ describe("gateway hot reload", () => {
     );
   }
 
-  it("uses the configured timeout when active work does not drain before channel reload", async () => {
+  it("reloads channels when active work remains past the configured timeout", async () => {
     await withNonMinimalGatewayServer(async () => {
       const onHotReload = hoisted.getOnHotReload();
       expect(onHotReload).toBeTypeOf("function");
