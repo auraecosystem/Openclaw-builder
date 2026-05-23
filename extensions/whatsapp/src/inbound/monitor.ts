@@ -14,7 +14,12 @@ import { defaultRuntime } from "openclaw/plugin-sdk/runtime-env";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
 import { readWebSelfIdentityForDecision, WhatsAppAuthUnstableError } from "../auth-store.js";
 import { getRegisteredWhatsAppConnectionController } from "../connection-controller-registry.js";
-import { getPrimaryIdentityId, resolveComparableIdentity } from "../identity.js";
+import {
+  getPrimaryIdentityId,
+  identitiesOverlap,
+  resolveComparableIdentity,
+  type WhatsAppSelfIdentity,
+} from "../identity.js";
 import { cacheInboundMessageMeta } from "../quoted-message.js";
 import { DEFAULT_RECONNECT_POLICY, computeBackoff, sleepWithAbort } from "../reconnect.js";
 import type { OpenClawConfig } from "../runtime-api.js";
@@ -190,11 +195,35 @@ export async function attachWebInboxToSocket(
   if (options.socketRef) {
     options.socketRef.current = sock;
   }
+  // Capture the original socket's self identity at attach time so the
+  // successor-socket fallback can refuse a controller registered under the same
+  // accountId but logged into a different WhatsApp number (in-place relink).
+  // Compared via identitiesOverlap() so JID-vs-LID and device-scoped JID
+  // differences across reconnects are normalized away.
+  const originalSelfIdentity = ((): WhatsAppSelfIdentity | null => {
+    const user = sock.user as { id?: string | null; lid?: string | null } | undefined;
+    if (!user) {
+      return null;
+    }
+    const jid = user.id ?? null;
+    const lid = user.lid ?? null;
+    if (!jid && !lid) {
+      return null;
+    }
+    return { jid, lid };
+  })();
+
   // When this monitor's own controller has been shutdown (socketRef nulled) but a
   // successor controller for the same accountId is already registered with a live
   // socket, return the successor's socket. This recovers in-flight outbound
   // operations whose closures were bound to the old controller's socketRef before
   // a channel-health-monitor restart cycle.
+  //
+  // The fallback is session-safe: it only fires when the successor's
+  // currently-authenticated self identity overlaps the original socket's self
+  // identity. If the accountId has been relinked to a different phone number,
+  // identities cannot be compared yet, or the successor is not authenticated,
+  // the fallback returns null and the caller fails closed.
   const getCurrentSock = (): WASocket | null => {
     if (!options.socketRef) {
       return sock;
@@ -202,7 +231,18 @@ export async function attachWebInboxToSocket(
     if (options.socketRef.current) {
       return options.socketRef.current;
     }
-    return getRegisteredWhatsAppConnectionController(options.accountId)?.getCurrentSock() ?? null;
+    if (!originalSelfIdentity) {
+      return null;
+    }
+    const successor = getRegisteredWhatsAppConnectionController(options.accountId);
+    if (!successor) {
+      return null;
+    }
+    const successorIdentity = successor.getSelfIdentity();
+    if (!successorIdentity || !identitiesOverlap(originalSelfIdentity, successorIdentity)) {
+      return null;
+    }
+    return successor.getCurrentSock();
   };
   const shouldRetryDisconnect = () => options.shouldRetryDisconnect?.() === true;
   const disconnectRetryPolicy = options.disconnectRetryPolicy ?? DEFAULT_RECONNECT_POLICY;
