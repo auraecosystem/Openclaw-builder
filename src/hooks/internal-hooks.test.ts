@@ -319,7 +319,7 @@ describe("hooks", () => {
           const delayedEvent = createInternalHookEvent("command", "new", "test-session", {
             fromDelayed: true,
           });
-          triggerInternalHook(delayedEvent);
+          void triggerInternalHook(delayedEvent);
         }, 10);
       });
 
