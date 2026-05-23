@@ -706,8 +706,8 @@ export async function processDiscordMessage(
           return;
         }
 
-        if (isFinal && draftPreview.isProgressMode && draftStream?.messageId()) {
-          await draftStream.clear();
+        if (isFinal && draftPreview.isProgressMode) {
+          await draftStream?.clear();
         }
         const replyToId = replyReference.use();
         if (isFinal) {

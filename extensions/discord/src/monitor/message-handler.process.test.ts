@@ -16,8 +16,9 @@ const sendMocks = vi.hoisted(() => ({
     (channelId: string, messageId: string, emoji: string, opts?: unknown) => Promise<void>
   >(async () => {}),
 }));
-function createMockDraftStream() {
-  let messageId: string | undefined = "preview-1";
+function createMockDraftStream(options?: { initialMessageId?: string }) {
+  let messageId: string | undefined =
+    options && "initialMessageId" in options ? options.initialMessageId : "preview-1";
   return {
     update: vi.fn<(text: string) => void>(() => {}),
     flush: vi.fn(async () => {}),
@@ -632,8 +633,8 @@ function expectRemoveAckCallAt(
   expectReactionCallAt(sendMocks.removeReactionDiscord, index, emoji, params);
 }
 
-function createMockDraftStreamForTest() {
-  const draftStream = createMockDraftStream();
+function createMockDraftStreamForTest(options?: { initialMessageId?: string }) {
+  const draftStream = createMockDraftStream(options);
   createDiscordDraftStream.mockReturnValueOnce(draftStream);
   return draftStream;
 }
@@ -2340,6 +2341,41 @@ describe("processDiscordMessage draft streaming", () => {
     expect(editMessageDiscord).not.toHaveBeenCalled();
     expect(draftStream.clear).toHaveBeenCalledTimes(1);
     expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
+    expect(firstMockArg(deliverDiscordReply, "deliverDiscordReply")).toMatchObject({
+      replies: [{ text: "done" }],
+    });
+  });
+
+  it("clears pending Discord progress drafts before final replies even before a message id exists", async () => {
+    const draftStream = createMockDraftStreamForTest({ initialMessageId: undefined });
+
+    dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
+      await params?.replyOptions?.onToolStart?.({ name: "exec", phase: "start" });
+      await params?.replyOptions?.onItemEvent?.({ progressText: "exec done" });
+      await params?.dispatcher.sendFinalReply({ text: "done" });
+      return { queuedFinal: true, counts: { final: 1, tool: 0, block: 0 } };
+    });
+
+    const ctx = await createAutomaticSourceDeliveryContext({
+      discordConfig: {
+        streaming: {
+          mode: "progress",
+          progress: {
+            label: "Shelling",
+          },
+        },
+      },
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    expect(draftStream.messageId()).toBeUndefined();
+    expect(draftStream.update).toHaveBeenCalledWith("Shelling\n\n🛠️ Exec\n• exec done");
+    expect(draftStream.clear).toHaveBeenCalledTimes(1);
+    expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
+    expect(draftStream.clear.mock.invocationCallOrder[0]).toBeLessThan(
+      deliverDiscordReply.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
     expect(firstMockArg(deliverDiscordReply, "deliverDiscordReply")).toMatchObject({
       replies: [{ text: "done" }],
     });
