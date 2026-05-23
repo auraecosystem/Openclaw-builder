@@ -296,6 +296,40 @@ describe("hooks", () => {
       // reentrantHandler called twice (both independent dispatches), not more
       expect(reentrantHandler).toHaveBeenCalledTimes(2);
     });
+
+    it("should deliver a delayed same-key hook scheduled from within a handler after dispatch completes", async () => {
+      // Regression test for ClawSweeper finding: a handler that schedules a
+      // delayed same-key redispatch (e.g. via setTimeout) should have that
+      // delayed call delivered after the original dispatch returns, not blocked
+      // by the guard.
+      const handler = vi.fn(async (event) => {
+        if (event.context.fromDelayed) {
+          // This is the delayed call — should be delivered
+          return;
+        }
+        // Schedule a delayed same-key trigger
+        await new Promise<void>((resolve) => {
+          setTimeout(async () => {
+            const delayedEvent = createInternalHookEvent("command", "new", "test-session", {
+              fromDelayed: true,
+            });
+            await triggerInternalHook(delayedEvent);
+            resolve();
+          }, 10);
+        });
+      });
+
+      registerInternalHook("command:new", handler);
+
+      const event = createInternalHookEvent("command", "new", "test-session");
+      await triggerInternalHook(event);
+
+      // Wait for the delayed trigger to complete
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Handler should be called twice: once for the original, once for the delayed
+      expect(handler).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("createInternalHookEvent", () => {

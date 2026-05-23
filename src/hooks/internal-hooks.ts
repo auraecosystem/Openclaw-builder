@@ -335,9 +335,12 @@ export async function triggerInternalHook(event: InternalHookEvent): Promise<voi
 
   // Run the dispatch inside AsyncLocalStorage.run() so that any re-entrant
   // call from within the handler chain inherits the store with this guardKey.
-  await dispatchContext.run(
-    activeKeys ? new Set([...activeKeys, guardKey]) : new Set([guardKey]),
-    async () => {
+  // The guard key is removed from the Set after dispatch completes, so that
+  // delayed same-key hooks scheduled by handlers (e.g. via setTimeout) are
+  // not blocked after the original dispatch returns.
+  const guardSet = activeKeys ? new Set([...activeKeys, guardKey]) : new Set([guardKey]);
+  await dispatchContext.run(guardSet, async () => {
+    try {
       const typeHandlers = handlers.get(event.type) ?? [];
       const specificHandlers = handlers.get(`${event.type}:${event.action}`) ?? [];
       const allHandlers = [...typeHandlers, ...specificHandlers];
@@ -350,8 +353,10 @@ export async function triggerInternalHook(event: InternalHookEvent): Promise<voi
           log.error(`Hook error [${event.type}:${event.action}]: ${message}`);
         }
       }
-    },
-  );
+    } finally {
+      guardSet.delete(guardKey);
+    }
+  });
 }
 
 /**
