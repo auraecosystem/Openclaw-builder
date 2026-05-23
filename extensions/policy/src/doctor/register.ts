@@ -15,6 +15,7 @@ import {
   type PolicyAuthProfileEvidence,
   type PolicyAgentWorkspaceEvidence,
   type PolicyEvidence,
+  type PolicySandboxPostureEvidence,
   type PolicyToolPostureEvidence,
 } from "../policy-state.js";
 import { POLICY_TOOL_GROUPS } from "../tool-policy-conformance.js";
@@ -49,6 +50,13 @@ const CHECK_IDS = {
   policyToolsFsWorkspaceOnlyRequired: "policy/tools-fs-workspace-only-required",
   policyToolsProfileUnapproved: "policy/tools-profile-unapproved",
   policyToolsRequiredDenyMissing: "policy/tools-required-deny-missing",
+  policySandboxModeUnapproved: "policy/sandbox-mode-unapproved",
+  policySandboxBackendUnapproved: "policy/sandbox-backend-unapproved",
+  policySandboxDockerNetworkDenied: "policy/sandbox-docker-network-denied",
+  policySandboxDockerBindModeRequired: "policy/sandbox-docker-bind-mode-required",
+  policySandboxDockerSocketBind: "policy/sandbox-docker-socket-bind",
+  policySandboxDockerUnconfinedProfile: "policy/sandbox-docker-unconfined-profile",
+  policySandboxBrowserCdpSourceRangeMissing: "policy/sandbox-browser-cdp-source-range-missing",
   policySecretsUnmanagedProvider: "policy/secrets-unmanaged-provider",
   policySecretsDeniedProviderSource: "policy/secrets-denied-provider-source",
   policySecretsInsecureProvider: "policy/secrets-insecure-provider",
@@ -92,6 +100,13 @@ export const POLICY_CHECK_IDS = [
   CHECK_IDS.policyToolsAlsoAllowMissing,
   CHECK_IDS.policyToolsAlsoAllowUnexpected,
   CHECK_IDS.policyToolsRequiredDenyMissing,
+  CHECK_IDS.policySandboxModeUnapproved,
+  CHECK_IDS.policySandboxBackendUnapproved,
+  CHECK_IDS.policySandboxDockerNetworkDenied,
+  CHECK_IDS.policySandboxDockerBindModeRequired,
+  CHECK_IDS.policySandboxDockerSocketBind,
+  CHECK_IDS.policySandboxDockerUnconfinedProfile,
+  CHECK_IDS.policySandboxBrowserCdpSourceRangeMissing,
   CHECK_IDS.policySecretsUnmanagedProvider,
   CHECK_IDS.policySecretsDeniedProviderSource,
   CHECK_IDS.policySecretsInsecureProvider,
@@ -109,7 +124,8 @@ export type PolicyStrictnessKind =
   | "denylist-superset"
   | "requires-true"
   | "requires-false"
-  | "exact-list";
+  | "exact-list"
+  | "ordered-string";
 
 export type PolicyEmptyListSemantics = "disabled" | "meaningful";
 
@@ -118,10 +134,11 @@ export type PolicyScopeSelectorKind = "agentIds";
 export type PolicyRuleMetadata = {
   readonly policyPath: readonly string[];
   readonly strictness: PolicyStrictnessKind;
-  readonly valueType: "boolean" | "string-list";
+  readonly valueType: "boolean" | "string" | "string-list";
   readonly checkIds: readonly (typeof POLICY_CHECK_IDS)[number][];
   readonly emptyList?: PolicyEmptyListSemantics;
   readonly caseSensitive?: boolean;
+  readonly orderedValues?: readonly string[];
   readonly scopeSelectors?: readonly PolicyScopeSelectorKind[];
 };
 
@@ -202,6 +219,58 @@ export const POLICY_RULE_METADATA = [
     checkIds: [CHECK_IDS.policyToolsRequiredDenyMissing],
     scopeSelectors: ["agentIds"],
   },
+  {
+    policyPath: ["sandbox", "requireMode"],
+    strictness: "allowlist-subset",
+    valueType: "string-list",
+    checkIds: [CHECK_IDS.policySandboxModeUnapproved],
+    emptyList: "disabled",
+    scopeSelectors: ["agentIds"],
+  },
+  {
+    policyPath: ["sandbox", "allowBackends"],
+    strictness: "allowlist-subset",
+    valueType: "string-list",
+    checkIds: [CHECK_IDS.policySandboxBackendUnapproved],
+    emptyList: "disabled",
+    scopeSelectors: ["agentIds"],
+  },
+  {
+    policyPath: ["sandbox", "docker", "denyNetworks"],
+    strictness: "denylist-superset",
+    valueType: "string-list",
+    checkIds: [CHECK_IDS.policySandboxDockerNetworkDenied],
+    scopeSelectors: ["agentIds"],
+  },
+  {
+    policyPath: ["sandbox", "docker", "requireBindMode"],
+    strictness: "ordered-string",
+    valueType: "string",
+    orderedValues: ["rw", "ro"],
+    checkIds: [CHECK_IDS.policySandboxDockerBindModeRequired],
+    scopeSelectors: ["agentIds"],
+  },
+  {
+    policyPath: ["sandbox", "docker", "denyDockerSocketBinds"],
+    strictness: "requires-true",
+    valueType: "boolean",
+    checkIds: [CHECK_IDS.policySandboxDockerSocketBind],
+    scopeSelectors: ["agentIds"],
+  },
+  {
+    policyPath: ["sandbox", "docker", "denyUnconfinedProfiles"],
+    strictness: "requires-true",
+    valueType: "boolean",
+    checkIds: [CHECK_IDS.policySandboxDockerUnconfinedProfile],
+    scopeSelectors: ["agentIds"],
+  },
+  {
+    policyPath: ["sandbox", "browser", "requireCdpSourceRange"],
+    strictness: "requires-true",
+    valueType: "boolean",
+    checkIds: [CHECK_IDS.policySandboxBrowserCdpSourceRangeMissing],
+    scopeSelectors: ["agentIds"],
+  },
 ] as const satisfies readonly PolicyRuleMetadata[];
 
 const KNOWN_RISK_LEVELS = ["low", "medium", "high", "critical"] as const;
@@ -221,6 +290,8 @@ const SUPPORTED_TOOL_PROFILES = ["minimal", "coding", "messaging", "full"] as co
 const SUPPORTED_TOOL_EXEC_SECURITY = ["deny", "allowlist", "full"] as const;
 const SUPPORTED_TOOL_EXEC_ASK = ["off", "on-miss", "always"] as const;
 const SUPPORTED_TOOL_EXEC_HOST = ["auto", "sandbox", "gateway", "node"] as const;
+const SUPPORTED_SANDBOX_MODES = ["off", "non-main", "all"] as const;
+const SUPPORTED_SANDBOX_BIND_MODES = ["ro", "rw"] as const;
 let registered = false;
 const policyEvaluationCache = new WeakMap<HealthCheckContext, Promise<PolicyEvaluation>>();
 
@@ -274,6 +345,13 @@ export function registerPolicyDoctorChecks(host?: PolicyDoctorRegistrationHost):
   registerHealthCheck(policyToolsAlsoAllowMissingCheck);
   registerHealthCheck(policyToolsAlsoAllowUnexpectedCheck);
   registerHealthCheck(policyToolsRequiredDenyMissingCheck);
+  registerHealthCheck(policySandboxModeUnapprovedCheck);
+  registerHealthCheck(policySandboxBackendUnapprovedCheck);
+  registerHealthCheck(policySandboxDockerNetworkDeniedCheck);
+  registerHealthCheck(policySandboxDockerBindModeRequiredCheck);
+  registerHealthCheck(policySandboxDockerSocketBindCheck);
+  registerHealthCheck(policySandboxDockerUnconfinedProfileCheck);
+  registerHealthCheck(policySandboxBrowserCdpSourceRangeMissingCheck);
   registerHealthCheck(policySecretsUnmanagedProviderCheck);
   registerHealthCheck(policySecretsDeniedProviderSourceCheck);
   registerHealthCheck(policySecretsInsecureProviderCheck);
@@ -622,6 +700,85 @@ const policyToolsRequiredDenyMissingCheck: HealthCheck = {
   },
 };
 
+const policySandboxModeUnapprovedCheck: HealthCheck = {
+  id: CHECK_IDS.policySandboxModeUnapproved,
+  kind: "plugin",
+  description: "Sandbox mode config satisfies policy requirements.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policySandboxModeUnapproved);
+  },
+};
+
+const policySandboxBackendUnapprovedCheck: HealthCheck = {
+  id: CHECK_IDS.policySandboxBackendUnapproved,
+  kind: "plugin",
+  description: "Sandbox backend config satisfies policy requirements.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policySandboxBackendUnapproved);
+  },
+};
+
+const policySandboxDockerNetworkDeniedCheck: HealthCheck = {
+  id: CHECK_IDS.policySandboxDockerNetworkDenied,
+  kind: "plugin",
+  description: "Sandbox Docker network config avoids policy-denied modes.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policySandboxDockerNetworkDenied);
+  },
+};
+
+const policySandboxDockerBindModeRequiredCheck: HealthCheck = {
+  id: CHECK_IDS.policySandboxDockerBindModeRequired,
+  kind: "plugin",
+  description: "Sandbox Docker bind mounts use the policy-required mode.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(
+      await evaluatePolicy(ctx),
+      CHECK_IDS.policySandboxDockerBindModeRequired,
+    );
+  },
+};
+
+const policySandboxDockerSocketBindCheck: HealthCheck = {
+  id: CHECK_IDS.policySandboxDockerSocketBind,
+  kind: "plugin",
+  description: "Sandbox Docker bind mounts avoid host Docker sockets.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policySandboxDockerSocketBind);
+  },
+};
+
+const policySandboxDockerUnconfinedProfileCheck: HealthCheck = {
+  id: CHECK_IDS.policySandboxDockerUnconfinedProfile,
+  kind: "plugin",
+  description: "Sandbox Docker profile config avoids unconfined profiles.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(
+      await evaluatePolicy(ctx),
+      CHECK_IDS.policySandboxDockerUnconfinedProfile,
+    );
+  },
+};
+
+const policySandboxBrowserCdpSourceRangeMissingCheck: HealthCheck = {
+  id: CHECK_IDS.policySandboxBrowserCdpSourceRangeMissing,
+  kind: "plugin",
+  description: "Sandbox browser CDP config includes a source range when policy requires it.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(
+      await evaluatePolicy(ctx),
+      CHECK_IDS.policySandboxBrowserCdpSourceRangeMissing,
+    );
+  },
+};
+
 const policySecretsUnmanagedProviderCheck: HealthCheck = {
   id: CHECK_IDS.policySecretsUnmanagedProvider,
   kind: "plugin",
@@ -822,6 +979,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
   const includeAuthProfiles = policyHasAuthProfileRules(policy);
   const includeGatewayExposure = policyHasGatewayRules(policy);
   const includeAgentWorkspace = policyHasAgentWorkspaceRules(policy);
+  const includeSandboxPosture = policyHasSandboxPostureRules(policy);
   if (requiredMetadata.size > 0) {
     const toolsFile = await readWorkspaceFile(ctx, "TOOLS.md");
     evidence = await collectPolicyEvidence(ctx.cfg as Record<string, unknown>, {
@@ -829,6 +987,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
       includeGatewayExposure,
       includeAgentWorkspace,
       includeToolPosture: policyHasToolPostureRules(policy),
+      includeSandboxPosture,
       includeSecrets,
       includeAuthProfiles,
     });
@@ -837,6 +996,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
       includeGatewayExposure,
       includeAgentWorkspace,
       includeToolPosture: policyHasToolPostureRules(policy),
+      includeSandboxPosture,
       includeSecrets,
       includeAuthProfiles,
     });
@@ -850,6 +1010,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
     ...gatewayExposureFindings(policy, policyFile.ocDocName, evidence),
     ...agentWorkspaceFindings(policy, policyFile.displayName, policyFile.ocDocName, evidence),
     ...toolPostureFindings(policy, policyFile.displayName, policyFile.ocDocName, evidence),
+    ...sandboxPostureFindings(policy, policyFile.displayName, policyFile.ocDocName, evidence),
     ...secretAuthProvenanceFindings(policy, policyFile.displayName, policyFile.ocDocName, evidence),
     ...authMetadataRequirementFindings,
     ...metadataRequirementFindings,
@@ -1230,6 +1391,13 @@ function policyContainerShapeFindings(
       ),
     ];
   }
+  const sandboxFinding = sandboxPolicyShapeFinding(policy.sandbox, {
+    policyDocName,
+    policyPath,
+  });
+  if (sandboxFinding !== undefined) {
+    return [sandboxFinding];
+  }
   const gatewayFinding = gatewayPolicyShapeFinding(policy.gateway, {
     policyDocName,
     policyPath,
@@ -1360,14 +1528,14 @@ function scopedPolicyShapeFinding(
       }
     }
     const unsupportedKey = Object.keys(overlay).find(
-      (key) => key !== "agentIds" && key !== "agents" && key !== "tools",
+      (key) => key !== "agentIds" && key !== "agents" && key !== "tools" && key !== "sandbox",
     );
     if (unsupportedKey !== undefined) {
       return policyShapeFinding(
         params.policyPath,
         `oc://${params.policyDocName}/${targetPrefix}/${ocPathSegment(unsupportedKey)}`,
         `${params.policyPath} scopes.${scopeName}.${unsupportedKey} is not supported by the agentIds selector.`,
-        `Use only agentIds with agents.workspace or tools in this policy scope.`,
+        `Use only agentIds with agents.workspace, tools, or sandbox in this policy scope.`,
       );
     }
     if (overlay.agents !== undefined && !isRecord(overlay.agents)) {
@@ -1415,6 +1583,15 @@ function scopedPolicyShapeFinding(
       if (toolsFinding !== undefined) {
         return toolsFinding;
       }
+    }
+    const sandboxFinding = sandboxPolicyShapeFinding(overlay.sandbox, {
+      policyDocName: params.policyDocName,
+      policyPath: params.policyPath,
+      targetPrefix: `${targetPrefix}/sandbox`,
+      propertyPrefix: `scopes.${scopeName}.sandbox`,
+    });
+    if (sandboxFinding !== undefined) {
+      return sandboxFinding;
     }
   }
   return duplicateScopedAgentFieldFinding(value, {
@@ -1634,6 +1811,108 @@ function toolPosturePolicyShapeFinding(
     valueName: "tool id or group",
   });
   return denyToolsFinding;
+}
+
+function sandboxPolicyShapeFinding(
+  value: unknown,
+  params: {
+    readonly policyDocName: string;
+    readonly policyPath: string;
+    readonly targetPrefix?: string;
+    readonly propertyPrefix?: string;
+  },
+): HealthFinding | undefined {
+  const targetPrefix = params.targetPrefix ?? "sandbox";
+  const propertyPrefix = params.propertyPrefix ?? "sandbox";
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    return policyShapeFinding(
+      params.policyPath,
+      `oc://${params.policyDocName}/${targetPrefix}`,
+      `${params.policyPath} ${propertyPrefix} must be an object.`,
+      `Fix ${params.policyPath} so ${propertyPrefix} is an object.`,
+    );
+  }
+  const modeFinding = policyStringArrayPropertyShapeFinding(value.requireMode, {
+    allowed: SUPPORTED_SANDBOX_MODES,
+    policyDocName: params.policyDocName,
+    policyPath: params.policyPath,
+    property: `${propertyPrefix}.requireMode`,
+    target: `${targetPrefix}/requireMode`,
+    valueName: "sandbox mode",
+  });
+  if (modeFinding !== undefined) {
+    return modeFinding;
+  }
+  const backendFinding = policyStringArrayPropertyShapeFinding(value.allowBackends, {
+    policyDocName: params.policyDocName,
+    policyPath: params.policyPath,
+    property: `${propertyPrefix}.allowBackends`,
+    target: `${targetPrefix}/allowBackends`,
+    valueName: "sandbox backend id",
+  });
+  if (backendFinding !== undefined) {
+    return backendFinding;
+  }
+  for (const section of ["docker", "browser"] as const) {
+    if (value[section] !== undefined && !isRecord(value[section])) {
+      return policyShapeFinding(
+        params.policyPath,
+        `oc://${params.policyDocName}/${targetPrefix}/${section}`,
+        `${params.policyPath} ${propertyPrefix}.${section} must be an object.`,
+        `Fix ${params.policyPath} so ${propertyPrefix}.${section} is an object.`,
+      );
+    }
+  }
+  const docker = isRecord(value.docker) ? value.docker : {};
+  const denyNetworksFinding = policyStringArrayPropertyShapeFinding(docker.denyNetworks, {
+    policyDocName: params.policyDocName,
+    policyPath: params.policyPath,
+    property: `${propertyPrefix}.docker.denyNetworks`,
+    target: `${targetPrefix}/docker/denyNetworks`,
+    valueName: "Docker network mode",
+  });
+  if (denyNetworksFinding !== undefined) {
+    return denyNetworksFinding;
+  }
+  if (
+    docker.requireBindMode !== undefined &&
+    !SUPPORTED_SANDBOX_BIND_MODES.includes(
+      docker.requireBindMode as (typeof SUPPORTED_SANDBOX_BIND_MODES)[number],
+    )
+  ) {
+    return policyShapeFinding(
+      params.policyPath,
+      `oc://${params.policyDocName}/${targetPrefix}/docker/requireBindMode`,
+      `${params.policyPath} ${propertyPrefix}.docker.requireBindMode must be ro or rw.`,
+      'Use "ro" to require read-only binds, or remove the rule.',
+    );
+  }
+  for (const key of ["denyDockerSocketBinds", "denyUnconfinedProfiles"] as const) {
+    if (docker[key] !== undefined && typeof docker[key] !== "boolean") {
+      return policyShapeFinding(
+        params.policyPath,
+        `oc://${params.policyDocName}/${targetPrefix}/docker/${key}`,
+        `${params.policyPath} ${propertyPrefix}.docker.${key} must be a boolean.`,
+        `Set ${propertyPrefix}.docker.${key} to true or false.`,
+      );
+    }
+  }
+  const browser = isRecord(value.browser) ? value.browser : {};
+  if (
+    browser.requireCdpSourceRange !== undefined &&
+    typeof browser.requireCdpSourceRange !== "boolean"
+  ) {
+    return policyShapeFinding(
+      params.policyPath,
+      `oc://${params.policyDocName}/${targetPrefix}/browser/requireCdpSourceRange`,
+      `${params.policyPath} ${propertyPrefix}.browser.requireCdpSourceRange must be a boolean.`,
+      `Set ${propertyPrefix}.browser.requireCdpSourceRange to true or false.`,
+    );
+  }
+  return undefined;
 }
 
 function gatewayPolicyShapeFinding(
@@ -2864,6 +3143,350 @@ function toolPostureLabel(entry: PolicyToolPostureEvidence): string {
   return entry.agentId === undefined ? "global tools config" : `agent '${entry.agentId}'`;
 }
 
+function sandboxPostureFindings(
+  policy: unknown,
+  policyPath: string,
+  policyDocName: string,
+  evidence: PolicyEvidence,
+): readonly HealthFinding[] {
+  if (!isRecord(policy)) {
+    return [];
+  }
+  const findings: HealthFinding[] = [];
+  if (sandboxPolicyShapeFinding(policy.sandbox, { policyDocName, policyPath }) === undefined) {
+    findings.push(
+      ...sandboxPostureFindingsForRule(
+        policy.sandbox,
+        policyDocName,
+        "sandbox",
+        evidence,
+        () => true,
+      ),
+    );
+  }
+  for (const target of agentScopedPolicyTargets(policy)) {
+    if (
+      sandboxPolicyShapeFinding(target.overlay.sandbox, {
+        policyDocName,
+        policyPath,
+        targetPrefix: `scopes/${ocPathSegment(target.scopeName)}/sandbox`,
+        propertyPrefix: `scopes.${target.scopeName}.sandbox`,
+      }) !== undefined ||
+      !isRecord(target.overlay.sandbox)
+    ) {
+      continue;
+    }
+    findings.push(
+      ...sandboxPostureFindingsForRule(
+        target.overlay.sandbox,
+        policyDocName,
+        `scopes/${ocPathSegment(target.scopeName)}/sandbox`,
+        evidence,
+        (entry) => scopedSandboxAgentMatches(entry, target.agentId, evidence.sandboxPosture ?? []),
+      ),
+    );
+  }
+  return findings;
+}
+
+function sandboxPostureFindingsForRule(
+  sandboxPolicy: Record<string, unknown> | undefined,
+  policyDocName: string,
+  requirementBase: string,
+  evidence: PolicyEvidence,
+  evidenceFilter: (entry: PolicySandboxPostureEvidence) => boolean,
+): readonly HealthFinding[] {
+  if (!isRecord(sandboxPolicy)) {
+    return [];
+  }
+  return [
+    ...sandboxModeFindings(sandboxPolicy, policyDocName, requirementBase, evidence, evidenceFilter),
+    ...sandboxBackendFindings(
+      sandboxPolicy,
+      policyDocName,
+      requirementBase,
+      evidence,
+      evidenceFilter,
+    ),
+    ...sandboxDockerNetworkFindings(
+      sandboxPolicy,
+      policyDocName,
+      requirementBase,
+      evidence,
+      evidenceFilter,
+    ),
+    ...sandboxDockerBindModeFindings(
+      sandboxPolicy,
+      policyDocName,
+      requirementBase,
+      evidence,
+      evidenceFilter,
+    ),
+    ...sandboxDockerSocketBindFindings(
+      sandboxPolicy,
+      policyDocName,
+      requirementBase,
+      evidence,
+      evidenceFilter,
+    ),
+    ...sandboxDockerUnconfinedProfileFindings(
+      sandboxPolicy,
+      policyDocName,
+      requirementBase,
+      evidence,
+      evidenceFilter,
+    ),
+    ...sandboxBrowserCdpSourceRangeFindings(
+      sandboxPolicy,
+      policyDocName,
+      requirementBase,
+      evidence,
+      evidenceFilter,
+    ),
+  ];
+}
+
+function scopedSandboxAgentMatches(
+  entry: PolicySandboxPostureEvidence,
+  policyAgentId: string,
+  entries: readonly PolicySandboxPostureEvidence[],
+): boolean {
+  if (scopedAgentIdMatches(entry.agentId, policyAgentId)) {
+    return true;
+  }
+  return (
+    normalizeAgentId(policyAgentId) === DEFAULT_SCOPED_AGENT_ID &&
+    entry.scope === "defaults" &&
+    !entries.some(
+      (candidate) =>
+        candidate.scope === "agent" &&
+        candidate.kind === entry.kind &&
+        scopedAgentIdMatches(candidate.agentId, policyAgentId),
+    )
+  );
+}
+
+function sandboxModeFindings(
+  sandboxPolicy: Record<string, unknown>,
+  policyDocName: string,
+  requirementBase: string,
+  evidence: PolicyEvidence,
+  evidenceFilter: (entry: PolicySandboxPostureEvidence) => boolean,
+): readonly HealthFinding[] {
+  const allowed = new Set(readStringList(sandboxPolicy, ["requireMode"]));
+  if (allowed.size === 0) {
+    return [];
+  }
+  return sandboxPostureEntries(evidence, "mode")
+    .filter(evidenceFilter)
+    .filter((entry) => typeof entry.value === "string" && !allowed.has(entry.value.toLowerCase()))
+    .map((entry) =>
+      sandboxPostureFinding(entry, {
+        checkId: CHECK_IDS.policySandboxModeUnapproved,
+        message: `${sandboxPostureLabel(entry)} uses unapproved sandbox mode '${entry.value ?? ""}'.`,
+        requirement: `oc://${policyDocName}/${requirementBase}/requireMode`,
+        fixHint:
+          "Set agents.defaults.sandbox.mode or agents.list[].sandbox.mode to an approved value.",
+      }),
+    );
+}
+
+function sandboxBackendFindings(
+  sandboxPolicy: Record<string, unknown>,
+  policyDocName: string,
+  requirementBase: string,
+  evidence: PolicyEvidence,
+  evidenceFilter: (entry: PolicySandboxPostureEvidence) => boolean,
+): readonly HealthFinding[] {
+  const allowed = new Set(readStringList(sandboxPolicy, ["allowBackends"]));
+  if (allowed.size === 0) {
+    return [];
+  }
+  return sandboxPostureEntries(evidence, "backend")
+    .filter(evidenceFilter)
+    .filter((entry) => typeof entry.value === "string" && !allowed.has(entry.value.toLowerCase()))
+    .map((entry) =>
+      sandboxPostureFinding(entry, {
+        checkId: CHECK_IDS.policySandboxBackendUnapproved,
+        message: `${sandboxPostureLabel(entry)} uses unapproved sandbox backend '${entry.value ?? ""}'.`,
+        requirement: `oc://${policyDocName}/${requirementBase}/allowBackends`,
+        fixHint: "Use an approved sandbox backend or update policy after review.",
+      }),
+    );
+}
+
+function sandboxDockerNetworkFindings(
+  sandboxPolicy: Record<string, unknown>,
+  policyDocName: string,
+  requirementBase: string,
+  evidence: PolicyEvidence,
+  evidenceFilter: (entry: PolicySandboxPostureEvidence) => boolean,
+): readonly HealthFinding[] {
+  const denied = readStringList(sandboxPolicy, ["docker", "denyNetworks"]);
+  if (denied.length === 0) {
+    return [];
+  }
+  return sandboxPostureEntries(evidence, "dockerNetwork")
+    .filter(evidenceFilter)
+    .filter((entry) => typeof entry.value === "string" && networkDenied(entry.value, denied))
+    .map((entry) =>
+      sandboxPostureFinding(entry, {
+        checkId: CHECK_IDS.policySandboxDockerNetworkDenied,
+        message: `${sandboxPostureLabel(entry)} uses denied Docker network '${entry.value ?? ""}'.`,
+        requirement: `oc://${policyDocName}/${requirementBase}/docker/denyNetworks`,
+        fixHint: "Change agents.*.sandbox.docker.network or update policy after review.",
+      }),
+    );
+}
+
+function sandboxDockerBindModeFindings(
+  sandboxPolicy: Record<string, unknown>,
+  policyDocName: string,
+  requirementBase: string,
+  evidence: PolicyEvidence,
+  evidenceFilter: (entry: PolicySandboxPostureEvidence) => boolean,
+): readonly HealthFinding[] {
+  const required = readPolicyString(sandboxPolicy, ["docker", "requireBindMode"]);
+  if (required === undefined) {
+    return [];
+  }
+  return sandboxPostureEntries(evidence, "dockerBind")
+    .filter(evidenceFilter)
+    .filter((entry) => entry.bindMode !== required)
+    .map((entry) =>
+      sandboxPostureFinding(entry, {
+        checkId: CHECK_IDS.policySandboxDockerBindModeRequired,
+        message: `${sandboxPostureLabel(entry)} has Docker bind '${entry.bind ?? ""}' with mode '${entry.bindMode ?? "unknown"}'.`,
+        requirement: `oc://${policyDocName}/${requirementBase}/docker/requireBindMode`,
+        fixHint: `Set the bind mode to ${required} or update policy after review.`,
+      }),
+    );
+}
+
+function sandboxDockerSocketBindFindings(
+  sandboxPolicy: Record<string, unknown>,
+  policyDocName: string,
+  requirementBase: string,
+  evidence: PolicyEvidence,
+  evidenceFilter: (entry: PolicySandboxPostureEvidence) => boolean,
+): readonly HealthFinding[] {
+  if (readPolicyBoolean(sandboxPolicy, ["docker", "denyDockerSocketBinds"]) !== true) {
+    return [];
+  }
+  return sandboxPostureEntries(evidence, "dockerBind")
+    .filter(evidenceFilter)
+    .filter((entry) => bindHostLooksLikeDockerSocket(entry.bindHost))
+    .map((entry) =>
+      sandboxPostureFinding(entry, {
+        checkId: CHECK_IDS.policySandboxDockerSocketBind,
+        message: `${sandboxPostureLabel(entry)} binds host Docker socket '${entry.bindHost ?? ""}'.`,
+        requirement: `oc://${policyDocName}/${requirementBase}/docker/denyDockerSocketBinds`,
+        fixHint: "Remove the Docker socket bind or update policy after review.",
+      }),
+    );
+}
+
+function sandboxDockerUnconfinedProfileFindings(
+  sandboxPolicy: Record<string, unknown>,
+  policyDocName: string,
+  requirementBase: string,
+  evidence: PolicyEvidence,
+  evidenceFilter: (entry: PolicySandboxPostureEvidence) => boolean,
+): readonly HealthFinding[] {
+  if (readPolicyBoolean(sandboxPolicy, ["docker", "denyUnconfinedProfiles"]) !== true) {
+    return [];
+  }
+  return sandboxPostureEntries(evidence, "dockerSecurityProfile")
+    .filter(evidenceFilter)
+    .filter(
+      (entry) => typeof entry.value === "string" && entry.value.toLowerCase() === "unconfined",
+    )
+    .map((entry) =>
+      sandboxPostureFinding(entry, {
+        checkId: CHECK_IDS.policySandboxDockerUnconfinedProfile,
+        message: `${sandboxPostureLabel(entry)} sets Docker ${entry.profile ?? "security"} profile to unconfined.`,
+        requirement: `oc://${policyDocName}/${requirementBase}/docker/denyUnconfinedProfiles`,
+        fixHint: "Remove the unconfined Docker profile or update policy after review.",
+      }),
+    );
+}
+
+function sandboxBrowserCdpSourceRangeFindings(
+  sandboxPolicy: Record<string, unknown>,
+  policyDocName: string,
+  requirementBase: string,
+  evidence: PolicyEvidence,
+  evidenceFilter: (entry: PolicySandboxPostureEvidence) => boolean,
+): readonly HealthFinding[] {
+  if (readPolicyBoolean(sandboxPolicy, ["browser", "requireCdpSourceRange"]) !== true) {
+    return [];
+  }
+  return sandboxPostureEntries(evidence, "browserCdpSourceRange")
+    .filter(evidenceFilter)
+    .filter((entry) => entry.value === undefined)
+    .map((entry) =>
+      sandboxPostureFinding(entry, {
+        checkId: CHECK_IDS.policySandboxBrowserCdpSourceRangeMissing,
+        message: `${sandboxPostureLabel(entry)} enables sandbox browser without cdpSourceRange.`,
+        requirement: `oc://${policyDocName}/${requirementBase}/browser/requireCdpSourceRange`,
+        fixHint: "Set agents.*.sandbox.browser.cdpSourceRange or update policy after review.",
+      }),
+    );
+}
+
+function sandboxPostureEntries(
+  evidence: PolicyEvidence,
+  kind: PolicySandboxPostureEvidence["kind"],
+): readonly PolicySandboxPostureEvidence[] {
+  return (evidence.sandboxPosture ?? []).filter((entry) => entry.kind === kind);
+}
+
+function sandboxPostureFinding(
+  entry: PolicySandboxPostureEvidence,
+  params: {
+    readonly checkId: (typeof POLICY_CHECK_IDS)[number];
+    readonly message: string;
+    readonly requirement: string;
+    readonly fixHint: string;
+  },
+): HealthFinding {
+  return {
+    checkId: params.checkId,
+    severity: "error",
+    message: params.message,
+    source: "policy",
+    path: "openclaw config",
+    ocPath: entry.source,
+    target: entry.source,
+    requirement: params.requirement,
+    fixHint: params.fixHint,
+  };
+}
+
+function sandboxPostureLabel(entry: PolicySandboxPostureEvidence): string {
+  return entry.agentId === undefined ? "default sandbox config" : `agent '${entry.agentId}'`;
+}
+
+function networkDenied(value: string, denied: readonly string[]): boolean {
+  const normalized = value.trim().toLowerCase();
+  return denied.some(
+    (entry) =>
+      entry === normalized || (entry === "container:*" && normalized.startsWith("container:")),
+  );
+}
+
+function bindHostLooksLikeDockerSocket(value: string | undefined): boolean {
+  if (value === undefined) {
+    return false;
+  }
+  const normalized = value.replaceAll("\\", "/").toLowerCase();
+  return (
+    normalized === "/var/run/docker.sock" ||
+    normalized === "/run/docker.sock" ||
+    normalized.endsWith("/docker.sock")
+  );
+}
+
 function secretAuthProvenanceFindings(
   policy: unknown,
   policyPath: string,
@@ -2940,6 +3563,35 @@ function policyHasAgentWorkspaceRules(policy: unknown): boolean {
     const scopedAgents = isRecord(overlay.agents) ? overlay.agents : {};
     return workspacePolicyHasRules(scopedAgents.workspace);
   });
+}
+
+function policyHasSandboxPostureRules(policy: unknown): boolean {
+  if (!isRecord(policy)) {
+    return false;
+  }
+  if (sandboxPosturePolicyHasRules(policy.sandbox)) {
+    return true;
+  }
+  return agentScopedPolicyOverlays(policy).some(([, overlay]) =>
+    sandboxPosturePolicyHasRules(overlay.sandbox),
+  );
+}
+
+function sandboxPosturePolicyHasRules(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const sandbox = value;
+  return (
+    sandbox.requireMode !== undefined ||
+    sandbox.allowBackends !== undefined ||
+    (isRecord(sandbox.docker) &&
+      (sandbox.docker.denyNetworks !== undefined ||
+        sandbox.docker.requireBindMode !== undefined ||
+        sandbox.docker.denyDockerSocketBinds !== undefined ||
+        sandbox.docker.denyUnconfinedProfiles !== undefined)) ||
+    (isRecord(sandbox.browser) && sandbox.browser.requireCdpSourceRange !== undefined)
+  );
 }
 
 function policyHasToolPostureRules(policy: unknown): boolean {
@@ -3118,6 +3770,8 @@ export function isPolicyValueAtLeastAsStrict(
       return baseline !== false || candidate === false;
     case "exact-list":
       return samePolicyStringList(candidate, baseline, metadata);
+    case "ordered-string":
+      return policyOrderedStringAtLeastAsStrict(candidate, baseline, metadata);
   }
 }
 
@@ -3178,6 +3832,28 @@ function samePolicyStringList(
   );
 }
 
+function policyOrderedStringAtLeastAsStrict(
+  candidate: unknown,
+  baseline: unknown,
+  metadata: PolicyRuleMetadata,
+): boolean {
+  const candidateValue = policyString(candidate, metadata);
+  const baselineValue = policyString(baseline, metadata);
+  if (
+    candidateValue === undefined ||
+    baselineValue === undefined ||
+    metadata.orderedValues === undefined
+  ) {
+    return false;
+  }
+  const orderedValues = metadata.orderedValues.map((entry) =>
+    metadata.caseSensitive === true ? entry : entry.toLowerCase(),
+  );
+  const candidateIndex = orderedValues.indexOf(candidateValue);
+  const baselineIndex = orderedValues.indexOf(baselineValue);
+  return candidateIndex >= 0 && baselineIndex >= 0 && candidateIndex >= baselineIndex;
+}
+
 function policyStringList(
   value: unknown,
   metadata: PolicyRuleMetadata,
@@ -3189,6 +3865,14 @@ function policyStringList(
     .map((entry) => entry.trim())
     .filter(Boolean)
     .map((entry) => (metadata.caseSensitive === true ? entry : entry.toLowerCase()));
+}
+
+function policyString(value: unknown, metadata: PolicyRuleMetadata): string | undefined {
+  if (typeof value !== "string" || value.trim() === "") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return metadata.caseSensitive === true ? trimmed : trimmed.toLowerCase();
 }
 
 function scopedPolicyValue(overlay: Record<string, unknown>, path: readonly string[]): unknown {
@@ -3841,6 +4525,19 @@ function ocPathSegment(value: string): string {
     return value;
   }
   return JSON.stringify(value);
+}
+
+function readPolicyString(policy: unknown, path: readonly string[]): string | undefined {
+  let current: unknown = policy;
+  for (const part of path) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[part];
+  }
+  return typeof current === "string" && current.trim() !== ""
+    ? current.trim().toLowerCase()
+    : undefined;
 }
 
 function readPolicyBoolean(policy: unknown, path: readonly string[]): boolean | undefined {

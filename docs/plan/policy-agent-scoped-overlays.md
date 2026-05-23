@@ -32,11 +32,11 @@ This page describes the agent-scoped overlay model. The field reference remains
 Use `scopes.<scopeName>` for purpose-named agent policy scopes. Each
 scope lists the runtime `agentIds` it applies to, then reuses the normal
 top-level policy section grammar where the section evidence can be attributed to
-those agents. The initial shipped scoped sections are `tools` and
-`agents.workspace`; sandbox and ingress stay out of this PR and can join the
-same container once those policy PRs land and their evidence carries agent
-identity. The scoped field inventory is backed by policy rule metadata that
-records each field's strictness semantics for later policy-file conformance.
+those agents. The scoped sections in this stack are `tools`,
+`agents.workspace`, and `sandbox`; ingress can join the same container once that
+policy PR lands with an enforceable selector. The scoped field inventory is
+backed by policy rule metadata that records each field's strictness semantics
+for later policy-file conformance.
 
 ```jsonc
 {
@@ -69,6 +69,13 @@ records each field's strictness semantics for later policy-file conformance.
         "denyTools": ["exec", "process", "write", "edit", "apply_patch"],
       },
     },
+    "release-agent-sandbox": {
+      "agentIds": ["release-agent"],
+      "sandbox": {
+        "requireMode": ["all"],
+        "allowBackends": ["docker"],
+      },
+    },
   },
 }
 ```
@@ -76,11 +83,14 @@ records each field's strictness semantics for later policy-file conformance.
 `agents.workspace` remains the existing all-agent workspace baseline.
 `scopes.<scopeName>` is a scoped overlay, not a replacement for global
 policy. The scope name is descriptive only; matching uses `agentIds`, not
-display names. It deliberately contains normal section names instead of a
-bespoke per-agent mini-grammar.
+display names. The same agent can appear in more than one scope, as long as
+each scope governs different effective policy fields for that agent, or its
+duplicate field is equally or more restrictive according to policy metadata. It
+deliberately contains normal section names instead of a bespoke per-agent
+mini-grammar.
 Every scope present in `policy.jsonc` must be valid and enforceable. In this
-PR, the only supported selector is `agentIds`, and it supports only `tools.*`
-and `agents.workspace.*`.
+PR, the only supported selector is `agentIds`, and it supports `tools.*`,
+`agents.workspace.*`, and `sandbox.*`.
 
 ## Layering semantics
 
@@ -126,6 +136,7 @@ is observed:
 | `scopes.<scopeName>.tools.*`            | Matching `agents.list[]` entry and inherited posture | Only that named agent             | Let most agents use `node` exec host while one agent must use only `sandbox`. |
 | `agents.workspace`                      | Defaults and every listed agent workspace posture    | Defaults and all listed agents    | Require every agent workspace access to be `none` or `ro`.                    |
 | `scopes.<scopeName>.agents.workspace.*` | Matching `agents.list[]` workspace posture           | Only that named agent             | Require one agent to be read-only without requiring the same for `main`.      |
+| `scopes.<scopeName>.sandbox.*`          | Matching agent sandbox posture                       | Only that named agent             | Require one agent to use Docker sandbox mode without requiring every agent.   |
 
 Per-agent overlays are additive. A named-agent rule can be stricter than the
 top-level rule, but it cannot make a global violation acceptable. For allow-list
@@ -135,8 +146,7 @@ named-agent overlay when both are present.
 For example, if top-level `tools.exec.allowHosts` permits `["sandbox", "node"]`
 and `scopes.release-agent-lockdown.tools.exec.allowHosts` permits only
 `["sandbox"]`, `release-agent` fails when its effective exec host is `node`;
-another agent can still pass
-with `node`.
+another agent can still pass with `node`.
 
 ## Tool posture versus workspace posture
 
@@ -150,23 +160,37 @@ policy namespace. If one agent needs stricter tool restrictions to make its
 workspace posture meaningful, put those restrictions in the same agent overlay
 under `scopes.<scopeName>.tools`.
 
-For a restricted release agent, the intended split is:
+For a restricted release agent, the intended split can use sibling scopes:
 
 ```jsonc
 {
   "scopes": {
-    "release-agent-lockdown": {
-      "agentIds": ["release-agent"],
+    "release-workspace": {
+      "agentIds": ["release-agent", "review-agent"],
       "agents": {
         "workspace": { "allowedAccess": ["none", "ro"] },
       },
+    },
+    "release-tool-lockdown": {
+      "agentIds": ["release-agent"],
       "tools": {
         "denyTools": ["exec", "process", "write", "edit", "apply_patch"],
+      },
+    },
+    "release-sandbox": {
+      "agentIds": ["release-agent"],
+      "sandbox": {
+        "requireMode": ["all"],
+        "allowBackends": ["docker"],
       },
     },
   },
 }
 ```
+
+Here, `release-agent` receives the shared workspace claim, the narrower tool
+lockdown claim, and the sandbox claim, while `review-agent` receives only the
+shared workspace claim.
 
 ## Section eligibility
 
@@ -177,8 +201,8 @@ agent id or can be attributed to one without guessing.
 | ----------- | --------------------------- | ------------------------------------------------------------------------ |
 | `workspace` | Include                     | Agent sandbox/workspace evidence already has agent identity.             |
 | `tools`     | Include                     | Tool posture evidence includes global and per-agent tool config.         |
-| `sandbox`   | Pipeline follow-up          | Keep out until the sandbox posture PR lands and evidence can be scoped.  |
-| `ingress`   | Pipeline follow-up          | Keep out until ingress/channel posture lands with agent attribution.     |
+| `sandbox`   | Include                     | Sandbox posture evidence carries default and per-agent identity.         |
+| `ingress`   | Pipeline follow-up          | Keep out until ingress/channel posture lands with channel selectors.     |
 | `models`    | Include when mapped         | Selected model refs can be agent-specific.                               |
 | `mcp`       | Include when mapped         | Use only when MCP server evidence is attributable to an agent.           |
 | `auth`      | Defer                       | Auth profile metadata is a config catalog unless agent binding is clear. |
