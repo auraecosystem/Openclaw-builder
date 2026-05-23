@@ -20,7 +20,7 @@ import type {
   MatrixStreamingMode,
   ReplyToMode,
 } from "../../types.js";
-import { resolveMatrixAccountConfig } from "../account-config.js";
+import { resolveMatrixAccountConfig, resolveMatrixBaseConfig } from "../account-config.js";
 import { resolveConfiguredMatrixBotUserIds } from "../accounts.js";
 import { setActiveMatrixClient } from "../active-client.js";
 import {
@@ -280,7 +280,9 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
   const threadReplies = accountConfig.threadReplies ?? "inbound";
   const dmThreadReplies = accountConfig.dm?.threadReplies;
   const bypassMentionInBoundThreads =
-    accountConfig.threadBindings?.bypassMentionInBoundThreads === true;
+    accountConfig.threadBindings?.bypassMentionInBoundThreads ??
+    resolveMatrixBaseConfig(cfg).threadBindings?.bypassMentionInBoundThreads ??
+    false;
   const threadBindingIdleTimeoutMs = resolveThreadBindingIdleTimeoutMsForChannel({
     cfg,
     channel: "matrix",
