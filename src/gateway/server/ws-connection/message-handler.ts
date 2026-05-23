@@ -66,8 +66,10 @@ import type { GatewayMethodRegistry } from "../../methods/registry.js";
 import {
   isLocalishHost,
   isLoopbackAddress,
+  isLoopbackHost,
   isTrustedProxyAddress,
   resolveClientIp,
+  resolveHostName,
 } from "../../net.js";
 import { reconcileNodePairingOnConnect } from "../../node-connect-reconcile.js";
 import {
@@ -318,6 +320,38 @@ export type GatewayWsMessageHandlerParams = {
   logHealth: SubsystemLogger;
   logWsControl: SubsystemLogger;
 };
+
+function isLoopbackOrigin(origin?: string): boolean {
+  const trimmed = origin?.trim();
+  if (!trimmed || trimmed === "null") {
+    return false;
+  }
+  try {
+    return isLoopbackHost(new URL(trimmed).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isLoopbackRequestHost(host?: string): boolean {
+  return isLoopbackHost(resolveHostName(host));
+}
+
+function resolveAllowsDevLlmTracing(params: {
+  isBrowserOperatorUi: boolean;
+  isLocalClient: boolean;
+  hasProxyHeaders: boolean;
+  requestHost?: string;
+  requestOrigin?: string;
+}): boolean {
+  return (
+    params.isBrowserOperatorUi &&
+    params.isLocalClient &&
+    !params.hasProxyHeaders &&
+    isLoopbackRequestHost(params.requestHost) &&
+    isLoopbackOrigin(params.requestOrigin)
+  );
+}
 
 export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerParams) {
   const {
@@ -626,6 +660,13 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
 
         const isControlUi = isOperatorUiClient(connectParams.client);
         const isBrowserOperatorUi = isBrowserOperatorUiClient(connectParams.client);
+        const allowsDevLlmTracing = resolveAllowsDevLlmTracing({
+          isBrowserOperatorUi,
+          isLocalClient,
+          hasProxyHeaders,
+          requestHost,
+          requestOrigin,
+        });
         const isWebchat = isWebchatConnect(connectParams);
         const isNativeAppUi =
           connectParams.client.mode === GATEWAY_CLIENT_MODES.UI &&
@@ -1560,6 +1601,8 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           socket,
           connect: connectParams,
           connId,
+          isLocalClient,
+          allowsDevLlmTracing,
           isDeviceTokenAuth: authMethod === "device-token",
           usesSharedGatewayAuth,
           sharedGatewaySessionGeneration,

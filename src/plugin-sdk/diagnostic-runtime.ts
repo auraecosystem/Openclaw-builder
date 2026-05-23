@@ -15,6 +15,14 @@ export {
   resetDiagnosticEventsForTest,
   waitForDiagnosticEventsDrained,
 } from "../infra/diagnostic-events.js";
+export type { DevLlmTraceModelCall } from "../infra/llm-dev-tracing.js";
+export {
+  recordDevLlmTraceCompleted,
+  recordDevLlmTraceError,
+  recordDevLlmTraceRequestPayload,
+  recordDevLlmTraceResponseChunk,
+  recordDevLlmTraceStarted,
+} from "../infra/llm-dev-tracing.js";
 export type { DiagnosticTraceContext } from "../infra/diagnostic-trace-context.js";
 export {
   createChildDiagnosticTraceContext,

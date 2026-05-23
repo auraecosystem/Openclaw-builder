@@ -15,6 +15,7 @@ import type {
   ClawHubSkillDetail,
   SkillMessage,
 } from "./controllers/skills.ts";
+import type { LlmTraceDetail, LlmTraceSummary, TraceCapability } from "./controllers/traces.ts";
 import type { EmbedSandboxMode } from "./embed-sandbox.ts";
 import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway.ts";
 import type { Tab } from "./navigation.ts";
@@ -427,6 +428,13 @@ export type AppViewState = {
     logsLimit: number;
     logsMaxBytes: number;
     logsAtBottom: boolean;
+    tracesLoading: boolean;
+    tracesError: string | null;
+    tracesCapability: TraceCapability | null;
+    tracesEntries: LlmTraceSummary[];
+    tracesSelectedId: string | null;
+    tracesSelected: LlmTraceDetail | null;
+    tracesFilterText: string;
     updateAvailable: import("./types.js").UpdateAvailable | null;
     attentionItems: AttentionItem[];
     paletteOpen: boolean;

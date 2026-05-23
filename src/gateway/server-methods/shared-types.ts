@@ -23,6 +23,8 @@ type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
 export type GatewayClient = {
   connect: ConnectParams;
   connId?: string;
+  isLocalClient?: boolean;
+  allowsDevLlmTracing?: boolean;
   clientIp?: string;
   pluginSurfaceUrls?: Record<string, string>;
   pluginNodeCapabilitySurfaces?: Record<string, PluginNodeCapabilitySurface>;

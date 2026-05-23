@@ -53,6 +53,7 @@ import { loadNodes, type NodesState } from "./controllers/nodes.ts";
 import { loadPresence, type PresenceState } from "./controllers/presence.ts";
 import { loadSessions, type SessionsState } from "./controllers/sessions.ts";
 import { loadSkills, type SkillsState } from "./controllers/skills.ts";
+import { loadTraces, type TracesState } from "./controllers/traces.ts";
 import { loadUsage, type UsageState } from "./controllers/usage.ts";
 import { syncCustomThemeStyleTag } from "./custom-theme.ts";
 import { isMonitoredAuthProvider } from "./model-auth-helpers.ts";
@@ -138,6 +139,7 @@ type SettingsAppHost = SettingsHost &
   DreamingState &
   ExecApprovalsState &
   LogsState &
+  TracesState &
   NodesState &
   PresenceState &
   SessionsState &
@@ -475,6 +477,9 @@ export async function refreshActiveTab(host: SettingsHost) {
         host.logsAtBottom = true;
         await loadLogs(app, { reset: true });
         scheduleLogsScroll(host as unknown as Parameters<typeof scheduleLogsScroll>[0], true);
+        break;
+      case "traces":
+        await loadTraces(app);
         break;
     }
     finishControlUiRefresh(host, refreshRun, "ok");

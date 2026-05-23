@@ -208,6 +208,23 @@ These flags log through normal OpenClaw logging, so `openclaw logs --follow`
 and the Control UI Logs tab show them. Without the flags, the same diagnostics
 remain available at `debug` level.
 
+### Development trace UI
+
+For local source-checkout debugging, the Control UI can show in-memory LLM
+request traces with full prompts and tool schemas. This is separate from the
+normal log file and is unavailable in packaged installs. Start the Gateway with
+the explicit development flags before opening `/traces`:
+
+```bash
+OPENCLAW_DEV_TRACING_UI=1 \
+OPENCLAW_DEV_TRACE_LLM_PAYLOADS=1 \
+OPENCLAW_DEV_TRACE_LLM_RESPONSE=1 \
+pnpm openclaw gateway
+```
+
+See [Control UI development traces](/web/control-ui#development-llm-traces)
+for the security model and flag meanings.
+
 ### Trace correlation
 
 File logs are JSONL. When a log call carries a valid diagnostic trace context,

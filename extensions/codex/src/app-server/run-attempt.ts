@@ -57,7 +57,13 @@ import {
   emitTrustedDiagnosticEvent,
   hasPendingInternalDiagnosticEvent,
   onInternalDiagnosticEvent,
+  recordDevLlmTraceCompleted,
+  recordDevLlmTraceError,
+  recordDevLlmTraceRequestPayload,
+  recordDevLlmTraceResponseChunk,
+  recordDevLlmTraceStarted,
   type DiagnosticEventPayload,
+  type DevLlmTraceModelCall,
 } from "openclaw/plugin-sdk/diagnostic-runtime";
 import { isToolAllowed } from "openclaw/plugin-sdk/sandbox";
 import { pathExists } from "openclaw/plugin-sdk/security-runtime";
@@ -148,6 +154,7 @@ import {
   type CodexDynamicToolCallParams,
   type CodexDynamicToolCallResponse,
   type CodexThreadItem,
+  type CodexTurnStartParams,
   type CodexTurnStartResponse,
   type JsonObject,
   type JsonValue,
@@ -292,6 +299,102 @@ function emitCodexAppServerEvent(
     // canonical app-server turn lifecycle.
     embeddedAgentLog.debug("codex app-server agent event handler threw", { error });
   }
+}
+
+function jsonByteLength(value: unknown): number | undefined {
+  try {
+    return Buffer.byteLength(JSON.stringify(value), "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function buildCodexDevTraceCall(
+  params: EmbeddedRunAttemptParams,
+  threadId: string,
+): DevLlmTraceModelCall {
+  return {
+    runId: params.runId,
+    callId: `${params.runId}:codex-app-server:${threadId}`,
+    ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
+    ...(params.sessionId ? { sessionId: params.sessionId } : {}),
+    provider: params.provider,
+    model: params.modelId,
+    api: "codex-app-server",
+    transport: "codex-app-server",
+  };
+}
+
+function codexDevTraceTool(tool: CodexDynamicToolSpec): JsonObject {
+  return {
+    type: "function",
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.inputSchema,
+    raw: tool,
+  };
+}
+
+function buildCodexDevTraceRequestPayload(params: {
+  attempt: EmbeddedRunAttemptParams;
+  developerInstructions?: string;
+  historyMessages: readonly AgentMessage[];
+  method: string;
+  threadId: string;
+  tools: readonly CodexDynamicToolSpec[];
+  turnStartParams: CodexTurnStartParams;
+}): JsonObject {
+  const payload: JsonObject = {
+    api: "codex-app-server",
+    method: params.method,
+    provider: params.attempt.provider,
+    model: params.attempt.modelId,
+    threadId: params.threadId,
+    input: params.turnStartParams.input ?? [],
+    tools: params.tools.map(codexDevTraceTool),
+    request: params.turnStartParams,
+  };
+  if (params.developerInstructions?.trim()) {
+    payload.instructions = params.developerInstructions;
+  }
+  if (params.historyMessages.length > 0) {
+    payload.historyMessages = [...params.historyMessages] as unknown as JsonValue;
+  }
+  return payload;
+}
+
+function recordCodexDevTraceNotification(
+  call: DevLlmTraceModelCall,
+  notification: CodexServerNotification,
+): boolean {
+  if (notification.method === "item/agentMessage/delta" && isJsonObject(notification.params)) {
+    const delta = readString(notification.params, "delta");
+    if (delta) {
+      recordDevLlmTraceResponseChunk(call, {
+        type: "text_delta",
+        delta,
+        source: "codex-app-server",
+        notification,
+      });
+      return true;
+    }
+    return false;
+  }
+  if (!isRawAssistantCompletionNotification(notification) || !isJsonObject(notification.params)) {
+    return false;
+  }
+  const item = isJsonObject(notification.params.item) ? notification.params.item : undefined;
+  const text = item ? extractRawResponseItemText(item) : "";
+  if (!text.trim()) {
+    return false;
+  }
+  recordDevLlmTraceResponseChunk(call, {
+    type: "response.output_text.done",
+    text,
+    source: "codex-app-server",
+    notification,
+  });
+  return true;
 }
 
 function collectTerminalAssistantText(result: EmbeddedRunAttemptResult): string {
@@ -2313,6 +2416,10 @@ export async function runCodexAppServerAttempt(
     );
   };
 
+  const codexDevTraceCall = buildCodexDevTraceCall(params, thread.threadId);
+  let codexDevTraceRequestBytes: number | undefined;
+  let codexDevTraceFirstResponseAt: number | undefined;
+  recordDevLlmTraceStarted(codexDevTraceCall);
   const handleNotification = async (notification: CodexServerNotification) => {
     userInputBridge?.handleNotification(notification);
     if (!projector || !turnId) {
@@ -2331,6 +2438,12 @@ export async function runCodexAppServerAttempt(
         attemptProgress: true,
       });
       reportCodexExecutionNotification(notification);
+      if (
+        recordCodexDevTraceNotification(codexDevTraceCall, notification) &&
+        codexDevTraceFirstResponseAt === undefined
+      ) {
+        codexDevTraceFirstResponseAt = Date.now();
+      }
     }
     if (isCurrentTurnNotification) {
       updateActiveTurnItemIds(notification, activeTurnItemIds);
@@ -2762,23 +2875,37 @@ export async function runCodexAppServerAttempt(
   ];
 
   let turn: CodexTurnStartResponse | undefined;
-  const startCodexTurn = async (): Promise<CodexTurnStartResponse> =>
-    assertCodexTurnStartResponse(
-      await client.request(
-        "turn/start",
-        buildTurnStartParams(params, {
-          threadId: thread.threadId,
-          cwd: codexExecutionCwd,
-          appServer: pluginAppServer,
-          promptText: codexTurnPromptText,
-          sandboxPolicy: codexSandboxPolicy,
-          environmentSelection: codexEnvironmentSelection,
-          heartbeatCollaborationInstructions:
-            workspaceBootstrapContext.heartbeatCollaborationInstructions,
-        }),
-        { timeoutMs: params.timeoutMs, signal: runAbortController.signal },
-      ),
+  const buildCodexTurnStartPayload = (): CodexTurnStartParams =>
+    buildTurnStartParams(params, {
+      threadId: thread.threadId,
+      cwd: codexExecutionCwd,
+      appServer: pluginAppServer,
+      promptText: codexTurnPromptText,
+      sandboxPolicy: codexSandboxPolicy,
+      environmentSelection: codexEnvironmentSelection,
+      heartbeatCollaborationInstructions:
+        workspaceBootstrapContext.heartbeatCollaborationInstructions,
+    });
+  const startCodexTurn = async (): Promise<CodexTurnStartResponse> => {
+    const turnStartParams = buildCodexTurnStartPayload();
+    const tracePayload = buildCodexDevTraceRequestPayload({
+      attempt: params,
+      developerInstructions: promptBuild.developerInstructions,
+      historyMessages,
+      method: "turn/start",
+      threadId: thread.threadId,
+      tools: toolBridge.availableSpecs,
+      turnStartParams,
+    });
+    codexDevTraceRequestBytes = jsonByteLength(tracePayload);
+    recordDevLlmTraceRequestPayload(codexDevTraceCall, tracePayload);
+    return assertCodexTurnStartResponse(
+      await client.request("turn/start", turnStartParams, {
+        timeoutMs: params.timeoutMs,
+        signal: runAbortController.signal,
+      }),
     );
+  };
   try {
     runAgentHarnessLlmInputHook({
       event: buildLlmInputEvent(),
@@ -2844,6 +2971,15 @@ export async function runCodexAppServerAttempt(
         signal: runAbortController.signal,
       });
       const turnStartErrorMessage = usageLimitError?.message ?? formatErrorMessage(turnStartError);
+      recordDevLlmTraceError(codexDevTraceCall, {
+        durationMs: Date.now() - attemptStartedAt,
+        requestPayloadBytes: codexDevTraceRequestBytes,
+        ...(codexDevTraceFirstResponseAt !== undefined
+          ? { timeToFirstByteMs: Math.max(0, codexDevTraceFirstResponseAt - attemptStartedAt) }
+          : {}),
+        errorCategory: "codex_turn_start",
+        failureKind: "turn_start_failed",
+      });
       if (isInvalidCodexImagePayloadError(turnStartErrorMessage)) {
         await clearCodexBindingAfterInvalidImagePayload(activeSessionFile, {
           phase: "turn_start",
@@ -3180,6 +3316,27 @@ export async function runCodexAppServerAttempt(
         runMaintenance: runHarnessContextEngineMaintenance,
         config: params.config,
         warn: (message) => embeddedAgentLog.warn(message),
+      });
+    }
+    if (finalPromptError) {
+      recordDevLlmTraceError(codexDevTraceCall, {
+        durationMs: Date.now() - attemptStartedAt,
+        requestPayloadBytes: codexDevTraceRequestBytes,
+        responseStreamBytes: jsonByteLength(result.assistantTexts),
+        ...(codexDevTraceFirstResponseAt !== undefined
+          ? { timeToFirstByteMs: Math.max(0, codexDevTraceFirstResponseAt - attemptStartedAt) }
+          : {}),
+        errorCategory: "codex_turn",
+        failureKind: codexAppServerFailureKind ?? "prompt_error",
+      });
+    } else {
+      recordDevLlmTraceCompleted(codexDevTraceCall, {
+        durationMs: Date.now() - attemptStartedAt,
+        requestPayloadBytes: codexDevTraceRequestBytes,
+        responseStreamBytes: jsonByteLength(result.assistantTexts),
+        ...(codexDevTraceFirstResponseAt !== undefined
+          ? { timeToFirstByteMs: Math.max(0, codexDevTraceFirstResponseAt - attemptStartedAt) }
+          : {}),
       });
     }
     runAgentHarnessLlmOutputHook({

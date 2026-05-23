@@ -16,6 +16,13 @@ import {
   formatDiagnosticTraceparent,
   type DiagnosticTraceContext,
 } from "../../../infra/diagnostic-trace-context.js";
+import {
+  recordDevLlmTraceCompleted,
+  recordDevLlmTraceError,
+  recordDevLlmTraceRequestPayload,
+  recordDevLlmTraceResponseChunk,
+  recordDevLlmTraceStarted,
+} from "../../../infra/llm-dev-tracing.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import type {
   PluginHookAgentContext,
@@ -273,6 +280,10 @@ function emitModelCallCompleted(
 ): void {
   const durationMs = Date.now() - startedAt;
   const sizeTimingFields = modelCallSizeTimingFields(state);
+  recordDevLlmTraceCompleted(eventBase, {
+    durationMs,
+    ...sizeTimingFields,
+  });
   emitTrustedDiagnosticEvent({
     type: "model.call.completed",
     ...eventBase,
@@ -294,6 +305,11 @@ function emitModelCallError(
 ): void {
   const durationMs = Date.now() - startedAt;
   const sizeTimingFields = modelCallSizeTimingFields(state);
+  recordDevLlmTraceError(eventBase, {
+    durationMs,
+    ...sizeTimingFields,
+    ...fields,
+  });
   emitTrustedDiagnosticEvent({
     type: "model.call.error",
     ...eventBase,
@@ -313,22 +329,28 @@ function withDiagnosticTraceparentHeader(
   options: ModelCallStreamOptions,
   trace: DiagnosticTraceContext,
   state: ModelCallObservationState,
+  call: ModelCallEventBase,
 ): ModelCallStreamOptions {
   const traceparent = formatDiagnosticTraceparent(trace);
   const originalOnPayload = options?.onPayload;
   const onPayload: NonNullable<ModelCallStreamOptions>["onPayload"] = (payload, model) => {
     if (!originalOnPayload) {
       assignRequestPayloadBytes(state, payload);
+      recordDevLlmTraceRequestPayload(call, payload);
       return undefined;
     }
     const result = originalOnPayload(payload, model);
     if (isPromiseLike(result)) {
       return result.then((replacement) => {
-        assignRequestPayloadBytes(state, replacement ?? payload);
+        const finalPayload = replacement ?? payload;
+        assignRequestPayloadBytes(state, finalPayload);
+        recordDevLlmTraceRequestPayload(call, finalPayload);
         return replacement;
       });
     }
-    assignRequestPayloadBytes(state, result ?? payload);
+    const finalPayload = result ?? payload;
+    assignRequestPayloadBytes(state, finalPayload);
+    recordDevLlmTraceRequestPayload(call, finalPayload);
     return result;
   };
 
@@ -400,6 +422,7 @@ async function* observeModelCallIterator<T>(
         break;
       }
       observeResponseChunk(state, startedAt, next.value);
+      recordDevLlmTraceResponseChunk(eventBase, next.value);
       yield next.value;
     }
     terminalEmitted = true;
@@ -476,11 +499,12 @@ export function wrapStreamFnWithDiagnosticModelCallEvents(
     const callId = ctx.nextCallId();
     const trace = freezeDiagnosticTraceContext(createChildDiagnosticTraceContext(ctx.trace));
     const eventBase = baseModelCallEvent(ctx, callId, trace);
+    recordDevLlmTraceStarted(eventBase);
     emitModelCallStarted(eventBase);
     ctx.onStarted?.();
     const startedAt = Date.now();
     const state: ModelCallObservationState = { responseStreamBytes: 0 };
-    const propagatedOptions = withDiagnosticTraceparentHeader(options, trace, state);
+    const propagatedOptions = withDiagnosticTraceparentHeader(options, trace, state, eventBase);
 
     try {
       const result = streamFn(model, streamContext, propagatedOptions);

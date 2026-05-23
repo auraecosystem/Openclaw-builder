@@ -6,6 +6,8 @@ export type GatewayWsClient = PluginNodeCapabilityClient & {
   socket: WebSocket;
   connect: ConnectParams;
   connId: string;
+  isLocalClient?: boolean;
+  allowsDevLlmTracing?: boolean;
   isDeviceTokenAuth?: boolean;
   usesSharedGatewayAuth: boolean;
   sharedGatewaySessionGeneration?: string;

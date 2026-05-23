@@ -128,6 +128,7 @@ import {
   updateSkillEdit,
   updateSkillEnabled,
 } from "./controllers/skills.ts";
+import { loadTraceDetail, loadTraces } from "./controllers/traces.ts";
 import { getCronJobPayload } from "./cron-payload.ts";
 import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "./external-link.ts";
 import { formatRelativeTimestamp } from "./format.ts";
@@ -233,6 +234,10 @@ function renderSettingsWorkspace(state: AppViewState, body: unknown) {
       <div class="settings-workspace__body">${body}</div>
     </section>
   `;
+}
+
+function shouldShowSidebarTab(state: AppViewState, tab: Tab): boolean {
+  return tab !== "traces" || state.tracesCapability?.available === true;
 }
 
 function isSidebarSessionBusy(state: AppViewState) {
@@ -364,6 +369,7 @@ const lazyLogs = createLazyView(() => import("./views/logs.ts"), notifyLazyViewC
 const lazyNodes = createLazyView(() => import("./views/nodes.ts"), notifyLazyViewChanged);
 const lazySessions = createLazyView(() => import("./views/sessions.ts"), notifyLazyViewChanged);
 const lazySkills = createLazyView(() => import("./views/skills.ts"), notifyLazyViewChanged);
+const lazyTraces = createLazyView(() => import("./views/traces.ts"), notifyLazyViewChanged);
 
 function formatDreamNextCycle(nextRunAtMs: number | undefined): string | null {
   if (typeof nextRunAtMs !== "number" || !Number.isFinite(nextRunAtMs)) {
@@ -1788,9 +1794,9 @@ export function renderApp(state: AppViewState) {
                           `
                         : nothing}
                       <div class="nav-section__items">
-                        ${group.tabs.map((tab) =>
-                          renderTab(state, tab, { collapsed: navCollapsed }),
-                        )}
+                        ${group.tabs
+                          .filter((tab) => shouldShowSidebarTab(state, tab))
+                          .map((tab) => renderTab(state, tab, { collapsed: navCollapsed }))}
                       </div>
                     </section>
                   `;
@@ -2110,6 +2116,25 @@ export function renderApp(state: AppViewState) {
             )
           : nothing}
         ${renderUsageTab(state)}
+        ${state.tab === "traces"
+          ? renderLazyView(lazyTraces, (m) =>
+              m.renderTraces({
+                loading: state.tracesLoading,
+                error: state.tracesError,
+                capability: state.tracesCapability,
+                entries: state.tracesEntries,
+                selected: state.tracesSelected,
+                selectedId: state.tracesSelectedId,
+                filterText: state.tracesFilterText,
+                onFilterTextChange: (next) => (state.tracesFilterText = next),
+                onRefresh: () => void loadTraces(state),
+                onSelect: (id) => {
+                  state.tracesSelectedId = id;
+                  void loadTraceDetail(state, id);
+                },
+              }),
+            )
+          : nothing}
         ${state.tab === "cron" ? renderCronQuickCreateForTab(state, requestHostUpdate) : nothing}
         ${state.tab === "cron"
           ? renderLazyView(lazyCron, (m) =>

@@ -98,6 +98,7 @@ import type {
   ClawHubSkillDetail,
   SkillMessage,
 } from "./controllers/skills.ts";
+import type { LlmTraceDetail, LlmTraceSummary, TraceCapability } from "./controllers/traces.ts";
 import { importCustomThemeFromUrl } from "./custom-theme.ts";
 import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway.ts";
 import type { Tab } from "./navigation.ts";
@@ -604,6 +605,14 @@ export class OpenClawApp extends LitElement {
   @state() logsLimit = 500;
   @state() logsMaxBytes = 250_000;
   @state() logsAtBottom = true;
+
+  @state() tracesLoading = false;
+  @state() tracesError: string | null = null;
+  @state() tracesCapability: TraceCapability | null = null;
+  @state() tracesEntries: LlmTraceSummary[] = [];
+  @state() tracesSelectedId: string | null = null;
+  @state() tracesSelected: LlmTraceDetail | null = null;
+  @state() tracesFilterText = "";
 
   client: GatewayBrowserClient | null = null;
   chatScrollFrame: number | null = null;

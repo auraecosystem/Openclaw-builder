@@ -50,6 +50,7 @@ import { tasksHandlers } from "./server-methods/tasks.js";
 import { toolsCatalogHandlers } from "./server-methods/tools-catalog.js";
 import { toolsEffectiveHandlers } from "./server-methods/tools-effective.js";
 import { toolsInvokeHandlers } from "./server-methods/tools-invoke.js";
+import { tracesHandlers } from "./server-methods/traces.js";
 import { ttsHandlers } from "./server-methods/tts.js";
 import type {
   GatewayRequestHandler,
@@ -123,6 +124,7 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
   ...toolsCatalogHandlers,
   ...toolsEffectiveHandlers,
   ...toolsInvokeHandlers,
+  ...tracesHandlers,
   ...ttsHandlers,
   ...skillsHandlers,
   ...sessionsHandlers,

@@ -34,6 +34,7 @@ describe("iconForTab", () => {
       sessions: "fileText",
       usage: "barChart",
       cron: "loader",
+      traces: "bug",
       agents: "folder",
       skills: "zap",
       nodes: "monitor",
@@ -66,6 +67,7 @@ describe("titleForTab", () => {
       sessions: "Sessions",
       usage: "Usage",
       cron: "Cron Jobs",
+      traces: "Traces",
       agents: "Agents",
       skills: "Skills",
       nodes: "Nodes",
@@ -92,6 +94,7 @@ describe("subtitleForTab", () => {
       sessions: "Active sessions and defaults.",
       usage: "API usage and costs.",
       cron: "Wakeups and recurring runs.",
+      traces: "Development LLM traces.",
       agents: "Workspaces, tools, identities.",
       skills: "Skills and API keys.",
       nodes: "Paired devices and commands.",
@@ -163,6 +166,7 @@ describe("tabFromPath", () => {
     expect(tabFromPath("/chat")).toBe("chat");
     expect(tabFromPath("/overview")).toBe("overview");
     expect(tabFromPath("/sessions")).toBe("sessions");
+    expect(tabFromPath("/traces")).toBe("traces");
     expect(tabFromPath("/dreaming")).toBe("dreams");
     expect(tabFromPath("/dreams")).toBe("dreams");
   });
@@ -194,6 +198,7 @@ describe("inferBasePathFromPathname", () => {
   it("returns empty string for direct tab path", () => {
     expect(inferBasePathFromPathname("/chat")).toBe("");
     expect(inferBasePathFromPathname("/overview")).toBe("");
+    expect(inferBasePathFromPathname("/traces")).toBe("");
     expect(inferBasePathFromPathname("/dreaming")).toBe("");
     expect(inferBasePathFromPathname("/dreams")).toBe("");
   });

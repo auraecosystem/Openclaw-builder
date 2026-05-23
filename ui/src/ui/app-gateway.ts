@@ -58,6 +58,7 @@ import {
   subscribeSessions,
   type SessionsState,
 } from "./controllers/sessions.ts";
+import { loadTraceCapability, type TracesState } from "./controllers/traces.ts";
 import {
   resolveGatewayErrorDetailCode,
   type GatewayEventFrame,
@@ -117,6 +118,7 @@ type GatewayHost = {
   execApprovalQueue: ExecApprovalRequest[];
   execApprovalError: string | null;
   updateAvailable: UpdateAvailable | null;
+  tracesCapability: TracesState["tracesCapability"];
   reconcileWebPushState?: () => Promise<void> | void;
   sessionsChangedReloadTimer?: number | ReturnType<typeof globalThis.setTimeout> | null;
 };
@@ -503,6 +505,7 @@ export function connectGateway(host: GatewayHost, options?: ConnectGatewayOption
   host.lastErrorCode = null;
   host.hello = null;
   host.connected = false;
+  host.tracesCapability = null;
   if (reconnectReason === "seq-gap") {
     host.execApprovalQueue = pruneExecApprovalQueue(host.execApprovalQueue);
     clearPendingQueueItemsForRun(
@@ -593,6 +596,7 @@ export function connectGateway(host: GatewayHost, options?: ConnectGatewayOption
         void refreshChatAvatar(host as unknown as Parameters<typeof refreshChatAvatar>[0]);
       }
       void loadHealthState(host as unknown as HealthState);
+      void loadTraceCapability(host as unknown as TracesState);
       void loadAgentsThenRefreshActiveTab(host);
       // Re-run push reconciliation now that the gateway client is available.
       void host.reconcileWebPushState?.();
