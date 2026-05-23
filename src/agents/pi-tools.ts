@@ -384,6 +384,31 @@ export function createOpenClawCodingTools(options?: {
   /** Disable hook-owned diagnostics when an outer runtime owns tool diagnostics. */
   emitBeforeToolCallDiagnostics?: boolean;
   /**
+   * Skip wrapToolWithBeforeToolCallHook on the returned tools. Used by the
+   * /tools/invoke HTTP surface, which runs runBeforeToolCallHook itself.
+   * Avoids double-firing the hook and adjusted-params leaks; the only safe way
+   * since exec/process are re-spread by applyDeferredFollowupToolDescriptions
+   * after wrapping, dropping symbol-keyed unwrap markers.
+   */
+  skipBeforeToolCallHook?: boolean;
+  /**
+   * Skip the appended `createOpenClawTools(...)` plugin-capable tool block AND
+   * the channel-defined agent tools. Used by the /tools/invoke HTTP surface so
+   * the resolver's `disablePluginTools` intent is honored end-to-end — without
+   * this, a "core-only" HTTP request would still re-enter plugin resolution
+   * via the coding factory. Independent of `includeCoreTools`: keeps the core
+   * coding tools (read/write/edit/exec/process) materialized, only suppresses
+   * plugin-loading.
+   */
+  disablePluginTools?: boolean;
+  /**
+   * Skip materializing tools that require model/provider context to construct
+   * (currently `apply_patch`, gated to OpenAI providers). Used by the
+   * /tools/invoke HTTP surface where no model context is available — without
+   * this, allowlisting a provider-gated tool would silently produce nothing.
+   */
+  excludeProviderGatedTools?: boolean;
+  /**
    * Provider of the currently selected model (used for provider-specific tool quirks).
    * Example: "anthropic", "openai", "google", "openai-codex".
    */
@@ -631,12 +656,20 @@ export function createOpenClawCodingTools(options?: {
   const allowWorkspaceWrites = sandbox?.workspaceAccess !== "ro";
   const workspaceRoot = resolveWorkspaceRoot(options?.workspaceDir);
   const includeCoreTools = options?.includeCoreTools !== false;
+  // Honor `disablePluginTools` end-to-end: when the caller (the HTTP raw
+  // factory at `createOpenClawCodingToolsRaw`) asks for a core-only tool set,
+  // suppress channel/OpenClaw/plugin construction in the default plan too.
+  // Flagged by clawsweeper review on #63919: the flag was propagated to
+  // `createOpenClawTools` (line ~980 below) but the default construction plan
+  // ignored it, so channel/OpenClaw/plugin-capable tools were still being
+  // materialized in the "core-only" HTTP path.
+  const pluginToolsDisabled = options?.disablePluginTools === true;
   const toolConstructionPlan = options?.toolConstructionPlan ?? {
     includeBaseCodingTools: includeCoreTools,
     includeShellTools: includeCoreTools,
-    includeChannelTools: includeCoreTools,
-    includeOpenClawTools: includeCoreTools,
-    includePluginTools: true,
+    includeChannelTools: includeCoreTools && !pluginToolsDisabled,
+    includeOpenClawTools: includeCoreTools && !pluginToolsDisabled,
+    includePluginTools: !pluginToolsDisabled,
   };
   const includeBaseCodingTools = includeCoreTools && toolConstructionPlan.includeBaseCodingTools;
   const includeShellTools = includeCoreTools && toolConstructionPlan.includeShellTools;
@@ -650,6 +683,7 @@ export function createOpenClawCodingTools(options?: {
   // (tools.fs.workspaceOnly is a separate umbrella flag for read/write/edit/apply_patch.)
   const applyPatchWorkspaceOnly = workspaceOnly || applyPatchConfig?.workspaceOnly !== false;
   const applyPatchEnabled =
+    !options?.excludeProviderGatedTools &&
     applyPatchConfig?.enabled !== false &&
     isOpenAIProvider(options?.modelProvider) &&
     isApplyPatchAllowedForModel({
@@ -1069,32 +1103,35 @@ export function createOpenClawCodingTools(options?: {
     }),
   );
   options?.recordToolPrepStage?.("schema-normalization");
-  const withHooks = normalized.map((tool) =>
-    wrapToolWithBeforeToolCallHook(
-      tool,
-      {
-        agentId,
-        ...(options?.config ? { config: options.config } : {}),
-        cwd: sandboxRoot ?? workspaceRoot,
-        ...(sandboxRoot && allowWorkspaceWrites
-          ? { sandbox: { root: sandboxRoot, bridge: sandboxFsBridge! } }
-          : {}),
-        sessionKey: options?.sessionKey,
-        sessionId: options?.sessionId,
-        runId: options?.runId,
-        channelId: options?.hookChannelId ?? options?.currentChannelId,
-        ...(options?.trace ? { trace: options.trace } : {}),
-        loopDetection: resolveToolLoopDetectionConfig({ cfg: options?.config, agentId }),
-        onToolOutcome: options?.onToolOutcome,
-      },
-      { emitDiagnostics: options?.emitBeforeToolCallDiagnostics },
-    ),
-  );
+  const withHooks = options?.skipBeforeToolCallHook
+    ? normalized
+    : normalized.map((tool) =>
+        wrapToolWithBeforeToolCallHook(
+          tool,
+          {
+            agentId,
+            ...(options?.config ? { config: options.config } : {}),
+            cwd: sandboxRoot ?? workspaceRoot,
+            ...(sandboxRoot && allowWorkspaceWrites
+              ? { sandbox: { root: sandboxRoot, bridge: sandboxFsBridge! } }
+              : {}),
+            sessionKey: options?.sessionKey,
+            sessionId: options?.sessionId,
+            runId: options?.runId,
+            channelId: options?.hookChannelId ?? options?.currentChannelId,
+            ...(options?.trace ? { trace: options.trace } : {}),
+            loopDetection: resolveToolLoopDetectionConfig({ cfg: options?.config, agentId }),
+            onToolOutcome: options?.onToolOutcome,
+          },
+          { emitDiagnostics: options?.emitBeforeToolCallDiagnostics },
+        ),
+      );
   options?.recordToolPrepStage?.("tool-hooks");
   const withAbort = options?.abortSignal
     ? withHooks.map((tool) => wrapToolWithAbortSignal(tool, options.abortSignal))
     : withHooks;
   options?.recordToolPrepStage?.("abort-wrappers");
+
   const withDeferredFollowupDescriptions = applyDeferredFollowupToolDescriptions(withAbort, {
     agentId,
   });
@@ -1106,3 +1143,34 @@ export function createOpenClawCodingTools(options?: {
   return withDeferredFollowupDescriptions;
 }
 export { testing as __testing };
+
+// HTTP-safe variant of createOpenClawCodingTools.
+//
+// Returns the same tool set but WITHOUT wrapToolWithBeforeToolCallHook applied
+// to ANY tool — including exec/process which applyDeferredFollowupToolDescriptions
+// re-spreads after wrapping (the spread drops symbol-keyed wrap markers, so a
+// post-construction unwrap step cannot reach those tools).
+//
+// The gateway /tools/invoke handler (handleToolsInvokeHttpRequest) calls
+// runBeforeToolCallHook itself before dispatching execute(); routing
+// hook-wrapped tools through that path would double-fire the hook and leak
+// adjusted-params state (the wrapper stashes adjusted params keyed by
+// toolCallId; only the agent subscribe path drains them via
+// consumeAdjustedParamsForToolCall).
+export function createOpenClawCodingToolsRaw(
+  options?: Parameters<typeof createOpenClawCodingTools>[0],
+): AnyAgentTool[] {
+  return createOpenClawCodingTools({
+    ...options,
+    skipBeforeToolCallHook: true,
+    // The /tools/invoke HTTP surface has no session-bound model context, so
+    // provider-gated tools (apply_patch is OpenAI-only) cannot be safely
+    // materialized here. Drop them rather than letting allowlist opt-in
+    // silently produce nothing.
+    excludeProviderGatedTools: true,
+    // The resolver already gates plugin loading (`disablePluginTools`) for
+    // core-only HTTP requests; honor that here so the coding factory does not
+    // re-enter plugin resolution via the appended createOpenClawTools(...) block.
+    disablePluginTools: true,
+  });
+}

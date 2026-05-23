@@ -1,5 +1,10 @@
-import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
+import {
+  resolveAgentDir,
+  resolveAgentWorkspaceDir,
+  resolveDefaultAgentId,
+} from "../agents/agent-scope.js";
 import { createOpenClawTools } from "../agents/openclaw-tools.js";
+import { createOpenClawCodingToolsRaw } from "../agents/pi-tools.js";
 import {
   resolveEffectiveToolPolicy,
   resolveGroupToolPolicy,
@@ -137,7 +142,7 @@ export function resolveGatewayScopedTools(params: {
     gatewayRequestedTools.length > 0 ? { allow: gatewayRequestedTools } : undefined,
   ].some(hasRestrictiveAllowPolicy);
 
-  const allTools = createOpenClawTools({
+  const gatewayTools = createOpenClawTools({
     agentSessionKey: params.sessionKey,
     agentChannel: params.messageProvider ?? undefined,
     agentAccountId: params.accountId,
@@ -168,6 +173,55 @@ export function resolveGatewayScopedTools(params: {
     inheritedToolAllowlist,
     inheritedToolDenylist,
   });
+
+  // Include coding tools (exec, edit, read, browser, etc.) so they are
+  // reachable via /tools/invoke HTTP API. Normally only wired into agent
+  // session runners; direct invocation without an LLM round-trip is needed
+  // for deterministic automation (linting, tests, browser capture). The
+  // existing gateway.tools deny-list still gates them — exec stays blocked
+  // by default unless gateway.tools.allow names it.
+  //
+  // We use createOpenClawCodingToolsRaw (unwrapped) — handleToolsInvokeHttp
+  // already calls runBeforeToolCallHook before dispatch; passing wrapped
+  // tools would double-fire hooks and leak adjusted-params state.
+  //
+  // Restricted to surface === "http". MCP loopback uses this same resolver
+  // but does not apply DEFAULT_GATEWAY_HTTP_TOOL_DENY, so any coding tool
+  // outside the loopback excludeToolNames set would otherwise become
+  // reachable on loopback even though this PR is scoped to /tools/invoke.
+  // See: https://github.com/openclaw/openclaw/issues/37131
+  // Names that should always require owner semantics when reached via the
+  // direct HTTP surface — even when `gateway.tools.allow` has removed them
+  // from the default deny list. The raw factory does not natively mark these
+  // as ownerOnly (other paths like agent runs apply owner gating differently),
+  // so we tag them post-construction. Flagged by clawsweeper review on #63919:
+  // a `trusted-proxy` caller with `operator.write` but no `operator.admin`
+  // could otherwise reach allowlisted exec/process via /tools/invoke.
+  const HTTP_OWNER_ONLY_CODING_TOOLS = new Set(["exec", "process"]);
+  const rawCodingTools =
+    surface === "http"
+      ? createOpenClawCodingToolsRaw({
+          agentId: agentId ?? resolveDefaultAgentId(params.cfg),
+          sessionKey: params.sessionKey,
+          workspaceDir,
+          agentDir: resolveAgentDir(params.cfg, agentId ?? resolveDefaultAgentId(params.cfg)),
+          config: params.cfg,
+          senderIsOwner: params.senderIsOwner,
+        })
+      : [];
+  // Mutate the fresh array in place — rawCodingTools is locally constructed by
+  // createOpenClawCodingToolsRaw and not shared with any caller, so an in-place
+  // tag avoids the lint warning against spread-in-map and is more efficient.
+  for (const tool of rawCodingTools) {
+    if (HTTP_OWNER_ONLY_CODING_TOOLS.has(tool.name)) {
+      tool.ownerOnly = true;
+    }
+  }
+  const codingTools = rawCodingTools;
+
+  // Merge, deduplicating by tool name (gateway tools take precedence).
+  const gatewayToolNames = new Set(gatewayTools.map((t) => t.name));
+  const allTools = [...gatewayTools, ...codingTools.filter((t) => !gatewayToolNames.has(t.name))];
 
   const policyFiltered = applyToolPolicyPipeline({
     tools: allTools,

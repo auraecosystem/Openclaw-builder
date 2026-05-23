@@ -282,6 +282,32 @@ describe("createOpenClawCodingTools", () => {
     expect(names.has("read")).toBe(true);
   });
 
+  it("honors disablePluginTools: true in the default construction plan (P2 fix for #63919)", () => {
+    // Flagged by clawsweeper review: createOpenClawCodingToolsRaw passes
+    // disablePluginTools=true to suppress plugin loading on the HTTP surface,
+    // but the previous default toolConstructionPlan ignored the flag — channel
+    // and plugin-capable OpenClaw tools were still being materialized.
+    // After the fix, the default plan respects disablePluginTools and
+    // createOpenClawTools (the plugin-capable factory) is NOT called.
+    const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
+    createOpenClawToolsMock.mockClear();
+
+    const tools = createOpenClawCodingTools({
+      config: testConfig,
+      disablePluginTools: true,
+    });
+    const names = new Set(tools.map((tool) => tool.name));
+
+    // Plugin/channel factory must not be entered when disablePluginTools=true.
+    expect(createOpenClawToolsMock).not.toHaveBeenCalled();
+    // Channel-only tools (message, etc.) come from listChannelAgentTools and
+    // must not surface either when the plan suppresses includeChannelTools.
+    expect(names.has("message")).toBe(false);
+    // Core coding primitives are still expected — disablePluginTools only
+    // suppresses the plugin/channel/OpenClaw families.
+    expect(names.has("read")).toBe(true);
+  });
+
   it("keeps PI Tool Search controls when core OpenClaw tools are not materialized", () => {
     const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
     createOpenClawToolsMock.mockClear();
