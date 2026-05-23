@@ -300,6 +300,21 @@ vi.mock("./config-reload.js", async (importOriginal) => {
 
 installGatewayTestHooks({ scope: "suite" });
 
+let prevSuiteOpenAiApiKey: string | undefined;
+
+beforeEach(() => {
+  prevSuiteOpenAiApiKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "mock-key";
+});
+
+afterEach(() => {
+  if (prevSuiteOpenAiApiKey === undefined) {
+    delete process.env.OPENAI_API_KEY;
+  } else {
+    process.env.OPENAI_API_KEY = prevSuiteOpenAiApiKey;
+  }
+});
+
 function latestMockCall(mock: { mock: { calls: unknown[][] } }, label: string): unknown[] {
   const calls = mock.mock.calls;
   const call = calls[calls.length - 1];
