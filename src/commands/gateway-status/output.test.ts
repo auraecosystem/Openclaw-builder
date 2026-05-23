@@ -214,7 +214,7 @@ describe("gateway status output", () => {
     expect(warnings.find((entry) => entry.code === "multiple_gateways")).toStrictEqual({
       code: "multiple_gateways",
       message:
-        "Unconventional setup: multiple reachable gateways detected. Usually one gateway per network is recommended unless you intentionally run isolated profiles, like a rescue bot (see docs: /gateway#multiple-gateways-same-host).",
+        "Unconventional setup: multiple reachable gateway identities detected. Usually one gateway per network is recommended unless you intentionally run isolated profiles, like a rescue bot (see docs: /gateway#multiple-gateways-same-host).",
       targetIds: ["localLoopback", "explicit"],
     });
   });
@@ -244,7 +244,7 @@ describe("gateway status output", () => {
     expect(warnings.find((entry) => entry.code === "multiple_gateways")).toStrictEqual({
       code: "multiple_gateways",
       message:
-        "Unconventional setup: multiple reachable gateways detected. Usually one gateway per network is recommended unless you intentionally run isolated profiles, like a rescue bot (see docs: /gateway#multiple-gateways-same-host).",
+        "Unconventional setup: multiple reachable gateway identities detected. Usually one gateway per network is recommended unless you intentionally run isolated profiles, like a rescue bot (see docs: /gateway#multiple-gateways-same-host).",
       targetIds: ["sshTunnel", "configRemote"],
     });
   });
@@ -264,7 +264,7 @@ describe("gateway status output", () => {
     expect(warnings.find((entry) => entry.code === "multiple_gateways")).toStrictEqual({
       code: "multiple_gateways",
       message:
-        "Unconventional setup: multiple reachable gateways detected. Usually one gateway per network is recommended unless you intentionally run isolated profiles, like a rescue bot (see docs: /gateway#multiple-gateways-same-host).",
+        "Unconventional setup: multiple reachable gateway identities detected. Usually one gateway per network is recommended unless you intentionally run isolated profiles, like a rescue bot (see docs: /gateway#multiple-gateways-same-host).",
       targetIds: ["sshTunnel", "configRemote"],
     });
   });
