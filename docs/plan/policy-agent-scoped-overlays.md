@@ -29,13 +29,12 @@ This page describes the agent-scoped overlay model. The field reference remains
 
 ## Shape
 
-Use `scopes.<scopeName>` for purpose-named agent policy scopes. Each
-scope lists the runtime `agentIds` it applies to, then reuses the normal
-top-level policy section grammar where the section evidence can be attributed to
-those agents. The scoped sections in this stack are `tools`,
-`agents.workspace`, and `sandbox`; ingress can join the same container once that
-policy PR lands with an enforceable selector. The scoped field inventory is
-backed by policy rule metadata that records each field's strictness semantics
+Use `scopes.<scopeName>` for purpose-named policy scopes. Each scope lists the
+selector it applies to, then reuses the normal top-level policy section grammar
+where the section evidence can be attributed to that selector. The scoped
+sections in this stack are `tools`, `agents.workspace`, and `sandbox` for
+`agentIds`, and `ingress.channels` for `channelIds`. The scoped field inventory
+is backed by policy rule metadata that records each field's strictness semantics
 for later policy-file conformance.
 
 ```jsonc
@@ -76,21 +75,32 @@ for later policy-file conformance.
         "allowBackends": ["docker"],
       },
     },
+    "telegram-ingress": {
+      "channelIds": ["telegram"],
+      "ingress": {
+        "channels": {
+          "allowDmPolicies": ["pairing"],
+          "denyOpenGroups": true,
+          "requireMentionInGroups": true,
+        },
+      },
+    },
   },
 }
 ```
 
 `agents.workspace` remains the existing all-agent workspace baseline.
-`scopes.<scopeName>` is a scoped overlay, not a replacement for global
-policy. The scope name is descriptive only; matching uses `agentIds`, not
-display names. The same agent can appear in more than one scope, as long as
-each scope governs different effective policy fields for that agent, or its
-duplicate field is equally or more restrictive according to policy metadata. It
-deliberately contains normal section names instead of a bespoke per-agent
-mini-grammar.
+`scopes.<scopeName>` is a scoped overlay, not a replacement for global policy.
+The scope name is descriptive only; matching uses selectors such as `agentIds`
+or `channelIds`, not display names. The same selected entity can appear in more
+than one scope, as long as each scope governs different effective policy fields
+for that entity, or its duplicate field is equally or more restrictive according
+to policy metadata. It deliberately contains normal section names instead of a
+bespoke mini-grammar.
 Every scope present in `policy.jsonc` must be valid and enforceable. In this
-PR, the only supported selector is `agentIds`, and it supports `tools.*`,
-`agents.workspace.*`, and `sandbox.*`.
+PR, `agentIds` supports `tools.*`, `agents.workspace.*`, and `sandbox.*`;
+`channelIds` supports `ingress.channels.*`. Use top-level `ingress.session.*`
+for deployment-wide direct-message session posture.
 
 ## Layering semantics
 
@@ -202,7 +212,7 @@ agent id or can be attributed to one without guessing.
 | `workspace` | Include                     | Agent sandbox/workspace evidence already has agent identity.             |
 | `tools`     | Include                     | Tool posture evidence includes global and per-agent tool config.         |
 | `sandbox`   | Include                     | Sandbox posture evidence carries default and per-agent identity.         |
-| `ingress`   | Pipeline follow-up          | Keep out until ingress/channel posture lands with channel selectors.     |
+| `ingress`   | Include via `channelIds`    | Channel ingress evidence carries channel identity.                       |
 | `models`    | Include when mapped         | Selected model refs can be agent-specific.                               |
 | `mcp`       | Include when mapped         | Use only when MCP server evidence is attributable to an agent.           |
 | `auth`      | Defer                       | Auth profile metadata is a config catalog unless agent binding is clear. |

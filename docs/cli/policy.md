@@ -18,12 +18,13 @@ report drift through `doctor --lint`. The final conformance signal is a clean
 instead of creating a separate health gate.
 
 Policy currently manages configured channels, MCP servers, model providers,
-network SSRF posture, Gateway exposure posture, agent workspace posture,
+network SSRF posture, ingress/channel access posture, Gateway exposure posture, agent workspace posture,
 OpenClaw config secret provider/auth profile posture, and governed tool
 declarations. For example, IT or a workspace operator can record that Telegram
 is not an approved channel provider, restrict MCP servers and model refs to
 approved entries, require private-network fetch/browser access to remain
-disabled, require Gateway bind/auth/HTTP exposure to stay within reviewed
+disabled, require direct-message session isolation and channel ingress posture
+to stay within reviewed bounds, require Gateway bind/auth/HTTP exposure to stay within reviewed
 bounds, require agent workspace access and tool denies to stay in a reviewed
 posture, require sandbox mode/backend/Docker/browser settings to stay in a
 reviewed posture, require OpenClaw config SecretRefs to use managed providers, require
@@ -50,7 +51,7 @@ arbitrary plugins. The plugin remains enabled if `policy.jsonc` is missing, so
 doctor can report the missing artifact.
 
 Policy is authored, not generated from the user's current settings. A minimal
-policy for channels, MCP servers, model providers, network posture, Gateway
+policy for channels, MCP servers, model providers, network posture, ingress/channel access, Gateway
 exposure, agent workspace posture, configured sandbox runtime posture, OpenClaw
 config secret provider/auth profile posture, and tool metadata looks like this:
 
@@ -80,6 +81,16 @@ config secret provider/auth profile posture, and tool metadata looks like this:
   "network": {
     "privateNetwork": {
       "allow": false,
+    },
+  },
+  "ingress": {
+    "session": {
+      "requireDmScope": "per-channel-peer",
+    },
+    "channels": {
+      "allowDmPolicies": ["pairing", "allowlist", "disabled"],
+      "denyOpenGroups": true,
+      "requireMentionInGroups": true,
     },
   },
   "gateway": {
@@ -156,8 +167,9 @@ config secret provider/auth profile posture, and tool metadata looks like this:
 The rules are the authority. A category block is only a namespace; checks run
 when a concrete rule is present. OpenClaw reads current `channels.*` settings
 `mcp.servers.*`, `models.providers.*`, selected agent model refs, network SSRF
-settings, Gateway bind/auth/Control UI/Tailscale/remote/HTTP posture, OpenClaw
-config agent sandbox workspace access and tool deny posture, config secret
+settings, direct-message session scope, channel DM policy, channel group policy,
+channel/group mention gates, Gateway bind/auth/Control UI/Tailscale/remote/HTTP
+posture, OpenClaw config agent sandbox workspace access and tool deny posture, config secret
 provider and SecretRef provenance, config auth profile metadata, configured
 global/per-agent tool posture, and `TOOLS.md` declarations as evidence, then
 reports observed state that does not conform. If a policy denies non-loopback
@@ -186,19 +198,17 @@ present in `policy.jsonc`. The observed state is existing OpenClaw config or
 workspace metadata; policy reports drift but does not rewrite runtime behavior
 unless a repair path is explicitly available and enabled.
 
-Agent-specific policy overlays keep broad `tools.*` and `agents.workspace`
-posture global, then let named scope blocks add stricter normal policy sections
-for explicit `agentIds` under `scopes.<scopeName>`. The initial scoped
-sections are `tools`, `agents.workspace`, and `sandbox`; ingress can use the
-same container once its evidence is attributable to a supported selector. Scoped fields
-carry strictness metadata such as allowlist subset, denylist superset, required
-boolean, and exact-list semantics so future policy-file conformance can reuse
-the same rule inventory instead of guessing. The overlay is additive: global
-claims still run, and a scoped claim can emit its own finding against the same
-observed config. See [Agent-scoped policy overlays](/plan/policy-agent-scoped-overlays).
-Every scope present in `policy.jsonc` must be valid and enforceable. Scopes
-currently require `agentIds`, and that selector supports `tools.*`,
-`agents.workspace.*`, and `sandbox.*`.
+Policy overlays keep broad `tools.*`, `agents.workspace`, `sandbox`, and
+`ingress` posture global, then let named scope blocks add stricter normal policy
+sections under `scopes.<scopeName>`. Agent-scoped sections use `agentIds`;
+channel-scoped ingress uses `channelIds` and supports `ingress.channels.*`.
+Scoped fields carry strictness metadata such as allowlist subset, denylist
+superset, required boolean, ordered string, and exact-list semantics so future
+policy-file conformance can reuse the same rule inventory instead of guessing.
+The overlay is additive: global claims still run, and a scoped claim can emit
+its own finding against the same observed config. See [Agent-scoped policy
+overlays](/plan/policy-agent-scoped-overlays). Every scope present in
+`policy.jsonc` must be valid and enforceable for its selector.
 
 #### Channels
 
@@ -226,6 +236,15 @@ currently require `agentIds`, and that selector supports `tools.*`,
 | Policy field                   | Observed state                      | Use when                                                           |
 | ------------------------------ | ----------------------------------- | ------------------------------------------------------------------ |
 | `network.privateNetwork.allow` | Private-network SSRF escape hatches | Set to `false` to require private-network access to stay disabled. |
+
+#### Ingress and channel access
+
+| Policy field                              | Observed state                                                 | Use when                                                           |
+| ----------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `ingress.session.requireDmScope`          | `session.dmScope`                                              | Require a reviewed direct-message isolation scope.                 |
+| `ingress.channels.allowDmPolicies`        | `channels.*.dmPolicy` and legacy channel DM policy fields      | Allow only reviewed direct-message channel policies.               |
+| `ingress.channels.denyOpenGroups`         | Channel, account, and group ingress policy                     | Deny open group ingress for configured channels and accounts.      |
+| `ingress.channels.requireMentionInGroups` | Channel, account, group, guild, and nested mention gate config | Require mention gates when group ingress is open or mention-gated. |
 
 #### Gateway
 
@@ -558,6 +577,10 @@ Policy currently verifies:
 | `policy/models-denied-provider`                   | A configured model provider or model ref uses a denied provider.                 |
 | `policy/models-unapproved-provider`               | A configured model provider or model ref is outside the allowlist.               |
 | `policy/network-private-access-enabled`           | A private-network SSRF escape hatch is enabled when policy denies it.            |
+| `policy/ingress-dm-policy-unapproved`             | A channel DM policy is outside the policy allowlist.                             |
+| `policy/ingress-dm-scope-unapproved`              | `session.dmScope` does not match the policy-required DM isolation scope.         |
+| `policy/ingress-open-groups-denied`               | A channel group policy is `open` while policy denies open group ingress.         |
+| `policy/ingress-group-mention-required`           | A channel or group entry disables mention gates while policy requires them.      |
 | `policy/gateway-non-loopback-bind`                | Gateway bind posture permits non-loopback exposure when policy denies it.        |
 | `policy/gateway-auth-disabled`                    | Gateway authentication is disabled when policy requires auth.                    |
 | `policy/gateway-rate-limit-missing`               | Gateway auth rate-limit posture is not explicit when policy requires it.         |
