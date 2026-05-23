@@ -384,6 +384,13 @@ export function createOpenClawCodingTools(options?: {
   /** Disable hook-owned diagnostics when an outer runtime owns tool diagnostics. */
   emitBeforeToolCallDiagnostics?: boolean;
   /**
+   * Skip `wrapToolWithBeforeToolCallHook` on the returned tools. Used by the
+   * gateway `/tools/invoke` HTTP surface, which calls `runBeforeToolCallHook`
+   * itself before dispatching. Wrapping here would double-fire the hook and
+   * leak adjusted-params state. See `createOpenClawCodingToolsRaw` below.
+   */
+  skipBeforeToolCallHook?: boolean;
+  /**
    * Provider of the currently selected model (used for provider-specific tool quirks).
    * Example: "anthropic", "openai", "google", "openai-codex".
    */
@@ -1069,29 +1076,31 @@ export function createOpenClawCodingTools(options?: {
     }),
   );
   options?.recordToolPrepStage?.("schema-normalization");
-  const withHooks = normalized.map((tool) =>
-    wrapToolWithBeforeToolCallHook(
-      tool,
-      {
-        agentId,
-        ...(options?.config ? { config: options.config } : {}),
-        cwd: sandboxRoot ?? workspaceRoot,
-        workspaceDir: workspaceRoot,
-        ...(options?.skillsSnapshot ? { skillsSnapshot: options.skillsSnapshot } : {}),
-        ...(sandboxRoot && allowWorkspaceWrites
-          ? { sandbox: { root: sandboxRoot, bridge: sandboxFsBridge! } }
-          : {}),
-        sessionKey: options?.sessionKey,
-        sessionId: options?.sessionId,
-        runId: options?.runId,
-        channelId: options?.hookChannelId ?? options?.currentChannelId,
-        ...(options?.trace ? { trace: options.trace } : {}),
-        loopDetection: resolveToolLoopDetectionConfig({ cfg: options?.config, agentId }),
-        onToolOutcome: options?.onToolOutcome,
-      },
-      { emitDiagnostics: options?.emitBeforeToolCallDiagnostics },
-    ),
-  );
+  const withHooks = options?.skipBeforeToolCallHook
+    ? normalized
+    : normalized.map((tool) =>
+        wrapToolWithBeforeToolCallHook(
+          tool,
+          {
+            agentId,
+            ...(options?.config ? { config: options.config } : {}),
+            cwd: sandboxRoot ?? workspaceRoot,
+            workspaceDir: workspaceRoot,
+            ...(options?.skillsSnapshot ? { skillsSnapshot: options.skillsSnapshot } : {}),
+            ...(sandboxRoot && allowWorkspaceWrites
+              ? { sandbox: { root: sandboxRoot, bridge: sandboxFsBridge! } }
+              : {}),
+            sessionKey: options?.sessionKey,
+            sessionId: options?.sessionId,
+            runId: options?.runId,
+            channelId: options?.hookChannelId ?? options?.currentChannelId,
+            ...(options?.trace ? { trace: options.trace } : {}),
+            loopDetection: resolveToolLoopDetectionConfig({ cfg: options?.config, agentId }),
+            onToolOutcome: options?.onToolOutcome,
+          },
+          { emitDiagnostics: options?.emitBeforeToolCallDiagnostics },
+        ),
+      );
   options?.recordToolPrepStage?.("tool-hooks");
   const withAbort = options?.abortSignal
     ? withHooks.map((tool) => wrapToolWithAbortSignal(tool, options.abortSignal))
@@ -1108,3 +1117,16 @@ export function createOpenClawCodingTools(options?: {
   return withDeferredFollowupDescriptions;
 }
 export { testing as __testing };
+
+/**
+ * Build OpenClaw coding tools without the `before_tool_call` hook wrapper.
+ * Intended for callers that drive the hook themselves (e.g. the gateway
+ * `/tools/invoke` HTTP surface in `handleToolsInvokeHttpRequest`, which calls
+ * `runBeforeToolCallHook` directly before dispatching). Passing wrapped tools
+ * to that path would double-fire the hook and leak adjusted-params state.
+ */
+export function createOpenClawCodingToolsRaw(
+  options?: Parameters<typeof createOpenClawCodingTools>[0],
+): AnyAgentTool[] {
+  return createOpenClawCodingTools({ ...options, skipBeforeToolCallHook: true });
+}

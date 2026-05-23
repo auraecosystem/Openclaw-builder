@@ -6,9 +6,10 @@ Docs: https://docs.openclaw.ai
 
 ### Changes
 
+- Gateway/tools-invoke: wire the `read` coding tool into the HTTP `/tools/invoke` endpoint via a new unwrapped factory `createOpenClawCodingToolsRaw()`, so deterministic automation flows (CI preflight, lint, browser capture) can read files without a full LLM round-trip. Restricted to `surface === "http"`; the MCP loopback contract is unchanged. Mutating coding tools (write/edit/exec/process) are out of scope for this PR and remain unreachable on this surface. Refs #37131. Thanks @simonusa.
+
 ### Fixes
 - iMessage: mark authorized slash-command turns as text-sourced commands so `/status`, `/new`, and `/restart` acknowledgements return to the source conversation. (#82642) thanks @homer-byte.
-
 
 ## 2026.5.24
 

@@ -203,8 +203,44 @@ vi.mock("../agents/openclaw-tools.js", () => {
   };
 });
 
+// Minimal mock for the unwrapped coding-tools factory used by the HTTP
+// surface. Returns a `read` tool that records calls and echoes inputs so
+// regression tests can assert wiring + dispatch behavior.
+const codingToolMocks = vi.hoisted(() => ({
+  lastReadCall: undefined as undefined | { input: unknown; ctx: unknown },
+}));
+
 vi.mock("../agents/pi-tools.js", () => ({
   resolveToolLoopDetectionConfig: hookMocks.resolveToolLoopDetectionConfig,
+  createOpenClawCodingToolsRaw: () => [
+    {
+      name: "read",
+      description: "Read a file",
+      parameters: {
+        type: "object" as const,
+        properties: { path: { type: "string" } },
+        required: ["path"],
+        additionalProperties: false,
+      },
+      async execute(_callId: string, input: unknown) {
+        codingToolMocks.lastReadCall = { input, ctx: undefined };
+        return { ok: true, observed: input };
+      },
+    },
+    {
+      name: "write",
+      description: "Write a file (test mutating tool, should not be wired by this PR)",
+      parameters: {
+        type: "object" as const,
+        properties: { path: { type: "string" } },
+        required: ["path"],
+        additionalProperties: false,
+      },
+      async execute() {
+        return { ok: false, error: "test-mutating-tool-should-not-be-called" };
+      },
+    },
+  ],
 }));
 
 vi.mock("../agents/pi-tools.before-tool-call.js", () => ({
@@ -919,6 +955,33 @@ describe("POST /tools/invoke", () => {
     const body = await expectOkInvokeResponse(res);
     expect(body.result).toEqual({ ok: true, result: "write-scoped" });
     expect(lastCreateOpenClawToolsContext?.senderIsOwner).toBe(true);
+  });
+
+  it("wires the `read` coding tool into /tools/invoke for HTTP callers", async () => {
+    setMainAllowedTools({ allow: ["read"] });
+    const res = await invokeToolAuthed({
+      tool: "read",
+      args: { path: "/workspace/example.txt" },
+      sessionKey: "main",
+    });
+    const body = await res.json();
+    expect({ status: res.status, body }).toMatchObject({
+      status: 200,
+      body: { ok: true },
+    });
+    expect(codingToolMocks.lastReadCall?.input).toEqual({ path: "/workspace/example.txt" });
+  });
+
+  it("does NOT wire mutating coding tools (write/edit/exec/process) into /tools/invoke", async () => {
+    // This narrow PR only adds `read`. Mutating coding tools are out of scope
+    // and remain unreachable via /tools/invoke; a follow-up PR may opt them in
+    // via gateway.tools.allow + deny-list expansion.
+    setMainAllowedTools({ allow: ["write"] });
+    const res = await invokeToolAuthed({
+      tool: "write",
+      sessionKey: "main",
+    });
+    expect(res.status).toBe(404);
   });
 
   it("extends the HTTP deny list to high-risk execution and file tools", async () => {
