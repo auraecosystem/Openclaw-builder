@@ -1145,7 +1145,7 @@ export function createOpenClawCodingToolsRaw(
   // the before-tool-call hook wrap step. SDK consumers cannot reach this
   // path because the symbol is module-private (not exported).
   const taggedOptions = {
-    ...(options ?? {}),
+    ...options,
     [SKIP_BEFORE_TOOL_CALL_HOOK]: true,
   } as Parameters<typeof createOpenClawCodingTools>[0];
   return createOpenClawCodingTools(taggedOptions);
