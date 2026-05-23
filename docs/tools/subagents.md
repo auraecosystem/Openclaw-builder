@@ -143,6 +143,7 @@ session to confirm the effective tool list.
 - **Thinking:** inherits the caller unless you set `agents.defaults.subagents.thinking` (or per-agent `agents.list[].subagents.thinking`); an explicit `sessions_spawn.thinking` still wins.
 - **Run timeout:** if `sessions_spawn.runTimeoutSeconds` is omitted, OpenClaw uses `agents.defaults.subagents.runTimeoutSeconds` when set; otherwise it falls back to `0` (no timeout).
 - **Task delivery:** native sub-agents receive the delegated task in their first visible `[Subagent Task]` message. The sub-agent system prompt carries runtime rules and routing context, not a hidden duplicate of the task.
+- **Execution:** `sessions_spawn.execution` can explicitly request an execution backend/profile. The current implementation validates and records local process placement for registry/list readback; unsupported backend types return an error instead of silently falling back.
 
 ### Delegation prompt mode
 

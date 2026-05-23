@@ -46,6 +46,7 @@ type SubagentListItem = {
   totalTokens?: number;
   startedAt?: number;
   endedAt?: number;
+  execution?: SubagentRunRecord["execution"];
 };
 
 type BuiltSubagentList = {
@@ -254,7 +255,10 @@ export function buildSubagentList(params: {
     const task = truncateLine(entry.task.trim(), params.taskMaxChars ?? 72);
     const taskName = entry.taskName?.trim();
     const taskNamePrefix = taskName ? `${taskName}: ` : "";
-    const line = `${index}. ${taskNamePrefix}${label} (${resolveModelDisplay(sessionEntry, entry.model)}, ${runtime}${usageText ? `, ${usageText}` : ""}) ${status}${normalizeLowercaseStringOrEmpty(task) !== normalizeLowercaseStringOrEmpty(label) ? ` - ${task}` : ""}`;
+    const executionText = entry.execution
+      ? `, exec ${entry.execution.backend}${entry.execution.profile ? `/${entry.execution.profile}` : ""}`
+      : "";
+    const line = `${index}. ${taskNamePrefix}${label} (${resolveModelDisplay(sessionEntry, entry.model)}, ${runtime}${usageText ? `, ${usageText}` : ""}${executionText}) ${status}${normalizeLowercaseStringOrEmpty(task) !== normalizeLowercaseStringOrEmpty(label) ? ` - ${task}` : ""}`;
     const view: SubagentListItem = {
       index,
       line,
@@ -272,6 +276,7 @@ export function buildSubagentList(params: {
       totalTokens,
       startedAt: getSubagentSessionStartedAt(entry),
       ...(entry.endedAt ? { endedAt: entry.endedAt } : {}),
+      ...(entry.execution ? { execution: entry.execution } : {}),
     };
     index += 1;
     return view;
