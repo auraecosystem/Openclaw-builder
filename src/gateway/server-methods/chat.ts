@@ -946,17 +946,7 @@ function stripTrailingOffloadedMediaMarkers(message: string, refs: OffloadedRef[
   return lines.join("\n").trimEnd();
 }
 
-// Stages media-path offloads into the agent sandbox synchronously so chat.send
-// can surface 5xx before respond(). Throws MediaOffloadError on any staging
-// failure (ENOSPC / EPERM / partial-stage) so the outer chat.send handler can
-// map it to UNAVAILABLE (5xx); plain Error would be misclassified as 4xx. All
-// offloaded refs are cleaned up from the media store before rethrow.
-// Callers MUST set ctx.MediaStaged=true when this runs so the dispatch
-// pipeline skips its own stageSandboxMedia pass.
-//
-// Returned paths are absolute media-store paths when no sandbox is active, or
-// sandbox-relative paths plus `workspaceDir` when sandboxing is active. Host-side
-// media-understanding uses MediaWorkspaceDir to resolve those relative paths.
+// Removes staged chat.send media paths only when they stay under the workspace root.
 async function cleanupStagedChatSendMediaPaths(params: {
   mediaPathOffloadPaths: string[];
   mediaPathOffloadWorkspaceDir?: string;
@@ -1010,6 +1000,17 @@ async function cleanupChatSendPreDispatchMedia(params: {
   });
 }
 
+// Stages media-path offloads into the agent sandbox synchronously so chat.send
+// can surface 5xx before respond(). Throws MediaOffloadError on any staging
+// failure (ENOSPC / EPERM / partial-stage) so the outer chat.send handler can
+// map it to UNAVAILABLE (5xx); plain Error would be misclassified as 4xx. All
+// offloaded refs are cleaned up from the media store before rethrow.
+// Callers MUST set ctx.MediaStaged=true when this runs so the dispatch
+// pipeline skips its own stageSandboxMedia pass.
+//
+// Returned paths are absolute media-store paths when no sandbox is active, or
+// sandbox-relative paths plus `workspaceDir` when sandboxing is active. Host-side
+// media-understanding uses MediaWorkspaceDir to resolve those relative paths.
 async function prestageMediaPathOffloads(params: {
   offloadedRefs: OffloadedRef[];
   includeImageRefs?: boolean;

@@ -3365,6 +3365,7 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
     mockState.saveMediaWait = new Promise<void>((resolve) => {
       releaseSave = resolve;
     });
+    const rmSpy = vi.spyOn(fs.promises, "rm").mockResolvedValue(undefined);
     const respond = vi.fn();
     const abortRespond = vi.fn();
     const context = createChatContext();
@@ -3422,6 +3423,10 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
     expect(lastRespondCall(respond)?.[2]).toBeUndefined();
     expect(mockState.lastDispatchCtx).toBeUndefined();
     expect(mockState.deleteMediaBufferCalls).toEqual([{ id: "saved-media", subdir: "inbound" }]);
+    expect(rmSpy).toHaveBeenCalledWith("/sandbox/workspace/media/inbound/report.pdf", {
+      force: true,
+    });
+    rmSpy.mockRestore();
   });
 
   it("logs chat.send attachment parse failures with stack details", async () => {
