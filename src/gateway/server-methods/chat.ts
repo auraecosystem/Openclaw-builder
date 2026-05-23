@@ -957,29 +957,45 @@ function stripTrailingOffloadedMediaMarkers(message: string, refs: OffloadedRef[
 // Returned paths are absolute media-store paths when no sandbox is active, or
 // sandbox-relative paths plus `workspaceDir` when sandboxing is active. Host-side
 // media-understanding uses MediaWorkspaceDir to resolve those relative paths.
+async function cleanupStagedChatSendMediaPaths(params: {
+  mediaPathOffloadPaths: string[];
+  mediaPathOffloadWorkspaceDir?: string;
+  logGateway?: GatewayRequestContext["logGateway"];
+}) {
+  if (!params.mediaPathOffloadWorkspaceDir) {
+    return;
+  }
+  const workspaceRoot = path.resolve(params.mediaPathOffloadWorkspaceDir);
+  const cleanupTasks: Promise<unknown>[] = [];
+  for (const stagedPath of new Set(params.mediaPathOffloadPaths)) {
+    if (!stagedPath || path.isAbsolute(stagedPath)) {
+      continue;
+    }
+    const target = path.resolve(workspaceRoot, stagedPath);
+    if (target === workspaceRoot || !target.startsWith(`${workspaceRoot}${path.sep}`)) {
+      continue;
+    }
+    cleanupTasks.push(fs.promises.rm(target, { force: true }));
+  }
+  const results = await Promise.allSettled(cleanupTasks);
+  for (const result of results) {
+    if (result.status === "rejected") {
+      params.logGateway?.warn(
+        `chat.send aborted attachment cleanup failed: ${formatForLog(result.reason)}`,
+      );
+    }
+  }
+}
+
 async function cleanupChatSendPreDispatchMedia(params: {
   offloadedRefs: OffloadedRef[];
   mediaPathOffloadPaths: string[];
   mediaPathOffloadWorkspaceDir?: string;
   logGateway: GatewayRequestContext["logGateway"];
 }) {
-  const cleanupTasks: Promise<unknown>[] = params.offloadedRefs.map((ref) =>
-    deleteMediaBuffer(ref.id, "inbound"),
+  const results = await Promise.allSettled(
+    params.offloadedRefs.map((ref) => deleteMediaBuffer(ref.id, "inbound")),
   );
-  if (params.mediaPathOffloadWorkspaceDir) {
-    const workspaceRoot = path.resolve(params.mediaPathOffloadWorkspaceDir);
-    for (const stagedPath of new Set(params.mediaPathOffloadPaths)) {
-      if (!stagedPath || path.isAbsolute(stagedPath)) {
-        continue;
-      }
-      const target = path.resolve(workspaceRoot, stagedPath);
-      if (target === workspaceRoot || !target.startsWith(`${workspaceRoot}${path.sep}`)) {
-        continue;
-      }
-      cleanupTasks.push(fs.promises.rm(target, { force: true }));
-    }
-  }
-  const results = await Promise.allSettled(cleanupTasks);
   for (const result of results) {
     if (result.status === "rejected") {
       params.logGateway.warn(
@@ -987,6 +1003,11 @@ async function cleanupChatSendPreDispatchMedia(params: {
       );
     }
   }
+  await cleanupStagedChatSendMediaPaths({
+    mediaPathOffloadPaths: params.mediaPathOffloadPaths,
+    mediaPathOffloadWorkspaceDir: params.mediaPathOffloadWorkspaceDir,
+    logGateway: params.logGateway,
+  });
 }
 
 async function prestageMediaPathOffloads(params: {
@@ -1057,6 +1078,10 @@ async function prestageMediaPathOffloads(params: {
     const stagedSources = stageResult.staged;
     const missing = mediaPathRefs.filter((ref) => !stagedSources.has(ref.path));
     if (missing.length > 0) {
+      await cleanupStagedChatSendMediaPaths({
+        mediaPathOffloadPaths: [...stagedSources.values()],
+        mediaPathOffloadWorkspaceDir: sandbox.workspaceDir,
+      });
       throw new Error(
         `attachment staging incomplete: ${stagedSources.size}/${mediaPathRefs.length} paths staged into sandbox workspace (missing: ${missing.map((ref) => ref.path).join(", ")})`,
       );
