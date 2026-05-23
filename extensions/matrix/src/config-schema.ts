@@ -32,6 +32,7 @@ const matrixThreadBindingsSchema = z
     defaultSpawnContext: z.enum(["isolated", "fork"]).optional(),
     spawnSubagentSessions: z.boolean().optional(),
     spawnAcpSessions: z.boolean().optional(),
+    bypassMentionInBoundThreads: z.boolean().optional(),
   })
   .optional();
 

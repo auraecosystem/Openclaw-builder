@@ -72,6 +72,7 @@ type MatrixThreadBindingsConfig = {
   spawnSubagentSessions?: boolean;
   /** @deprecated Use spawnSessions instead. */
   spawnAcpSessions?: boolean;
+  bypassMentionInBoundThreads?: boolean;
 };
 
 type MatrixExecApprovalTarget = "dm" | "channel" | "both";
