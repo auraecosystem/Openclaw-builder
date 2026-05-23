@@ -929,7 +929,7 @@ export async function processDiscordMessage(
                 return;
               }
               await draftPreview.pushToolProgress(
-                buildChannelProgressDraftLine({
+                buildChannelProgressDraftLineForEntry(discordConfig, {
                   event: "command-output",
                   phase: payload.phase,
                   title: payload.title,
