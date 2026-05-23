@@ -3298,7 +3298,7 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
       });
 
       await waitForAssertion(() => {
-        expect(mockState.activeSaveMediaCalls).toBe(2);
+        expect(mockState.activeSaveMediaCalls).toBe(1);
       });
 
       await chatHandlers["chat.abort"]({
