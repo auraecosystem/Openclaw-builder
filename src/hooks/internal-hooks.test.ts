@@ -302,21 +302,25 @@ describe("hooks", () => {
       // delayed same-key redispatch (e.g. via setTimeout) should have that
       // delayed call delivered after the original dispatch returns, not blocked
       // by the guard.
+      //
+      // The handler uses fire-and-forget for the setTimeout (does not await it),
+      // so the dispatch completes and the guard key is cleared before the
+      // delayed trigger fires.
+      let delayedTriggered = false;
       const handler = vi.fn(async (event) => {
         if (event.context.fromDelayed) {
-          // This is the delayed call — should be delivered
+          delayedTriggered = true;
           return;
         }
-        // Schedule a delayed same-key trigger
-        await new Promise<void>((resolve) => {
-          setTimeout(async () => {
-            const delayedEvent = createInternalHookEvent("command", "new", "test-session", {
-              fromDelayed: true,
-            });
-            await triggerInternalHook(delayedEvent);
-            resolve();
-          }, 10);
-        });
+        // Fire-and-forget: schedule a delayed trigger but don't await it.
+        // This simulates a handler that schedules follow-up work without
+        // blocking on it (common in real-world fireAndForgetHook patterns).
+        setTimeout(() => {
+          const delayedEvent = createInternalHookEvent("command", "new", "test-session", {
+            fromDelayed: true,
+          });
+          triggerInternalHook(delayedEvent);
+        }, 10);
       });
 
       registerInternalHook("command:new", handler);
@@ -324,11 +328,13 @@ describe("hooks", () => {
       const event = createInternalHookEvent("command", "new", "test-session");
       await triggerInternalHook(event);
 
-      // Wait for the delayed trigger to complete
+      // At this point, dispatch is complete and guard key is cleared.
+      // Wait for the delayed trigger to fire and complete.
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Handler should be called twice: once for the original, once for the delayed
       expect(handler).toHaveBeenCalledTimes(2);
+      expect(delayedTriggered).toBe(true);
     });
   });
 
