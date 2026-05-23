@@ -117,9 +117,9 @@ export function collectGatewayConfigFindings(
     findings.push({
       checkId: "gateway.tools_invoke_http.host_read_allow",
       severity: extraRisk ? "warn" : "warn",
-      title: "Gateway HTTP /tools/invoke exposes host file reads",
+      title: "Gateway direct-invoke exposes host file reads",
       detail:
-        "gateway.tools.allow includes read which exposes host filesystem read access over authenticated HTTP /tools/invoke. " +
+        "gateway.tools.allow includes read which exposes host filesystem read access over the authenticated direct-invoke surface — applies to BOTH HTTP POST /tools/invoke AND SDK RPC tools.invoke (they share the resolver via tools-invoke-shared.ts). " +
         "By default the coding `read` tool is NOT confined to the workspace — it can read any file the gateway process can access on the host (config files, secrets, SSH keys, environment files, etc.). " +
         "Threat shape is information disclosure (not RCE / session orchestration): callers with the gateway bearer credential can read any file the gateway user can read.",
       remediation:

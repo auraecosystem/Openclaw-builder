@@ -174,19 +174,22 @@ export function resolveGatewayScopedTools(params: {
     inheritedToolDenylist,
   });
 
-  // Wire the `read` coding tool into the HTTP `/tools/invoke` surface so it is
-  // reachable for deterministic automation (CI/preflight checks, lint, browser
-  // capture flows) without a full LLM round-trip. This is the narrow first
-  // landing of the broader direct-invoke umbrella tracked in #37131:
+  // Wire the `read` coding tool into the gateway direct-invoke surfaces so it
+  // is reachable for deterministic automation (CI/preflight checks, lint,
+  // browser capture flows) without a full LLM round-trip. This is the narrow
+  // first landing of the broader direct-invoke umbrella tracked in #37131:
   //
   // - Only `read` is materialized — write/edit/exec/process are NOT exposed
-  //   by this PR (they remain unreachable on this surface). Maintainer
-  //   approval for opt-in mutating coding primitives is deferred to a
-  //   follow-up PR per the bot's "Narrow The First Landing" rank-up move.
-  // - Restricted to `surface === "http"`. MCP loopback uses the same resolver
-  //   but does not apply DEFAULT_GATEWAY_HTTP_TOOL_DENY, so a coding tool
-  //   reached via the loopback path would bypass the deny gating; gating on
-  //   the HTTP surface keeps the loopback contract unchanged.
+  //   by this PR. Maintainer approval for opt-in mutating coding primitives
+  //   is deferred to a follow-up PR per the bot's "Narrow The First Landing"
+  //   rank-up move.
+  // - Gated on `surface === "http"`, which is the **direct-invoke marker**
+  //   set by `tools-invoke-shared.ts` for BOTH the HTTP `POST /tools/invoke`
+  //   route AND the SDK-facing JSON-RPC `tools.invoke` method (they share
+  //   the resolver). The `read` opt-in therefore applies to ALL direct-invoke
+  //   surfaces consistently — same shared-logic pattern established by the
+  //   merged sibling work in #74804. MCP loopback uses `surface === "loopback"`
+  //   and is unaffected.
   // - Uses `createOpenClawCodingToolsRaw` (unwrapped) — `handleToolsInvokeHttp`
   //   already calls `runBeforeToolCallHook` itself before dispatch, so the
   //   tools must arrive unwrapped to avoid double-firing the hook and leaking

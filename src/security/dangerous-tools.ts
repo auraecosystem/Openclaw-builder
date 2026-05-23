@@ -35,11 +35,13 @@ export const DEFAULT_GATEWAY_HTTP_TOOL_DENY = [
   // openclaw/openclaw#85664). Distinct from the entries above: the threat
   // shape is information disclosure of file contents reachable by the
   // gateway process (config files, secrets, SSH keys, environment files,
-  // etc.), not RCE / session orchestration. By default `read` is NOT
-  // confined to the workspace — `tools.fs.workspaceOnly` is a separate
-  // umbrella that the operator may enable. Default-deny so the operator
-  // must explicitly accept the host file-read surface by setting
-  // `gateway.tools.allow: ["read"]`. Existing `gateway.tools.{allow,deny}`
-  // and agent-level tool policies continue to apply on top of this.
+  // etc.), not RCE / session orchestration. Applies to ALL direct-invoke
+  // surfaces (HTTP `/tools/invoke` AND SDK RPC `tools.invoke`) — they share
+  // the same `surface: "http"` marker via `tools-invoke-shared.ts`. By
+  // default `read` is NOT confined to the workspace — `tools.fs.workspaceOnly`
+  // is a separate umbrella that the operator may enable. Default-deny so
+  // the operator must explicitly accept the host file-read surface by
+  // setting `gateway.tools.allow: ["read"]`. Existing `gateway.tools.{allow,
+  // deny}` and agent-level tool policies continue to apply on top of this.
   "read",
 ] as const;
