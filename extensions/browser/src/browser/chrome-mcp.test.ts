@@ -184,22 +184,22 @@ function createFakeSession(): ChromeMcpSession {
     if (name === "performance_analyze_insight") {
       return { content: [{ type: "text", text: `Insight ${args?.insightName} details.` }] };
     }
-    if (name === "take_heapsnapshot") {
+    if (name === "take_memory_snapshot") {
       return { content: [{ type: "text", text: `Heap snapshot saved to ${args?.filePath}` }] };
     }
-    if (name === "get_heapsnapshot_summary") {
+    if (name === "load_memory_snapshot") {
       return {
         content: [{ type: "text", text: "Heap snapshot summary." }],
         structuredContent: { stats: { totalSize: 1024 } },
       };
     }
-    if (name === "get_heapsnapshot_details") {
+    if (name === "get_memory_snapshot_details") {
       return { content: [{ type: "text", text: "Heap snapshot details." }] };
     }
-    if (name === "get_heapsnapshot_class_nodes") {
+    if (name === "get_nodes_by_class") {
       return { content: [{ type: "text", text: "Heap snapshot class nodes." }] };
     }
-    if (name === "get_heapsnapshot_retainers") {
+    if (name === "get_node_retainers") {
       return { content: [{ type: "text", text: "Heap snapshot retainers." }] };
     }
     if (name === "lighthouse_audit") {
@@ -639,7 +639,7 @@ describe("chrome MCP page parsing", () => {
     await emulateChromeMcpPage({
       profileName: "chrome-live",
       targetId: "2",
-      extraHttpHeaders: { "x-openclaw-test": "yes" },
+      colorScheme: "dark",
     });
     await emulateChromeMcpPage({
       profileName: "chrome-live",
@@ -660,14 +660,14 @@ describe("chrome MCP page parsing", () => {
         arguments: {
           pageId: 2,
           networkConditions: "Offline",
-          extraHttpHeaders: JSON.stringify({ "x-openclaw-test": "yes" }),
+          colorScheme: "dark",
         },
       },
       {
         name: "emulate",
         arguments: {
           pageId: 2,
-          extraHttpHeaders: JSON.stringify({ "x-openclaw-test": "yes" }),
+          colorScheme: "dark",
         },
       },
     ]);
@@ -770,28 +770,28 @@ describe("chrome MCP page parsing", () => {
     const calls = (session.client.callTool as unknown as ToolCallMock).mock.calls;
     expect(calls.slice(-5).map(([call]) => call)).toEqual([
       {
-        name: "take_heapsnapshot",
+        name: "take_memory_snapshot",
         arguments: { pageId: 2, filePath: "/tmp/openclaw/page.heapsnapshot" },
       },
       {
-        name: "get_heapsnapshot_summary",
+        name: "load_memory_snapshot",
         arguments: { filePath: "/tmp/openclaw/page.heapsnapshot" },
       },
       {
-        name: "get_heapsnapshot_details",
+        name: "get_memory_snapshot_details",
         arguments: { filePath: "/tmp/openclaw/page.heapsnapshot", pageIdx: 1, pageSize: 25 },
       },
       {
-        name: "get_heapsnapshot_class_nodes",
+        name: "get_nodes_by_class",
         arguments: {
           filePath: "/tmp/openclaw/page.heapsnapshot",
-          id: 42,
+          uid: 42,
           pageIdx: 2,
           pageSize: 10,
         },
       },
       {
-        name: "get_heapsnapshot_retainers",
+        name: "get_node_retainers",
         arguments: {
           filePath: "/tmp/openclaw/page.heapsnapshot",
           nodeId: 99,
@@ -982,6 +982,7 @@ describe("chrome MCP page parsing", () => {
       "--experimentalInteropTools",
       "--categoryExperimentalThirdParty",
       "--categoryExperimentalWebmcp",
+      "--categoryExtensions",
       "--userDataDir",
       "/tmp/brave-profile",
     ]);
@@ -1007,6 +1008,7 @@ describe("chrome MCP page parsing", () => {
       "--experimentalInteropTools",
       "--categoryExperimentalThirdParty",
       "--categoryExperimentalWebmcp",
+      "--categoryExtensions",
     ]);
   });
 
@@ -1029,6 +1031,7 @@ describe("chrome MCP page parsing", () => {
       "--experimentalInteropTools",
       "--categoryExperimentalThirdParty",
       "--categoryExperimentalWebmcp",
+      "--categoryExtensions",
     ]);
   });
 
@@ -1049,6 +1052,7 @@ describe("chrome MCP page parsing", () => {
       "--experimentalInteropTools",
       "--categoryExperimentalThirdParty",
       "--categoryExperimentalWebmcp",
+      "--categoryExtensions",
       "--browserUrl",
       "http://127.0.0.1:9222",
       "--no-usage-statistics",
@@ -1103,6 +1107,7 @@ describe("chrome MCP page parsing", () => {
       "--experimentalInteropTools",
       "--categoryExperimentalThirdParty",
       "--categoryExperimentalWebmcp",
+      "--categoryExtensions",
     ]);
   });
 

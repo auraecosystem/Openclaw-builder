@@ -143,6 +143,8 @@ const DEFAULT_CHROME_MCP_FEATURE_ARGS = [
   // Enables Chrome DevTools MCP page-exposed tool listing/execution surfaces.
   "--categoryExperimentalThirdParty",
   "--categoryExperimentalWebmcp",
+  // Enables Chrome DevTools MCP extension inventory/actions when the connected Chrome mode supports it.
+  "--categoryExtensions",
 ];
 const CHROME_MCP_USAGE_STATISTICS_FLAG_RE = /^--(?:no-)?usage-?statistics(?:=.*)?$/i;
 const CHROME_MCP_CONNECTION_FLAGS = new Set([
@@ -167,7 +169,6 @@ type ChromeMcpTrackedEmulationState = {
   networkConditions?: "Offline";
   geolocation?: string;
   colorScheme?: "dark" | "light";
-  extraHttpHeaders?: Record<string, string>;
 };
 
 const sessions = new Map<string, ChromeMcpSession>();
@@ -228,7 +229,9 @@ function extractExtensions(result: ChromeMcpToolResult): ChromeMcpExtension[] {
   if (!Array.isArray(extensions)) {
     return [];
   }
-  return extensions.map((entry) => asRecord(entry)).filter((entry): entry is ChromeMcpExtension => Boolean(entry));
+  return extensions
+    .map((entry) => asRecord(entry))
+    .filter((entry): entry is ChromeMcpExtension => Boolean(entry));
 }
 
 function extractTextContent(result: ChromeMcpToolResult): string[] {
@@ -341,7 +344,9 @@ function extractTextConsoleMessages(result: ChromeMcpToolResult): ChromeMcpConso
   const messages: ChromeMcpConsoleMessage[] = [];
   for (const block of extractTextContent(result)) {
     for (const line of block.split(/\r?\n/)) {
-      const match = line.match(/^\s*msgid=(\d+)\s+\[([^\]]+)]\s+(.+?)(?:\s+\((\d+)\s+args\))?\s*$/i);
+      const match = line.match(
+        /^\s*msgid=(\d+)\s+\[([^\]]+)]\s+(.+?)(?:\s+\((\d+)\s+args\))?\s*$/i,
+      );
       if (!match) {
         continue;
       }
@@ -1581,7 +1586,6 @@ export async function emulateChromeMcpPage(params: {
   userDataDir?: string;
   targetId: string;
   offline?: boolean;
-  extraHttpHeaders?: Record<string, string>;
   geolocation?: { latitude: number; longitude: number } | null;
   colorScheme?: "dark" | "light" | "auto";
 }): Promise<void> {
@@ -1600,9 +1604,6 @@ export async function emulateChromeMcpPage(params: {
       delete nextState.networkConditions;
     }
   }
-  if (params.extraHttpHeaders !== undefined) {
-    nextState.extraHttpHeaders = { ...params.extraHttpHeaders };
-  }
   if (Object.hasOwn(params, "geolocation")) {
     if (params.geolocation) {
       nextState.geolocation = `${params.geolocation.latitude},${params.geolocation.longitude}`;
@@ -1618,22 +1619,12 @@ export async function emulateChromeMcpPage(params: {
     }
   }
 
-  await callTool(
-    params.profileName,
-    profileOptions,
-    "emulate",
-    {
-      pageId: parsePageId(params.targetId),
-      ...(nextState.networkConditions
-        ? { networkConditions: nextState.networkConditions }
-        : {}),
-      ...(nextState.geolocation ? { geolocation: nextState.geolocation } : {}),
-      ...(nextState.colorScheme ? { colorScheme: nextState.colorScheme } : {}),
-      ...(nextState.extraHttpHeaders !== undefined
-        ? { extraHttpHeaders: JSON.stringify(nextState.extraHttpHeaders) }
-        : {}),
-    },
-  );
+  await callTool(params.profileName, profileOptions, "emulate", {
+    pageId: parsePageId(params.targetId),
+    ...(nextState.networkConditions ? { networkConditions: nextState.networkConditions } : {}),
+    ...(nextState.geolocation ? { geolocation: nextState.geolocation } : {}),
+    ...(nextState.colorScheme ? { colorScheme: nextState.colorScheme } : {}),
+  });
 
   if (Object.keys(nextState).length > 0) {
     emulationStates.set(stateKey, nextState);
@@ -1737,7 +1728,7 @@ export async function takeChromeMcpHeapSnapshot(params: {
   const result = await callTool(
     params.profileName,
     chromeMcpProfileOptionsFromParams(params),
-    "take_heapsnapshot",
+    "take_memory_snapshot",
     {
       pageId: parsePageId(params.targetId),
       filePath: params.filePath,
@@ -1757,7 +1748,7 @@ export async function getChromeMcpHeapSnapshotSummary(params: {
   const result = await callTool(
     params.profileName,
     chromeMcpProfileOptionsFromParams(params),
-    "get_heapsnapshot_summary",
+    "load_memory_snapshot",
     { filePath: params.filePath },
     { timeoutMs: params.timeoutMs },
   );
@@ -1776,7 +1767,7 @@ export async function getChromeMcpHeapSnapshotDetails(params: {
   const result = await callTool(
     params.profileName,
     chromeMcpProfileOptionsFromParams(params),
-    "get_heapsnapshot_details",
+    "get_memory_snapshot_details",
     {
       filePath: params.filePath,
       ...(params.pageIdx !== undefined ? { pageIdx: params.pageIdx } : {}),
@@ -1800,10 +1791,10 @@ export async function getChromeMcpHeapSnapshotClassNodes(params: {
   const result = await callTool(
     params.profileName,
     chromeMcpProfileOptionsFromParams(params),
-    "get_heapsnapshot_class_nodes",
+    "get_nodes_by_class",
     {
       filePath: params.filePath,
-      id: params.id,
+      uid: params.id,
       ...(params.pageIdx !== undefined ? { pageIdx: params.pageIdx } : {}),
       ...(params.pageSize !== undefined ? { pageSize: params.pageSize } : {}),
     },
@@ -1825,7 +1816,7 @@ export async function getChromeMcpHeapSnapshotRetainers(params: {
   const result = await callTool(
     params.profileName,
     chromeMcpProfileOptionsFromParams(params),
-    "get_heapsnapshot_retainers",
+    "get_node_retainers",
     {
       filePath: params.filePath,
       nodeId: params.nodeId,
@@ -2007,7 +1998,10 @@ export async function getChromeMcpTabId(params: {
     { pageId: parsePageId(params.targetId) },
     { timeoutMs: params.timeoutMs },
   );
-  return readStringValue(extractStructuredContent(result).tabId) ?? normalizeOptionalString(extractMessageText(result));
+  return (
+    readStringValue(extractStructuredContent(result).tabId) ??
+    normalizeOptionalString(extractMessageText(result))
+  );
 }
 
 export async function listChromeMcpThirdPartyDeveloperTools(params: {
@@ -2107,12 +2101,19 @@ export async function handleChromeMcpDialog(params: {
   targetId: string;
   action: "accept" | "dismiss";
   promptText?: string;
+  timeoutMs?: number;
 }): Promise<void> {
-  await callTool(params.profileName, chromeMcpProfileOptionsFromParams(params), "handle_dialog", {
-    pageId: parsePageId(params.targetId),
-    action: params.action,
-    ...(params.promptText ? { promptText: params.promptText } : {}),
-  });
+  await callTool(
+    params.profileName,
+    chromeMcpProfileOptionsFromParams(params),
+    "handle_dialog",
+    {
+      pageId: parsePageId(params.targetId),
+      action: params.action,
+      ...(params.promptText ? { promptText: params.promptText } : {}),
+    },
+    { timeoutMs: params.timeoutMs },
+  );
 }
 
 export async function evaluateChromeMcpScript(params: {

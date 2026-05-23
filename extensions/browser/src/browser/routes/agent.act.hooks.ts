@@ -1,4 +1,9 @@
-import { evaluateChromeMcpScript, handleChromeMcpDialog, uploadChromeMcpFile } from "../chrome-mcp.js";
+import { handleJavaScriptDialogViaCdp } from "../cdp.js";
+import {
+  evaluateChromeMcpScript,
+  handleChromeMcpDialog,
+  uploadChromeMcpFile,
+} from "../chrome-mcp.js";
 import { getBrowserProfileCapabilities } from "../profile-capabilities.js";
 import type { BrowserRouteContext } from "../server-context.js";
 import {
@@ -21,6 +26,17 @@ import {
 
 function isChromeMcpNoOpenDialogError(error: unknown): boolean {
   return error instanceof Error && /no open dialog/i.test(error.message);
+}
+
+function isChromeMcpDialogTimeoutError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /handle_dialog.*timed out|timed out.*handle_dialog/i.test(error.message)
+  );
+}
+
+function boundedDialogTimeoutMs(timeoutMs: number | undefined): number {
+  return Math.min(Math.max(timeoutMs ?? 2000, 250), 5000);
 }
 
 export function registerBrowserAgentActHookRoutes(
@@ -145,9 +161,22 @@ export function registerBrowserAgentActHookRoutes(
                 targetId: tab.targetId,
                 action: accept ? "accept" : "dismiss",
                 promptText,
+                timeoutMs: boundedDialogTimeoutMs(timeoutMs),
               });
               return res.json({ ok: true });
             } catch (error) {
+              if (isChromeMcpDialogTimeoutError(error)) {
+                await handleJavaScriptDialogViaCdp({
+                  cdpUrl,
+                  targetId: tab.targetId,
+                  targetUrl: tab.url,
+                  accept,
+                  promptText,
+                  ssrfPolicy: ctx.state().resolved.ssrfPolicy,
+                  timeoutMs: boundedDialogTimeoutMs(timeoutMs),
+                });
+                return res.json({ ok: true });
+              }
               if (!isChromeMcpNoOpenDialogError(error)) {
                 throw error;
               }
@@ -203,15 +232,35 @@ export function registerBrowserAgentActHookRoutes(
           if (!pw) {
             return;
           }
-          await pw.armDialogViaPlaywright({
-            cdpUrl,
-            targetId: tab.targetId,
-            dialogId,
-            accept,
-            promptText,
-            timeoutMs: timeoutMs ?? undefined,
-          });
-          res.json({ ok: true });
+          try {
+            await pw.armDialogViaPlaywright({
+              cdpUrl,
+              targetId: tab.targetId,
+              dialogId,
+              accept,
+              promptText,
+              timeoutMs: dialogId ? boundedDialogTimeoutMs(timeoutMs) : (timeoutMs ?? undefined),
+            });
+            return res.json({ ok: true });
+          } catch (error) {
+            if (!dialogId) {
+              throw error;
+            }
+            try {
+              await handleJavaScriptDialogViaCdp({
+                cdpUrl,
+                targetId: tab.targetId,
+                targetUrl: tab.url,
+                accept,
+                promptText,
+                ssrfPolicy: ctx.state().resolved.ssrfPolicy,
+                timeoutMs: boundedDialogTimeoutMs(timeoutMs),
+              });
+              return res.json({ ok: true });
+            } catch {
+              throw error;
+            }
+          }
         },
       });
     }),
