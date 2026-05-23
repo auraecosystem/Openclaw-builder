@@ -115,16 +115,17 @@ export function collectGatewayConfigFindings(
   if (reenabledReadOnly.length > 0) {
     const extraRisk = bind !== "loopback" || tailscaleMode === "funnel";
     findings.push({
-      checkId: "gateway.tools_invoke_http.workspace_read_allow",
+      checkId: "gateway.tools_invoke_http.host_read_allow",
       severity: extraRisk ? "warn" : "warn",
-      title: "Gateway HTTP /tools/invoke exposes workspace file reads",
+      title: "Gateway HTTP /tools/invoke exposes host file reads",
       detail:
-        "gateway.tools.allow includes read which exposes workspace file contents over authenticated HTTP /tools/invoke. " +
-        "This is a data-exposure boundary (not RCE / session orchestration): callers with the gateway bearer credential can read any file the agent's tool policy permits.",
+        "gateway.tools.allow includes read which exposes host filesystem read access over authenticated HTTP /tools/invoke. " +
+        "By default the coding `read` tool is NOT confined to the workspace — it can read any file the gateway process can access on the host (config files, secrets, SSH keys, environment files, etc.). " +
+        "Threat shape is information disclosure (not RCE / session orchestration): callers with the gateway bearer credential can read any file the gateway user can read.",
       remediation:
-        "Confirm the workspace contents are appropriate to expose over this surface. " +
+        "Confirm host file content reachable by the gateway process is safe to expose over this surface. " +
         "If not, remove read from gateway.tools.allow. " +
-        "If retained, keep gateway.bind loopback-only (or tailnet-only) and treat the gateway token as workspace-read-capable.",
+        "If retained, also set `tools.fs.workspaceOnly: true` to confine reads to the workspace, keep gateway.bind loopback-only (or tailnet-only), and treat the gateway token as host-file-read-capable.",
     });
   }
   if (bind !== "loopback" && !hasSharedSecret && auth.mode !== "trusted-proxy") {

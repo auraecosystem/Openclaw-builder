@@ -119,7 +119,7 @@ Gateway HTTP also applies a hard deny list by default (even if session policy al
 - `gateway` - gateway control plane; prevents reconfiguration via HTTP
 - `nodes` - node command relay can reach system.run on paired hosts
 - `whatsapp_login` - interactive setup requiring terminal QR scan; hangs on HTTP
-- `read` - workspace file read; the coding `read` tool is wired into `/tools/invoke` but default-denied because exposing workspace file contents over authenticated HTTP is a security boundary the operator must accept. Opt in via `gateway.tools.allow: ["read"]`. Unlike the entries above, this is data exposure (not RCE / session orchestration), so the appropriate review is "is this workspace's content safe to expose over this surface" rather than "should remote shell run".
+- `read` - **host filesystem read access for the gateway process**; the coding `read` tool is wired into `/tools/invoke` but default-denied. By default, `read` can access any file the gateway process can read on the host (not just the workspace) — this is broader than data exposure of workspace contents. Confining `read` to the workspace requires the separate `tools.fs.workspaceOnly` umbrella flag. Opt in via `gateway.tools.allow: ["read"]`. Unlike the RCE entries above, the threat shape is information disclosure (file contents readable by the gateway user — config files, secrets, SSH keys, environment files, etc.) rather than remote command execution / session spawning. The appropriate review is "is host file content reachable by the gateway process safe to expose over this surface (including outside the workspace unless `tools.fs.workspaceOnly` is enabled)?" rather than "should remote shell run".
 
 You can customize this deny list via `gateway.tools`:
 

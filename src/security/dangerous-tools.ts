@@ -31,12 +31,14 @@ export const DEFAULT_GATEWAY_HTTP_TOOL_DENY = [
   "gateway",
   // Node command relay can reach system.run on paired hosts
   "nodes",
-  // Workspace file read — wired into the HTTP `/tools/invoke` surface by
-  // openclaw/openclaw#85664. Distinct from the entries above: this is a
-  // data-exposure boundary (workspace file *contents* become reachable over
-  // authenticated HTTP) rather than an RCE / session-orchestration boundary.
-  // Default-deny so the operator must explicitly accept that the workspace
-  // contents are safe to expose over this surface by setting
+  // Host filesystem read access (via the coding `read` tool wired by
+  // openclaw/openclaw#85664). Distinct from the entries above: the threat
+  // shape is information disclosure of file contents reachable by the
+  // gateway process (config files, secrets, SSH keys, environment files,
+  // etc.), not RCE / session orchestration. By default `read` is NOT
+  // confined to the workspace — `tools.fs.workspaceOnly` is a separate
+  // umbrella that the operator may enable. Default-deny so the operator
+  // must explicitly accept the host file-read surface by setting
   // `gateway.tools.allow: ["read"]`. Existing `gateway.tools.{allow,deny}`
   // and agent-level tool policies continue to apply on top of this.
   "read",
