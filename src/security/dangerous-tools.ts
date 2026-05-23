@@ -31,4 +31,10 @@ export const DEFAULT_GATEWAY_HTTP_TOOL_DENY = [
   "gateway",
   // Node command relay can reach system.run on paired hosts
   "nodes",
+  // Workspace file read — newly wired into the HTTP `/tools/invoke` surface.
+  // Even read access expands the security boundary (workspace file contents
+  // become reachable over authenticated HTTP), so require explicit operator
+  // opt-in via `gateway.tools.allow: ["read"]`. Existing `gateway.tools.{allow,
+  // deny}` and agent-level tool policies continue to apply on top of this.
+  "read",
 ] as const;

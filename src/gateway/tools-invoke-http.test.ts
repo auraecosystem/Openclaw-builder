@@ -957,8 +957,12 @@ describe("POST /tools/invoke", () => {
     expect(lastCreateOpenClawToolsContext?.senderIsOwner).toBe(true);
   });
 
-  it("wires the `read` coding tool into /tools/invoke for HTTP callers", async () => {
-    setMainAllowedTools({ allow: ["read"] });
+  it("wires the `read` coding tool into /tools/invoke when operator explicitly opts in", async () => {
+    // `read` is on DEFAULT_GATEWAY_HTTP_TOOL_DENY by default — the operator
+    // must explicitly opt in via `gateway.tools.allow: ["read"]` because
+    // exposing workspace file contents over authenticated HTTP is a security
+    // boundary the operator must accept.
+    setMainAllowedTools({ allow: ["read"], gatewayAllow: ["read"] });
     const res = await invokeToolAuthed({
       tool: "read",
       args: { path: "/workspace/example.txt" },
@@ -970,6 +974,18 @@ describe("POST /tools/invoke", () => {
       body: { ok: true },
     });
     expect(codingToolMocks.lastReadCall?.input).toEqual({ path: "/workspace/example.txt" });
+  });
+
+  it("`read` is denied by default — operator must opt in via gateway.tools.allow", async () => {
+    // Without explicit `gateway.tools.allow=["read"]`, the HTTP default
+    // deny list blocks `read` even though the agent-level policy permits it.
+    setMainAllowedTools({ allow: ["read"] });
+    const res = await invokeToolAuthed({
+      tool: "read",
+      args: { path: "/workspace/example.txt" },
+      sessionKey: "main",
+    });
+    expect(res.status).toBe(404);
   });
 
   it("does NOT wire mutating coding tools (write/edit/exec/process) into /tools/invoke", async () => {
