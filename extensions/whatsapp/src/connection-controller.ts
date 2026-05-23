@@ -332,6 +332,10 @@ export class WhatsAppConnectionController {
     return this.current?.listener ?? null;
   }
 
+  getCurrentSock(): WASocket | null {
+    return this.socketRef.current;
+  }
+
   getReconnectAttempts(): number {
     return this.reconnectAttempts;
   }
