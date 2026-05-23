@@ -325,13 +325,45 @@ export async function noteSessionSnapshotHealth(params?: {
         const raw = fs.readFileSync(storePath, "utf-8");
         let fixed = raw;
         for (const finding of findings) {
-          // Escape special regex characters in the cached path for a literal replacement
-          const escaped = finding.cachedPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          const count = (fixed.match(new RegExp(escaped, "g")) ?? []).length;
-          if (count > 0) {
-            fixed = fixed.replaceAll(finding.cachedPath, finding.expectedPath);
-            totalReplacements += count;
+          // Replace both the JSON-escaped form (as stored in the file) and the
+          // raw unescaped form. JSON.stringify produces the escaped content
+          // with surrounding quotes; slice(1,-1) strips the quotes.
+          const jsonEscaped = JSON.stringify(finding.cachedPath).slice(1, -1);
+          const jsonEscapedExpected = JSON.stringify(finding.expectedPath).slice(1, -1);
+
+          let count = 0;
+          // 1. Replace JSON-escaped paths (handles Windows backslashes, unicode, etc.)
+          if (fixed.includes(jsonEscaped)) {
+            const occurrences = fixed.split(jsonEscaped).length - 1;
+            fixed = fixed.replaceAll(jsonEscaped, jsonEscapedExpected);
+            count += occurrences;
           }
+          // 2. Replace raw unescaped paths as a fallback for non-JSON-escaped storage
+          if (fixed.includes(finding.cachedPath)) {
+            const occurrences = fixed.split(finding.cachedPath).length - 1;
+            fixed = fixed.replaceAll(finding.cachedPath, finding.expectedPath);
+            count += occurrences;
+          }
+          // 3. For baseDir paths (resolvedSkills), also replace the directory
+          //    prefix without the trailing SKILL.md segment, since the raw JSON
+          //    stores the baseDir as a directory path.
+          if (finding.field === "skillsSnapshot.resolvedSkills" && finding.cachedPath.endsWith("/SKILL.md")) {
+            const cachedDir = finding.cachedPath.slice(0, -"/SKILL.md".length);
+            const expectedDir = finding.expectedPath.slice(0, -"/SKILL.md".length);
+            const jsonEscapedDir = JSON.stringify(cachedDir).slice(1, -1);
+            const jsonEscapedExpectedDir = JSON.stringify(expectedDir).slice(1, -1);
+            if (fixed.includes(jsonEscapedDir)) {
+              const occurrences = fixed.split(jsonEscapedDir).length - 1;
+              fixed = fixed.replaceAll(jsonEscapedDir, jsonEscapedExpectedDir);
+              count += occurrences;
+            }
+            if (fixed.includes(cachedDir)) {
+              const occurrences = fixed.split(cachedDir).length - 1;
+              fixed = fixed.replaceAll(cachedDir, expectedDir);
+              count += occurrences;
+            }
+          }
+          totalReplacements += count;
         }
         if (fixed !== raw) {
           // Create backup before writing
