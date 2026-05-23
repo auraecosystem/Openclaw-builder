@@ -139,6 +139,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     itemStartedCount: 0,
     itemCompletedCount: 0,
     lastToolError: undefined,
+    consecutiveToolErrors: null,
     blockReplyBreak: params.blockReplyBreak ?? "text_end",
     reasoningMode,
     includeReasoning: reasoningMode === "on" && canShowReasoning,
@@ -964,6 +965,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     state.itemStartedCount = 0;
     state.itemCompletedCount = 0;
     state.lastToolError = undefined;
+    state.consecutiveToolErrors = null;
     messagingToolSentTexts.length = 0;
     messagingToolSentTextsNormalized.length = 0;
     messagingToolSentTargets.length = 0;

@@ -25,5 +25,6 @@ export function createBaseToolHandlerState() {
     messagingToolSentTargets: [] as unknown[],
     deterministicApprovalPromptSent: false,
     blockBuffer: "",
+    consecutiveToolErrors: null,
   };
 }
