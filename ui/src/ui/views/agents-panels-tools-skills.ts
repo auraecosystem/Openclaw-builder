@@ -212,7 +212,7 @@ function renderEffectiveToolBadge(tool: {
       : t("agentTools.channel");
   }
   if (tool.source === "mcp") {
-    return t("agentTools.mcp");
+    return "MCP";
   }
   return t("agentTools.builtIn");
 }

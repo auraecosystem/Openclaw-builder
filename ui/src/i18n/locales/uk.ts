@@ -381,7 +381,6 @@ export const uk: TranslationMap = {
     connected: "Підключено",
     channelSource: "Канал: {id}",
     channel: "Канал",
-    mcp: "MCP",
     builtIn: "Вбудований",
   },
   nav: {

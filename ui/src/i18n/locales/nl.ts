@@ -382,7 +382,6 @@ export const nl: TranslationMap = {
     connected: "Verbonden",
     channelSource: "Kanaal: {id}",
     channel: "Kanaal",
-    mcp: "MCP",
     builtIn: "Ingebouwd",
   },
   nav: {

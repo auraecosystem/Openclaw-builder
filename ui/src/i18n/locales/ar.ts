@@ -379,7 +379,6 @@ export const ar: TranslationMap = {
     connected: "متصل",
     channelSource: "القناة: {id}",
     channel: "القناة",
-    mcp: "MCP",
     builtIn: "مدمج",
   },
   nav: {

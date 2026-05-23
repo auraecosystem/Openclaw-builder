@@ -378,7 +378,6 @@ export const en: TranslationMap = {
     connected: "Connected",
     channelSource: "Channel: {id}",
     channel: "Channel",
-    mcp: "MCP",
     builtIn: "Built-in",
   },
   nav: {

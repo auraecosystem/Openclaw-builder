@@ -383,7 +383,6 @@ export const de: TranslationMap = {
     connected: "Verbunden",
     channelSource: "Kanal: {id}",
     channel: "Kanal",
-    mcp: "MCP",
     builtIn: "Integriert",
   },
   nav: {
