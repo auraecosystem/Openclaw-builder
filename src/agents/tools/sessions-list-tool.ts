@@ -85,7 +85,7 @@ export function createSessionsListTool(opts?: {
         resolveSandboxedSessionToolContext({
           cfg,
           agentSessionKey: opts?.agentSessionKey,
-          agentId: requesterAgentId,
+          agentId: opts?.requesterAgentIdOverride,
           sandboxed: opts?.sandboxed,
         });
       const visibility = resolveEffectiveSessionToolsVisibility({
@@ -145,8 +145,6 @@ export function createSessionsListTool(opts?: {
       const visibilityGuard = createSessionVisibilityRowChecker({
         action: "list",
         requesterSessionKey: effectiveRequesterKey,
-        mainKey,
-        requesterAgentId,
         visibility,
         a2aPolicy,
       });

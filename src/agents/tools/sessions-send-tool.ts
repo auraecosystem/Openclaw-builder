@@ -202,8 +202,7 @@ export function createSessionsSendTool(opts?: {
       const { cfg, mainKey, alias, effectiveRequesterKey, restrictToSpawned } =
         resolveSessionToolContext(opts);
       const requesterAgentId =
-        opts?.requesterAgentIdOverride ??
-        (opts?.agentSessionKey ? resolveAgentIdFromSessionKey(opts.agentSessionKey) : undefined);
+        opts?.requesterAgentIdOverride ?? resolveAgentIdFromSessionKey(effectiveRequesterKey);
 
       const a2aPolicy = createAgentToAgentPolicy(cfg);
       const sessionVisibility = resolveEffectiveSessionToolsVisibility({
@@ -375,8 +374,6 @@ export function createSessionsSendTool(opts?: {
       const visibilityGuard = await createSessionVisibilityGuard({
         action: "send",
         requesterSessionKey: effectiveRequesterKey,
-        mainKey,
-        requesterAgentId,
         visibility: sessionVisibility,
         a2aPolicy,
       });

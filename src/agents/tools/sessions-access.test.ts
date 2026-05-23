@@ -4,11 +4,14 @@ import {
   createAgentToAgentPolicy,
   createSessionVisibilityGuard,
   createSessionVisibilityRowChecker,
-  resolveEffectiveSessionToolsVisibility,
   resolveSandboxSessionToolsVisibility,
   resolveSessionToolsVisibility,
 } from "../../plugin-sdk/session-visibility.js";
-import { resolveSandboxedSessionToolContext } from "./sessions-access.js";
+import {
+  resolveEffectiveSessionToolsVisibility,
+  resolveSandboxedSessionToolContext,
+  resolveSandboxSessionToolsVisibilityForAgent,
+} from "./sessions-access.js";
 import { testing as sessionsResolutionTesting } from "./sessions-resolution.js";
 
 describe("resolveSessionToolsVisibility", () => {
@@ -84,7 +87,7 @@ describe("sandbox session-tools context", () => {
         list: [{ id: "Tony", sandbox: { sessionToolsVisibility: "all" } }],
       },
     } as unknown as OpenClawConfig;
-    expect(resolveSandboxSessionToolsVisibility(cfg, "tony")).toBe("all");
+    expect(resolveSandboxSessionToolsVisibilityForAgent(cfg, "tony")).toBe("all");
   });
 
   it("restricts non-subagent sandboxed sessions to spawned visibility", () => {
@@ -118,7 +121,7 @@ describe("sandbox session-tools context", () => {
     expect(context.requesterInternalKey).toBe("agent:main:subagent:abc");
   });
 
-  it("roots sandboxed spawned visibility to requesterAgentId override", () => {
+  it("roots sandboxed spawned visibility to requester agent overrides", () => {
     const cfg = {
       session: { mainKey: "inbox" },
       tools: { sessions: { visibility: "all" } },

@@ -205,7 +205,7 @@ export function createSessionsHistoryTool(opts?: {
         resolveSandboxedSessionToolContext({
           cfg,
           agentSessionKey: opts?.agentSessionKey,
-          agentId: requesterAgentId,
+          agentId: opts?.requesterAgentIdOverride,
           sandboxed: opts?.sandboxed,
         });
       const resolvedSession = await resolveSessionReference({
@@ -243,8 +243,6 @@ export function createSessionsHistoryTool(opts?: {
       const visibilityGuard = await createSessionVisibilityGuard({
         action: "history",
         requesterSessionKey: effectiveRequesterKey,
-        mainKey,
-        requesterAgentId,
         visibility,
         a2aPolicy,
       });

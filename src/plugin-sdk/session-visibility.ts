@@ -1,11 +1,6 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { callGateway as defaultCallGateway } from "../gateway/call.js";
-import {
-  buildAgentMainSessionKey,
-  normalizeAgentId,
-  parseAgentSessionKey,
-  resolveAgentIdFromSessionKey,
-} from "../routing/session-key.js";
+import { resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
@@ -83,32 +78,19 @@ export function resolveSessionToolsVisibility(cfg: OpenClawConfig): SessionTools
 export function resolveEffectiveSessionToolsVisibility(params: {
   cfg: OpenClawConfig;
   sandboxed: boolean;
-  agentId?: string;
 }): SessionToolsVisibility {
   const visibility = resolveSessionToolsVisibility(params.cfg);
   if (!params.sandboxed) {
     return visibility;
   }
-  const sandboxClamp = resolveSandboxSessionToolsVisibility(params.cfg, params.agentId);
+  const sandboxClamp = params.cfg.agents?.defaults?.sandbox?.sessionToolsVisibility ?? "spawned";
   if (sandboxClamp === "spawned" && visibility !== "tree") {
     return "tree";
   }
   return visibility;
 }
 
-export function resolveSandboxSessionToolsVisibility(
-  cfg: OpenClawConfig,
-  agentId?: string,
-): "spawned" | "all" {
-  if (agentId) {
-    const normalizedAgentId = normalizeAgentId(agentId);
-    const override = cfg.agents?.list?.find(
-      (entry) => normalizeAgentId(entry.id) === normalizedAgentId,
-    )?.sandbox?.sessionToolsVisibility;
-    if (override === "spawned" || override === "all") {
-      return override;
-    }
-  }
+export function resolveSandboxSessionToolsVisibility(cfg: OpenClawConfig): "spawned" | "all" {
   return cfg.agents?.defaults?.sandbox?.sessionToolsVisibility ?? "spawned";
 }
 
@@ -318,41 +300,20 @@ export function createSessionVisibilityRowChecker(params: {
 export async function createSessionVisibilityGuard(params: {
   action: SessionAccessAction;
   requesterSessionKey: string;
-  mainKey?: string;
-  requesterAgentId?: string;
   visibility: SessionToolsVisibility;
   a2aPolicy: AgentToAgentPolicy;
 }): Promise<{
   check: (targetSessionKey: string) => SessionAccessResult;
 }> {
-  const requesterSessionKey = params.requesterSessionKey.trim();
-  const requesterAgentIdFromSessionKey = resolveAgentIdFromSessionKey(requesterSessionKey);
-  const requesterAgentId =
-    params.requesterAgentId && params.requesterAgentId.trim()
-      ? normalizeAgentId(params.requesterAgentId)
-      : requesterAgentIdFromSessionKey;
-  const effectiveRequesterSessionKey =
-    requesterAgentId === requesterAgentIdFromSessionKey
-      ? requesterSessionKey
-      : (() => {
-          const parsed = parseAgentSessionKey(requesterSessionKey);
-          if (parsed) {
-            return `agent:${requesterAgentId}:${parsed.rest}`;
-          }
-          return buildAgentMainSessionKey({
-            agentId: requesterAgentId,
-            mainKey: params.mainKey,
-          });
-        })();
   // Listing already has row ownership metadata; direct key actions still need
   // this lookup until every caller can pass a normalized session row.
   const spawnedKeys =
     params.action !== "list" && (params.visibility === "tree" || params.visibility === "all")
-      ? await listSpawnedSessionKeys({ requesterSessionKey: effectiveRequesterSessionKey })
+      ? await listSpawnedSessionKeys({ requesterSessionKey: params.requesterSessionKey })
       : null;
   return createSessionVisibilityChecker({
     action: params.action,
-    requesterSessionKey: effectiveRequesterSessionKey,
+    requesterSessionKey: params.requesterSessionKey,
     visibility: params.visibility,
     a2aPolicy: params.a2aPolicy,
     spawnedKeys,

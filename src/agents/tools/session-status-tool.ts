@@ -352,7 +352,7 @@ export function createSessionStatusTool(opts?: {
       const a2aPolicy = createAgentToAgentPolicy(cfg);
       const requesterAgentId = opts?.requesterAgentIdOverride?.trim()
         ? normalizeAgentId(opts.requesterAgentIdOverride)
-        : resolveAgentIdFromSessionKey(opts?.agentSessionKey ?? effectiveRequesterKey);
+        : resolveAgentIdFromSessionKey(effectiveRequesterKey);
       const visibilityRequesterKey = effectiveRequesterKey.trim();
       const usesLegacyMainAlias = alias === mainKey;
       const isLegacyMainVisibilityKey = (sessionKey: string) => {
@@ -393,8 +393,6 @@ export function createSessionStatusTool(opts?: {
       const visibilityGuard = await createSessionVisibilityGuard({
         action: "status",
         requesterSessionKey: visibilityRequesterKey,
-        mainKey,
-        requesterAgentId,
         visibility: resolveEffectiveSessionToolsVisibility({
           cfg,
           sandboxed: opts?.sandboxed === true,
