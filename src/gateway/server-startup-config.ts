@@ -10,6 +10,7 @@ import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import { applyConfigOverrides } from "../config/runtime-overrides.js";
 import type { GatewayAuthConfig, GatewayTailscaleConfig } from "../config/types.gateway.js";
 import type { ConfigFileSnapshot, OpenClawConfig } from "../config/types.openclaw.js";
+import { measureDiagnosticsTimelineSpan } from "../infra/diagnostics-timeline.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
 import {
@@ -20,7 +21,12 @@ import {
   GATEWAY_AUTH_SURFACE_PATHS,
   evaluateGatewayAuthSurfaceStates,
 } from "../secrets/runtime-gateway-auth-surfaces.js";
-import { activateSecretsRuntimeSnapshotState } from "../secrets/runtime-state.js";
+import {
+  activateSecretsRuntimeSnapshotState,
+  getActiveSecretsRuntimeSnapshot,
+  getLiveSecretsRuntimeAuthStores,
+  setPreparedSecretsRuntimeSnapshotRefreshContext,
+} from "../secrets/runtime-state.js";
 import { resolveGatewayAuth } from "./auth.js";
 import { assertGatewayAuthNotKnownWeak } from "./known-weak-gateway-secrets.js";
 import {
@@ -63,7 +69,22 @@ type GatewayStartupConfigOverrides = {
   tailscale?: GatewayTailscaleConfig;
 };
 
-type GatewayStartupConfigMeasure = <T>(name: string, run: () => T | Promise<T>) => Promise<T>;
+type GatewayStartupConfigMeasure = <T>(
+  name: string,
+  run: () => T | Promise<T>,
+  options?: { omitErrorMessage?: boolean },
+) => Promise<T>;
+
+function secretsPrepareTimelineAttributes(
+  config: OpenClawConfig,
+  activationParams: RuntimeSecretsActivationParams,
+) {
+  return {
+    activate: activationParams.activate,
+    gatewayAuthSecretRef: hasActiveGatewayAuthSecretRef(config),
+    reason: activationParams.reason,
+  };
+}
 
 export type GatewayStartupConfigSnapshotLoadResult = {
   snapshot: ConfigFileSnapshot;
@@ -249,17 +270,30 @@ export function createRuntimeSecretsActivator(params: {
                   snapshot,
                   refreshContext: fastPath.refreshContext,
                   refreshHandler: {
-                    refresh: async ({ sourceConfig }) => {
+                    refresh: async ({ sourceConfig, includeAuthStoreRefs }) => {
                       const secretsRuntime = await loadSecretsRuntime();
+                      const activeSnapshot = getActiveSecretsRuntimeSnapshot();
+                      const oneShotSkipAuthStoreRefs =
+                        includeAuthStoreRefs === false &&
+                        fastPath.refreshContext.includeAuthStoreRefs;
                       const refreshed = await secretsRuntime.prepareSecretsRuntimeSnapshot({
                         config: sourceConfig,
                         env: fastPath.refreshContext.env,
                         agentDirs: resolveRefreshAgentDirs(sourceConfig, fastPath.refreshContext),
+                        includeAuthStoreRefs:
+                          includeAuthStoreRefs ?? fastPath.refreshContext.includeAuthStoreRefs,
                         loadablePluginOrigins: fastPath.refreshContext.loadablePluginOrigins,
                         ...(fastPath.usesAuthStoreFallback || !fastPath.refreshContext.loadAuthStore
                           ? {}
                           : { loadAuthStore: fastPath.refreshContext.loadAuthStore }),
                       });
+                      if (oneShotSkipAuthStoreRefs && activeSnapshot) {
+                        refreshed.authStores = getLiveSecretsRuntimeAuthStores();
+                        setPreparedSecretsRuntimeSnapshotRefreshContext(
+                          refreshed,
+                          fastPath.refreshContext,
+                        );
+                      }
                       secretsRuntime.activateSecretsRuntimeSnapshot(refreshed);
                       return true;
                     },
@@ -277,10 +311,21 @@ export function createRuntimeSecretsActivator(params: {
             : await loadSecretsRuntime();
         const prepareRuntimeSecretsSnapshot =
           params.prepareRuntimeSecretsSnapshot ?? secretsRuntime!.prepareSecretsRuntimeSnapshot;
-        const prepared = await prepareRuntimeSecretsSnapshot({
-          config: pruneSkippedStartupSecretSurfaces(config),
-          ...(loadAuthStore ? { loadAuthStore } : {}),
-        });
+        const prepared = await measureDiagnosticsTimelineSpan(
+          "secrets.prepare",
+          () =>
+            prepareRuntimeSecretsSnapshot({
+              config: pruneSkippedStartupSecretSurfaces(config),
+              ...(loadAuthStore ? { loadAuthStore } : {}),
+            }),
+          {
+            attributes: secretsPrepareTimelineAttributes(config, activationParams),
+            config,
+            env: process.env,
+            omitErrorMessage: true,
+            phase: activationParams.reason,
+          },
+        );
         return await finishPreparedSnapshot(prepared, activationParams);
       } catch (err) {
         return handleSecretsActivationError(err, activationParams, config);
@@ -340,16 +385,20 @@ export async function prepareGatewayStartupConfig(params: {
     hasActiveGatewayAuthSecretRef(startupPreflightConfig),
   );
   let preflightPrepared: PreparedRuntimeSecretsSnapshot | undefined;
-  const preflightConfig = await measure("config.auth.secret-preflight", async () => {
-    if (!needsAuthSecretPreflight) {
-      return startupPreflightConfig;
-    }
-    preflightPrepared = await params.activateRuntimeSecrets(startupPreflightConfig, {
-      reason: "startup",
-      activate: false,
-    });
-    return preflightPrepared.config;
-  });
+  const preflightConfig = await measure(
+    "config.auth.secret-preflight",
+    async () => {
+      if (!needsAuthSecretPreflight) {
+        return startupPreflightConfig;
+      }
+      preflightPrepared = await params.activateRuntimeSecrets(startupPreflightConfig, {
+        reason: "startup",
+        activate: false,
+      });
+      return preflightPrepared.config;
+    },
+    { omitErrorMessage: true },
+  );
   const canReusePreflightPreparedSnapshot = (config: OpenClawConfig): boolean =>
     Boolean(
       preflightPrepared &&
@@ -400,8 +449,10 @@ export async function prepareGatewayStartupConfig(params: {
     }),
   );
   const activatedConfig = (
-    await measure("config.auth.secrets-activate", () =>
-      activateStartupSecrets(runtimeStartupConfig),
+    await measure(
+      "config.auth.secrets-activate",
+      () => activateStartupSecrets(runtimeStartupConfig),
+      { omitErrorMessage: true },
     )
   ).config;
   return {

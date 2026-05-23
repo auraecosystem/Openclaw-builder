@@ -1582,6 +1582,7 @@ public struct SecretsResolveResult: Codable, Sendable {
 
 public struct SessionsListParams: Codable, Sendable {
     public let limit: Int?
+    public let offset: Int?
     public let activeminutes: Int?
     public let includeglobal: Bool?
     public let includeunknown: Bool?
@@ -1595,6 +1596,7 @@ public struct SessionsListParams: Codable, Sendable {
 
     public init(
         limit: Int?,
+        offset: Int?,
         activeminutes: Int?,
         includeglobal: Bool?,
         includeunknown: Bool?,
@@ -1607,6 +1609,7 @@ public struct SessionsListParams: Codable, Sendable {
         search: String?)
     {
         self.limit = limit
+        self.offset = offset
         self.activeminutes = activeminutes
         self.includeglobal = includeglobal
         self.includeunknown = includeunknown
@@ -1621,6 +1624,7 @@ public struct SessionsListParams: Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case limit
+        case offset
         case activeminutes = "activeMinutes"
         case includeglobal = "includeGlobal"
         case includeunknown = "includeUnknown"
@@ -2757,6 +2761,7 @@ public struct ConfigSchemaResponse: Codable, Sendable {
 public struct ConfigSchemaLookupResult: Codable, Sendable {
     public let path: String
     public let schema: AnyCodable
+    public let reloadkind: AnyCodable?
     public let hint: [String: AnyCodable]?
     public let hintpath: String?
     public let children: [[String: AnyCodable]]
@@ -2764,12 +2769,14 @@ public struct ConfigSchemaLookupResult: Codable, Sendable {
     public init(
         path: String,
         schema: AnyCodable,
+        reloadkind: AnyCodable?,
         hint: [String: AnyCodable]?,
         hintpath: String?,
         children: [[String: AnyCodable]])
     {
         self.path = path
         self.schema = schema
+        self.reloadkind = reloadkind
         self.hint = hint
         self.hintpath = hintpath
         self.children = children
@@ -2778,6 +2785,7 @@ public struct ConfigSchemaLookupResult: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case path
         case schema
+        case reloadkind = "reloadKind"
         case hint
         case hintpath = "hintPath"
         case children

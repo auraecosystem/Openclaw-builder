@@ -88,7 +88,7 @@ import { createLazyGatewayCronState } from "./server-cron-lazy.js";
 import { applyGatewayLaneConcurrency } from "./server-lanes.js";
 import { createGatewayServerLiveState, type GatewayServerLiveState } from "./server-live-state.js";
 import { GATEWAY_EVENTS } from "./server-methods-list.js";
-import type { GatewayRequestHandlers } from "./server-methods/types.js";
+import type { GatewayRequestContext, GatewayRequestHandlers } from "./server-methods/types.js";
 import { setFallbackGatewayContextResolver } from "./server-plugins.js";
 import type { GatewayPluginReloadResult } from "./server-reload-handlers.js";
 import { createGatewayRuntimeState } from "./server-runtime-state.js";
@@ -112,9 +112,8 @@ import { loadGatewayTlsRuntime } from "./server/tls.js";
 import { resolveSharedGatewaySessionGeneration } from "./server/ws-shared-generation.js";
 import { maybeSeedControlUiAllowedOriginsAtStartup } from "./startup-control-ui-origins.js";
 
-export async function __resetModelCatalogCacheForTest(): Promise<void> {
-  const { __resetModelCatalogCacheForTest: resetModelCatalogCacheForTest } =
-    await import("./server-model-catalog.js");
+export async function resetModelCatalogCacheForTest(): Promise<void> {
+  const { resetModelCatalogCacheForTest } = await import("./server-model-catalog.js");
   await resetModelCatalogCacheForTest();
 }
 
@@ -363,7 +362,11 @@ function createGatewayStartupTrace() {
         timelineOptions(),
       );
     },
-    async measure<T>(name: string, run: () => Promise<T> | T): Promise<T> {
+    async measure<T>(
+      name: string,
+      run: () => Promise<T> | T,
+      options: { omitErrorMessage?: boolean } = {},
+    ): Promise<T> {
       const before = performance.now();
       const spanId = `gateway-startup-${++spanSequence}`;
       emitDiagnosticsTimelineEvent(
@@ -402,7 +405,9 @@ function createGatewayStartupTrace() {
             durationMs: now - before,
             attributes: name === mapTimelineName(name) ? undefined : { traceName: name },
             errorName: error instanceof Error ? error.name : typeof error,
-            errorMessage: error instanceof Error ? error.message : String(error),
+            ...(options.omitErrorMessage
+              ? {}
+              : { errorMessage: error instanceof Error ? error.message : String(error) }),
           },
           timelineOptions(),
         );
@@ -587,8 +592,6 @@ export async function startGatewayServer(
     enqueueSystemEvent(`[${code}] ${message}`, {
       sessionKey: resolveMainSessionKey(cfg),
       contextKey: code,
-      forceSenderIsOwnerFalse: true,
-      trusted: false,
     });
   };
   const { createRuntimeSecretsActivator } = await startupConfigModulePromise;
@@ -604,14 +607,17 @@ export async function startGatewayServer(
   const startupRuntimeConfig = applyConfigOverrides(configSnapshot.config);
   startupTrace.setConfig(startupRuntimeConfig);
   const { prepareGatewayStartupConfig } = await startupConfigModulePromise;
-  const authBootstrap = await startupTrace.measure("config.auth", () =>
-    prepareGatewayStartupConfig({
-      configSnapshot,
-      authOverride: opts.auth,
-      tailscaleOverride: opts.tailscale,
-      activateRuntimeSecrets,
-      measure: (name, run) => startupTrace.measure(name, run),
-    }),
+  const authBootstrap = await startupTrace.measure(
+    "config.auth",
+    () =>
+      prepareGatewayStartupConfig({
+        configSnapshot,
+        authOverride: opts.auth,
+        tailscaleOverride: opts.tailscale,
+        activateRuntimeSecrets,
+        measure: (name, run, measureOptions) => startupTrace.measure(name, run, measureOptions),
+      }),
+    { omitErrorMessage: true },
   );
   cfgAtStart = authBootstrap.cfg;
   startupTrace.setConfig(cfgAtStart);
@@ -834,6 +840,7 @@ export async function startGatewayServer(
     channelRuntimeEnvs,
     resolveChannelRuntime: getChannelRuntime,
     resolveStartupChannelRuntime: getStartupChannelRuntime,
+    getPluginHttpRouteRegistry: () => pluginRegistry,
     startupTrace,
   });
   const getReadiness = createReadinessChecker({
@@ -847,6 +854,7 @@ export async function startGatewayServer(
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
   });
   log.info("starting HTTP server...");
+  let currentPluginRegistryGatewayContext: GatewayRequestContext | undefined;
   const {
     releasePluginRouteRegistry,
     httpServer,
@@ -888,6 +896,8 @@ export async function startGatewayServer(
       hooksConfig: () => runtimeState?.hooksConfig ?? initialHooksConfig,
       getHookClientIpConfig: () => runtimeState?.hookClientIpConfig ?? initialHookClientIpConfig,
       pluginRegistry,
+      getPluginRouteRegistry: () => pluginRegistry,
+      getGatewayRequestContext: () => currentPluginRegistryGatewayContext,
       pinChannelRegistry: !minimalTestGateway,
       deps,
       log,
@@ -980,6 +990,13 @@ export async function startGatewayServer(
       postReadySidecar.stop();
     }
   };
+  const stopRegisteredGatewayLifetimeSidecars = () => {
+    const gatewayLifetimeSidecars = runtimeState.gatewayLifetimeSidecars;
+    runtimeState.gatewayLifetimeSidecars = [];
+    for (const gatewayLifetimeSidecar of gatewayLifetimeSidecars) {
+      gatewayLifetimeSidecar.stop();
+    }
+  };
   const createCloseHandler = () => async (opts?: GatewayCloseOptions) => {
     const channelIds = listLoadedChannelPlugins().map((plugin) => plugin.id as ChannelId);
     const { createGatewayCloseHandler, drainActiveSessionsForShutdown } =
@@ -1023,6 +1040,7 @@ export async function startGatewayServer(
   let clearFallbackGatewayContextForServer = () => {};
   const closeOnStartupFailure = async () => {
     try {
+      stopRegisteredGatewayLifetimeSidecars();
       stopRegisteredPostReadySidecars();
       await runClosePrelude();
       await createCloseHandler()({ reason: "gateway startup failed" });
@@ -1389,6 +1407,7 @@ export async function startGatewayServer(
       unavailableGatewayMethods,
       broadcastVoiceWakeRoutingChanged,
     });
+    currentPluginRegistryGatewayContext = gatewayRequestContext;
 
     const fallbackGatewayContextCleanup: unknown = setFallbackGatewayContextResolver(
       () => gatewayRequestContext,
@@ -1550,12 +1569,23 @@ export async function startGatewayServer(
                 runtimeState.postReadySidecars = [];
               }
             },
+            onGatewayLifetimeSidecars: (gatewayLifetimeSidecars) => {
+              runtimeState.gatewayLifetimeSidecars = gatewayLifetimeSidecars;
+              stopPostReadySidecarsAfterCloseStarted({
+                postReadySidecars: gatewayLifetimeSidecars,
+                closeStarted: closePreludeStarted,
+              });
+              if (closePreludeStarted) {
+                runtimeState.gatewayLifetimeSidecars = [];
+              }
+            },
             onSidecarsReady: () => {
               startupSidecarsReady = true;
               activateScheduledServicesWhenReady();
             },
             startupTrace,
             deferSidecars: opts.deferStartupSidecars === true,
+            providerAuthPrewarm: { getConfig: getRuntimeConfig },
           }),
       ),
     ));
@@ -1669,6 +1699,7 @@ export async function startGatewayServer(
     close: async (opts) => {
       try {
         markClosePreludeStarted();
+        stopRegisteredGatewayLifetimeSidecars();
         stopRegisteredPostReadySidecars();
         // Run gateway_stop plugin hook before shutdown
         const { runGlobalGatewayStopSafely } = await import("../plugins/hook-runner-global.js");

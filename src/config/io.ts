@@ -100,6 +100,7 @@ import {
   getRuntimeConfigSnapshotRefreshHandler as getRuntimeConfigSnapshotRefreshHandlerState,
   setRuntimeConfigSnapshotRefreshHandler as setRuntimeConfigSnapshotRefreshHandlerState,
   type ConfigWriteAfterWrite,
+  type RuntimeConfigSnapshotRefreshOptions,
   type RuntimeConfigWriteNotification,
 } from "./runtime-snapshot.js";
 import { resolveShellEnvExpectedKeys } from "./shell-env-expected-keys.js";
@@ -219,6 +220,10 @@ export type ConfigWriteOptions = {
    * the post-write runtime snapshot refresh/reload tail entirely.
    */
   skipRuntimeSnapshotRefresh?: boolean;
+  /**
+   * Optional controls for the active runtime snapshot refresh after this write.
+   */
+  runtimeRefresh?: RuntimeConfigSnapshotRefreshOptions;
   /**
    * Allow intentionally destructive config writes, such as explicit reset flows.
    * Normal writers must keep this false so clobbers are rejected before disk commit.
@@ -2382,15 +2387,17 @@ export function projectConfigOntoRuntimeSourceSnapshot(config: OpenClawConfig): 
   return coerceConfig(applyMergePatch(projectedSource, runtimePatch));
 }
 
-export function loadConfig(): OpenClawConfig {
+export function loadConfig(options?: { skipPluginValidation?: boolean }): OpenClawConfig {
   // First successful load becomes the process snapshot. Long-lived runtimes
   // should swap this snapshot via explicit reload/watcher paths instead of
   // reparsing openclaw.json on hot code paths.
-  return loadPinnedRuntimeConfig(() => createConfigIO().loadConfig());
+  return loadPinnedRuntimeConfig(() =>
+    createConfigIO(options?.skipPluginValidation ? { pluginValidation: "skip" } : {}).loadConfig(),
+  );
 }
 
-export function getRuntimeConfig(): OpenClawConfig {
-  return loadConfig();
+export function getRuntimeConfig(options?: { skipPluginValidation?: boolean }): OpenClawConfig {
+  return loadConfig(options);
 }
 
 export async function readBestEffortConfig(): Promise<OpenClawConfig> {
@@ -2546,6 +2553,7 @@ export async function writeConfigFile(
   // succeeds, so concurrent readers do not observe unresolved SecretRefs mid-refresh.
   await finalizeRuntimeSnapshotWrite({
     nextSourceConfig: canonicalSourceConfig,
+    refreshOptions: options.runtimeRefresh,
     hadRuntimeSnapshot,
     hadBothSnapshots,
     loadFreshConfig: () => io.loadConfig(),

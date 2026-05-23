@@ -79,10 +79,12 @@ Skills own workflows; root owns hard policy and routing.
 - If proof is blocked, say exactly what is missing and why.
 - Do not land related failing format/lint/type/build/tests. If unrelated on latest `origin/main`, say so with scoped proof.
 - Docs/changelog-only and CI/workflow metadata-only: `git diff --check` plus relevant docs/workflow sanity; escalate only if scripts/config/generated/package/runtime behavior changed.
+- Prompt snapshots: CI truth is Linux Node 24. If macOS local passes but CI drifts, reproduce/generate in Linux before rerun.
 
 ## GitHub / PRs
 
 - Use `$openclaw-pr-maintainer` immediately for maintainer-side OpenClaw issue/PR review, triage, duplicates, labels, comments, close, land, or evidence. Contributor PR creation/refresh follows the requested contributor workflow; linked refs alone do not require maintainer archive tooling.
+- Pasted GitHub issue/PR: first `git status -sb`; if dirty, yell; then `git push` + `git pull --ff-only`.
 - PR refs: `gh pr view/diff` or `gh api`, not web search. Prefer `gitcrawl` for maintainer discovery; missing/stale `gitcrawl` falls through to live `gh`, not contributor setup. Verify live with `gh` before mutation.
 - Bare issue/PR URL/number means review/report in chat. Suggest comment/close/merge when appropriate; mutate only when asked.
 - No unsolicited PR comments/reviews/labels/retitles/rebases/fixups/landing. Exception: close/duplicate action that needs a reason comment after explicit close/sweep/landing request.
@@ -110,6 +112,10 @@ Skills own workflows; root owns hard policy and routing.
 - No `@ts-nocheck`. Lint suppressions only intentional + explained.
 - External boundaries: prefer `zod` or existing schema helpers.
 - Runtime branching: discriminated unions/closed codes over freeform strings. Avoid semantic sentinels (`?? 0`, empty object/string).
+- Formatter-friendly shape: when oxfmt explodes an expression vertically, extract named booleans, payloads, or small helpers. Do not change width or use format-ignore for local compactness.
+- Calls should be boring: complex decisions happen above; call args/object fields are names, literals, or simple property reads.
+- Prefer early returns over nested condition pyramids. Split code into gather -> normalize -> decide -> act.
+- Use named intermediates only for domain meaning or readability; avoid temp-variable soup.
 - Dynamic import: no static+dynamic import for same prod module. Use `*.runtime.ts` lazy boundary. After edits: `pnpm build`; check `[INEFFECTIVE_DYNAMIC_IMPORT]`.
 - Cycles: keep `pnpm check:import-cycles` + architecture/madge green.
 - Classes: no prototype mixins/mutations. Prefer inheritance/composition. Tests prefer per-instance stubs.
@@ -155,6 +161,7 @@ Skills own workflows; root owns hard policy and routing.
 - Never commit real phone numbers, videos, credentials, live config.
 - Secrets: channel/provider creds in `~/.openclaw/credentials/`; model auth profiles in `~/.openclaw/agents/<agentId>/agent/auth-profiles.json`.
 - Dependency patches/overrides/vendor changes need explicit approval. `pnpm-workspace.yaml` patched dependencies use exact versions only.
+- Lockfiles/shrinkwrap are security surface: review `pnpm-lock.yaml`, `npm-shrinkwrap.json`, `package-lock.json`; root/plugin npm packages ship shrinkwrap, not package-lock.
 - Carbon pins owner-only: do not change `@buape/carbon` unless Shadow (`@thewilloftheshadow`, verified by `gh`) asks.
 - Releases/publish/version bumps need explicit approval. Use `$openclaw-release-maintainer`.
 - GHSA/advisories: `$openclaw-ghsa-maintainer` / `$security-triage`. Secret scanning: `$openclaw-secret-scanning-maintainer`.
@@ -166,6 +173,7 @@ Skills own workflows; root owns hard policy and routing.
 - "restart iOS/Android apps" = rebuild/reinstall/relaunch, not kill/launch.
 - SwiftUI: Observation (`@Observable`, `@Bindable`) over new `ObservableObject`.
 - Mac gateway: dev watch = `pnpm gateway:watch`; managed installs = `openclaw gateway restart/status --deep`; logs = `./scripts/clawlog.sh`. No launchd/ad-hoc tmux.
+- Mac app permission testing: stable app path + real signing identity required. No `--no-sign`, `SIGN_IDENTITY=-`, or raw debug binary; TCC prompts/listing won't stick.
 - Version bump surfaces live in `$openclaw-release-maintainer`.
 - Parallels: `$openclaw-parallels-smoke`; Discord roundtrip: `$parallels-discord-roundtrip`.
 - Crabbox/WebVNC human demos: keep remote desktop visible/windowed; no fullscreen remote browser unless video/capture-style output.

@@ -112,7 +112,7 @@ function isCanonicalCandidateShadowedByExecutionAlias(
   );
 }
 
-export const __testing = {
+export const testing = {
   decodeDataUrl,
   coerceImageAssistantText,
   hasImageReasoningOnlyResponse,
@@ -239,6 +239,8 @@ export function resolveImageModelConfigForTool(params: {
 
   return buildToolModelConfigFromCandidates({
     explicit,
+    cfg: params.cfg,
+    workspaceDir: params.workspaceDir,
     agentDir: params.agentDir,
     authStore: params.authStore,
     candidates: [...primaryAliasCandidates, ...primaryCandidates, ...remainingAutoCandidates],
@@ -749,3 +751,4 @@ export function createImageTool(options?: {
     },
   };
 }
+export { testing as __testing };

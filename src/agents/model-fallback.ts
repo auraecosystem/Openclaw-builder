@@ -19,6 +19,7 @@ import {
   coerceToFailoverError,
   describeFailoverError,
   isFailoverError,
+  isNonProviderRuntimeCoordinationError,
   isTimeoutError,
 } from "./failover-error.js";
 import {
@@ -373,17 +374,19 @@ async function assertModelFallbackCandidateHarnessAvailable(
   if (isCliAgentRuntime(agentRuntime, params.cfg)) {
     return;
   }
+  if (
+    agentRuntime === "auto" ||
+    agentRuntime === "pi" ||
+    (agentRuntime === "codex" && agentRuntimeSource === "implicit")
+  ) {
+    return;
+  }
   await params.prepareAgentHarnessRuntime?.({
     provider: params.provider,
     model: params.model,
     agentHarnessRuntimeOverride,
   });
-  if (
-    agentRuntime !== "auto" &&
-    agentRuntime !== "pi" &&
-    !(agentRuntime === "codex" && agentRuntimeSource === "implicit") &&
-    !getRegisteredAgentHarness(agentRuntime)
-  ) {
+  if (!getRegisteredAgentHarness(agentRuntime)) {
     throw new MissingAgentHarnessError(agentRuntime);
   }
 }
@@ -621,7 +624,7 @@ function resolveImageFallbackDefaultProvider(cfg: OpenClawConfig | undefined): s
   return DEFAULT_PROVIDER;
 }
 
-export const __testing = {
+export const testing = {
   resolveFallbackCandidates,
   resolveImageFallbackCandidates,
   resolveCooldownDecision,
@@ -798,7 +801,7 @@ function shouldProbePrimaryDuringCooldown(params: {
 }
 
 /** @internal – exposed for unit tests only */
-export const _probeThrottleInternals = {
+export const probeThrottleInternals = {
   lastProbeAttempt,
   MIN_PROBE_INTERVAL_MS,
   PROBE_MARGIN_MS,
@@ -1197,6 +1200,14 @@ export async function runWithModelFallback<T>(
     }
     const err = attemptRun.error;
     {
+      // Local runtime coordination errors (session write-lock timeout, embedded
+      // attempt session takeover) are not provider/model failures. Aborting
+      // here prevents the fallback chain from consuming candidates retrying
+      // the same local condition and surfacing a misleading "All models
+      // failed" summary. See #83510.
+      if (isNonProviderRuntimeCoordinationError(err)) {
+        throw err;
+      }
       if (transientProbeProviderForAttempt) {
         const probeFailureReason = describeFailoverError(err).reason;
         if (!shouldPreserveTransientCooldownProbeSlot(probeFailureReason)) {
@@ -1382,3 +1393,4 @@ export async function runWithImageModelFallback<T>(params: {
     cfg: params.cfg,
   });
 }
+export { testing as __testing };

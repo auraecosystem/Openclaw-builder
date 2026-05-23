@@ -16,7 +16,7 @@ import {
   safeRunLabel,
   validateOpenClawPackageSpec,
 } from "../../scripts/lib/rtt-harness.ts";
-import { __testing as cliTesting } from "../../scripts/rtt.ts";
+import { testing as cliTesting } from "../../scripts/rtt.ts";
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = path.resolve(TEST_DIR, "../fixtures/telegram-qa-summary-rtt.json");
@@ -176,7 +176,7 @@ describe("RTT harness", () => {
     ]);
 
     const config = JSON.parse(await fs.readFile(configPath, "utf8"));
-    expect(config.channels.telegram.streaming).toBe(false);
+    expect(config.channels.telegram.streaming).toEqual({ mode: "off" });
     expect(config.messages.groupChat.visibleReplies).toBe("automatic");
   });
 

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { CliDeps } from "../cli/deps.types.js";
 import type { GatewayTailscaleMode } from "../config/types.gateway.js";
@@ -27,6 +28,8 @@ const ACP_BACKEND_READY_TIMEOUT_MS = 5_000;
 const ACP_BACKEND_READY_POLL_MS = 50;
 const PRIMARY_MODEL_PREWARM_TIMEOUT_MS = 5_000;
 const STARTUP_PROVIDER_DISCOVERY_TIMEOUT_MS = 5_000;
+const PROVIDER_AUTH_PREWARM_START_DELAY_MS = 1_000;
+const PROVIDER_AUTH_REWARM_DELAY_MS = 1_000;
 const SKIP_STARTUP_MODEL_PREWARM_ENV = "OPENCLAW_SKIP_STARTUP_MODEL_PREWARM";
 const QMD_STARTUP_IDLE_DELAY_MS = 120_000;
 const RESTART_SENTINEL_FILENAME = "restart-sentinel.json";
@@ -66,6 +69,31 @@ async function measureStartup<T>(
   run: () => Awaitable<T>,
 ): Promise<T> {
   return startupTrace ? startupTrace.measure(name, run) : await run();
+}
+
+async function measureProviderAuthWarm(run: () => Promise<void>): Promise<{
+  elapsedMs: number;
+  eventLoopMaxMs: number;
+}> {
+  const eventLoopDelay = monitorEventLoopDelay({ resolution: 10 });
+  eventLoopDelay.enable();
+  const startMs = performance.now();
+  try {
+    await run();
+  } finally {
+    eventLoopDelay.disable();
+  }
+  return {
+    elapsedMs: performance.now() - startMs,
+    eventLoopMaxMs: eventLoopDelay.max / 1_000_000,
+  };
+}
+
+function formatProviderAuthWarmMetrics(metrics: {
+  elapsedMs: number;
+  eventLoopMaxMs: number;
+}): string {
+  return `in ${metrics.elapsedMs.toFixed(0)}ms eventLoopMax=${metrics.eventLoopMaxMs.toFixed(1)}ms`;
 }
 
 function shouldCheckRestartSentinel(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -143,6 +171,119 @@ function schedulePostAttachUpdateSentinelRefresh(params: {
     });
   });
   handle.unref?.();
+}
+
+function scheduleProviderAuthStatePrewarm(params: {
+  getConfig: () => OpenClawConfig;
+  log: {
+    info: (msg: string) => void;
+    warn: (msg: string) => void;
+  };
+  delayMs?: number;
+}): GatewayPostReadySidecarHandle {
+  let stopped = false;
+  let startupTimer: ReturnType<typeof setTimeout> | undefined;
+  let rewarmTimer: ReturnType<typeof setTimeout> | undefined;
+  let rewarmInFlight = false;
+  let pendingRewarmReason: string | undefined;
+  const isStopped = () => stopped;
+  const delayMs = params.delayMs ?? PROVIDER_AUTH_PREWARM_START_DELAY_MS;
+  void (async () => {
+    const { clearCurrentProviderAuthState, warmCurrentProviderAuthState } =
+      await import("../agents/model-provider-auth.js");
+    const { setAuthProfileFailureHook } = await import("../agents/auth-profiles.js");
+    const runRewarm = async (reason: string) => {
+      if (isStopped()) {
+        return;
+      }
+      const cfg = params.getConfig();
+      rewarmInFlight = true;
+      try {
+        const metrics = await measureProviderAuthWarm(() =>
+          warmCurrentProviderAuthState(cfg, { isCancelled: isStopped }),
+        );
+        if (isStopped()) {
+          return;
+        }
+        params.log.info(
+          `provider auth state re-warmed (${reason}) ${formatProviderAuthWarmMetrics(metrics)}`,
+        );
+      } catch (err) {
+        params.log.warn(`provider auth state rewarm failed: ${String(err)}`);
+      } finally {
+        rewarmInFlight = false;
+        const nextReason = pendingRewarmReason;
+        pendingRewarmReason = undefined;
+        if (nextReason && !isStopped()) {
+          scheduleAuthMapRewarm(nextReason);
+        }
+      }
+    };
+    const scheduleAuthMapRewarm = (reason: string) => {
+      if (isStopped()) {
+        return;
+      }
+      pendingRewarmReason = reason;
+      if (rewarmTimer || rewarmInFlight) {
+        return;
+      }
+      rewarmTimer = setTimeout(() => {
+        rewarmTimer = undefined;
+        const nextReason = pendingRewarmReason ?? reason;
+        pendingRewarmReason = undefined;
+        void runRewarm(nextReason);
+      }, PROVIDER_AUTH_REWARM_DELAY_MS);
+      rewarmTimer.unref?.();
+    };
+    if (isStopped()) {
+      return;
+    }
+    setAuthProfileFailureHook(() => {
+      if (isStopped()) {
+        return;
+      }
+      clearCurrentProviderAuthState();
+      scheduleAuthMapRewarm("auth-profile-failure");
+    });
+    startupTimer = setTimeout(
+      () => {
+        void (async () => {
+          if (isStopped()) {
+            return;
+          }
+          const cfg = params.getConfig();
+          const metrics = await measureProviderAuthWarm(() =>
+            warmCurrentProviderAuthState(cfg, { isCancelled: isStopped }),
+          );
+          if (isStopped()) {
+            return;
+          }
+          params.log.info(
+            `provider auth state pre-warmed ${formatProviderAuthWarmMetrics(metrics)}`,
+          );
+        })().catch((err) => {
+          params.log.warn(`provider auth state pre-warm failed: ${String(err)}`);
+        });
+      },
+      Math.max(0, delayMs),
+    );
+    startupTimer.unref?.();
+  })().catch((err) => {
+    params.log.warn(`provider auth state pre-warm setup failed: ${String(err)}`);
+  });
+  return {
+    stop: () => {
+      stopped = true;
+      if (startupTimer) {
+        clearTimeout(startupTimer);
+        startupTimer = undefined;
+      }
+      if (rewarmTimer) {
+        clearTimeout(rewarmTimer);
+        rewarmTimer = undefined;
+      }
+    },
+  };
 }
 
 function schedulePostReadySidecarTask(params: {
@@ -745,6 +886,66 @@ const defaultGatewayPostAttachRuntimeDeps: GatewayPostAttachRuntimeDeps = {
     (await import("./server-tailscale.js")).startGatewayTailscaleExposure(...args),
 };
 
+function createDeferredGatewayUpdateCheck(params: {
+  startupTrace?: GatewayStartupTrace;
+  runtimeDeps: GatewayPostAttachRuntimeDeps;
+  cfg: OpenClawConfig;
+  log: {
+    info: (msg: string) => void;
+    warn: (msg: string) => void;
+  };
+  isNixMode: boolean;
+  broadcast: (event: string, payload: unknown, opts?: { dropIfSlow?: boolean }) => void;
+}): { start: () => void; stop: () => void } {
+  let started = false;
+  let stopped = false;
+  let stopUpdateCheck: (() => void) | null = null;
+
+  const stop = () => {
+    stopped = true;
+    stopUpdateCheck?.();
+    stopUpdateCheck = null;
+  };
+
+  const start = () => {
+    if (started || stopped) {
+      return;
+    }
+    started = true;
+    setImmediate(() => {
+      if (stopped) {
+        return;
+      }
+      void measureStartup(params.startupTrace, "post-attach.update-check", () =>
+        params.runtimeDeps.scheduleGatewayUpdateCheck({
+          cfg: params.cfg,
+          log: params.log,
+          isNixMode: params.isNixMode,
+          onUpdateAvailableChange: (updateAvailable) => {
+            const payload: GatewayUpdateAvailableEventPayload = { updateAvailable };
+            params.broadcast(GATEWAY_EVENT_UPDATE_AVAILABLE, payload, { dropIfSlow: true });
+          },
+        }),
+      )
+        .then((nextStop) => {
+          if (stopped) {
+            nextStop();
+            return;
+          }
+          stopUpdateCheck = nextStop;
+        })
+        .catch((err) => {
+          if (stopped) {
+            return;
+          }
+          params.log.warn(`gateway update check failed to start: ${String(err)}`);
+        });
+    });
+  };
+
+  return { start, stop };
+}
+
 export async function startGatewayPostAttachRuntime(
   params: {
     minimalTestGateway: boolean;
@@ -794,9 +995,15 @@ export async function startGatewayPostAttachRuntime(
     getCronService?: () => PluginHookGatewayCronService | null | undefined;
     onPluginServices?: (pluginServices: PluginServicesHandle | null) => void;
     onPostReadySidecars?: (postReadySidecars: GatewayPostReadySidecarHandle[]) => void;
+    onGatewayLifetimeSidecars?: (sidecars: GatewayPostReadySidecarHandle[]) => void;
     onSidecarsReady?: () => void;
     startupTrace?: GatewayStartupTrace;
     deferSidecars?: boolean;
+    providerAuthPrewarm?: {
+      enabled?: boolean;
+      delayMs?: number;
+      getConfig?: () => OpenClawConfig;
+    };
   },
   runtimeDeps: GatewayPostAttachRuntimeDeps = defaultGatewayPostAttachRuntimeDeps,
 ) {
@@ -833,19 +1040,16 @@ export async function startGatewayPostAttachRuntime(
     }),
   );
 
-  const stopGatewayUpdateCheckPromise = params.minimalTestGateway
-    ? Promise.resolve(() => {})
-    : measureStartup(params.startupTrace, "post-attach.update-check", () =>
-        runtimeDeps.scheduleGatewayUpdateCheck({
-          cfg: params.cfgAtStart,
-          log: params.log,
-          isNixMode: params.isNixMode,
-          onUpdateAvailableChange: (updateAvailable) => {
-            const payload: GatewayUpdateAvailableEventPayload = { updateAvailable };
-            params.broadcast(GATEWAY_EVENT_UPDATE_AVAILABLE, payload, { dropIfSlow: true });
-          },
-        }),
-      );
+  const updateCheck = params.minimalTestGateway
+    ? { start: () => {}, stop: () => {} }
+    : createDeferredGatewayUpdateCheck({
+        startupTrace: params.startupTrace,
+        runtimeDeps,
+        cfg: params.cfgAtStart,
+        log: params.log,
+        isNixMode: params.isNixMode,
+        broadcast: params.broadcast,
+      });
 
   const tailscaleCleanupPromise = params.minimalTestGateway
     ? Promise.resolve(null)
@@ -909,18 +1113,30 @@ export async function startGatewayPostAttachRuntime(
         if (!pluginServicesReported) {
           reportPluginServices(result.pluginServices);
         }
-        params.onPostReadySidecars?.(result.postReadySidecars);
+        const postReadySidecars = [...result.postReadySidecars];
+        const gatewayLifetimeSidecars: GatewayPostReadySidecarHandle[] = [];
+        if (params.providerAuthPrewarm?.enabled !== false) {
+          gatewayLifetimeSidecars.push(
+            scheduleProviderAuthStatePrewarm({
+              getConfig: params.providerAuthPrewarm?.getConfig ?? (() => params.cfgAtStart),
+              log: params.log,
+              delayMs: params.providerAuthPrewarm?.delayMs,
+            }),
+          );
+        }
+        params.onPostReadySidecars?.(postReadySidecars);
+        params.onGatewayLifetimeSidecars?.(gatewayLifetimeSidecars);
         params.onSidecarsReady?.();
         params.startupTrace?.detail("sidecars.ready", [
           [
             "loadedPluginCount",
             pluginRegistry.plugins.filter((plugin) => plugin.status === "loaded").length,
           ],
-          ["postReadySidecarCount", result.postReadySidecars.length],
+          ["postReadySidecarCount", postReadySidecars.length + gatewayLifetimeSidecars.length],
         ]);
         params.startupTrace?.mark("sidecars.ready");
         params.log.info("gateway ready");
-        return { ...result, pluginRegistry };
+        return { ...result, postReadySidecars, gatewayLifetimeSidecars, pluginRegistry };
       });
 
   void sidecarsPromise
@@ -939,8 +1155,9 @@ export async function startGatewayPostAttachRuntime(
       await new Promise<void>((resolve) => setImmediate(resolve));
       const hookRunner = await runtimeDeps.getGlobalHookRunner();
       if (hookRunner?.hasHooks("gateway_start")) {
-        void hookRunner
-          .runGatewayStart(
+        const { withPluginHttpRouteRegistry } = await import("../plugins/http-registry.js");
+        void withPluginHttpRouteRegistry(sidecarsResult.pluginRegistry, () =>
+          hookRunner.runGatewayStart(
             { port: params.port },
             {
               port: params.port,
@@ -950,10 +1167,10 @@ export async function startGatewayPostAttachRuntime(
                 params.getCronService?.() ??
                 (params.deps.cron as PluginHookGatewayCronService | undefined),
             },
-          )
-          .catch((err) => {
-            params.log.warn(`gateway_start hook failed: ${String(err)}`);
-          });
+          ),
+        ).catch((err) => {
+          params.log.warn(`gateway_start hook failed: ${String(err)}`);
+        });
       }
     })
     .catch((err) => {
@@ -961,35 +1178,38 @@ export async function startGatewayPostAttachRuntime(
     });
 
   if (params.deferSidecars !== true) {
-    const [, stopGatewayUpdateCheck, tailscaleCleanup, sidecarsResult] = await Promise.all([
+    const [, tailscaleCleanup, sidecarsResult] = await Promise.all([
       startupLogPromise,
-      stopGatewayUpdateCheckPromise,
       tailscaleCleanupPromise,
       sidecarsPromise,
     ]);
+    updateCheck.start();
     return {
-      stopGatewayUpdateCheck,
+      stopGatewayUpdateCheck: updateCheck.stop,
       tailscaleCleanup,
       pluginServices: sidecarsResult.pluginServices,
     };
   }
 
-  const [, stopGatewayUpdateCheck, tailscaleCleanup] = await Promise.all([
-    startupLogPromise,
-    stopGatewayUpdateCheckPromise,
-    tailscaleCleanupPromise,
-  ]);
+  const [, tailscaleCleanup] = await Promise.all([startupLogPromise, tailscaleCleanupPromise]);
+  updateCheck.start();
 
-  return { stopGatewayUpdateCheck, tailscaleCleanup, pluginServices: reportedPluginServices };
+  return {
+    stopGatewayUpdateCheck: updateCheck.stop,
+    tailscaleCleanup,
+    pluginServices: reportedPluginServices,
+  };
 }
 
-export const __testing = {
+export const testing = {
   hasRestartSentinelFileFast,
   prewarmConfiguredPrimaryModel,
   prewarmConfiguredPrimaryModelWithTimeout,
   refreshLatestUpdateRestartSentinelIfPresent,
   resolveGatewayMemoryStartupPolicy,
+  scheduleProviderAuthStatePrewarm,
   schedulePrimaryModelPrewarm,
   shouldSkipStartupModelPrewarm,
   stopPostReadySidecarsAfterCloseStarted,
 };
+export { testing as __testing };
