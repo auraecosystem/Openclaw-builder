@@ -5,6 +5,7 @@ import {
   buildTurnStartParams,
   buildThreadResumeParams,
   buildThreadStartParams,
+  codexDynamicToolsFingerprint,
   resolveReasoningEffort,
 } from "./thread-lifecycle.js";
 
@@ -59,12 +60,12 @@ function createAppServerOptions() {
 }
 
 describe("Codex app-server native code mode config", () => {
-  it("keeps Codex-native subagents primary while routing OpenClaw spawn through dynamic search", () => {
+  it("keeps Codex-native subagents primary while limiting OpenClaw spawn to OpenClaw delegation", () => {
     const instructions = buildDeveloperInstructions(createAttemptParams({ provider: "openai" }));
 
     expect(instructions).toContain("Use Codex native `spawn_agent` for Codex subagents");
     expect(instructions).toContain(
-      "search for `sessions_spawn` in the `openclaw` dynamic tool namespace",
+      "Use OpenClaw `sessions_spawn` only for OpenClaw or ACP delegation.",
     );
   });
 
@@ -112,6 +113,35 @@ describe("Codex app-server native code mode config", () => {
     });
 
     expect(instructions).not.toContain("Deferred searchable OpenClaw dynamic tools available");
+  });
+
+  it("keeps durable dynamic tool fingerprints independent from presentation mode", () => {
+    const inputSchema = {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        text: { type: "string" },
+      },
+      required: ["text"],
+    };
+    const directFingerprint = codexDynamicToolsFingerprint([
+      {
+        name: "message",
+        description: "Send a visible message",
+        inputSchema,
+      },
+    ]);
+    const searchableFingerprint = codexDynamicToolsFingerprint([
+      {
+        name: "message",
+        description: "Load and send a visible message",
+        inputSchema,
+        namespace: "openclaw",
+        deferLoading: true,
+      },
+    ]);
+
+    expect(searchableFingerprint).toBe(directFingerprint);
   });
 
   it("keeps OpenClaw skill catalogs out of developer instructions", () => {
