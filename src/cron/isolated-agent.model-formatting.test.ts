@@ -45,7 +45,7 @@ vi.mock("./isolated-agent/run-model-selection.runtime.js", () => ({
     agentConfigOverride,
   }: {
     cfg?: { agents?: { defaults?: { subagents?: { model?: unknown } } } };
-    agentConfigOverride?: { model?: unknown; subagents?: { model?: unknown } };
+    agentConfigOverride?: Pick<AgentConfig, "model" | "subagents">;
   }) => {
     for (const candidate of [
       { raw: agentConfigOverride?.subagents?.model, source: "subagent" as const },
