@@ -106,6 +106,8 @@ let mockedReplyOptionEvents: Array<
       meta?: string;
     }
   | { kind: "partial"; text: string }
+  | { kind: "assistantMessageStart" }
+  | { kind: "reasoningEnd" }
 > = [];
 
 function requireCapturedTyping() {
@@ -745,8 +747,16 @@ vi.mock("../reply.runtime.js", () => ({
             status: entry.status,
             meta: entry.meta,
           });
-        } else {
+        } else if (entry.kind === "partial") {
           await params.replyOptions?.onPartialReply?.({ text: entry.text });
+        } else if (entry.kind === "assistantMessageStart") {
+          await (
+            params.replyOptions as { onAssistantMessageStart?: () => Promise<void> | void }
+          ).onAssistantMessageStart?.();
+        } else if (entry.kind === "reasoningEnd") {
+          await (
+            params.replyOptions as { onReasoningEnd?: () => Promise<void> | void }
+          ).onReasoningEnd?.();
         }
       }
     } else {
@@ -1312,6 +1322,73 @@ describe("dispatchPreparedSlackMessage preview fallback", () => {
     expect(draftStream.update).toHaveBeenLastCalledWith(
       ["Shelling", "• tool one", "• tool two"].join("\n"),
     );
+  });
+
+  it("does not start a new draft message on assistant/reasoning boundaries in progress mode", async () => {
+    // Regression: tool-using assistant turns fire onAssistantMessageStart /
+    // onReasoningEnd between segments. In status_final the draft is a single
+    // rolling preview finalised in place — calling forceNewMessage() on each
+    // boundary orphans the prior message and leaves visible chat-stream litter.
+    const draftStream = vi.fn(() => ({
+      update: vi.fn(),
+      flush: noopAsync,
+      clear: noopAsync,
+      discardPending: noopAsync,
+      seal: noopAsync,
+      stop: noop,
+      forceNewMessage: vi.fn(),
+      messageId: () => "171234.567",
+      channelId: () => "C123",
+    }))();
+    createSlackDraftStreamMock.mockReturnValueOnce(draftStream);
+    mockedSlackStreamingMode = "progress";
+    mockedSlackDraftMode = "status_final";
+    mockedDispatchSequence = [];
+    mockedReplyOptionEvents = [
+      { kind: "item", progressText: "tool one" },
+      { kind: "assistantMessageStart" },
+      { kind: "item", progressText: "tool two" },
+      { kind: "reasoningEnd" },
+      { kind: "item", progressText: "tool three" },
+    ];
+
+    await dispatchPreparedSlackMessage(
+      createPreparedSlackMessage({
+        accountConfig: { streaming: { progress: { label: "Working" } } },
+      }),
+    );
+
+    expect(draftStream.forceNewMessage).not.toHaveBeenCalled();
+  });
+
+  it("forces a new draft message on assistant boundaries in non-progress modes", async () => {
+    // Sanity check: outside status_final mode the boundary still triggers a
+    // new draft message — partial/block streams expect each assistant turn to
+    // be its own delivered chunk, so we mustn't accidentally silence them.
+    const draftStream = vi.fn(() => ({
+      update: vi.fn(),
+      flush: noopAsync,
+      clear: noopAsync,
+      discardPending: noopAsync,
+      seal: noopAsync,
+      stop: noop,
+      forceNewMessage: vi.fn(),
+      messageId: () => "171234.567",
+      channelId: () => "C123",
+    }))();
+    createSlackDraftStreamMock.mockReturnValueOnce(draftStream);
+    mockedSlackStreamingMode = "partial";
+    mockedSlackDraftMode = "replace";
+    mockedDispatchSequence = [];
+    mockedReplyOptionEvents = [
+      { kind: "partial", text: "first chunk" },
+      { kind: "assistantMessageStart" },
+      { kind: "partial", text: "second chunk" },
+    ];
+
+    await dispatchPreparedSlackMessage(createPreparedSlackMessage({}));
+
+    expect(draftStream.forceNewMessage).toHaveBeenCalledTimes(1);
   });
 
   it("can hide raw Slack command progress text by config", async () => {

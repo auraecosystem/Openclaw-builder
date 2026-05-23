@@ -1254,6 +1254,16 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
   const onDraftBoundary = !shouldUseDraftStream
     ? undefined
     : async () => {
+        // In progress (status_final) mode the draft is a single rolling
+        // preview that's finalised in place by finalizeSlackPreviewEdit on
+        // the final reply. Calling forceNewMessage() on every assistant
+        // message / reasoning boundary drops the messageId, so the next
+        // draftStream.update() posts a new chat.postMessage instead of
+        // editing — leaving one orphaned progress message per assistant
+        // turn behind the final reply. Boundary should be a no-op here.
+        if (streamMode === "status_final") {
+          return;
+        }
         if (hasStreamedMessage) {
           draftStream?.forceNewMessage();
           hasStreamedMessage = false;
