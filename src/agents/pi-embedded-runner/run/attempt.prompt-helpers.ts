@@ -567,6 +567,7 @@ export function buildAfterTurnRuntimeContext(params: {
       contextEnginePluginId: params.contextEnginePluginId,
       purpose: "context-engine.after-turn",
     }),
+    ...(params.activeAgentId ? { activeAgentId: params.activeAgentId } : {}),
     ...(typeof params.tokenBudget === "number" &&
     Number.isFinite(params.tokenBudget) &&
     params.tokenBudget > 0

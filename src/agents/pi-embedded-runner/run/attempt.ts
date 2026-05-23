@@ -2535,6 +2535,7 @@ export async function runEmbeddedAttempt(
               workspaceDir: effectiveWorkspace,
               agentDir,
               tokenBudget: params.contextTokenBudget,
+              activeAgentId: sessionAgentId,
               promptCache:
                 promptCache ??
                 buildLoopPromptCacheInfo({

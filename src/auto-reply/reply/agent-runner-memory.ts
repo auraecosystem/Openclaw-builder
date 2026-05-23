@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { resolveAgentCompactionConfig } from "../../agents/agent-scope-config.js";
 import { resolveBootstrapWarningSignaturesSeen } from "../../agents/bootstrap-budget.js";
 import { estimateMessagesTokens } from "../../agents/compaction.js";
 import { resolveAgentHarnessPolicy } from "../../agents/harness/policy.js";

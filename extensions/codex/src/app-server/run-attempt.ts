@@ -1237,6 +1237,7 @@ export async function runCodexAppServerAttempt(
         contextTokenBudget: params.contextTokenBudget,
         reserveTokens: resolveCodexContextEngineProjectionReserveTokens({
           config: params.config,
+          activeAgentId: sessionAgentId,
         }),
       }),
       toolPayloadMode: contextEngineProjection ? "preserve" : "elide",
@@ -1247,6 +1248,7 @@ export async function runCodexAppServerAttempt(
           expectedBinding: buildContextEngineBinding(
             buildActiveRunAttemptParams(),
             contextEngineProjection,
+            sessionAgentId,
           ),
           projection: contextEngineProjection,
           dynamicToolsFingerprint: codexDynamicToolsFingerprint(toolBridge.specs),
@@ -1345,8 +1347,10 @@ export async function runCodexAppServerAttempt(
       return undefined;
     }
     const reserveTokens =
-      resolveCodexContextEngineProjectionReserveTokens({ config: params.config }) ??
-      DEFAULT_CODEX_PROJECTION_RESERVE_TOKENS;
+      resolveCodexContextEngineProjectionReserveTokens({
+        config: params.config,
+        activeAgentId: sessionAgentId,
+      }) ?? DEFAULT_CODEX_PROJECTION_RESERVE_TOKENS;
     const renderedChars =
       codexTurnPromptText.length + (promptBuild.developerInstructions?.length ?? 0);
     return shouldPreemptivelyCompactBeforePrompt({
@@ -1384,8 +1388,10 @@ export async function runCodexAppServerAttempt(
             ? params.contextTokenBudget
             : (params.contextWindowInfo?.tokens ?? 0),
         reserveTokens:
-          resolveCodexContextEngineProjectionReserveTokens({ config: params.config }) ??
-          DEFAULT_CODEX_PROJECTION_RESERVE_TOKENS,
+          resolveCodexContextEngineProjectionReserveTokens({
+            config: params.config,
+            activeAgentId: sessionAgentId,
+          }) ?? DEFAULT_CODEX_PROJECTION_RESERVE_TOKENS,
         ...(contextSessionKey ? { sessionKey: contextSessionKey } : {}),
         ...(activeSessionId ? { sessionId: activeSessionId } : {}),
         ...(activeSessionFile ? { sessionFile: activeSessionFile } : {}),
