@@ -198,8 +198,10 @@ export async function attachWebInboxToSocket(
   // Capture the original socket's self identity at attach time so the
   // successor-socket fallback can refuse a controller registered under the same
   // accountId but logged into a different WhatsApp number (in-place relink).
-  // Compared via identitiesOverlap() so JID-vs-LID and device-scoped JID
-  // differences across reconnects are normalized away.
+  // Pre-resolved with options.authDir so e164 derives from the auth-state
+  // PN<->LID mapping; identitiesOverlap() then matches on the normalized form
+  // even when the original and successor sockets expose the identity in
+  // different shapes (PN-only JID vs LID-only).
   const originalSelfIdentity = ((): WhatsAppSelfIdentity | null => {
     const user = sock.user as { id?: string | null; lid?: string | null } | undefined;
     if (!user) {
@@ -210,7 +212,8 @@ export async function attachWebInboxToSocket(
     if (!jid && !lid) {
       return null;
     }
-    return { jid, lid };
+    const resolved = resolveComparableIdentity({ jid, lid }, options.authDir);
+    return { jid: resolved.jid, lid: resolved.lid, e164: resolved.e164 };
   })();
 
   // When this monitor's own controller has been shutdown (socketRef nulled) but a
