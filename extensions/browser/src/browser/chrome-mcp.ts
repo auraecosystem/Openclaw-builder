@@ -154,6 +154,7 @@ const CHROME_MCP_CONNECTION_FLAGS = new Set([
   "--browser-url",
   "--wsEndpoint",
   "--ws-endpoint",
+  "--isolated",
   "-w",
 ]);
 const CHROME_MCP_USER_DATA_DIR_FLAGS = new Set(["--userDataDir", "--user-data-dir"]);
