@@ -6,7 +6,12 @@ import { AUTH_STORE_VERSION } from "../agents/auth-profiles/constants.js";
 import { loadPersistedAuthProfileStore } from "../agents/auth-profiles/persisted.js";
 import type { AuthProfileStore } from "../agents/auth-profiles/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import type { SecretProviderConfig, SecretRef, SecretRefSource } from "../config/types.secrets.js";
+import type {
+  ManualExecSecretProviderConfig,
+  SecretProviderConfig,
+  SecretRef,
+  SecretRefSource,
+} from "../config/types.secrets.js";
 import { isSafeExecutableValue } from "../infra/exec-safety.js";
 import { loadPluginManifestRegistry } from "../plugins/manifest-registry.js";
 import { normalizeAgentId } from "../routing/session-key.js";
@@ -142,6 +147,10 @@ function providerHint(provider: SecretProviderConfig): string {
   if (provider.source === "file") {
     return `file (${provider.mode ?? "json"})`;
   }
+  if ("pluginIntegration" in provider) {
+    const { pluginId, integrationId } = provider.pluginIntegration;
+    return `exec plugin (${pluginId}:${integrationId})`;
+  }
   return `exec (${provider.jsonOnly === false ? "json+text" : "json"})`;
 }
 
@@ -150,7 +159,7 @@ function providerPresetKey(preset: SecretProviderIntegrationPreset): string {
 }
 
 function providerPresetHint(preset: SecretProviderIntegrationPreset): string {
-  return `${preset.providerAlias} | ${preset.pluginId} | ${providerHint(preset.providerConfig)}`;
+  return `${preset.providerAlias} | ${preset.pluginId}:${preset.id} | exec plugin`;
 }
 
 function loadSecretProviderIntegrationPresets(params: {
@@ -505,8 +514,8 @@ async function parseArgsInput(rawValue: string): Promise<string[] | undefined> {
 }
 
 async function promptExecProvider(
-  base?: Extract<SecretProviderConfig, { source: "exec" }>,
-): Promise<Extract<SecretProviderConfig, { source: "exec" }>> {
+  base?: ManualExecSecretProviderConfig,
+): Promise<ManualExecSecretProviderConfig> {
   const command = assertNoCancel(
     await text({
       message: "Command path (absolute)",
@@ -643,7 +652,9 @@ async function promptProviderConfig(
   if (source === "file") {
     return await promptFileProvider(current?.source === "file" ? current : undefined);
   }
-  return await promptExecProvider(current?.source === "exec" ? current : undefined);
+  return await promptExecProvider(
+    current?.source === "exec" && "command" in current ? current : undefined,
+  );
 }
 
 async function configureProvidersInteractive(
