@@ -337,9 +337,12 @@ describe("runEmbeddedPiAgent", () => {
     expect(resolveModelCall?.[1]).toBe("openrouter/auto");
     expect(resolveModelCall?.[2]).toBe(agentDir);
     expect(resolveModelCall?.[3]).toBe(cfg);
-    expect(
-      (resolveModelCall?.[4] as { skipPiDiscovery?: boolean } | undefined)?.skipPiDiscovery,
-    ).toBe(true);
+    expect(resolveModelCall?.[4]).toEqual(
+      expect.objectContaining({
+        allowBundledStaticCatalogFallback: true,
+        skipPiDiscovery: true,
+      }),
+    );
     expect(ensureOpenClawModelsJsonMock).not.toHaveBeenCalled();
   });
 

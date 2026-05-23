@@ -457,6 +457,8 @@ describe("resolveModel", () => {
       maxTokens: 8192,
     });
 
+    const runtimeHooks = createRuntimeHooks();
+    const prepareProviderDynamicModel = vi.fn(async () => {});
     const result = await resolveModelAsync(
       "mistral",
       "mistral-medium-3-5",
@@ -464,7 +466,7 @@ describe("resolveModel", () => {
       undefined,
       {
         allowBundledStaticCatalogFallback: true,
-        runtimeHooks: createRuntimeHooks(),
+        runtimeHooks: { ...runtimeHooks, prepareProviderDynamicModel },
         skipPiDiscovery: true,
       },
     );
@@ -478,6 +480,7 @@ describe("resolveModel", () => {
       contextWindow: 262144,
       maxTokens: 8192,
     });
+    expect(prepareProviderDynamicModel).not.toHaveBeenCalled();
     expect(resolveBundledStaticCatalogModelMock).toHaveBeenCalledWith({
       provider: "mistral",
       modelId: "mistral-medium-3-5",

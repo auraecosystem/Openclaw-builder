@@ -913,7 +913,10 @@ function resolveConfiguredFallbackModel(params: {
   }
   const fallbackTransport = resolveProviderTransport({
     provider,
-    api: normalizeResolvedTransportApi(configuredModel?.api) ?? resolveConfiguredProviderDefaultApi(providerConfig) ?? "openai-responses",
+    api:
+      normalizeResolvedTransportApi(configuredModel?.api) ??
+      resolveConfiguredProviderDefaultApi(providerConfig) ??
+      "openai-responses",
     baseUrl: configuredModel?.baseUrl ?? providerConfig?.baseUrl,
     cfg,
     workspaceDir,
@@ -1199,6 +1202,41 @@ export async function resolveModelAsync(
     };
   }
   const providerConfig = resolveConfiguredProviderConfig(cfg, normalizedRef.provider);
+  const resolveStaticCatalogAttempt = () => {
+    if (explicitModel || !options?.allowBundledStaticCatalogFallback) {
+      return undefined;
+    }
+    const staticCatalogModel = resolveBundledStaticCatalogModel({
+      provider: normalizedRef.provider,
+      modelId: normalizedRef.model,
+      cfg,
+      workspaceDir,
+    });
+    if (!staticCatalogModel) {
+      return undefined;
+    }
+    const staticCatalogRuntimeHooks = options?.skipPiDiscovery
+      ? STATIC_PROVIDER_RUNTIME_HOOKS
+      : runtimeHooks;
+    const overriddenStaticCatalogModel = applyConfiguredProviderOverrides({
+      provider: normalizedRef.provider,
+      discoveredModel: staticCatalogModel,
+      providerConfig,
+      modelId: normalizedRef.model,
+      cfg,
+      runtimeHooks: staticCatalogRuntimeHooks,
+      workspaceDir,
+      preferDiscoveredModelMetadata: true,
+    });
+    return normalizeResolvedModel({
+      provider: normalizedRef.provider,
+      cfg,
+      agentDir: resolvedAgentDir,
+      workspaceDir,
+      model: overriddenStaticCatalogModel,
+      runtimeHooks: staticCatalogRuntimeHooks,
+    });
+  };
   const resolveDynamicAttempt = async () => {
     await runtimeHooks.prepareProviderDynamicModel({
       provider: normalizedRef.provider,
@@ -1235,40 +1273,17 @@ export async function resolveModelAsync(
       runtimeHooks,
     })
       ? explicitModel.model
-      : await resolveDynamicAttempt();
+      : options?.skipPiDiscovery
+        ? (resolveStaticCatalogAttempt() ?? (await resolveDynamicAttempt()))
+        : await resolveDynamicAttempt();
   if (!model && !explicitModel && options?.retryTransientProviderRuntimeMiss) {
     // Startup can race the first provider-runtime snapshot load on a fresh
     // gateway boot. Retry once before surfacing a user-visible "Unknown model"
     // that disappears on the next message.
     model = await resolveDynamicAttempt();
   }
-  if (!model && !explicitModel && options?.allowBundledStaticCatalogFallback) {
-    const staticCatalogModel = resolveBundledStaticCatalogModel({
-      provider: normalizedRef.provider,
-      modelId: normalizedRef.model,
-      cfg,
-      workspaceDir,
-    });
-    if (staticCatalogModel) {
-      const overriddenStaticCatalogModel = applyConfiguredProviderOverrides({
-        provider: normalizedRef.provider,
-        discoveredModel: staticCatalogModel,
-        providerConfig,
-        modelId: normalizedRef.model,
-        cfg,
-        runtimeHooks,
-        workspaceDir,
-        preferDiscoveredModelMetadata: true,
-      });
-      model = normalizeResolvedModel({
-        provider: normalizedRef.provider,
-        cfg,
-        agentDir: resolvedAgentDir,
-        workspaceDir,
-        model: overriddenStaticCatalogModel,
-        runtimeHooks,
-      });
-    }
+  if (!model && !options?.skipPiDiscovery) {
+    model = resolveStaticCatalogAttempt();
   }
   if (model) {
     return { model, authStorage, modelRegistry };
