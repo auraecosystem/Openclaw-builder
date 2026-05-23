@@ -744,6 +744,19 @@ function maxFiniteNumber(values: Array<number | undefined>): number | undefined 
   return Math.max(...nums);
 }
 
+function resolveCodexStartupRotationCompactionConfig(
+  config: EmbeddedRunAttemptParams["config"] | undefined,
+  sessionAgentId?: string | null,
+) {
+  if (config && sessionAgentId) {
+    const agentEntry = config.agents?.list?.find((entry) => entry?.id === sessionAgentId);
+    if (agentEntry && Object.hasOwn(agentEntry, "compaction")) {
+      return agentEntry.compaction;
+    }
+  }
+  return resolveAgentCompactionConfig(config, sessionAgentId);
+}
+
 async function rotateOversizedCodexAppServerStartupBinding(params: {
   binding: CodexAppServerThreadBinding | undefined;
   sessionFile: string;
@@ -756,7 +769,10 @@ async function rotateOversizedCodexAppServerStartupBinding(params: {
   if (!binding?.threadId) {
     return binding;
   }
-  const compactionConfig = resolveAgentCompactionConfig(params.config, params.sessionAgentId);
+  const compactionConfig = resolveCodexStartupRotationCompactionConfig(
+    params.config,
+    params.sessionAgentId,
+  );
   if (compactionConfig?.truncateAfterCompaction !== true) {
     return binding;
   }
@@ -1017,6 +1033,7 @@ export async function runCodexAppServerAttempt(
     pluginConfig,
     forceHeartbeatTool: true,
     ignoreRuntimePlan: true,
+    skipRuntimeToolNormalization: true,
     onYieldDetected: () => {
       yieldDetected = true;
     },
@@ -3806,6 +3823,7 @@ type DynamicToolBuildParams = {
   pluginConfig: CodexPluginConfig;
   forceHeartbeatTool?: boolean;
   ignoreRuntimePlan?: boolean;
+  skipRuntimeToolNormalization?: boolean;
   onYieldDetected: () => void;
 };
 
@@ -3930,6 +3948,9 @@ async function buildDynamicTools(input: DynamicToolBuildParams) {
   });
   const toolsAllow = includeForcedCodexDynamicToolAllow(params.toolsAllow, params);
   const filteredTools = filterCodexDynamicToolsForAllowlist(visionFilteredTools, toolsAllow);
+  if (input.skipRuntimeToolNormalization) {
+    return filteredTools;
+  }
   return normalizeAgentRuntimeTools({
     runtimePlan: input.ignoreRuntimePlan ? undefined : params.runtimePlan,
     tools: filteredTools,

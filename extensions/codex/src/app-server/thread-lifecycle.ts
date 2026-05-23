@@ -121,7 +121,7 @@ export async function startOrResumeThread(params: {
     agentDir: params.params.agentDir,
     config: params.params.config,
   });
-  let preserveExistingBinding = false;
+  let preserveExistingBinding = params.nativeCodeModeEnabled === false;
   let rotatedContextEngineBinding = false;
   let prebuiltPluginThreadConfig: CodexPluginThreadConfig | undefined;
   if (binding?.threadId && params.nativeCodeModeEnabled === false) {
