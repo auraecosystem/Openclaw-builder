@@ -89,6 +89,7 @@ const cdpMocks = vi.hoisted(() => ({
     throw new Error("cdp disabled");
   }),
   handleJavaScriptDialogViaCdp: vi.fn(async () => {}),
+  printPdfViaCdp: vi.fn(async () => ({ buffer: Buffer.from("%PDF-1.7") })),
   setExtraHTTPHeadersViaCdp: vi.fn(async () => {}),
   snapshotAria: vi.fn(async () => ({
     nodes: [{ ref: "1", role: "link", name: "x", depth: 0 }],
@@ -103,6 +104,7 @@ const cdpMocks = vi.hoisted(() => ({
 export function getCdpMocks(): {
   createTargetViaCdp: MockFn;
   handleJavaScriptDialogViaCdp: MockFn;
+  printPdfViaCdp: MockFn;
   setExtraHTTPHeadersViaCdp: MockFn;
   snapshotAria: MockFn;
   snapshotRoleViaCdp: MockFn;
@@ -110,6 +112,7 @@ export function getCdpMocks(): {
   return cdpMocks as unknown as {
     createTargetViaCdp: MockFn;
     handleJavaScriptDialogViaCdp: MockFn;
+    printPdfViaCdp: MockFn;
     setExtraHTTPHeadersViaCdp: MockFn;
     snapshotAria: MockFn;
     snapshotRoleViaCdp: MockFn;
@@ -502,6 +505,7 @@ vi.mock("./chrome.js", () => ({
 vi.mock("./cdp.js", () => ({
   createTargetViaCdp: cdpMocks.createTargetViaCdp,
   handleJavaScriptDialogViaCdp: cdpMocks.handleJavaScriptDialogViaCdp,
+  printPdfViaCdp: cdpMocks.printPdfViaCdp,
   setExtraHTTPHeadersViaCdp: cdpMocks.setExtraHTTPHeadersViaCdp,
   normalizeCdpWsUrl: vi.fn((wsUrl: string) => wsUrl),
   snapshotAria: cdpMocks.snapshotAria,
