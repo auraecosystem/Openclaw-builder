@@ -351,7 +351,14 @@ function startGateway(runner, port, env, logPath) {
   const log = fs.openSync(logPath, "w");
   const command = resolveOpenClawCommand(
     runner,
-    ["gateway", "--port", String(port), "--bind", "loopback", "--allow-unconfigured"],
+    [
+      "gateway",
+      "--port",
+      String(port),
+      "--bind",
+      "loopback",
+      "--allow-unconfigured",
+    ],
     env,
     {
       stdio: ["ignore", log, log],
