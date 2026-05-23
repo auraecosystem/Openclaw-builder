@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearRuntimeAuthProfileStoreSnapshots,
   replaceRuntimeAuthProfileStoreSnapshots,
+  saveAuthProfileStore,
 } from "../auth-profiles.js";
 import { discoverAuthStorage, discoverModels } from "../pi-model-discovery.js";
 import { resetModelDiscoveryCacheForTest } from "./model-discovery-cache.js";
@@ -147,7 +148,9 @@ vi.mock("./openrouter-model-capabilities.js", () => ({
 }));
 
 import type { OpenClawConfig, OpenClawConfigInput } from "../../config/config.js";
+import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
 import { COPILOT_INTEGRATION_ID, buildCopilotIdeHeaders } from "../copilot-dynamic-headers.js";
+import { writeStoredModelsConfigRaw } from "../models-config-store.js";
 import { getModelProviderLocalService } from "../provider-local-service.js";
 import { getModelProviderRequestTransport } from "../provider-request-config.js";
 import { buildForwardCompatTemplate } from "./model.forward-compat.test-support.js";
@@ -185,6 +188,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  closeOpenClawStateDatabaseForTest();
 });
 
 function createRuntimeHooks() {
@@ -292,6 +296,39 @@ describe("resolveModel", () => {
     expect(discoverModels).toHaveBeenCalledTimes(1);
   });
 
+  it("invalidates PI discovery stores when the SQLite model catalog changes", async () => {
+    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-model-catalog-cache-"));
+    const stateDir = path.join(rootDir, "state");
+    const agentDir = path.join(rootDir, "agent");
+    fs.mkdirSync(agentDir, { recursive: true });
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+    mockDiscoveredModel(discoverModels, {
+      provider: "openai",
+      modelId: "gpt-5.5",
+      templateModel: {
+        provider: "openai",
+        ...makeModel("gpt-5.5"),
+      },
+    });
+
+    const first = await resolveModelAsync("openai", "gpt-5.5", agentDir, undefined, {
+      runtimeHooks: createRuntimeHooks(),
+    });
+    writeStoredModelsConfigRaw(
+      agentDir,
+      `${JSON.stringify({ providers: { openai: { models: [] } } })}\n`,
+      { now: () => 1 },
+    );
+    const second = await resolveModelAsync("openai", "gpt-5.5", agentDir, undefined, {
+      runtimeHooks: createRuntimeHooks(),
+    });
+
+    expectResolvedModel(first);
+    expectResolvedModel(second);
+    expect(discoverAuthStorage).toHaveBeenCalledTimes(2);
+    expect(discoverModels).toHaveBeenCalledTimes(2);
+  });
+
   it("invalidates PI discovery stores when inherited default auth changes", async () => {
     const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-model-cache-"));
     const agentDir = path.join(rootDir, "agent");
@@ -354,6 +391,48 @@ describe("resolveModel", () => {
     fs.writeFileSync(
       path.join(mainAgentDir, "auth-profiles.json"),
       JSON.stringify({ version: 1, profiles: { openai: { type: "api_key", key: "one" } } }),
+    );
+    const second = await resolveModelAsync("openai", "gpt-5.5", agentDir, undefined, {
+      runtimeHooks: createRuntimeHooks(),
+    });
+
+    expectResolvedModel(first);
+    expectResolvedModel(second);
+    expect(discoverAuthStorage).toHaveBeenCalledTimes(2);
+    expect(discoverModels).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidates PI discovery stores when implicit SQLite main auth changes without config", async () => {
+    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-model-cache-sqlite-auth-"));
+    vi.stubEnv("OPENCLAW_STATE_DIR", rootDir);
+    const agentDir = path.join(rootDir, "agents", "worker", "agent");
+    const mainAgentDir = path.join(rootDir, "agents", "main", "agent");
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.mkdirSync(mainAgentDir, { recursive: true });
+    mockDiscoveredModel(discoverModels, {
+      provider: "openai",
+      modelId: "gpt-5.5",
+      templateModel: {
+        provider: "openai",
+        ...makeModel("gpt-5.5"),
+      },
+    });
+
+    const first = await resolveModelAsync("openai", "gpt-5.5", agentDir, undefined, {
+      runtimeHooks: createRuntimeHooks(),
+    });
+    saveAuthProfileStore(
+      {
+        version: 1,
+        profiles: {
+          "openai:default": {
+            type: "api_key",
+            provider: "openai",
+            key: "one",
+          },
+        },
+      },
+      mainAgentDir,
     );
     const second = await resolveModelAsync("openai", "gpt-5.5", agentDir, undefined, {
       runtimeHooks: createRuntimeHooks(),
@@ -593,11 +672,10 @@ describe("resolveModel", () => {
   });
 
   it("defaults missing model cost before handing models to PI", () => {
-    const cfg: OpenClawConfig = {
+    const cfg = {
       models: {
         providers: {
           openai: {
-            baseUrl: "",
             api: "openai-responses",
             models: [
               {
@@ -606,7 +684,6 @@ describe("resolveModel", () => {
                 api: "openai-responses",
                 reasoning: true,
                 input: ["text"],
-                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
                 contextWindow: 400_000,
                 maxTokens: 128_000,
               },
@@ -614,7 +691,7 @@ describe("resolveModel", () => {
           },
         },
       },
-    };
+    } as unknown as OpenClawConfig;
 
     const result = resolveModelForTest("openai", "gpt-5.5", "/tmp/agent", cfg);
 
@@ -1084,7 +1161,7 @@ describe("resolveModel", () => {
     });
   });
 
-  it("drops marker headers from discovered models.json entries", () => {
+  it("drops marker headers from discovered model catalog entries", () => {
     mockDiscoveredModel(discoverModels, {
       provider: "custom",
       modelId: "listed-model",
@@ -1260,14 +1337,9 @@ describe("resolveModel", () => {
           },
         },
       },
-    } satisfies OpenClawConfigInput;
+    } as unknown as OpenClawConfig;
 
-    const result = resolveModelForTest(
-      "openai",
-      "gpt-5.5",
-      "/tmp/agent",
-      cfg as unknown as OpenClawConfig,
-    );
+    const result = resolveModelForTest("openai", "gpt-5.5", "/tmp/agent", cfg);
 
     expect(result.error).toBeUndefined();
     expect((result.model as { requestTimeoutMs?: number } | undefined)?.requestTimeoutMs).toBe(

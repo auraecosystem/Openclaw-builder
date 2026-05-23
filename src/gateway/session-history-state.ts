@@ -36,9 +36,9 @@ type InlineSessionHistoryAppend = {
 };
 
 type SessionHistoryTranscriptTarget = {
+  agentId?: string;
+  path?: string;
   sessionId: string;
-  storePath?: string;
-  sessionFile?: string;
 };
 
 type SessionHistoryRawSnapshot = {
@@ -340,9 +340,11 @@ export class SessionHistorySseState {
   private async readRawSnapshotAsync(): Promise<SessionHistoryRawSnapshot> {
     if (this.cursor === undefined && typeof this.limit === "number") {
       const snapshot = await readRecentSessionMessagesWithStatsAsync(
-        this.target.sessionId,
-        this.target.storePath,
-        this.target.sessionFile,
+        {
+          agentId: this.target.agentId,
+          path: this.target.path,
+          sessionId: this.target.sessionId,
+        },
         {
           ...resolveSessionHistoryTailReadOptions(this.limit),
         },
@@ -355,9 +357,11 @@ export class SessionHistorySseState {
     }
     return {
       rawMessages: await readSessionMessagesAsync(
-        this.target.sessionId,
-        this.target.storePath,
-        this.target.sessionFile,
+        {
+          agentId: this.target.agentId,
+          path: this.target.path,
+          sessionId: this.target.sessionId,
+        },
         {
           mode: "full",
           reason: "session history cursor pagination",

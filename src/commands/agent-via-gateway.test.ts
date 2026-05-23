@@ -35,7 +35,7 @@ const jsonRuntime = {
   exit: vi.fn(),
 };
 
-function mockConfig(storePath: string, overrides?: Partial<OpenClawConfig>) {
+function mockConfig(overrides?: Partial<OpenClawConfig>) {
   loadConfig.mockReturnValue({
     agents: {
       defaults: {
@@ -45,7 +45,6 @@ function mockConfig(storePath: string, overrides?: Partial<OpenClawConfig>) {
       ...(overrides?.agents?.list ? { list: overrides.agents.list } : {}),
     },
     session: {
-      store: storePath,
       mainKey: "main",
       ...overrides?.session,
     },
@@ -53,18 +52,26 @@ function mockConfig(storePath: string, overrides?: Partial<OpenClawConfig>) {
   });
 }
 
+async function withTempConfig(
+  fn: (ctx: { dir: string }) => Promise<void>,
+  overrides?: Partial<OpenClawConfig>,
+) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-agent-cli-"));
+  mockConfig(overrides);
+  try {
+    await fn({ dir });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 async function withTempStore(
   fn: (ctx: { dir: string; store: string }) => Promise<void>,
   overrides?: Partial<OpenClawConfig>,
 ) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-agent-cli-"));
-  const store = path.join(dir, "sessions.json");
-  mockConfig(store, overrides);
-  try {
-    await fn({ dir, store });
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  await withTempConfig(async ({ dir }) => {
+    await fn({ dir, store: path.join(dir, "sessions.json") });
+  }, overrides);
 }
 
 function mockGatewaySuccessReply(text = "hello") {
@@ -204,7 +211,7 @@ afterEach(() => {
 
 describe("agentCliCommand", () => {
   it("uses a timer-safe max gateway timeout when --timeout is 0", async () => {
-    await withTempStore(async () => {
+    await withTempConfig(async () => {
       mockGatewaySuccessReply();
 
       await agentCliCommand({ message: "hi", to: "+1555", timeout: "0" }, runtime);
@@ -216,7 +223,7 @@ describe("agentCliCommand", () => {
   });
 
   it("uses gateway by default", async () => {
-    await withTempStore(async () => {
+    await withTempConfig(async () => {
       mockGatewaySuccessReply();
 
       await agentCliCommand({ message: "hi", to: "+1555" }, runtime);
@@ -285,7 +292,7 @@ describe("agentCliCommand", () => {
         );
         const params = requireRecord(request.params, "gateway request params");
         expect(params.agentId).toBe("ops");
-        expect(params.sessionKey).toBe("agent:OPS:incident-42");
+        expect(params.sessionKey).toBe("agent:ops:incident-42");
       },
       { agents: { list: [{ id: "main" }, { id: "ops" }] } },
     );
@@ -1067,7 +1074,7 @@ describe("agentCliCommand", () => {
   });
 
   it("stays silent when the gateway returns an intentional empty reply", async () => {
-    await withTempStore(async () => {
+    await withTempConfig(async () => {
       callGateway.mockResolvedValue({
         runId: "idem-1",
         status: "ok",
@@ -1085,7 +1092,7 @@ describe("agentCliCommand", () => {
   });
 
   it("logs non-ok gateway summaries when payloads are empty", async () => {
-    await withTempStore(async () => {
+    await withTempConfig(async () => {
       callGateway.mockResolvedValue({
         runId: "idem-1",
         status: "timeout",
@@ -1120,7 +1127,7 @@ describe("agentCliCommand", () => {
   });
 
   it("passes model overrides through gateway requests", async () => {
-    await withTempStore(async () => {
+    await withTempConfig(async () => {
       mockGatewaySuccessReply();
 
       await agentCliCommand({ message: "hi", to: "+1555", model: "ollama/qwen3.5:9b" }, runtime);
@@ -1136,7 +1143,7 @@ describe("agentCliCommand", () => {
   });
 
   it("routes diagnostics to stderr before JSON gateway execution", async () => {
-    await withTempStore(async () => {
+    await withTempConfig(async () => {
       const response = {
         runId: "idem-1",
         status: "ok",
@@ -1158,7 +1165,7 @@ describe("agentCliCommand", () => {
   });
 
   it("promotes gateway deliveryStatus to the top-level JSON response", async () => {
-    await withTempStore(async () => {
+    await withTempConfig(async () => {
       const deliveryStatus = {
         requested: true,
         attempted: true,
@@ -1191,7 +1198,7 @@ describe("agentCliCommand", () => {
   });
 
   it("falls back to embedded agent when gateway fails", async () => {
-    await withTempStore(async () => {
+    await withTempConfig(async () => {
       callGateway.mockRejectedValue(createGatewayClosedError());
       mockLocalAgentReply();
 
@@ -1279,7 +1286,7 @@ describe("agentCliCommand", () => {
   });
 
   it("does not fall back to embedded agent for gateway request errors", async () => {
-    await withTempStore(async () => {
+    await withTempConfig(async () => {
       callGateway.mockRejectedValue(
         Object.assign(new Error("missing scope: operator.admin"), {
           name: "GatewayClientRequestError",
@@ -1300,7 +1307,7 @@ describe("agentCliCommand", () => {
   });
 
   it("uses a fresh embedded session when gateway agent times out", async () => {
-    await withTempStore(async () => {
+    await withTempConfig(async () => {
       callGateway.mockRejectedValue(createGatewayTimeoutError());
       mockLocalAgentReply();
 
@@ -1401,7 +1408,7 @@ describe("agentCliCommand", () => {
   });
 
   it("keeps timeout fallback from replacing the routed conversation session key", async () => {
-    await withTempStore(async () => {
+    await withTempConfig(async () => {
       callGateway.mockRejectedValue(createGatewayTimeoutError());
       mockLocalAgentReply();
 
@@ -1426,7 +1433,7 @@ describe("agentCliCommand", () => {
   });
 
   it("passes fallback metadata into JSON embedded fallback output", async () => {
-    await withTempStore(async () => {
+    await withTempConfig(async () => {
       callGateway.mockRejectedValue(createGatewayClosedError());
       agentCommand.mockImplementationOnce(async (opts, rt) => {
         expect(loggingState.forceConsoleToStderr).toBe(true);
@@ -1492,7 +1499,7 @@ describe("agentCliCommand", () => {
   });
 
   it("skips gateway when --local is set", async () => {
-    await withTempStore(async () => {
+    await withTempConfig(async () => {
       mockLocalAgentReply();
 
       await agentCliCommand(
@@ -1593,7 +1600,7 @@ describe("agentCliCommand", () => {
   });
 
   it("forces bundle MCP cleanup on embedded fallback", async () => {
-    await withTempStore(async () => {
+    await withTempConfig(async () => {
       callGateway.mockRejectedValue(createGatewayClosedError());
       mockLocalAgentReply();
 

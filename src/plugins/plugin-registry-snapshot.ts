@@ -75,8 +75,6 @@ function canReuseCurrentPluginMetadataSnapshot(params: LoadPluginRegistryParams)
   return (
     params.preferPersisted !== false &&
     params.stateDir === undefined &&
-    params.filePath === undefined &&
-    params.pluginIndexFilePath === undefined &&
     params.installRecords === undefined &&
     params.candidates === undefined &&
     params.diagnostics === undefined &&
@@ -240,11 +238,6 @@ function loadSnapshotInstallRecords(params: LoadPluginRegistryParams, env: NodeJ
   return loadInstalledPluginIndexInstallRecordsSync({
     env,
     ...(params.stateDir ? { stateDir: params.stateDir } : {}),
-    ...(params.filePath
-      ? { filePath: params.filePath }
-      : params.pluginIndexFilePath
-        ? { filePath: params.pluginIndexFilePath }
-        : {}),
   });
 }
 

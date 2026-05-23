@@ -67,9 +67,12 @@ vi.mock("../../agents/skills/refresh-state.js", () => ({
 }));
 
 vi.mock("../../config/sessions.js", () => ({
-  updateSessionStore: vi.fn(),
-  resolveSessionFilePath: vi.fn(),
-  resolveSessionFilePathOptions: vi.fn(),
+  getSessionEntry: vi.fn(() => undefined),
+  mergeSessionEntry: (existing: SessionEntry | undefined, patch: Partial<SessionEntry>) => ({
+    ...existing,
+    ...patch,
+  }),
+  upsertSessionEntry: vi.fn(),
 }));
 
 vi.mock("../../infra/skills-remote.js", () => ({

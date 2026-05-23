@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import { resolveConfiguredProviderFallback } from "../../../agents/configured-provider-fallback.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../../../agents/defaults.js";
 import { splitTrailingAuthProfile } from "../../../agents/model-ref-profile.js";
@@ -8,8 +7,8 @@ import { openAIProviderUsesCodexRuntimeByDefault } from "../../../agents/openai-
 import { normalizeEmbeddedAgentRuntime } from "../../../agents/pi-embedded-runner/runtime.js";
 import { normalizeProviderId } from "../../../agents/provider-id.js";
 import { AGENT_MODEL_CONFIG_KEYS } from "../../../config/model-refs.js";
-import { loadSessionStore, updateSessionStore } from "../../../config/sessions/store.js";
-import { resolveAllAgentSessionStoreTargetsSync } from "../../../config/sessions/targets.js";
+import { listSessionEntries, upsertSessionEntry } from "../../../config/sessions/store.js";
+import { resolveAllAgentSessionDatabaseTargetsSync } from "../../../config/sessions/targets.js";
 import type { SessionEntry } from "../../../config/sessions/types.js";
 import type { AgentRuntimePolicyConfig } from "../../../config/types.agents-shared.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
@@ -2730,9 +2729,9 @@ export async function maybeRepairCodexSessionRoutes(params: {
   shouldRepair: boolean;
   codexRuntimeReady?: boolean;
 }): Promise<CodexSessionRouteRepairSummary> {
-  const targets = resolveAllAgentSessionStoreTargetsSync(params.cfg, {
+  const targets = resolveAllAgentSessionDatabaseTargetsSync(params.cfg, {
     env: params.env ?? process.env,
-  }).filter((target) => fs.existsSync(target.storePath));
+  });
   if (targets.length === 0) {
     return {
       scannedStores: 0,
@@ -2744,7 +2743,14 @@ export async function maybeRepairCodexSessionRoutes(params: {
   }
   if (!params.shouldRepair) {
     const stale = targets.flatMap((target) => {
-      const sessionKeys = scanCodexSessionStoreRoutes(loadSessionStore(target.storePath));
+      const store = Object.fromEntries(
+        listSessionEntries({
+          agentId: target.agentId,
+          env: params.env,
+          path: target.databasePath,
+        }).map(({ sessionKey, entry }) => [sessionKey, entry]),
+      );
+      const sessionKeys = scanCodexSessionStoreRoutes(store);
       return sessionKeys.map((sessionKey) => `${target.agentId}:${sessionKey}`);
     });
     return {
@@ -2767,17 +2773,32 @@ export async function maybeRepairCodexSessionRoutes(params: {
   let repairedStores = 0;
   let repairedSessions = 0;
   for (const target of targets) {
-    const staleSessionKeys = scanCodexSessionStoreRoutes(loadSessionStore(target.storePath));
+    const store = Object.fromEntries(
+      listSessionEntries({
+        agentId: target.agentId,
+        env: params.env,
+        path: target.databasePath,
+      }).map(({ sessionKey, entry }) => [sessionKey, entry]),
+    );
+    const staleSessionKeys = scanCodexSessionStoreRoutes(store);
     if (staleSessionKeys.length === 0) {
       continue;
     }
-    const result = await updateSessionStore(
-      target.storePath,
-      (store) => repairCodexSessionStoreRoutes({ store }),
-      { skipMaintenance: true },
-    );
+    const result = repairCodexSessionStoreRoutes({ store });
     if (!result.changed) {
       continue;
+    }
+    for (const sessionKey of result.sessionKeys) {
+      const entry = store[sessionKey];
+      if (entry) {
+        upsertSessionEntry({
+          agentId: target.agentId,
+          env: params.env,
+          path: target.databasePath,
+          sessionKey,
+          entry,
+        });
+      }
     }
     repairedStores += 1;
     repairedSessions += result.sessionKeys.length;

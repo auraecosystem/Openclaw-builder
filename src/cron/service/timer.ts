@@ -1,7 +1,6 @@
 import { resolveFailoverReasonFromError } from "../../agents/failover-error.js";
 import { formatEmbeddedAgentExecutionPhase } from "../../agents/pi-embedded-runner/execution-phase.js";
-import { readSessionEntry } from "../../config/sessions/store-load.js";
-import type { SessionEntry } from "../../config/sessions/types.js";
+import { getSessionEntry } from "../../config/sessions.js";
 import type { CronConfig } from "../../config/types.cron.js";
 import type { HeartbeatRunResult } from "../../infra/heartbeat-wake.js";
 import {
@@ -32,7 +31,6 @@ import {
   summarizeCronRunDiagnostics,
 } from "../run-diagnostics.js";
 import { createCronExecutionId } from "../run-id.js";
-import { sweepCronRunSessions } from "../session-reaper.js";
 import type {
   CronAgentExecutionPhase,
   CronAgentExecutionPhaseUpdate,
@@ -446,10 +444,7 @@ function resolveMainSessionCronRunSessionKey(job: CronJob, startedAt: number): s
   return `agent:${agentId}:cron:${jobSegment}:run:${runSegment}`;
 }
 
-function resolveMainSessionCronDeliveryContext(
-  state: CronServiceState,
-  job: CronJob,
-): DeliveryContext | undefined {
+function resolveMainSessionCronDeliveryContext(job: CronJob): DeliveryContext | undefined {
   const targetSessionKey = job.sessionKey?.trim();
   if (!targetSessionKey) {
     return undefined;
@@ -458,12 +453,8 @@ function resolveMainSessionCronDeliveryContext(
   const agentId = normalizeAgentId(
     explicitAgentId || resolveAgentIdFromSessionKey(targetSessionKey),
   );
-  const storePath = state.deps.resolveSessionStorePath?.(agentId) ?? state.deps.sessionStorePath;
-  if (!storePath) {
-    return undefined;
-  }
   try {
-    const sessionEntry = readSessionEntry(storePath, targetSessionKey) as SessionEntry | undefined;
+    const sessionEntry = getSessionEntry({ agentId, sessionKey: targetSessionKey });
     return deliveryContextFromSession(sessionEntry);
   } catch {
     return undefined;
@@ -1318,42 +1309,6 @@ export async function onTimer(state: CronServiceState) {
       });
     }
   } finally {
-    // Piggyback session reaper on timer tick (self-throttled to every 5 min).
-    // Placed in `finally` so the reaper runs even when a long-running job keeps
-    // `state.running` true across multiple timer ticks — the early return at the
-    // top of onTimer would otherwise skip the reaper indefinitely.
-    const storePaths = new Set<string>();
-    if (state.deps.resolveSessionStorePath) {
-      const defaultAgentId = state.deps.defaultAgentId ?? DEFAULT_AGENT_ID;
-      if (state.store?.jobs?.length) {
-        for (const job of state.store.jobs) {
-          const agentId =
-            typeof job.agentId === "string" && job.agentId.trim() ? job.agentId : defaultAgentId;
-          storePaths.add(state.deps.resolveSessionStorePath(agentId));
-        }
-      } else {
-        storePaths.add(state.deps.resolveSessionStorePath(defaultAgentId));
-      }
-    } else if (state.deps.sessionStorePath) {
-      storePaths.add(state.deps.sessionStorePath);
-    }
-
-    if (storePaths.size > 0) {
-      const nowMs = state.deps.nowMs();
-      for (const storePath of storePaths) {
-        try {
-          await sweepCronRunSessions({
-            cronConfig: state.deps.cronConfig,
-            sessionStorePath: storePath,
-            nowMs,
-            log: state.deps.log,
-          });
-        } catch (err) {
-          state.deps.log.warn({ err: String(err), storePath }, "cron: session reaper sweep failed");
-        }
-      }
-    }
-
     state.running = false;
     armTimer(state);
   }
@@ -1746,7 +1701,7 @@ async function executeMainSessionCronJob(
   const cronStartedAt =
     typeof job.state.runningAtMs === "number" ? job.state.runningAtMs : state.deps.nowMs();
   const cronRunSessionKey = resolveMainSessionCronRunSessionKey(job, cronStartedAt);
-  const deliveryContext = resolveMainSessionCronDeliveryContext(state, job);
+  const deliveryContext = resolveMainSessionCronDeliveryContext(job);
   state.deps.enqueueSystemEvent(text, {
     agentId: job.agentId,
     sessionKey: cronRunSessionKey,
@@ -2020,25 +1975,6 @@ export function wake(
       intent: "immediate",
       reason: "wake",
       ...(sessionKey ? { sessionKey } : {}),
-    });
-  } else if (sessionKey) {
-    // next-heartbeat + sessionKey still needs a targeted immediate wake.
-    // Reasons:
-    //   1. The regularly-scheduled heartbeat fires for the agent's main
-    //      session, not the supplied sessionKey, so it never peeks the queue
-    //      we just enqueued — the event would sit stranded indefinitely.
-    //   2. An `intent: "event"` wake gets deferred by heartbeat-runner as
-    //      not-due and is not retried (only busy-skips are), so it cannot
-    //      stand in for the regular cadence either.
-    // Effectively, --session-key collapses --mode now and --mode next-heartbeat
-    // into the same targeted-immediate behavior — this matches the documented
-    // user intent (target a specific session for relay) better than silently
-    // dropping the event.
-    state.deps.requestHeartbeat({
-      source: "manual",
-      intent: "immediate",
-      reason: "wake",
-      sessionKey,
     });
   }
   return { ok: true } as const;

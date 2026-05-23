@@ -240,7 +240,6 @@ function hasSessionWriteLockTimeout(err: unknown, seen: Set<object> = new Set())
 }
 
 function isEmbeddedAttemptSessionTakeover(err: unknown): boolean {
-  // Match by name to avoid importing pi-embedded-runner here (would create a cycle).
   return Boolean(
     err && typeof err === "object" && readErrorName(err) === "EmbeddedAttemptSessionTakeoverError",
   );
@@ -265,13 +264,6 @@ function hasEmbeddedAttemptSessionTakeover(err: unknown, seen: Set<object> = new
   );
 }
 
-/**
- * True when the error is a local runtime coordination error (session write-lock
- * timeout or embedded attempt session takeover) rather than a provider/model
- * failure. The model fallback chain must abort on these instead of consuming
- * candidate slots — retrying any model would hit the same local condition.
- * See #83510.
- */
 export function isNonProviderRuntimeCoordinationError(err: unknown): boolean {
   if (!hasSessionWriteLockTimeout(err) && !hasEmbeddedAttemptSessionTakeover(err)) {
     return false;
@@ -415,9 +407,12 @@ function resolveFailoverClassificationFromErrorInternal(
     typeof inferSignalStatus(signal) === "number" ||
     (codeReason !== null && codeReason !== "timeout");
   const hasSessionLock = hasSessionWriteLockTimeout(err);
-
   const classification = classifyFailoverSignal(signal);
   const nestedCandidates = getNestedErrorCandidates(err);
+
+  if (hasSessionLock && !hasExplicitFailoverMetadata) {
+    return null;
+  }
 
   if (!classification || classification.kind === "context_overflow") {
     for (const candidate of nestedCandidates) {
@@ -428,9 +423,6 @@ function resolveFailoverClassificationFromErrorInternal(
         providerHint,
       );
       if (nestedClassification) {
-        if (hasSessionLock && !hasExplicitFailoverMetadata) {
-          return null;
-        }
         return nestedClassification;
       }
     }
@@ -454,14 +446,7 @@ function resolveFailoverClassificationFromErrorInternal(
   }
 
   if (classification) {
-    if (hasSessionLock && !hasExplicitFailoverMetadata) {
-      return null;
-    }
     return classification;
-  }
-
-  if (hasSessionLock) {
-    return null;
   }
 
   if (isTimeoutError(err)) {

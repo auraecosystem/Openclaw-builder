@@ -9,6 +9,10 @@ import type { SkillSnapshot } from "../skills.js";
 
 export type CompactEmbeddedPiSessionParams = {
   sessionId: string;
+  agentId?: string;
+  path?: string;
+  sessionFile?: string;
+  storePath?: string;
   runId?: string;
   sessionKey?: string;
   /** Session key used only for runtime policy/sandbox resolution. Defaults to sessionKey. */
@@ -33,14 +37,14 @@ export type CompactEmbeddedPiSessionParams = {
   groupSpace?: string | null;
   /** Parent session key for subagent policy inheritance. */
   spawnedBy?: string | null;
-  sessionFile: string;
+  /** Whether the sender is an owner (required for owner-only tools). */
+  senderIsOwner?: boolean;
   /** Optional caller-observed live prompt tokens used for compaction diagnostics. */
   currentTokenCount?: number;
   workspaceDir: string;
   agentDir?: string;
   config?: OpenClawConfig;
   skillsSnapshot?: SkillSnapshot;
-  senderIsOwner?: boolean;
   provider?: string;
   model?: string;
   /** Effective model fallback chain for this session attempt. Undefined uses config defaults. */

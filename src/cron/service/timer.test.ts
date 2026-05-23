@@ -1,15 +1,13 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setupCronServiceSuite, writeCronStoreSnapshot } from "../../cron/service.test-harness.js";
 import { createCronServiceState } from "../../cron/service/state.js";
-import { executeJobCore, onTimer } from "../../cron/service/timer.js";
+import { onTimer } from "../../cron/service/timer.js";
 import { loadCronStore, saveCronStore } from "../../cron/store.js";
 import type { CronJob } from "../../cron/types.js";
 import * as detachedTaskRuntime from "../../tasks/detached-task-runtime.js";
 import { findTaskByRunId, resetTaskRegistryForTests } from "../../tasks/task-registry.js";
 
-const { logger, makeStorePath } = setupCronServiceSuite({
+const { logger, makeStoreKey } = setupCronServiceSuite({
   prefix: "cron-service-timer-seam",
 });
 
@@ -50,76 +48,21 @@ afterEach(() => {
 });
 
 describe("cron service timer seam coverage", () => {
-  it("routes main cron jobs onto a cron run lane derived from the target agent", async () => {
-    const { storePath } = await makeStorePath();
-    const now = Date.parse("2026-03-23T12:00:00.000Z");
-    const enqueueSystemEvent = vi.fn();
-    const requestHeartbeat = vi.fn();
-    const runHeartbeatOnce = vi.fn(async () => ({ status: "ran" as const, durationMs: 1 }));
-    const job = {
-      ...createDueMainJob({ now, wakeMode: "now" }),
-      sessionKey: "agent:main-pr-router:main",
-      state: { runningAtMs: now },
-    };
-    const cronRunSessionKey = `agent:main-pr-router:cron:main-heartbeat-job:run:${now}`;
-    const sessionStorePath = path.join(path.dirname(path.dirname(storePath)), "sessions.json");
-    await fs.writeFile(
-      sessionStorePath,
-      JSON.stringify({
-        "agent:main-pr-router:main": {
-          lastChannel: "discord",
-          lastTo: "channel-1",
-          lastAccountId: "default",
-        },
-      }),
-      "utf8",
-    );
-
-    const state = createCronServiceState({
-      storePath,
-      cronEnabled: true,
-      log: logger,
-      nowMs: () => now,
-      resolveSessionStorePath: () => sessionStorePath,
-      enqueueSystemEvent,
-      requestHeartbeat,
-      runHeartbeatOnce,
-      runIsolatedAgentJob: vi.fn(async () => ({ status: "ok" as const })),
-    });
-
-    const result = await executeJobCore(state, job);
-
-    expect(result).toMatchObject({ status: "ok", sessionKey: cronRunSessionKey });
-    expect(enqueueSystemEvent).toHaveBeenCalledWith("heartbeat seam tick", {
-      agentId: undefined,
-      sessionKey: cronRunSessionKey,
-      contextKey: "cron:main-heartbeat-job",
-      deliveryContext: { channel: "discord", to: "channel-1", accountId: "default" },
-    });
-    expect(runHeartbeatOnce).toHaveBeenCalledWith({
-      source: "cron",
-      intent: "immediate",
-      reason: "cron:main-heartbeat-job",
-      agentId: undefined,
-      sessionKey: cronRunSessionKey,
-      heartbeat: { target: "last" },
-    });
-  });
-
   it("persists the next schedule and hands off next-heartbeat main jobs", async () => {
-    const { storePath } = await makeStorePath();
+    const { storeKey } = await makeStoreKey();
     const now = Date.parse("2026-03-23T12:00:00.000Z");
+    const cronRunSessionKey = "agent:main:cron:main-heartbeat-job:run:1774267200000";
     const enqueueSystemEvent = vi.fn();
     const requestHeartbeat = vi.fn();
     const timeoutSpy = vi.spyOn(globalThis, "setTimeout");
 
     await writeCronStoreSnapshot({
-      storePath,
+      storeKey,
       jobs: [createDueMainJob({ now, wakeMode: "next-heartbeat" })],
     });
 
     const state = createCronServiceState({
-      storePath,
+      storeKey,
       cronEnabled: true,
       log: logger,
       nowMs: () => now,
@@ -130,7 +73,6 @@ describe("cron service timer seam coverage", () => {
 
     await onTimer(state);
 
-    const cronRunSessionKey = `agent:main:cron:main-heartbeat-job:run:${now}`;
     expect(enqueueSystemEvent).toHaveBeenCalledWith("heartbeat seam tick", {
       agentId: undefined,
       sessionKey: cronRunSessionKey,
@@ -145,7 +87,7 @@ describe("cron service timer seam coverage", () => {
       heartbeat: { target: "last" },
     });
 
-    const persisted = await loadCronStore(storePath);
+    const persisted = await loadCronStore(storeKey);
     const job = persisted.jobs[0];
     if (!job) {
       throw new Error("expected persisted heartbeat cron job");
@@ -183,7 +125,7 @@ describe("cron service timer seam coverage", () => {
   });
 
   it("records isolated cron task runs against the backing cron session", async () => {
-    const { storePath } = await makeStorePath();
+    const { storeKey } = await makeStoreKey();
     const now = Date.parse("2026-03-23T12:00:00.000Z");
     const enqueueSystemEvent = vi.fn();
     const requestHeartbeat = vi.fn();
@@ -194,12 +136,12 @@ describe("cron service timer seam coverage", () => {
     }));
 
     await writeCronStoreSnapshot({
-      storePath,
+      storeKey,
       jobs: [createDueIsolatedAgentJob({ now })],
     });
 
     const state = createCronServiceState({
-      storePath,
+      storeKey,
       cronEnabled: true,
       log: logger,
       nowMs: () => now,
@@ -226,14 +168,15 @@ describe("cron service timer seam coverage", () => {
   });
 
   it("keeps scheduler progress when task ledger creation fails", async () => {
-    const { storePath } = await makeStorePath();
+    const { storeKey } = await makeStoreKey();
     const now = Date.parse("2026-03-23T12:00:00.000Z");
+    const cronRunSessionKey = "agent:main:cron:main-heartbeat-job:run:1774267200000";
     const enqueueSystemEvent = vi.fn();
     const requestHeartbeat = vi.fn();
     const ledgerError = new Error("disk full");
 
     await writeCronStoreSnapshot({
-      storePath,
+      storeKey,
       jobs: [createDueMainJob({ now, wakeMode: "next-heartbeat" })],
     });
 
@@ -244,7 +187,7 @@ describe("cron service timer seam coverage", () => {
       });
 
     const state = createCronServiceState({
-      storePath,
+      storeKey,
       cronEnabled: true,
       log: logger,
       nowMs: () => now,
@@ -259,7 +202,6 @@ describe("cron service timer seam coverage", () => {
       { jobId: "main-heartbeat-job", error: ledgerError },
       "cron: failed to create task ledger record",
     );
-    const cronRunSessionKey = `agent:main:cron:main-heartbeat-job:run:${now}`;
     expect(enqueueSystemEvent).toHaveBeenCalledWith("heartbeat seam tick", {
       agentId: undefined,
       sessionKey: cronRunSessionKey,
@@ -270,13 +212,13 @@ describe("cron service timer seam coverage", () => {
   });
 
   it("reloads externally edited split-store schedules without firing stale slots", async () => {
-    const { storePath } = await makeStorePath();
+    const { storeKey } = await makeStoreKey();
     const now = Date.parse("2026-03-23T06:00:00.000Z");
     const staleNextRunAtMs = now;
     const enqueueSystemEvent = vi.fn();
     const requestHeartbeat = vi.fn();
 
-    await saveCronStore(storePath, {
+    await saveCronStore(storeKey, {
       version: 1,
       jobs: [
         {
@@ -294,14 +236,26 @@ describe("cron service timer seam coverage", () => {
       ],
     });
 
-    const config = JSON.parse(await fs.readFile(storePath, "utf8")) as {
-      jobs: Array<Record<string, unknown>>;
-    };
-    config.jobs[0].schedule = { kind: "cron", expr: "0 7 * * *", tz: "UTC" };
-    await fs.writeFile(storePath, JSON.stringify(config, null, 2), "utf8");
+    await saveCronStore(storeKey, {
+      version: 1,
+      jobs: [
+        {
+          id: "externally-edited-cron",
+          name: "externally edited cron",
+          enabled: true,
+          createdAtMs: now - 60_000,
+          updatedAtMs: now,
+          schedule: { kind: "cron", expr: "0 7 * * *", tz: "UTC" },
+          sessionTarget: "main",
+          wakeMode: "now",
+          payload: { kind: "systemEvent", text: "stale schedule should not run" },
+          state: {},
+        },
+      ],
+    });
 
     const state = createCronServiceState({
-      storePath,
+      storeKey,
       cronEnabled: true,
       log: logger,
       nowMs: () => now,
@@ -315,7 +269,7 @@ describe("cron service timer seam coverage", () => {
     expect(enqueueSystemEvent).not.toHaveBeenCalled();
     expect(requestHeartbeat).not.toHaveBeenCalled();
 
-    const persisted = await loadCronStore(storePath);
+    const persisted = await loadCronStore(storeKey);
     const job = persisted.jobs[0];
     expect(job?.schedule).toEqual({ kind: "cron", expr: "0 7 * * *", tz: "UTC" });
     expect(job?.state.lastStatus).toBeUndefined();

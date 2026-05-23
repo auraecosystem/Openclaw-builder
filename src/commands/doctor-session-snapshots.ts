@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { listAgentIds } from "../agents/agent-scope.js";
 import { resolveBundledSkillsDir } from "../agents/skills/bundled-dir.js";
 import { resolveStateDir } from "../config/paths.js";
-import { resolveAllAgentSessionStoreTargetsSync } from "../config/sessions/targets.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { expandHomePrefix } from "../infra/home-dir.js";
@@ -253,12 +253,17 @@ function resolveSessionStorePaths(params: {
   cfg?: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
 }): string[] | undefined {
-  if (!params.cfg) {
+  const configured = params.cfg?.session?.store;
+  if (typeof configured !== "string" || !configured.trim()) {
     return undefined;
   }
-  return resolveAllAgentSessionStoreTargetsSync(params.cfg, { env: params.env })
-    .map((target) => target.storePath)
-    .filter((storePath) => fs.existsSync(storePath))
+  const storePath = expandHomePrefix(configured.trim(), { env: params.env });
+  if (!storePath.includes("{agentId}")) {
+    return [storePath];
+  }
+  return listAgentIds(params.cfg ?? {})
+    .map((agentId) => storePath.replaceAll("{agentId}", agentId))
+    .filter((candidate) => fs.existsSync(candidate))
     .toSorted((a, b) => a.localeCompare(b));
 }
 

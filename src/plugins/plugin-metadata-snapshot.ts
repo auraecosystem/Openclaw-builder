@@ -10,9 +10,12 @@ import { resolveUserPath } from "../utils.js";
 import { resolveCompatibilityHostVersion } from "../version.js";
 import { resolveDefaultPluginNpmDir } from "./install-paths.js";
 import { hashJson } from "./installed-plugin-index-hash.js";
+import {
+  readPersistedInstalledPluginIndexFingerprintSync,
+  readPersistedInstalledPluginIndexSync,
+} from "./installed-plugin-index-persisted-read.js";
 import { resolveInstalledPluginIndexPolicyHash } from "./installed-plugin-index-policy.js";
 import { loadInstalledPluginIndexInstallRecordsSync } from "./installed-plugin-index-record-reader.js";
-import { resolveInstalledPluginIndexStorePath } from "./installed-plugin-index-store-path.js";
 import type { InstalledPluginIndex } from "./installed-plugin-index.js";
 import {
   loadPluginManifestRegistryForInstalledIndex,
@@ -20,6 +23,7 @@ import {
 } from "./manifest-registry-installed.js";
 import { loadPluginManifestRegistry, type PluginManifestRecord } from "./manifest-registry.js";
 import { resolvePluginControlPlaneFingerprint } from "./plugin-control-plane-context.js";
+import { registerPluginMetadataSnapshotMemoClear } from "./plugin-metadata-snapshot-memo.js";
 import type {
   LoadPluginMetadataSnapshotParams,
   PluginMetadataSnapshot,
@@ -50,6 +54,8 @@ let pluginMetadataSnapshotMemo: PluginMetadataSnapshotMemo | undefined;
 export function clearLoadPluginMetadataSnapshotMemo(): void {
   pluginMetadataSnapshotMemo = undefined;
 }
+
+registerPluginMetadataSnapshotMemoClear(clearLoadPluginMetadataSnapshotMemo);
 
 const MEMO_RELEVANT_ENV_KEYS = [
   "APPDATA",
@@ -349,15 +355,14 @@ function resolvePersistedRegistryFastMemoFingerprint(params: {
   if (disabled) {
     return { disabled: true };
   }
-  const indexPath = resolveInstalledPluginIndexStorePath({
-    env: params.env,
-    ...(params.stateDir ? { stateDir: params.stateDir } : {}),
-  });
   const npmRoot = params.stateDir
     ? path.join(params.stateDir, "npm")
     : resolveDefaultPluginNpmDir(params.env);
   return {
-    index: fileFingerprint(indexPath),
+    index: readPersistedInstalledPluginIndexFingerprintSync({
+      env: params.env,
+      ...(params.stateDir ? { stateDir: params.stateDir } : {}),
+    }),
     npmPackageJson: fileFingerprint(path.join(npmRoot, "package.json")),
   };
 }
@@ -401,14 +406,16 @@ function resolvePersistedRegistryMemoState(params: {
       watchedFilesHash: hashJson([]),
     };
   }
-  const indexPath = resolveInstalledPluginIndexStorePath({
-    env: params.env,
-    ...(params.stateDir ? { stateDir: params.stateDir } : {}),
-  });
   const npmRoot = params.stateDir
     ? path.join(params.stateDir, "npm")
     : resolveDefaultPluginNpmDir(params.env);
-  const index = params.index ?? readJsonObject(indexPath);
+  const index =
+    params.index ??
+    readPersistedInstalledPluginIndexSync({
+      env: params.env,
+      ...(params.stateDir ? { stateDir: params.stateDir } : {}),
+    }) ??
+    undefined;
   const plugins = Array.isArray(index?.plugins) ? index.plugins : [];
   const diagnostics = Array.isArray(index?.diagnostics) ? index.diagnostics : [];
   const pluginRootById = new Map<string, string>();
@@ -768,7 +775,18 @@ function canMemoizePluginMetadataSnapshotResult(result: {
   registrySource: PluginRegistrySnapshotSource;
   snapshot: PluginMetadataSnapshot;
 }): boolean {
-  return result.registrySource !== "derived" && result.snapshot.index.plugins.length > 0;
+  if (result.snapshot.index.plugins.length === 0) {
+    return false;
+  }
+  if (result.registrySource !== "derived") {
+    return true;
+  }
+  return (
+    result.snapshot.registryDiagnostics.length > 0 &&
+    result.snapshot.registryDiagnostics.every(
+      (diagnostic) => diagnostic.code === "persisted-registry-stale-policy",
+    )
+  );
 }
 
 function loadPluginMetadataSnapshotImpl(params: LoadPluginMetadataSnapshotParams): {
@@ -820,7 +838,6 @@ function loadPluginMetadataSnapshotImpl(params: LoadPluginMetadataSnapshotParams
     registrySource: registryResult.source,
     snapshot: {
       policyHash: index.policyHash,
-      registrySource: registryResult.source,
       configFingerprint: resolvePluginMetadataControlPlaneFingerprint({
         config: params.config,
         env: params.env,

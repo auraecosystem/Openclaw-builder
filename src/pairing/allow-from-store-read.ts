@@ -1,41 +1,53 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { resolveOAuthDir, resolveStateDir } from "../config/paths.js";
+import { resolveRequiredHomeDir } from "../infra/home-dir.js";
+import { DEFAULT_ACCOUNT_ID } from "../routing/session-key.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import {
-  clearAllowFromFileReadCacheForNamespace,
   dedupePreserveOrder,
-  readAllowFromFileSyncWithExists,
   resolveAllowFromAccountId,
-  resolveAllowFromFilePath,
-  shouldIncludeLegacyAllowFromEntries,
-  type AllowFromStore,
-} from "./allow-from-store-file.js";
+  safeAccountKey,
+  safeChannelKey,
+} from "./pairing-store-keys.js";
+import { readChannelAllowFromStoreSync } from "./pairing-store.js";
 import type { PairingChannel } from "./pairing-store.types.js";
 
-const ALLOW_FROM_STORE_READ_CACHE_NAMESPACE = "allow-from-store-read";
+function legacyPairingCredentialsDir(env: NodeJS.ProcessEnv): string {
+  const stateDir = resolveStateDir(env, () => resolveRequiredHomeDir(env, os.homedir));
+  return resolveOAuthDir(env, stateDir);
+}
 
-function normalizeRawAllowFromList(store: AllowFromStore): string[] {
-  const list = Array.isArray(store.allowFrom) ? store.allowFrom : [];
-  return dedupePreserveOrder(
-    list.map((entry) => normalizeOptionalString(entry) ?? "").filter(Boolean),
+function resolveLegacyAllowFromPath(
+  channel: PairingChannel,
+  env: NodeJS.ProcessEnv,
+  accountId?: string,
+): string {
+  const base = safeChannelKey(channel);
+  const accountKey = accountId ? safeAccountKey(accountId) : "";
+  return path.join(
+    legacyPairingCredentialsDir(env),
+    accountKey ? `${base}-${accountKey}-allowFrom.json` : `${base}-allowFrom.json`,
   );
 }
 
-function readAllowFromEntriesForPathSyncWithExists(filePath: string): {
-  entries: string[];
-  exists: boolean;
-} {
-  return readAllowFromFileSyncWithExists({
-    cacheNamespace: ALLOW_FROM_STORE_READ_CACHE_NAMESPACE,
-    filePath,
-    normalizeStore: normalizeRawAllowFromList,
-  });
-}
-
-export function resolveChannelAllowFromPath(
-  channel: PairingChannel,
-  env: NodeJS.ProcessEnv = process.env,
-  accountId?: string,
-): string {
-  return resolveAllowFromFilePath(channel, env, accountId);
+function readLegacyAllowFromEntries(filePath: string): string[] {
+  let raw = "";
+  try {
+    raw = fs.readFileSync(filePath, "utf8");
+  } catch {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw) as { allowFrom?: unknown };
+    const list = Array.isArray(parsed.allowFrom) ? parsed.allowFrom : [];
+    return dedupePreserveOrder(
+      list.map((entry) => normalizeOptionalString(entry) ?? "").filter(Boolean),
+    );
+  } catch {
+    return [];
+  }
 }
 
 export function readChannelAllowFromStoreEntriesSync(
@@ -44,20 +56,17 @@ export function readChannelAllowFromStoreEntriesSync(
   accountId?: string,
 ): string[] {
   const resolvedAccountId = resolveAllowFromAccountId(accountId);
-  if (!shouldIncludeLegacyAllowFromEntries(resolvedAccountId)) {
-    return readAllowFromEntriesForPathSyncWithExists(
-      resolveAllowFromFilePath(channel, env, resolvedAccountId),
-    ).entries;
-  }
-  const scopedEntries = readAllowFromEntriesForPathSyncWithExists(
-    resolveAllowFromFilePath(channel, env, resolvedAccountId),
-  ).entries;
-  const legacyEntries = readAllowFromEntriesForPathSyncWithExists(
-    resolveAllowFromFilePath(channel, env),
-  ).entries;
-  return dedupePreserveOrder([...scopedEntries, ...legacyEntries]);
+  const sqliteEntries = readChannelAllowFromStoreSync(channel, env, resolvedAccountId);
+  const scopedLegacyEntries = readLegacyAllowFromEntries(
+    resolveLegacyAllowFromPath(channel, env, resolvedAccountId),
+  );
+  const defaultLegacyEntries =
+    resolvedAccountId === DEFAULT_ACCOUNT_ID
+      ? readLegacyAllowFromEntries(resolveLegacyAllowFromPath(channel, env))
+      : [];
+  return dedupePreserveOrder([...sqliteEntries, ...scopedLegacyEntries, ...defaultLegacyEntries]);
 }
 
 export function clearAllowFromStoreReadCacheForTest(): void {
-  clearAllowFromFileReadCacheForNamespace(ALLOW_FROM_STORE_READ_CACHE_NAMESPACE);
+  // SQLite-backed and legacy fallback reads do not keep a process-local cache.
 }

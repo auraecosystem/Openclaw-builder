@@ -1,4 +1,3 @@
-import type { ImageContent } from "@earendil-works/pi-ai";
 import type { SourceReplyDeliveryMode } from "../../auto-reply/get-reply-options.types.js";
 import type { ReplyOperation } from "../../auto-reply/reply/reply-run-registry.js";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
@@ -13,6 +12,7 @@ import type { InputProvenance } from "../../sessions/input-provenance.js";
 import type { BootstrapContextMode } from "../bootstrap-files.js";
 import type { ResolvedCliBackend } from "../cli-backends.js";
 import type { ContextWindowInfo } from "../context-window-guard.js";
+import type { ImageContent } from "../pi-ai-contract.js";
 import type { EmbeddedAgentExecutionPhase } from "../pi-embedded-runner/execution-phase.js";
 import type {
   CurrentInboundPromptContext,
@@ -25,8 +25,8 @@ export type RunCliAgentParams = {
   sessionId: string;
   sessionKey?: string;
   agentId?: string;
+  sessionFile?: string;
   trigger?: EmbeddedRunTrigger;
-  sessionFile: string;
   workspaceDir: string;
   config?: OpenClawConfig;
   prompt: string;

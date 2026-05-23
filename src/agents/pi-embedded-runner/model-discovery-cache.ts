@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import path from "node:path";
 import type { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
@@ -6,7 +7,10 @@ import {
   resolveRuntimeSyntheticAuthProviderRefs,
 } from "../../plugins/synthetic-auth.runtime.js";
 import { resolveDefaultAgentDir } from "../agent-scope.js";
+import { authProfileStoreKey } from "../auth-profiles/persisted.js";
 import { hasAnyRuntimeAuthProfileStoreSource } from "../auth-profiles/runtime-snapshots.js";
+import { readAuthProfileStorePayloadResult } from "../auth-profiles/sqlite-storage.js";
+import { readStoredModelsConfigRaw } from "../models-config-store.js";
 import { discoverAuthStorage, discoverModels } from "../pi-model-discovery.js";
 
 type DiscoveryStores = {
@@ -44,6 +48,35 @@ function authFingerprint(agentDir: string): object {
   return {
     authJson: fileFingerprint(path.join(agentDir, "auth.json")),
     authProfilesJson: fileFingerprint(path.join(agentDir, "auth-profiles.json")),
+    sqliteAuthProfiles: sqliteAuthProfileStoreFingerprint(agentDir),
+  };
+}
+
+function sqliteAuthProfileStoreFingerprint(agentDir: string): object | null {
+  try {
+    const stored = readAuthProfileStorePayloadResult(authProfileStoreKey(agentDir));
+    if (!stored.exists) {
+      return null;
+    }
+    return {
+      updatedAt: stored.updatedAt,
+      rawHash: createHash("sha256")
+        .update(JSON.stringify(stored.value ?? null))
+        .digest("hex"),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function storedModelCatalogFingerprint(agentDir: string): object | null {
+  const stored = readStoredModelsConfigRaw(agentDir);
+  if (!stored) {
+    return null;
+  }
+  return {
+    updatedAt: stored.updatedAt,
+    rawHash: createHash("sha256").update(stored.raw).digest("hex"),
   };
 }
 
@@ -57,7 +90,7 @@ function discoveryFingerprint(params: DiscoverCachedPiStoresOptions): string {
     inheritedAuthDir,
     localAuth: authFingerprint(params.agentDir),
     inheritedAuth: inheritedAuthDir ? authFingerprint(inheritedAuthDir) : undefined,
-    modelsJson: fileFingerprint(path.join(params.agentDir, "models.json")),
+    modelCatalog: storedModelCatalogFingerprint(params.agentDir),
   });
 }
 

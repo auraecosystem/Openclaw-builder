@@ -11,12 +11,25 @@ import {
   type LegacyOAuthRef,
   type LegacyOAuthSecretMaterial,
 } from "../agents/auth-profiles/legacy-oauth-sidecar.js";
-import { resolveAuthStorePath } from "../agents/auth-profiles/paths.js";
+import {
+  resolveAuthProfileStoreKey,
+  resolveAuthProfileStoreLocationForDisplay,
+  resolveAuthStorePath,
+} from "../agents/auth-profiles/paths.js";
+import {
+  readAuthProfileStorePayloadResultReadOnly,
+  writeAuthProfileStorePayload,
+  type AuthProfilePayloadValue,
+} from "../agents/auth-profiles/sqlite-storage.js";
 import { clearRuntimeAuthProfileStoreSnapshots } from "../agents/auth-profiles/store.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import { resolveOAuthDir, resolveStateDir } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { loadJsonFile, saveJsonFile } from "../infra/json-file.js";
+import { executeSqliteQuerySync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
+import type { DB as OpenClawStateKyselyDatabase } from "../state/openclaw-state-db.generated.js";
+import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
+import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import { note } from "../terminal/note.js";
 import { shortenHomePath } from "../utils.js";
 import type { DoctorPrompter } from "./doctor-prompter.js";
@@ -36,7 +49,9 @@ type LegacyOAuthSidecarProfile = {
 
 type LegacyOAuthSidecarStore = AuthProfileRepairCandidate & {
   raw: Record<string, unknown>;
+  originalRaw: Record<string, unknown>;
   profiles: LegacyOAuthSidecarProfile[];
+  storage: "file" | "sqlite";
 };
 
 type LegacyOAuthUnreferencedSidecar = {
@@ -85,6 +100,28 @@ function listExistingAgentDirsFromState(env: NodeJS.ProcessEnv): string[] {
     });
 }
 
+function listAuthProfileStoreKeysFromState(env: NodeJS.ProcessEnv): string[] {
+  const databasePath = resolveOpenClawStateSqlitePath(env);
+  if (!fs.existsSync(databasePath)) {
+    return [];
+  }
+  try {
+    const database = openOpenClawStateDatabase({ path: databasePath, env });
+    const db = getNodeSqliteKysely<Pick<OpenClawStateKyselyDatabase, "auth_profile_stores">>(
+      database.db,
+    );
+    const rows = executeSqliteQuerySync(
+      database.db,
+      db.selectFrom("auth_profile_stores").select(["store_key"]).orderBy("store_key"),
+    ).rows;
+    return rows.flatMap((row) =>
+      typeof row.store_key === "string" && row.store_key ? [row.store_key] : [],
+    );
+  } catch {
+    return [];
+  }
+}
+
 function listAuthProfileRepairCandidates(
   cfg: OpenClawConfig,
   env: NodeJS.ProcessEnv,
@@ -101,18 +138,15 @@ function listAuthProfileRepairCandidates(
   for (const agentDir of listExistingAgentDirsFromState(env)) {
     addCandidate(candidates, agentDir);
   }
+  for (const storeKey of listAuthProfileStoreKeysFromState(env)) {
+    addCandidate(candidates, storeKey);
+  }
   return [...candidates.values()];
 }
 
-function resolveLegacyOAuthSidecarStore(
-  candidate: AuthProfileRepairCandidate,
-): LegacyOAuthSidecarStore | null {
-  if (!fs.existsSync(candidate.authPath)) {
-    return null;
-  }
-  const raw = loadJsonFile(candidate.authPath);
+function collectLegacyOAuthProfiles(raw: unknown): LegacyOAuthSidecarProfile[] {
   if (!isRecord(raw) || !isRecord(raw.profiles)) {
-    return null;
+    return [];
   }
   const profiles: LegacyOAuthSidecarProfile[] = [];
   for (const [profileId, value] of Object.entries(raw.profiles)) {
@@ -125,13 +159,46 @@ function resolveLegacyOAuthSidecarStore(
     }
     profiles.push({ profileId, provider: ref.provider, ref });
   }
-  return profiles.length > 0
-    ? {
-        ...candidate,
-        raw,
-        profiles,
-      }
-    : null;
+  return profiles;
+}
+
+function resolveLegacyOAuthSidecarStore(
+  candidate: AuthProfileRepairCandidate,
+  env: NodeJS.ProcessEnv,
+): LegacyOAuthSidecarStore | null {
+  const storeKey = candidate.agentDir
+    ? resolveAuthProfileStoreKey(candidate.agentDir, env)
+    : candidate.authPath;
+  const entry = readAuthProfileStorePayloadResultReadOnly(storeKey, { env });
+  const sqliteRaw = entry.exists ? entry.value : undefined;
+  const sqliteProfiles = collectLegacyOAuthProfiles(sqliteRaw);
+  if (sqliteRaw && sqliteProfiles.length > 0) {
+    return {
+      ...candidate,
+      authPath: candidate.agentDir
+        ? resolveAuthProfileStoreLocationForDisplay(candidate.agentDir, env)
+        : candidate.authPath,
+      raw: sqliteRaw as unknown as Record<string, unknown>,
+      originalRaw: structuredClone(sqliteRaw as unknown as Record<string, unknown>),
+      profiles: sqliteProfiles,
+      storage: "sqlite",
+    };
+  }
+
+  if (fs.existsSync(candidate.authPath)) {
+    const raw = loadJsonFile(candidate.authPath);
+    const profiles = collectLegacyOAuthProfiles(raw);
+    return isRecord(raw) && profiles.length > 0
+      ? {
+          ...candidate,
+          raw,
+          originalRaw: structuredClone(raw),
+          profiles,
+          storage: "file",
+        }
+      : null;
+  }
+  return null;
 }
 
 function listUnreferencedLegacyOAuthSidecars(
@@ -183,10 +250,32 @@ function applyLegacyOAuthSidecarMaterial(params: {
   return true;
 }
 
-function backupLegacyOAuthSidecarStore(authPath: string, now: () => number): string {
+function writeSyntheticBackupFile(pathname: string, raw: Record<string, unknown>): void {
+  fs.mkdirSync(path.dirname(pathname), { recursive: true });
+  fs.writeFileSync(pathname, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+}
+
+function backupLegacyOAuthSidecarStore(store: LegacyOAuthSidecarStore, now: () => number): string {
+  const authPath = store.authPath;
   const backupPath = `${authPath}.oauth-ref.${now()}.bak`;
-  fs.copyFileSync(authPath, backupPath);
+  if (store.storage === "file") {
+    fs.copyFileSync(authPath, backupPath);
+  } else {
+    writeSyntheticBackupFile(backupPath, store.originalRaw);
+  }
   return backupPath;
+}
+
+function saveLegacyOAuthSidecarStore(store: LegacyOAuthSidecarStore, env: NodeJS.ProcessEnv): void {
+  if (store.storage === "file") {
+    saveJsonFile(store.authPath, store.raw);
+    return;
+  }
+  writeAuthProfileStorePayload(
+    store.agentDir ? resolveAuthProfileStoreKey(store.agentDir, env) : store.authPath,
+    store.raw as unknown as AuthProfilePayloadValue,
+    { env },
+  );
 }
 
 export async function maybeRepairLegacyOAuthSidecarProfiles(params: {
@@ -200,7 +289,7 @@ export async function maybeRepairLegacyOAuthSidecarProfiles(params: {
   const emitNotes = params.emitNotes !== false;
   const env = params.env ?? process.env;
   const stores = listAuthProfileRepairCandidates(params.cfg, env)
-    .map(resolveLegacyOAuthSidecarStore)
+    .map((candidate) => resolveLegacyOAuthSidecarStore(candidate, env))
     .filter((entry): entry is LegacyOAuthSidecarStore => entry !== null);
   const referencedRefIds = new Set(stores.flatMap((entry) => entry.profiles.map((p) => p.ref.id)));
   const unreferencedSidecars = listUnreferencedLegacyOAuthSidecars(referencedRefIds, env);
@@ -274,11 +363,11 @@ export async function maybeRepairLegacyOAuthSidecarProfiles(params: {
     }
 
     try {
-      const backupPath = backupLegacyOAuthSidecarStore(store.authPath, now);
+      const backupPath = backupLegacyOAuthSidecarStore(store, now);
       if (!("version" in store.raw)) {
         store.raw.version = AUTH_STORE_VERSION;
       }
-      saveJsonFile(store.authPath, store.raw);
+      saveLegacyOAuthSidecarStore(store, env);
       for (const [refId, sidecarPath] of storeMigratedSidecarsByRefId) {
         migratedSidecarsByRefId.set(refId, sidecarPath);
       }

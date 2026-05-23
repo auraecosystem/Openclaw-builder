@@ -4,8 +4,8 @@ import {
   createChannelMessageReplyPipeline,
   deliverInboundReplyWithMessageSendContext,
 } from "openclaw/plugin-sdk/channel-message";
-import { readChannelAllowFromStore } from "openclaw/plugin-sdk/conversation-runtime";
 import {
+  readChannelAllowFromStore,
   recordInboundSession,
   upsertChannelPairingRequest,
 } from "openclaw/plugin-sdk/conversation-runtime";
@@ -14,8 +14,13 @@ import { dispatchReplyWithBufferedBlockDispatcher } from "openclaw/plugin-sdk/re
 import { resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing";
 import { getRuntimeConfig } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import { resolvePinnedMainDmOwnerFromAllowlist } from "openclaw/plugin-sdk/security-runtime";
-import { readSessionUpdatedAt, resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
-import { loadSessionStore } from "openclaw/plugin-sdk/session-store-runtime";
+import {
+  getSessionEntry,
+  listSessionEntries,
+  patchSessionEntry,
+  readSessionUpdatedAt,
+  resolveStorePath,
+} from "openclaw/plugin-sdk/session-store-runtime";
 import { listSkillCommandsForAgents } from "openclaw/plugin-sdk/skill-commands-runtime";
 import { enqueueSystemEvent } from "openclaw/plugin-sdk/system-event-runtime";
 import { loadWebMedia } from "openclaw/plugin-sdk/web-media";
@@ -29,8 +34,10 @@ import { wasSentByBot } from "./sent-message-cache.js";
 
 export type TelegramBotDeps = {
   getRuntimeConfig: typeof getRuntimeConfig;
-  resolveStorePath: typeof resolveStorePath;
-  loadSessionStore?: typeof loadSessionStore;
+  getSessionEntry: typeof getSessionEntry;
+  resolveStorePath?: typeof resolveStorePath;
+  listSessionEntries: typeof listSessionEntries;
+  patchSessionEntry: typeof patchSessionEntry;
   readSessionUpdatedAt?: typeof readSessionUpdatedAt;
   recordInboundSession?: typeof recordInboundSession;
   recordChannelActivity?: typeof recordChannelActivity;
@@ -60,17 +67,23 @@ export const defaultTelegramBotDeps: TelegramBotDeps = {
   get getRuntimeConfig() {
     return getRuntimeConfig;
   },
+  get getSessionEntry() {
+    return getSessionEntry;
+  },
   get resolveStorePath() {
     return resolveStorePath;
   },
-  get readChannelAllowFromStore() {
-    return readChannelAllowFromStore;
+  get listSessionEntries() {
+    return listSessionEntries;
   },
-  get loadSessionStore() {
-    return loadSessionStore;
+  get patchSessionEntry() {
+    return patchSessionEntry;
   },
   get readSessionUpdatedAt() {
     return readSessionUpdatedAt;
+  },
+  get readChannelAllowFromStore() {
+    return readChannelAllowFromStore;
   },
   get recordInboundSession() {
     return recordInboundSession;

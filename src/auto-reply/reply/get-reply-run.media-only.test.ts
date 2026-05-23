@@ -27,18 +27,14 @@ vi.mock("../../config/sessions/group.js", () => ({
   resolveGroupSessionKey: vi.fn().mockReturnValue(undefined),
 }));
 
-vi.mock("../../config/sessions/paths.js", () => ({
-  resolveSessionFilePath: vi.fn().mockReturnValue("/tmp/session.jsonl"),
-  resolveSessionFilePathOptions: vi.fn().mockReturnValue({}),
-}));
-
 const storeRuntimeLoads = vi.hoisted(() => vi.fn());
-const updateSessionStore = vi.hoisted(() => vi.fn());
+const upsertSessionEntry = vi.hoisted(() => vi.fn());
+const drainFormattedSystemEventsMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
 vi.mock("../../config/sessions/store.runtime.js", () => {
   storeRuntimeLoads();
   return {
-    updateSessionStore,
+    upsertSessionEntry,
   };
 });
 
@@ -120,7 +116,7 @@ vi.mock("./session-updates.runtime.js", () => ({
 }));
 
 vi.mock("./session-system-events.js", () => ({
-  drainFormattedSystemEvents: vi.fn().mockResolvedValue(undefined),
+  drainFormattedSystemEvents: drainFormattedSystemEventsMock,
 }));
 
 vi.mock("./typing-mode.js", () => ({
@@ -288,7 +284,7 @@ describe("runPreparedReply media-only handling", () => {
 
   beforeEach(async () => {
     storeRuntimeLoads.mockClear();
-    updateSessionStore.mockReset();
+    upsertSessionEntry.mockReset();
     vi.clearAllMocks();
     replyRunTesting.resetReplyRunRegistry();
   });
@@ -298,7 +294,7 @@ describe("runPreparedReply media-only handling", () => {
     return Promise.all(paths.map((entry) => rm(entry, { recursive: true, force: true })));
   });
 
-  it("does not load session store runtime on module import", async () => {
+  it("does not load session row runtime on module import", async () => {
     await loadFreshGetReplyRunModuleForTest();
 
     expect(storeRuntimeLoads).not.toHaveBeenCalled();
@@ -1233,7 +1229,6 @@ describe("runPreparedReply media-only handling", () => {
     const sessionStore: Record<string, SessionEntry> = {
       "session-key": {
         sessionId: "session-auth-profile",
-        sessionFile: "/tmp/session-auth-profile.jsonl",
         authProfileOverride: "profile-before-wait",
         authProfileOverrideSource: "auto",
         updatedAt: 1,
@@ -1279,7 +1274,6 @@ describe("runPreparedReply media-only handling", () => {
       await import("../../agents/auth-profiles/session-override.js");
     const sessionEntry: SessionEntry = {
       sessionId: "session-image-auth",
-      sessionFile: "/tmp/session-image-auth.jsonl",
       authProfileOverride: "anthropic:work",
       authProfileOverrideSource: "user",
       updatedAt: 1,
@@ -1289,7 +1283,6 @@ describe("runPreparedReply media-only handling", () => {
     };
     vi.mocked(resolveSessionAuthProfileOverride).mockImplementationOnce(async (params) => {
       expect(params.provider).toBe("openai");
-      expect(params.storePath).toBeUndefined();
       expect(params.sessionEntry).not.toBe(sessionEntry);
       expect(params.sessionStore).not.toBe(sessionStore);
       if (params.sessionEntry) {
@@ -1310,7 +1303,6 @@ describe("runPreparedReply media-only handling", () => {
         sessionId: "session-image-auth",
         sessionEntry,
         sessionStore,
-        storePath: "/tmp/sessions.json",
       }),
     );
 
@@ -1327,7 +1319,6 @@ describe("runPreparedReply media-only handling", () => {
       await import("../../agents/auth-profiles/session-override.js");
     const sessionEntry: SessionEntry = {
       sessionId: "session-image-default-provider-auth",
-      sessionFile: "/tmp/session-image-default-provider-auth.jsonl",
       providerOverride: "anthropic",
       modelOverride: "claude-opus-4-1",
       authProfileOverride: "anthropic:work",
@@ -1339,7 +1330,6 @@ describe("runPreparedReply media-only handling", () => {
     };
     vi.mocked(resolveSessionAuthProfileOverride).mockImplementationOnce(async (params) => {
       expect(params.provider).toBe("openai");
-      expect(params.storePath).toBeUndefined();
       expect(params.sessionEntry).not.toBe(sessionEntry);
       expect(params.sessionStore).not.toBe(sessionStore);
       if (params.sessionEntry) {
@@ -1360,7 +1350,6 @@ describe("runPreparedReply media-only handling", () => {
         sessionId: "session-image-default-provider-auth",
         sessionEntry,
         sessionStore,
-        storePath: "/tmp/sessions.json",
       }),
     );
 
@@ -1376,7 +1365,6 @@ describe("runPreparedReply media-only handling", () => {
       await import("../../agents/auth-profiles/session-override.js");
     const sessionEntry: SessionEntry = {
       sessionId: "session-image-runtime-provider-auth",
-      sessionFile: "/tmp/session-image-runtime-provider-auth.jsonl",
       modelProvider: "anthropic",
       model: "claude-opus-4-1",
       authProfileOverride: "anthropic:work",
@@ -1388,7 +1376,6 @@ describe("runPreparedReply media-only handling", () => {
     };
     vi.mocked(resolveSessionAuthProfileOverride).mockImplementationOnce(async (params) => {
       expect(params.provider).toBe("openai");
-      expect(params.storePath).toBeUndefined();
       expect(params.sessionEntry).not.toBe(sessionEntry);
       expect(params.sessionStore).not.toBe(sessionStore);
       if (params.sessionEntry) {
@@ -1410,7 +1397,6 @@ describe("runPreparedReply media-only handling", () => {
         sessionId: "session-image-runtime-provider-auth",
         sessionEntry,
         sessionStore,
-        storePath: "/tmp/sessions.json",
       }),
     );
 
@@ -1433,7 +1419,6 @@ describe("runPreparedReply media-only handling", () => {
     const sessionStore: Record<string, SessionEntry> = {
       "session-key": {
         sessionId: "session-before-rotation",
-        sessionFile: "/tmp/session-before-rotation.jsonl",
         updatedAt: 1,
       },
     };
@@ -1462,7 +1447,6 @@ describe("runPreparedReply media-only handling", () => {
     sessionStore["session-key"] = {
       ...sessionStore["session-key"],
       sessionId: "session-after-rotation",
-      sessionFile: "/tmp/session-after-rotation.jsonl",
       updatedAt: 2,
     };
     rotatedRun.updateSessionId("session-after-rotation");

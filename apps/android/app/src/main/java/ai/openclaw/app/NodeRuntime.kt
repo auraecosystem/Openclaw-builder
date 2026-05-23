@@ -6,6 +6,7 @@ import ai.openclaw.app.chat.ChatPendingToolCall
 import ai.openclaw.app.chat.ChatSessionEntry
 import ai.openclaw.app.chat.OutgoingAttachment
 import ai.openclaw.app.gateway.DeviceAuthStore
+import ai.openclaw.app.gateway.DeviceAuthTokenStore
 import ai.openclaw.app.gateway.DeviceIdentityStore
 import ai.openclaw.app.gateway.GatewayDiscovery
 import ai.openclaw.app.gateway.GatewayEndpoint
@@ -77,6 +78,7 @@ class NodeRuntime(
   context: Context,
   val prefs: SecurePrefs = SecurePrefs(context.applicationContext),
   private val tlsFingerprintProbe: suspend (String, Int) -> GatewayTlsProbeResult = ::probeGatewayTlsFingerprint,
+  private val deviceAuthStore: DeviceAuthTokenStore = DeviceAuthStore(context.applicationContext),
 ) {
   data class GatewayConnectAuth(
     val token: String?,
@@ -86,7 +88,6 @@ class NodeRuntime(
 
   private val appContext = context.applicationContext
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-  private val deviceAuthStore = DeviceAuthStore(prefs)
   val canvas = CanvasController()
   val camera = CameraCaptureManager(appContext)
   val location = LocationCaptureManager(appContext)
@@ -107,7 +108,6 @@ class NodeRuntime(
 
   private val cameraHandler: CameraHandler =
     CameraHandler(
-      appContext = appContext,
       camera = camera,
       externalAudioCaptureActive = externalAudioCaptureActive,
       showCameraHud = ::showCameraHud,
@@ -117,7 +117,6 @@ class NodeRuntime(
 
   private val debugHandler: DebugHandler =
     DebugHandler(
-      appContext = appContext,
       identityStore = identityStore,
     )
 

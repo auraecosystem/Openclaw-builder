@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { safeFileURLToPath } from "../infra/local-file-access.js";
 import { resolveUserPath } from "../utils.js";
-import { getMediaDir, resolveMediaBufferPath } from "./store.js";
+import { getMediaMaterializationDir, resolveMediaBufferPath } from "./store.js";
 
 type MediaReferenceErrorCode = "invalid-path" | "path-not-allowed";
 
@@ -87,15 +87,6 @@ function maybeLocalPathFromSource(source: string): string | null {
   return null;
 }
 
-function relativePathEscapesBase(relativePath: string): boolean {
-  return (
-    relativePath === ".." ||
-    relativePath.startsWith("../") ||
-    relativePath.startsWith("..\\") ||
-    path.isAbsolute(relativePath)
-  );
-}
-
 async function resolvePathForContainment(candidate: string): Promise<string> {
   try {
     return await fs.realpath(candidate);
@@ -166,17 +157,24 @@ export async function resolveInboundMediaReference(
     return null;
   }
 
-  const rawInboundDir = path.resolve(getMediaDir(), "inbound");
+  const inboundDirs = [path.resolve(getMediaMaterializationDir(), "inbound")];
   const rawResolvedPath = path.resolve(localPath);
-  const rawRel = path.relative(rawInboundDir, rawResolvedPath);
-  const rel =
-    rawRel && !relativePathEscapesBase(rawRel)
-      ? rawRel
-      : path.relative(
-          await resolvePathForContainment(rawInboundDir),
-          await resolvePathForContainment(localPath),
-        );
-  if (!rel || relativePathEscapesBase(rel) || rel.includes(path.sep)) {
+  let rel: string | null = null;
+  for (const inboundDir of inboundDirs) {
+    const rawRel = path.relative(inboundDir, rawResolvedPath);
+    const candidate =
+      rawRel && !rawRel.startsWith("..") && !path.isAbsolute(rawRel)
+        ? rawRel
+        : path.relative(
+            await resolvePathForContainment(inboundDir),
+            await resolvePathForContainment(localPath),
+          );
+    if (candidate && !candidate.startsWith("..") && !path.isAbsolute(candidate)) {
+      rel = candidate;
+      break;
+    }
+  }
+  if (!rel || rel.includes(path.sep)) {
     return null;
   }
 

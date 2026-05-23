@@ -1514,7 +1514,7 @@ ensure_macos_default_node_active() {
     return 1
 }
 
-ensure_macos_node22_active() {
+ensure_macos_node24_active() {
     ensure_macos_default_node_active "$@"
 }
 

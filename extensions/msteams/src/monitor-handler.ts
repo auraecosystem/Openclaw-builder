@@ -1,6 +1,6 @@
-import path from "node:path";
+import { appendSessionTranscriptMessage } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
-import { appendRegularFile } from "openclaw/plugin-sdk/security-runtime";
+import { getSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { formatUnknownError } from "./errors.js";
 import { buildFeedbackEvent, runFeedbackReflection } from "./feedback-reflection.js";
@@ -200,8 +200,8 @@ async function handleFeedbackInvoke(
   const messageId = value.replyToId ?? activity.replyToId ?? "unknown";
   const isNegative = reaction === "dislike";
 
-  // Route feedback using the same chat-type logic as normal messages
-  // so session keys, agent IDs, and transcript paths match.
+  // Route feedback using the same chat-type logic as normal messages so session
+  // keys, agent IDs, and SQLite transcript identity match.
   const convType = normalizeOptionalLowercaseString(activity.conversation?.conversationType);
   const isDirectMessage = convType === "personal" || (!convType && !activity.conversation?.isGroup);
   const isChannel = convType === "channel";
@@ -232,7 +232,7 @@ async function handleFeedbackInvoke(
     route.sessionKey = threadKeys.sessionKey;
   }
 
-  // Log feedback event to session JSONL
+  // Log feedback event to the SQLite transcript.
   const feedbackEvent = buildFeedbackEvent({
     messageId,
     value: isNegative ? "negative" : "positive",
@@ -249,19 +249,17 @@ async function handleFeedbackInvoke(
     hasComment: Boolean(userComment),
   });
 
-  // Write feedback event to session transcript
+  // Append feedback to the SQLite transcript.
   try {
-    const storePath = core.channel.session.resolveStorePath(deps.cfg.session?.store, {
+    const transcriptSessionId =
+      getSessionEntry({
+        agentId: route.agentId,
+        sessionKey: route.sessionKey,
+      })?.sessionId ?? route.sessionKey;
+    await appendSessionTranscriptMessage({
       agentId: route.agentId,
-    });
-    const safeKey = route.sessionKey.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const transcriptFile = path.join(storePath, `${safeKey}.jsonl`);
-    await appendRegularFile({
-      filePath: transcriptFile,
-      content: `${JSON.stringify(feedbackEvent)}\n`,
-      rejectSymlinkParents: true,
-    }).catch(() => {
-      // Best effort — transcript dir may not exist yet
+      sessionId: transcriptSessionId,
+      message: feedbackEvent,
     });
   } catch {
     // Best effort

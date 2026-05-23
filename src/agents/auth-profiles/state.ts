@@ -1,9 +1,21 @@
-import fs from "node:fs";
-import { loadJsonFile, saveJsonFile } from "../../infra/json-file.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
+import type {
+  OpenClawStateDatabase,
+  OpenClawStateDatabaseOptions,
+} from "../../state/openclaw-state-db.js";
 import { normalizeProviderId } from "../provider-id.js";
 import { AUTH_STORE_VERSION } from "./constants.js";
-import { resolveAuthStatePath } from "./paths.js";
+import { resolveAuthProfileStoreKey } from "./paths.js";
+import {
+  deleteAuthProfileStatePayload,
+  deleteAuthProfileStatePayloadInTransaction,
+  readAuthProfileStatePayloadResult,
+  readAuthProfileStatePayloadResultFromDatabase,
+  readAuthProfileStatePayloadResultReadOnly,
+  writeAuthProfileStatePayload as writeAuthProfileStatePayloadToSqlite,
+  writeAuthProfileStatePayloadInTransaction,
+  type AuthProfilePayloadValue,
+} from "./sqlite-storage.js";
 import type {
   AuthProfileBlockedReason,
   AuthProfileBlockedSource,
@@ -30,6 +42,13 @@ const AUTH_FAILURE_REASONS = new Set<AuthProfileFailureReason>([
 ]);
 const AUTH_BLOCKED_REASONS = new Set<AuthProfileBlockedReason>(["subscription_limit"]);
 const AUTH_BLOCKED_SOURCES = new Set<AuthProfileBlockedSource>(["codex_rate_limits", "wham"]);
+
+export function authProfileStateKey(
+  agentDir?: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return resolveAuthProfileStoreKey(agentDir, env);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -181,11 +200,57 @@ export function mergeAuthProfileState(
   };
 }
 
-export function loadPersistedAuthProfileState(agentDir?: string): AuthProfileState {
-  return coerceAuthProfileState(loadJsonFile(resolveAuthStatePath(agentDir)));
+function authProfileStateToPayloadValue(state: AuthProfileStateStore): AuthProfilePayloadValue {
+  return state as AuthProfilePayloadValue;
 }
 
-function buildPersistedAuthProfileState(store: AuthProfileState): AuthProfileStateStore | null {
+function writeAuthProfileStatePayload(key: string, payload: AuthProfileStateStore): void {
+  writeAuthProfileStatePayloadToSqlite(key, authProfileStateToPayloadValue(payload));
+}
+
+export function loadPersistedAuthProfileState(
+  agentDir?: string,
+  options: OpenClawStateDatabaseOptions = {},
+): AuthProfileState {
+  const key = authProfileStateKey(agentDir, options.env);
+  const sqliteState = readAuthProfileStatePayloadResult(key, options);
+  if (sqliteState.exists && sqliteState.value !== undefined) {
+    return coerceAuthProfileState(sqliteState.value);
+  }
+
+  return {};
+}
+
+export function loadPersistedAuthProfileStateReadOnly(
+  agentDir?: string,
+  options: OpenClawStateDatabaseOptions = {},
+): AuthProfileState {
+  const key = authProfileStateKey(agentDir, options.env);
+  const sqliteState = readAuthProfileStatePayloadResultReadOnly(key, options);
+  if (sqliteState.exists && sqliteState.value !== undefined) {
+    return coerceAuthProfileState(sqliteState.value);
+  }
+
+  return {};
+}
+
+export function loadPersistedAuthProfileStateFromDatabase(
+  database: OpenClawStateDatabase,
+  agentDir?: string,
+  options: Pick<OpenClawStateDatabaseOptions, "env"> = {},
+): AuthProfileState {
+  const key = authProfileStateKey(agentDir, options.env);
+  const sqliteState = readAuthProfileStatePayloadResultFromDatabase(database, key);
+  if (sqliteState.exists && sqliteState.value !== undefined) {
+    return coerceAuthProfileState(sqliteState.value);
+  }
+
+  return {};
+}
+
+export function buildPersistedAuthProfileState(
+  store: AuthProfileState,
+): AuthProfileStateStore | null {
   const state = coerceAuthProfileState(store);
   if (!state.order && !state.lastGood && !state.usageStats) {
     return null;
@@ -202,18 +267,46 @@ export function savePersistedAuthProfileState(
   store: AuthProfileState,
   agentDir?: string,
 ): AuthProfileStateStore | null {
-  const payload = buildPersistedAuthProfileState(store);
-  const statePath = resolveAuthStatePath(agentDir);
+  return savePersistedAuthProfileStatePayload({
+    store,
+    key: authProfileStateKey(agentDir),
+    write: (key, payload) => writeAuthProfileStatePayload(key, payload),
+    delete: (key) => deleteAuthProfileStatePayload(key),
+  });
+}
+
+export function savePersistedAuthProfileStateInTransaction(
+  database: OpenClawStateDatabase,
+  store: AuthProfileState,
+  agentDir?: string,
+  updatedAt: number = Date.now(),
+  options: Pick<OpenClawStateDatabaseOptions, "env"> = {},
+): AuthProfileStateStore | null {
+  return savePersistedAuthProfileStatePayload({
+    store,
+    key: authProfileStateKey(agentDir, options.env),
+    write: (key, payload) =>
+      writeAuthProfileStatePayloadInTransaction(
+        database,
+        key,
+        authProfileStateToPayloadValue(payload),
+        updatedAt,
+      ),
+    delete: (key) => deleteAuthProfileStatePayloadInTransaction(database, key),
+  });
+}
+
+function savePersistedAuthProfileStatePayload(params: {
+  store: AuthProfileState;
+  key: string;
+  write: (key: string, payload: AuthProfileStateStore) => void;
+  delete: (key: string) => void;
+}): AuthProfileStateStore | null {
+  const payload = buildPersistedAuthProfileState(params.store);
   if (!payload) {
-    try {
-      fs.unlinkSync(statePath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
-        throw error;
-      }
-    }
+    params.delete(params.key);
     return null;
   }
-  saveJsonFile(statePath, payload);
+  params.write(params.key, payload);
   return payload;
 }

@@ -1,4 +1,3 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { SourceReplyDeliveryMode } from "../../../auto-reply/get-reply-options.types.js";
 import {
   createHeartbeatToolResponsePayload,
@@ -22,6 +21,7 @@ import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
 } from "../../../shared/string-coerce.js";
+import type { AssistantMessage } from "../../pi-ai-contract.js";
 import {
   BILLING_ERROR_USER_MESSAGE,
   formatAssistantErrorText,

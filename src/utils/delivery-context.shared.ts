@@ -22,6 +22,7 @@ export function normalizeDeliveryContext(context?: DeliveryContext): DeliveryCon
         : undefined,
     to: context.to,
     accountId: context.accountId,
+    chatType: context.chatType,
     threadId: context.threadId,
   });
   if (!route) {
@@ -32,6 +33,10 @@ export function normalizeDeliveryContext(context?: DeliveryContext): DeliveryCon
     to: channelRouteTarget(route),
     accountId: normalizeAccountId(route.accountId),
   };
+  const chatType = route.target?.chatType;
+  if (chatType) {
+    normalized.chatType = chatType;
+  }
   const threadId = channelRouteThreadId(route);
   if (threadId != null) {
     normalized.threadId = threadId;
@@ -64,6 +69,7 @@ export function deliveryContextFromChannelRoute(
     channel: normalized?.channel,
     to: channelRouteTarget(normalized),
     accountId: normalized?.accountId,
+    chatType: normalized?.target?.chatType,
     threadId: channelRouteThreadId(normalized),
   });
 }
@@ -85,7 +91,7 @@ function mergeRouteMetadataWithDeliveryContext(
     channel: route.channel ?? context.channel,
     to: route.target?.to ?? context.to,
     rawTo: route.target?.rawTo,
-    chatType: route.target?.chatType,
+    chatType: route.target?.chatType ?? context.chatType,
     accountId: route.accountId ?? context.accountId,
     threadId: route.thread?.id ?? context.threadId,
     threadKind: route.thread?.kind,
@@ -114,15 +120,17 @@ export function normalizeSessionDeliveryFields(source?: DeliveryContextSessionSo
 
   const normalizedRoute = normalizeDeliveryChannelRoute(source.route);
   const routeContext = deliveryContextFromChannelRoute(normalizedRoute);
-  const legacyContext = normalizeDeliveryContext({
-    channel: source.lastChannel ?? source.channel,
-    to: source.lastTo,
-    accountId: source.lastAccountId,
-    threadId: source.lastThreadId,
-  });
   const merged = mergeDeliveryContext(
     routeContext,
-    mergeDeliveryContext(legacyContext, normalizeDeliveryContext(source.deliveryContext)),
+    mergeDeliveryContext(
+      normalizeDeliveryContext({
+        channel: source.lastChannel ?? source.channel,
+        to: source.lastTo,
+        accountId: source.lastAccountId,
+        threadId: source.lastThreadId,
+      }),
+      normalizeDeliveryContext(source.deliveryContext),
+    ),
   );
 
   if (!merged) {
@@ -152,7 +160,7 @@ export function deliveryContextFromSession(
   if (!entry) {
     return undefined;
   }
-  const source: DeliveryContextSessionSource = {
+  return normalizeSessionDeliveryFields({
     route: entry.route,
     channel: entry.channel ?? entry.origin?.provider,
     lastChannel: entry.lastChannel,
@@ -161,8 +169,7 @@ export function deliveryContextFromSession(
     lastThreadId: entry.lastThreadId ?? entry.deliveryContext?.threadId ?? entry.origin?.threadId,
     origin: entry.origin,
     deliveryContext: entry.deliveryContext,
-  };
-  return normalizeSessionDeliveryFields(source).deliveryContext;
+  }).deliveryContext;
 }
 
 export function mergeDeliveryContext(
@@ -188,6 +195,9 @@ export function mergeDeliveryContext(
     accountId: channelsConflict
       ? normalizedPrimary?.accountId
       : (normalizedPrimary?.accountId ?? normalizedFallback?.accountId),
+    chatType: channelsConflict
+      ? normalizedPrimary?.chatType
+      : (normalizedPrimary?.chatType ?? normalizedFallback?.chatType),
     threadId: channelsConflict
       ? normalizedPrimary?.threadId
       : (normalizedPrimary?.threadId ?? normalizedFallback?.threadId),

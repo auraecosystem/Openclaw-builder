@@ -1,27 +1,33 @@
 import fs from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import path from "node:path";
+import { resetPluginBlobStoreForTests } from "openclaw/plugin-sdk/plugin-state-runtime";
+import type { PluginBlobStore } from "openclaw/plugin-sdk/plugin-state-runtime";
 import { createMockServerResponse } from "openclaw/plugin-sdk/test-env";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDiffsHttpHandler } from "./http.js";
 import { DiffArtifactStore } from "./store.js";
+import type { DiffBlobMetadata } from "./store.js";
 import { createDiffStoreHarness } from "./test-helpers.js";
 
 describe("DiffArtifactStore", () => {
   let rootDir: string;
   let store: DiffArtifactStore;
+  let blobStore: PluginBlobStore<DiffBlobMetadata>;
   let cleanupRootDir: () => Promise<void>;
 
   beforeEach(async () => {
     ({
       rootDir,
       store,
+      blobStore,
       cleanup: cleanupRootDir,
     } = await createDiffStoreHarness("openclaw-diffs-store-"));
   });
 
   afterEach(async () => {
     vi.useRealTimers();
+    resetPluginBlobStoreForTests();
     await cleanupRootDir();
   });
 
@@ -50,6 +56,28 @@ describe("DiffArtifactStore", () => {
     expect(await store.readHtml(artifact.id)).toBe("<html>demo</html>");
   });
 
+  it("does not write file-backed viewer metadata or html", async () => {
+    const artifact = await store.createArtifact({
+      html: "<html>sqlite</html>",
+      title: "SQLite",
+      inputKind: "patch",
+      fileCount: 1,
+    });
+
+    expect(artifact.htmlPath).toBe(`sqlite:diffs/artifacts/view:${artifact.id}`);
+    await expect(fs.stat(path.join(rootDir, artifact.id, "meta.json"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(fs.stat(path.join(rootDir, artifact.id, "viewer.html"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(await store.getArtifact(artifact.id, artifact.token)).toMatchObject({
+      id: artifact.id,
+      title: "SQLite",
+    });
+    expect(await store.readHtml(artifact.id)).toBe("<html>sqlite</html>");
+  });
+
   it("expires artifacts after the ttl", async () => {
     vi.useFakeTimers();
     const now = new Date("2026-02-27T16:00:00Z");
@@ -66,6 +94,26 @@ describe("DiffArtifactStore", () => {
     vi.setSystemTime(new Date(now.getTime() + 2_000));
     const loaded = await store.getArtifact(artifact.id, artifact.token);
     expect(loaded).toBeNull();
+  });
+
+  it("sweeps expired SQLite-only viewer artifacts during cleanup", async () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-02-27T16:00:00Z");
+    vi.setSystemTime(now);
+
+    const artifact = await store.createArtifact({
+      html: "<html>sqlite</html>",
+      title: "SQLite",
+      inputKind: "patch",
+      fileCount: 1,
+      ttlMs: 1_000,
+    });
+
+    vi.setSystemTime(new Date(now.getTime() + 2_000));
+    await store.cleanupExpired();
+
+    expect(await blobStore.deleteExpired()).toBe(0);
+    await expect(blobStore.lookup(`view:${artifact.id}`)).resolves.toBeUndefined();
   });
 
   it("updates the stored file path", async () => {
@@ -95,22 +143,6 @@ describe("DiffArtifactStore", () => {
     );
   });
 
-  it("rejects tampered html metadata paths outside the store root", async () => {
-    const artifact = await store.createArtifact({
-      html: "<html>demo</html>",
-      title: "Demo",
-      inputKind: "before_after",
-      fileCount: 1,
-    });
-    const metaPath = path.join(rootDir, artifact.id, "meta.json");
-    const rawMeta = await fs.readFile(metaPath, "utf8");
-    const meta = JSON.parse(rawMeta) as { htmlPath: string };
-    meta.htmlPath = "../outside.html";
-    await fs.writeFile(metaPath, JSON.stringify(meta), "utf8");
-
-    await expect(store.readHtml(artifact.id)).rejects.toThrow("escapes store root");
-  });
-
   it("creates standalone file artifacts with managed metadata", async () => {
     const standalone = await store.createStandaloneFileArtifact({
       context: {
@@ -125,6 +157,19 @@ describe("DiffArtifactStore", () => {
       agentId: "main",
       sessionId: "session-123",
     });
+  });
+
+  it("keeps standalone artifact dirs when cleanup overlaps metadata registration", async () => {
+    const register = blobStore.register.bind(blobStore);
+    vi.spyOn(blobStore, "register").mockImplementationOnce(async (key, metadata, blob, opts) => {
+      await store.cleanupExpired();
+      await register(key, metadata, blob, opts);
+    });
+
+    const standalone = await store.createStandaloneFileArtifact();
+
+    const directory = await fs.stat(path.dirname(standalone.filePath));
+    expect(directory.isDirectory()).toBe(true);
   });
 
   it("expires standalone file artifacts using ttl metadata", async () => {
@@ -185,10 +230,14 @@ describe("DiffArtifactStore", () => {
     vi.useFakeTimers();
     const now = new Date("2026-02-27T16:00:00Z");
     vi.setSystemTime(now);
-    store = new DiffArtifactStore({
+    await cleanupRootDir();
+    ({
       rootDir,
+      store,
+      cleanup: cleanupRootDir,
+    } = await createDiffStoreHarness("openclaw-diffs-store-cleanup-", {
       cleanupIntervalMs: 60_000,
-    });
+    }));
     const cleanupSpy = vi.spyOn(store, "cleanupExpired").mockResolvedValue();
 
     await store.createArtifact({

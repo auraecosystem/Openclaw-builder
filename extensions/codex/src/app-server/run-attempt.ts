@@ -19,6 +19,7 @@ import {
   finalizeHarnessContextEngineTurn,
   formatPrePromptPrecheckLog,
   formatErrorMessage,
+  hasSqliteSessionTranscriptEvents,
   hasBeforeToolCallPolicy,
   isActiveHarnessContextEngine,
   isSubagentSessionKey,
@@ -64,7 +65,6 @@ import {
   type DiagnosticEventPayload,
 } from "openclaw/plugin-sdk/diagnostic-runtime";
 import { isToolAllowed } from "openclaw/plugin-sdk/sandbox";
-import { pathExists } from "openclaw/plugin-sdk/security-runtime";
 import { defaultCodexAppInventoryCache } from "./app-inventory-cache.js";
 import { handleCodexAppServerApprovalRequest } from "./approval-bridge.js";
 import {
@@ -171,7 +171,10 @@ import {
   readCodexAppServerBinding,
   type CodexAppServerThreadBinding,
 } from "./session-binding.js";
-import { readCodexMirroredSessionHistoryMessages } from "./session-history.js";
+import {
+  readCodexMirroredSessionHistoryMessages,
+  type CodexMirroredSessionHistoryScope,
+} from "./session-history.js";
 import { clearSharedCodexAppServerClientIfCurrent } from "./shared-client.js";
 import {
   areCodexDynamicToolFingerprintsCompatible,
@@ -305,11 +308,15 @@ function hasCodexAppServerPotentialSideEffectEvidence(result: EmbeddedRunAttempt
   return result.replayMetadata.hadPotentialSideEffects;
 }
 
+type CodexAppServerReplayBlockedReason =
+  | "potential_side_effect"
+  | "assistant_output"
+  | "tool_activity"
+  | "active_item";
+
 function resolveCodexAppServerReplayBlockedReason(
   result: EmbeddedRunAttemptResult,
-):
-  | NonNullable<EmbeddedRunAttemptResult["codexAppServerFailure"]>["replayBlockedReason"]
-  | undefined {
+): CodexAppServerReplayBlockedReason | undefined {
   if (result.replayMetadata.hadPotentialSideEffects) {
     return "potential_side_effect";
   }
@@ -660,32 +667,6 @@ async function listCodexAppServerRolloutFilesForThread(
   return files;
 }
 
-async function readCodexSessionRecordForSessionFile(
-  sessionFile: string,
-): Promise<(Record<string, unknown> & { sessionKey: string }) | undefined> {
-  const sessionsFile = path.join(path.dirname(sessionFile), "sessions.json");
-  let store: JsonValue | undefined;
-  try {
-    store = JSON.parse(await fs.readFile(sessionsFile, "utf8")) as JsonValue;
-  } catch {
-    return undefined;
-  }
-  if (!isJsonObject(store)) {
-    return undefined;
-  }
-  const resolvedSessionFile = path.resolve(sessionFile);
-  for (const [sessionKey, record] of Object.entries(store)) {
-    if (!isJsonObject(record) || typeof record.sessionFile !== "string") {
-      continue;
-    }
-    if (path.resolve(record.sessionFile) !== resolvedSessionFile) {
-      continue;
-    }
-    return { sessionKey, ...record };
-  }
-  return undefined;
-}
-
 async function readCodexAppServerRolloutTokenUsage(file: string): Promise<number | undefined> {
   let handle: Awaited<ReturnType<typeof fs.open>>;
   try {
@@ -745,7 +726,7 @@ function maxFiniteNumber(values: Array<number | undefined>): number | undefined 
 
 async function rotateOversizedCodexAppServerStartupBinding(params: {
   binding: CodexAppServerThreadBinding | undefined;
-  sessionFile: string;
+  bindingIdentity: Parameters<typeof clearCodexAppServerBinding>[0];
   agentDir: string;
   codexHome?: string;
   config: EmbeddedRunAttemptParams["config"] | undefined;
@@ -754,10 +735,9 @@ async function rotateOversizedCodexAppServerStartupBinding(params: {
   if (!binding?.threadId) {
     return binding;
   }
-  if (params.config?.agents?.defaults?.compaction?.truncateAfterCompaction !== true) {
+  if (params.config?.agents?.defaults?.compaction?.rotateAfterCompaction !== true) {
     return binding;
   }
-  const sessionRecord = await readCodexSessionRecordForSessionFile(params.sessionFile);
   const maxBytes = parseCodexAppServerByteLimit(
     params.config?.agents?.defaults?.compaction?.maxActiveTranscriptBytes,
   );
@@ -777,7 +757,7 @@ async function rotateOversizedCodexAppServerStartupBinding(params: {
           files: oversizedFiles.map((file) => ({ path: file.path, bytes: file.bytes })),
         },
       );
-      await clearCodexAppServerBinding(params.sessionFile);
+      await clearCodexAppServerBinding(params.bindingIdentity);
       return undefined;
     }
   }
@@ -786,25 +766,17 @@ async function rotateOversizedCodexAppServerStartupBinding(params: {
       rolloutFiles.map(async (file) => readCodexAppServerRolloutTokenUsage(file.path)),
     ),
   );
-  const sessionTokens =
-    sessionRecord?.totalTokensFresh !== false &&
-    typeof sessionRecord?.totalTokens === "number" &&
-    Number.isFinite(sessionRecord.totalTokens)
-      ? sessionRecord.totalTokens
-      : undefined;
-  const tokenCount = maxFiniteNumber([sessionTokens, nativeTokens]);
+  const tokenCount = maxFiniteNumber([nativeTokens]);
   if (tokenCount !== undefined && tokenCount >= CODEX_APP_SERVER_NATIVE_THREAD_MAX_TOKENS) {
     embeddedAgentLog.warn(
       "codex app-server native transcript exceeded active token limit; starting a fresh thread",
       {
         threadId: binding.threadId,
         maxTokens: CODEX_APP_SERVER_NATIVE_THREAD_MAX_TOKENS,
-        sessionKey: sessionRecord?.sessionKey,
-        sessionTokens,
         nativeTokens,
       },
     );
-    await clearCodexAppServerBinding(params.sessionFile);
+    await clearCodexAppServerBinding(params.bindingIdentity);
     return undefined;
   }
   return binding;
@@ -898,11 +870,15 @@ export async function runCodexAppServerAttempt(
     agentId: params.agentId,
   });
   const agentDir = params.agentDir ?? resolveAgentDir(params.config ?? {}, sessionAgentId);
-  let startupBinding = await readCodexAppServerBinding(params.sessionFile);
+  const startupBindingIdentity = {
+    sessionKey: sandboxSessionKey,
+    sessionId: params.sessionId,
+  };
+  let startupBinding = await readCodexAppServerBinding(startupBindingIdentity);
   const startupBindingAuthProfileId = startupBinding?.authProfileId;
   startupBinding = await rotateOversizedCodexAppServerStartupBinding({
     binding: startupBinding,
-    sessionFile: params.sessionFile,
+    bindingIdentity: startupBindingIdentity,
     agentDir,
     codexHome: appServer.start.env?.CODEX_HOME,
     config: params.config,
@@ -929,20 +905,19 @@ export async function runCodexAppServerAttempt(
     ...(startupAuthProfileId ? { authProfileId: startupAuthProfileId } : {}),
   };
   let activeSessionId = params.sessionId;
-  let activeSessionFile = params.sessionFile;
   const buildActiveRunAttemptParams = (): EmbeddedRunAttemptParams => ({
     ...runtimeParams,
     sessionId: activeSessionId,
-    sessionFile: activeSessionFile,
+  });
+  const activeTranscriptScope = (): CodexMirroredSessionHistoryScope => ({
+    agentId: sessionAgentId,
+    sessionId: activeSessionId,
   });
   const adoptContextEngineCompactionTranscript = (compactResult: {
-    result?: { sessionId?: string; sessionFile?: string };
+    result?: { sessionId?: string };
   }): void => {
     if (compactResult.result?.sessionId) {
       activeSessionId = compactResult.result.sessionId;
-    }
-    if (compactResult.result?.sessionFile) {
-      activeSessionFile = compactResult.result.sessionFile;
     }
   };
   const startupAuthAccountCacheKey = await resolveCodexAppServerAuthAccountCacheKey({
@@ -1028,8 +1003,6 @@ export async function runCodexAppServerAttempt(
       channelId: hookChannelId,
     },
   });
-  const hadSessionFile = await pathExists(activeSessionFile);
-  let historyMessages = (await readMirroredSessionHistoryMessages(activeSessionFile)) ?? [];
   const hookContextWindowFields = {
     ...(params.contextWindowInfo?.tokens
       ? { contextTokenBudget: params.contextWindowInfo.tokens }
@@ -1043,6 +1016,15 @@ export async function runCodexAppServerAttempt(
       ? { contextWindowReferenceTokens: params.contextWindowInfo.referenceTokens }
       : {}),
   };
+  const hadTranscript = hasSqliteSessionTranscriptEvents({
+    agentId: sessionAgentId,
+    sessionId: activeSessionId,
+  });
+  let historyMessages =
+    (await readMirroredSessionHistoryMessages({
+      agentId: sessionAgentId,
+      sessionId: activeSessionId,
+    })) ?? [];
   const hookContext = {
     runId: params.runId,
     agentId: sessionAgentId,
@@ -1096,7 +1078,7 @@ export async function runCodexAppServerAttempt(
         {
           sessionId: activeSessionId,
           sessionKey: contextSessionKey,
-          sessionFile: activeSessionFile,
+          transcriptScope: activeTranscriptScope(),
           tokenBudget: params.contextTokenBudget,
           force: true,
           ...(overflowTokenCount ? { currentTokenCount: overflowTokenCount } : {}),
@@ -1130,7 +1112,7 @@ export async function runCodexAppServerAttempt(
         contextEngine: activeContextEngine,
         sessionId: activeSessionId,
         sessionKey: contextSessionKey,
-        sessionFile: activeSessionFile,
+        transcriptScope: activeTranscriptScope(),
         reason: "compaction",
         runtimeContext: maintenanceRuntimeContext,
         config: params.config,
@@ -1148,18 +1130,21 @@ export async function runCodexAppServerAttempt(
   };
   if (activeContextEngine) {
     await bootstrapHarnessContextEngine({
-      hadSessionFile,
+      hadTranscript,
       contextEngine: activeContextEngine,
       sessionId: activeSessionId,
-      sessionKey: contextSessionKey,
-      sessionFile: activeSessionFile,
+      sessionKey: sandboxSessionKey,
+      transcriptScope: { agentId: sessionAgentId, sessionId: activeSessionId },
       runtimeContext: buildActiveContextEngineRuntimeContext(),
       runMaintenance: runHarnessContextEngineMaintenance,
       config: params.config,
       warn: (message) => embeddedAgentLog.warn(message),
     });
     historyMessages =
-      (await readMirroredSessionHistoryMessages(activeSessionFile)) ?? historyMessages;
+      (await readMirroredSessionHistoryMessages({
+        agentId: sessionAgentId,
+        sessionId: activeSessionId,
+      })) ?? historyMessages;
   }
   const workspaceBootstrapContext = await buildCodexWorkspaceBootstrapContext({
     params,
@@ -1304,7 +1289,7 @@ export async function runCodexAppServerAttempt(
   };
   const rebuildPromptAfterContextEngineCompaction = async () => {
     historyMessages =
-      (await readMirroredSessionHistoryMessages(activeSessionFile)) ?? historyMessages;
+      (await readMirroredSessionHistoryMessages(activeTranscriptScope())) ?? historyMessages;
     resetCodexPromptInputs();
     try {
       await applyActiveContextEngineProjection(undefined);
@@ -1374,7 +1359,6 @@ export async function runCodexAppServerAttempt(
           DEFAULT_CODEX_PROJECTION_RESERVE_TOKENS,
         ...(contextSessionKey ? { sessionKey: contextSessionKey } : {}),
         ...(activeSessionId ? { sessionId: activeSessionId } : {}),
-        ...(activeSessionFile ? { sessionFile: activeSessionFile } : {}),
       }),
     );
     if (precheck.route === "fits") {
@@ -2804,16 +2788,22 @@ export async function runCodexAppServerAttempt(
         },
       );
       try {
-        const preRetrySessionFile = activeSessionFile;
+        const preRetrySessionId = activeSessionId;
         const compactedForRetry = await forceContextEngineCompactionForCodexOverflow(
           turnStartError,
           {
             threadId: thread.threadId,
           },
         );
-        await clearCodexAppServerBinding(preRetrySessionFile);
-        if (activeSessionFile !== preRetrySessionFile) {
-          await clearCodexAppServerBinding(activeSessionFile);
+        await clearCodexAppServerBinding({
+          sessionKey: sandboxSessionKey,
+          sessionId: preRetrySessionId,
+        });
+        if (activeSessionId !== preRetrySessionId) {
+          await clearCodexAppServerBinding({
+            sessionKey: sandboxSessionKey,
+            sessionId: activeSessionId,
+          });
         }
         if (compactedForRetry) {
           await rebuildPromptAfterContextEngineCompaction();
@@ -2842,11 +2832,14 @@ export async function runCodexAppServerAttempt(
       });
       const turnStartErrorMessage = usageLimitError?.message ?? formatErrorMessage(turnStartError);
       if (isInvalidCodexImagePayloadError(turnStartErrorMessage)) {
-        await clearCodexBindingAfterInvalidImagePayload(activeSessionFile, {
-          phase: "turn_start",
-          threadId: thread.threadId,
-          error: turnStartErrorMessage,
-        });
+        await clearCodexBindingAfterInvalidImagePayload(
+          { sessionKey: params.sessionKey, sessionId: activeSessionId },
+          {
+            phase: "turn_start",
+            threadId: thread.threadId,
+            error: turnStartErrorMessage,
+          },
+        );
       }
       emitCodexAppServerEvent(params, {
         stream: "codex_app_server.lifecycle",
@@ -3059,12 +3052,15 @@ export async function runCodexAppServerAttempt(
           ? formatErrorMessage(finalPromptError)
           : undefined;
     if (isInvalidCodexImagePayloadError(finalPromptErrorMessage)) {
-      await clearCodexBindingAfterInvalidImagePayload(activeSessionFile, {
-        phase: "turn_completed",
-        threadId: thread.threadId,
-        turnId: activeTurnId,
-        error: finalPromptErrorMessage,
-      });
+      await clearCodexBindingAfterInvalidImagePayload(
+        { sessionKey: params.sessionKey, sessionId: activeSessionId },
+        {
+          phase: "turn_completed",
+          threadId: thread.threadId,
+          turnId: activeTurnId,
+          error: finalPromptErrorMessage,
+        },
+      );
     }
     if (shouldRefreshCodexRateLimitsForUsageLimitMessage(finalPromptErrorMessage)) {
       finalPromptError = await refreshCodexUsageLimitErrorMessage({
@@ -3151,7 +3147,7 @@ export async function runCodexAppServerAttempt(
     if (activeContextEngine) {
       const activeContextEnginePluginId = resolveContextEngineOwnerPluginId(activeContextEngine);
       const finalMessages =
-        (await readMirroredSessionHistoryMessages(activeSessionFile)) ??
+        (await readMirroredSessionHistoryMessages(activeTranscriptScope())) ??
         historyMessages.concat(result.messagesSnapshot);
       await finalizeHarnessContextEngineTurn({
         contextEngine: activeContextEngine,
@@ -3160,7 +3156,7 @@ export async function runCodexAppServerAttempt(
         yieldAborted: Boolean(result.yieldDetected),
         sessionIdUsed: activeSessionId,
         sessionKey: contextSessionKey,
-        sessionFile: activeSessionFile,
+        transcriptScope: activeTranscriptScope(),
         messagesSnapshot: finalMessages,
         prePromptMessageCount,
         tokenBudget: params.contextTokenBudget,
@@ -4617,10 +4613,10 @@ function isInvalidCodexImagePayloadError(message: unknown): boolean {
 }
 
 async function clearCodexBindingAfterInvalidImagePayload(
-  sessionFile: string,
+  identity: { sessionKey?: string; sessionId: string },
   fields: { phase: string; threadId?: string; turnId?: string; error?: string },
 ): Promise<void> {
-  const currentBinding = await readCodexAppServerBinding(sessionFile);
+  const currentBinding = await readCodexAppServerBinding(identity);
   if (fields.threadId && currentBinding && currentBinding.threadId !== fields.threadId) {
     embeddedAgentLog.warn(
       "codex app-server image payload error detected for unbound thread; preserving thread binding",
@@ -4632,7 +4628,7 @@ async function clearCodexBindingAfterInvalidImagePayload(
     "codex app-server image payload error detected; clearing thread binding",
     fields,
   );
-  await clearCodexAppServerBinding(sessionFile);
+  await clearCodexAppServerBinding(identity);
 }
 
 function describeNotificationActivity(
@@ -4940,12 +4936,13 @@ function readBoolean(record: JsonObject, key: string): boolean | undefined {
 }
 
 async function readMirroredSessionHistoryMessages(
-  sessionFile: string,
+  scope: CodexMirroredSessionHistoryScope,
 ): Promise<AgentMessage[] | undefined> {
-  const messages = await readCodexMirroredSessionHistoryMessages(sessionFile);
+  const messages = await readCodexMirroredSessionHistoryMessages(scope);
   if (!messages) {
     embeddedAgentLog.warn("failed to read mirrored session history for codex harness hooks", {
-      sessionFile,
+      agentId: scope.agentId,
+      sessionId: scope.sessionId,
     });
   }
   return messages;
@@ -5392,7 +5389,7 @@ function getCodexContextFileBasename(filePath: string): string {
 
 async function mirrorTranscriptBestEffort(params: {
   params: EmbeddedRunAttemptParams;
-  agentId?: string;
+  agentId: string;
   result: EmbeddedRunAttemptResult;
   sessionKey?: string;
   threadId: string;
@@ -5400,8 +5397,8 @@ async function mirrorTranscriptBestEffort(params: {
 }): Promise<void> {
   try {
     await mirrorCodexAppServerTranscript({
-      sessionFile: params.params.sessionFile,
       agentId: params.agentId,
+      sessionId: params.result.sessionIdUsed || params.params.sessionId,
       sessionKey: params.sessionKey,
       messages: params.result.messagesSnapshot,
       // Scope is thread-stable. Each entry in `messagesSnapshot` is tagged
@@ -5535,6 +5532,7 @@ export const testing = {
   resolveDynamicToolCallTimeoutMs,
   resolveCodexDynamicToolsLoading,
   rotateOversizedCodexAppServerStartupBinding,
+  resolveCodexExternalSandboxPolicyForOpenClawSandbox,
   resolveCodexAppServerForOpenClawToolPolicy,
   resolveOpenClawCodingToolsSessionKeys,
   shouldProjectMirroredHistoryForCodexStart,
