@@ -81,6 +81,7 @@ export type SubagentRunRecord = {
   };
   completionEnqueuedAt?: number;
   completionDeliveredAt?: number;
+  browserCleanupDispatchedAt?: number;
   completionAnnouncedAt?: number;
   lastAnnounceDropReason?: "queue_cap" | "parent_run_ended" | "sink_unavailable" | "dedupe";
   attachmentsDir?: string;
