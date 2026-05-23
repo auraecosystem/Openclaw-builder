@@ -213,6 +213,7 @@ async function finalizeAcpTurnOutput(params: {
   sessionTtsAuto?: TtsAutoMode;
   ttsChannel?: string;
   ttsAccountId?: string;
+  supportsCaptionedVoice?: boolean;
   shouldEmitResolvedIdentityNotice: boolean;
 }): Promise<boolean> {
   const ttsMode = resolveConfiguredTtsMode(params.cfg, {
@@ -235,12 +236,7 @@ async function finalizeAcpTurnOutput(params: {
 
   const willAttemptFinalTts = ttsMode === "final" && hasAccumulatedBlockText && canAttemptFinalTts;
 
-  // Only defer settling visible text for channels that deliver text inline as a
-  // voice-message caption (e.g. Telegram). Other channels send voice and text
-  // separately, so deferral just delays visible text with no benefit.
-  const CAPTIONED_VOICE_CHANNELS = new Set(["telegram"]);
-  const shouldDeferTextForTts =
-    willAttemptFinalTts && CAPTIONED_VOICE_CHANNELS.has(params.ttsChannel ?? "");
+  const shouldDeferTextForTts = willAttemptFinalTts && (params.supportsCaptionedVoice ?? false);
   if (!shouldDeferTextForTts) {
     await params.delivery.settleVisibleText();
   }
@@ -282,8 +278,16 @@ async function finalizeAcpTurnOutput(params: {
     } catch (err) {
       logVerbose(`dispatch-acp: accumulated ACP block TTS failed: ${formatErrorMessage(err)}`);
     }
-    if (!finalMediaDelivered && shouldDeferTextForTts) {
+    if (shouldDeferTextForTts) {
+      // Always settle deferred text delivery — even when the captioned voice
+      // was accepted by the dispatcher — so we can detect later sendVoice
+      // failures that would otherwise silently lose the caption text.
       await params.delivery.settleVisibleText();
+      if (finalMediaDelivered && params.delivery.hasFailedVisibleTextDelivery()) {
+        // The captioned voice delivery was queued but ultimately failed;
+        // reset so the text fallback below can send text standalone.
+        finalMediaDelivered = false;
+      }
       queuedFinal =
         params.delivery.hasDeliveredVisibleText() &&
         !params.delivery.hasFailedVisibleTextDelivery();
@@ -585,6 +589,7 @@ export async function tryDispatchAcpReply(params: {
         sessionTtsAuto: params.sessionTtsAuto,
         ttsChannel: params.ttsChannel,
         ttsAccountId: effectiveDispatchAccountId,
+        supportsCaptionedVoice: params.ttsChannel === "telegram",
         shouldEmitResolvedIdentityNotice,
       })) || queuedFinal;
 
