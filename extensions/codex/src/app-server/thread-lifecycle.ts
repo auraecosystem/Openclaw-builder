@@ -774,7 +774,7 @@ export function buildTurnCollaborationMode(
   };
 }
 
-function buildTurnScopedCollaborationInstructions(
+export function buildTurnScopedCollaborationInstructions(
   params: EmbeddedRunAttemptParams,
   options: {
     turnScopedDeveloperInstructions?: string;

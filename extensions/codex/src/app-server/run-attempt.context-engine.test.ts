@@ -1063,6 +1063,43 @@ describe("runCodexAppServerAttempt context-engine lifecycle", () => {
     expect(result.assistantTexts).toContain("final answer");
   });
 
+  it("counts collaboration-mode skills developer_instructions in the preemptive-compaction precheck", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const compact = vi.fn<ContextEngine["compact"]>(async () => ({
+      ok: true,
+      compacted: true,
+      result: { summary: "summary", firstKeptEntryId: "entry-1", tokensBefore: 90_000 },
+    }));
+    const assemble = vi.fn<ContextEngine["assemble"]>(async ({ messages, prompt }) => ({
+      messages: [...messages, userMessage(prompt ?? "", 10)],
+      estimatedTokens: 42,
+      systemPromptAddition: "context-engine system",
+      contextProjection: { mode: "thread_bootstrap", epoch: "epoch-before" },
+    }));
+    const contextEngine = createContextEngine({ assemble, compact });
+    const harness = createStartedThreadHarness();
+    const params = createParams(sessionFile, workspaceDir);
+    params.contextEngine = contextEngine;
+    // Budget chosen so the base developer_instructions + user input alone fit
+    // comfortably inside the prompt budget (80_000 tokens after the default
+    // 20_000-token reserve), but the ~62_500-token skills payload routed via
+    // collaborationMode.settings.developer_instructions pushes the precheck
+    // estimate over the budget. Without the skills lane being counted, the
+    // precheck returns "fits" and compaction is never triggered.
+    params.contextTokenBudget = 80_000;
+    params.skillsSnapshot = {
+      prompt: "x".repeat(250_000),
+      skills: [],
+    };
+
+    const run = runCodexAppServerAttempt(params);
+    await expect(run).rejects.toThrow(/Context overflow/);
+    expect(compact).toHaveBeenCalledTimes(1);
+    expect(compact.mock.calls[0]?.[0]?.compactionTarget).toBe("threshold");
+    expect(compact.mock.calls[0]?.[0]?.force).toBe(true);
+  });
+
   it("bounds a hung owning context-engine compaction during Codex overflow recovery", async () => {
     const sessionFile = path.join(tempDir, "session.jsonl");
     const workspaceDir = path.join(tempDir, "workspace");
