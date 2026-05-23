@@ -12,6 +12,7 @@ import { emitAgentPlanEvent } from "../../infra/agent-events.js";
 import { sleepWithAbort } from "../../infra/backoff.js";
 import { freezeDiagnosticTraceContext } from "../../infra/diagnostic-trace-context.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { redactIdentifier } from "../../logging/redact-identifier.js";
 import { buildAgentHookContextChannelFields } from "../../plugins/hook-agent-context.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { resolveProviderAuthProfileId } from "../../plugins/provider-runtime.js";
@@ -1163,6 +1164,7 @@ export async function runEmbeddedPiAgent(
           return;
         }
         const successProfileId = lastProfileId;
+        const safeSuccessProfileId = redactIdentifier(successProfileId, { len: 12 });
         const successProvider = resolveAuthProfileStateProvider(
           profileFailureStore,
           successProfileId,
@@ -1181,7 +1183,7 @@ export async function runEmbeddedPiAgent(
               log.warn(
                 `post-run auth-profile success bookkeeping completed after ${durationMs}ms: ` +
                   `runId=${params.runId} sessionId=${params.sessionId} ` +
-                  `provider=${sanitizeForLog(successProvider)} profileId=${sanitizeForLog(successProfileId)}`,
+                  `provider=${sanitizeForLog(successProvider)} profileId=${safeSuccessProfileId}`,
               );
             } else if (log.isEnabled("trace")) {
               log.trace(
@@ -1194,7 +1196,7 @@ export async function runEmbeddedPiAgent(
             log.warn(
               `post-run auth-profile success bookkeeping failed: ` +
                 `runId=${params.runId} sessionId=${params.sessionId} ` +
-                `provider=${sanitizeForLog(successProvider)} profileId=${sanitizeForLog(successProfileId)} ` +
+                `provider=${sanitizeForLog(successProvider)} profileId=${safeSuccessProfileId} ` +
                 `error=${formatErrorMessage(err)}`,
             );
           });
