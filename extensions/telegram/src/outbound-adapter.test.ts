@@ -4,10 +4,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const sendMessageTelegramMock = vi.fn();
 const pinMessageTelegramMock = vi.fn();
+const sendPollTelegramMock = vi.fn();
+const recordTelegramPollRegistryEntryMock = vi.fn();
 
 vi.mock("./send.js", () => ({
   pinMessageTelegram: (...args: unknown[]) => pinMessageTelegramMock(...args),
   sendMessageTelegram: (...args: unknown[]) => sendMessageTelegramMock(...args),
+  sendPollTelegram: (...args: unknown[]) => sendPollTelegramMock(...args),
+}));
+
+vi.mock("./poll-registry.js", () => ({
+  recordTelegramPollRegistryEntry: (...args: unknown[]) =>
+    recordTelegramPollRegistryEntryMock(...args),
 }));
 
 import { telegramOutbound } from "./outbound-adapter.js";
@@ -58,6 +66,8 @@ describe("telegramOutbound", () => {
   beforeEach(() => {
     pinMessageTelegramMock.mockReset();
     sendMessageTelegramMock.mockReset();
+    sendPollTelegramMock.mockReset();
+    recordTelegramPollRegistryEntryMock.mockReset();
   });
 
   it("forwards mediaLocalRoots in direct media sends", async () => {
@@ -506,5 +516,123 @@ describe("telegramOutbound", () => {
     expect(options.accountId).toBe("ops");
     expect(options.notify).toBe(true);
     expect(options.verbose).toBe(false);
+  });
+
+  it("records poll registry entry for non-anonymous polls via sendPoll", async () => {
+    sendPollTelegramMock.mockResolvedValueOnce({
+      messageId: "tg-poll-1",
+      chatId: "-100123",
+      pollId: "poll-abc",
+    });
+    recordTelegramPollRegistryEntryMock.mockResolvedValueOnce(undefined);
+
+    await telegramOutbound.sendPoll!({
+      cfg: {} as never,
+      to: "-100123",
+      poll: { question: "Favorite?", options: ["A", "B"] },
+      accountId: "ops",
+      isAnonymous: false,
+    });
+
+    expect(recordTelegramPollRegistryEntryMock).toHaveBeenCalledWith({
+      accountId: "ops",
+      pollId: "poll-abc",
+      chatId: "-100123",
+      messageThreadId: undefined,
+      question: "Favorite?",
+      options: ["A", "B"],
+    });
+  });
+
+  it("records poll registry with messageThreadId from target", async () => {
+    sendPollTelegramMock.mockResolvedValueOnce({
+      messageId: "tg-poll-2",
+      chatId: "-100123",
+      pollId: "poll-topic",
+    });
+    recordTelegramPollRegistryEntryMock.mockResolvedValueOnce(undefined);
+
+    await telegramOutbound.sendPoll!({
+      cfg: {} as never,
+      to: "-100123:topic:42",
+      poll: { question: "Vote?", options: ["Yes", "No"] },
+      accountId: "ops",
+      isAnonymous: false,
+    });
+
+    expect(sendPollTelegramMock.mock.calls[0]?.[2]).toEqual(
+      expect.objectContaining({ messageThreadId: 42 }),
+    );
+    expect(recordTelegramPollRegistryEntryMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pollId: "poll-topic",
+        messageThreadId: 42,
+      }),
+    );
+  });
+
+  it("records poll registry with explicit threadId", async () => {
+    sendPollTelegramMock.mockResolvedValueOnce({
+      messageId: "tg-poll-thread",
+      chatId: "-100123",
+      pollId: "poll-thread",
+    });
+    recordTelegramPollRegistryEntryMock.mockResolvedValueOnce(undefined);
+
+    await telegramOutbound.sendPoll!({
+      cfg: {} as never,
+      to: "-100123",
+      threadId: "99",
+      poll: { question: "Thread?", options: ["Yes", "No"] },
+      accountId: "ops",
+      isAnonymous: false,
+    });
+
+    expect(sendPollTelegramMock.mock.calls[0]?.[2]).toEqual(
+      expect.objectContaining({ messageThreadId: 99 }),
+    );
+    expect(recordTelegramPollRegistryEntryMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pollId: "poll-thread",
+        messageThreadId: 99,
+      }),
+    );
+  });
+
+  it("skips poll registry for anonymous polls", async () => {
+    sendPollTelegramMock.mockResolvedValueOnce({
+      messageId: "tg-poll-3",
+      chatId: "-100123",
+      pollId: "poll-anon",
+    });
+
+    await telegramOutbound.sendPoll!({
+      cfg: {} as never,
+      to: "-100123",
+      poll: { question: "Secret?", options: ["X", "Y"] },
+      isAnonymous: true,
+    });
+
+    expect(recordTelegramPollRegistryEntryMock).not.toHaveBeenCalled();
+  });
+
+  it("does not break outbound delivery when registry write fails", async () => {
+    sendPollTelegramMock.mockResolvedValueOnce({
+      messageId: "tg-poll-4",
+      chatId: "-100123",
+      pollId: "poll-fail",
+    });
+    recordTelegramPollRegistryEntryMock.mockRejectedValueOnce(new Error("disk full"));
+
+    const result = await telegramOutbound.sendPoll!({
+      cfg: {} as never,
+      to: "-100123",
+      poll: { question: "Broken?", options: ["A", "B"] },
+      accountId: "ops",
+      isAnonymous: false,
+    });
+
+    expect(result.pollId).toBe("poll-fail");
+    expect(result.messageId).toBe("tg-poll-4");
   });
 });

@@ -16,6 +16,7 @@ import {
   renderMessagePresentationFallbackText,
 } from "openclaw/plugin-sdk/interactive-runtime";
 import type { MessagePresentation } from "openclaw/plugin-sdk/interactive-runtime";
+import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { createTelegramActionGate, resolveTelegramPollActionGateState } from "./accounts.js";
 import { resolveTelegramInlineButtons } from "./button-types.js";
 import { notifyTelegramInboundEventOutboundSuccess } from "./inbound-event-delivery.js";
@@ -24,6 +25,7 @@ import {
   resolveTelegramTargetChatType,
 } from "./inline-buttons.js";
 import { resolveTelegramInteractiveTextFallback } from "./interactive-fallback.js";
+import { recordTelegramPollRegistryEntry } from "./poll-registry.js";
 import { resolveTelegramPollVisibility } from "./poll-visibility.js";
 import { resolveTelegramReactionLevel } from "./reaction-level.js";
 import {
@@ -123,6 +125,10 @@ function formatTelegramDeliveryTarget(to: string, messageThreadId?: number | nul
     return to;
   }
   return `${parsed.chatId}:topic:${topicId}`;
+}
+
+function resolveTelegramActionMessageThreadId(to: string, messageThreadId?: number | null) {
+  return messageThreadId ?? parseTelegramTarget(to).messageThreadId;
 }
 
 function readTelegramReplyToMessageId(params: Record<string, unknown>) {
@@ -500,6 +506,22 @@ export async function handleTelegramAction(
         gatewayClientScopes: options?.gatewayClientScopes,
       },
     );
+    if (result.pollId && isAnonymous === false) {
+      try {
+        await recordTelegramPollRegistryEntry({
+          accountId: accountId ?? undefined,
+          pollId: result.pollId,
+          chatId: result.chatId,
+          messageThreadId: resolveTelegramActionMessageThreadId(to, messageThreadId),
+          question,
+          options: answers,
+        });
+      } catch (err) {
+        logVerbose(
+          `telegram: failed to record poll registry entry for ${result.pollId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
     notifyVisibleOutboundSuccess(to, messageThreadId);
     return jsonResult({
       ok: true,

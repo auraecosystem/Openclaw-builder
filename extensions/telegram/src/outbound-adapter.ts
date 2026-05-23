@@ -22,6 +22,8 @@ import { resolveTelegramInlineButtons } from "./button-types.js";
 import { markdownToTelegramHtmlChunks, splitTelegramHtmlChunks } from "./format.js";
 import { resolveTelegramInteractiveTextFallback } from "./interactive-fallback.js";
 import { parseTelegramReplyToMessageId, parseTelegramThreadId } from "./outbound-params.js";
+import { recordTelegramPollRegistryEntry } from "./poll-registry.js";
+import { parseTelegramTarget } from "./targets.js";
 
 export const TELEGRAM_TEXT_CHUNK_LIMIT = 4000;
 export const TELEGRAM_POLL_OPTION_LIMIT = 10;
@@ -355,14 +357,31 @@ export function createTelegramOutboundAdapter(
       gatewayClientScopes,
     }) => {
       const { sendPollTelegram } = await loadSendModule();
-      return await sendPollTelegram(to, poll, {
+      const parsedTarget = parseTelegramTarget(to);
+      const messageThreadId = parseTelegramThreadId(threadId) ?? parsedTarget.messageThreadId;
+      const result = await sendPollTelegram(to, poll, {
         cfg,
         accountId: accountId ?? undefined,
-        messageThreadId: parseTelegramThreadId(threadId),
+        messageThreadId,
         silent: silent ?? undefined,
         isAnonymous: isAnonymous ?? undefined,
         gatewayClientScopes,
       });
+      if (result.pollId && isAnonymous === false) {
+        try {
+          await recordTelegramPollRegistryEntry({
+            accountId: accountId ?? undefined,
+            pollId: result.pollId,
+            chatId: result.chatId,
+            messageThreadId,
+            question: poll.question,
+            options: poll.options,
+          });
+        } catch {
+          // Best-effort: registry write failure should not break outbound delivery.
+        }
+      }
+      return result;
     },
   };
 }
