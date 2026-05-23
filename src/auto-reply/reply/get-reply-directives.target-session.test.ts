@@ -323,7 +323,6 @@ describe("resolveReplyDirectives", () => {
     mocks.resolveReplyExecOverrides.mockReturnValue(undefined);
   });
 
-<<<<<<< HEAD
   it("passes one-turn model override state into model selection", async () => {
     await resolveHelloWithModelDefaults({
       defaultThinking: "off",

@@ -483,6 +483,7 @@ export async function runEmbeddedPiAgent(
     return enqueueGlobal(async () => {
       throwIfAborted();
       const started = Date.now();
+      const fastModeStarted = params.fastModeStartedAtMs ?? started;
       let fastModeAutoOffAnnounced = false;
       let fastModeAutoResetAnnounced = false;
       const startupStages = createEmbeddedRunStageTracker();
@@ -529,7 +530,7 @@ export async function runEmbeddedPiAgent(
         }
         const next = resolveFastModeForElapsed({
           mode: "auto",
-          startedAtMs: started,
+          startedAtMs: fastModeStarted,
         });
         if (next.enabled) {
           return;
@@ -559,7 +560,7 @@ export async function runEmbeddedPiAgent(
       const resolveAttemptFastMode = (): boolean | undefined => {
         const resolved = resolveFastModeForElapsed({
           mode: params.fastMode,
-          startedAtMs: started,
+          startedAtMs: fastModeStarted,
         });
         return resolved.mode === undefined ? undefined : resolved.enabled;
       };

@@ -127,6 +127,8 @@ export type RunEmbeddedPiAgentParams = {
   authProfileIdSource?: "auto" | "user";
   thinkLevel?: ThinkLevel;
   fastMode?: FastMode;
+  /** Stable outer-run start time for auto fast-mode cutoff across retries/fallbacks. */
+  fastModeStartedAtMs?: number;
   verboseLevel?: VerboseLevel;
   reasoningLevel?: ReasoningLevel;
   toolResultFormat?: ToolResultFormat;

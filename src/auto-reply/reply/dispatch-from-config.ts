@@ -2134,6 +2134,9 @@ export async function dispatchReplyFromConfig(
                 if (isFastModeAutoProgress && progressCallbackForwarded) {
                   return;
                 }
+                if (sendPolicyDenied) {
+                  return;
+                }
                 if (
                   shouldSuppressProgressDelivery() &&
                   !isFastModeAutoProgress &&
