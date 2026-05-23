@@ -62,6 +62,7 @@ Docs: https://docs.openclaw.ai
 
 - Agents/subagents: report tool-only child progress during timeout summaries instead of showing no visible output.
 - Telegram/ACP: preserve explicit `:topic:` conversation suffixes when inbound ACP targets do not carry a separate thread id.
+- Plugins/memory-lancedb: add configurable `embedding.timeoutMs` and `embedding.maxRetries` for OpenAI-compatible embedding requests, validated and clamped to safe ranges with silent fallback to SDK defaults on out-of-bounds input. (#56532) Thanks @amittell.
 - Ollama: bypass the managed proxy for configured local embedding origins while keeping SSRF guardrails on unconfigured targets. Thanks @Kaspre.
 - OpenAI/images: route Codex API-key image generation through the native OpenAI Images API instead of the Codex OAuth streaming backend, avoiding 401s from valid API keys.
 - Checks/Windows: route full `pnpm check` stage commands through the managed child runner so Windows avoids Node shell-argv deprecation warnings there too.
