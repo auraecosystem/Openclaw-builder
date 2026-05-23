@@ -79,6 +79,7 @@ function makeForwardedRuntimePlan(overrides: RuntimePlanOverrides = {}): AgentRu
     preserveSignatures: false,
     sanitizeThinkingSignatures: true,
     dropThinkingBlocks: false,
+    dropAllThinkingBlocks: false,
     applyGoogleTurnOrdering: false,
     validateGeminiTurns: false,
     validateAnthropicTurns: false,

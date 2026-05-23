@@ -2081,6 +2081,7 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
       validateAnthropicTurns: true,
       preserveSignatures: true,
       dropThinkingBlocks: false,
+      dropAllThinkingBlocks: false,
     } as never);
     const stream = wrapped({} as never, { messages } as never, {} as never) as
       | FakeWrappedStream
@@ -2113,6 +2114,7 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
       validateAnthropicTurns: true,
       preserveSignatures: true,
       dropThinkingBlocks: false,
+      dropAllThinkingBlocks: false,
     } as never);
     const stream = wrapped({} as never, { messages } as never, {} as never) as
       | FakeWrappedStream
@@ -2143,6 +2145,7 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
       validateAnthropicTurns: true,
       preserveSignatures: true,
       dropThinkingBlocks: false,
+      dropAllThinkingBlocks: false,
     } as never);
     const stream = wrapped(
       { api: "anthropic-messages" } as never,
@@ -2181,6 +2184,7 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
       validateGeminiTurns: true,
       preserveSignatures: true,
       dropThinkingBlocks: false,
+      dropAllThinkingBlocks: false,
     } as never);
     const stream = wrapped(
       { api: "google-generative-ai" } as never,
@@ -2222,6 +2226,7 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
       validateAnthropicTurns: true,
       preserveSignatures: true,
       dropThinkingBlocks: false,
+      dropAllThinkingBlocks: false,
     } as never);
     const stream = wrapped(
       { api: "anthropic-messages" } as never,
@@ -2262,6 +2267,7 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
       validateAnthropicTurns: true,
       preserveSignatures: true,
       dropThinkingBlocks: false,
+      dropAllThinkingBlocks: false,
     } as never);
     const stream = wrapped(
       { api: "bedrock-converse-stream" } as never,
@@ -2303,6 +2309,7 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
       validateAnthropicTurns: true,
       preserveSignatures: true,
       dropThinkingBlocks: false,
+      dropAllThinkingBlocks: false,
     } as never);
     const stream = wrapped(
       { api: "anthropic-messages" } as never,
@@ -2355,6 +2362,7 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
         validateAnthropicTurns: true,
         preserveSignatures: true,
         dropThinkingBlocks: false,
+        dropAllThinkingBlocks: false,
       } as never,
     );
     const stream = wrapped(
@@ -2414,6 +2422,7 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
         validateAnthropicTurns: true,
         preserveSignatures: true,
         dropThinkingBlocks: false,
+        dropAllThinkingBlocks: false,
       } as never,
     );
     const stream = wrapped(
@@ -2932,6 +2941,7 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
       validateAnthropicTurns: true,
       preserveSignatures: false,
       dropThinkingBlocks: false,
+      dropAllThinkingBlocks: false,
     });
     const stream = wrapped({} as never, { messages } as never, {} as never) as
       | FakeWrappedStream
@@ -2979,6 +2989,7 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
       validateAnthropicTurns: true,
       preserveSignatures: false,
       dropThinkingBlocks: false,
+      dropAllThinkingBlocks: false,
     });
     const stream = wrapped({} as never, { messages } as never, {} as never) as
       | FakeWrappedStream
@@ -3031,6 +3042,7 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
       validateAnthropicTurns: true,
       preserveSignatures: true,
       dropThinkingBlocks: false,
+      dropAllThinkingBlocks: false,
     });
     const stream = wrapped(
       { api: "anthropic-messages" } as never,
@@ -3082,6 +3094,7 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
       validateAnthropicTurns: true,
       preserveSignatures: true,
       dropThinkingBlocks: false,
+      dropAllThinkingBlocks: false,
     });
     const stream = wrapped(
       { api: "anthropic-messages" } as never,
@@ -3126,6 +3139,7 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
         validateAnthropicTurns: true,
         preserveSignatures: false,
         dropThinkingBlocks: false,
+        dropAllThinkingBlocks: false,
       });
       const stream = wrapped({} as never, { messages } as never, {} as never) as
         | FakeWrappedStream
@@ -3168,6 +3182,7 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
       validateAnthropicTurns: true,
       preserveSignatures: false,
       dropThinkingBlocks: false,
+      dropAllThinkingBlocks: false,
     });
     const stream = wrapped({} as never, { messages } as never, {} as never) as
       | FakeWrappedStream
