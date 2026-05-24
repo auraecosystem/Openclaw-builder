@@ -376,17 +376,19 @@ async function assertModelFallbackCandidateHarnessAvailable(
   if (isCliAgentRuntime(agentRuntime, params.cfg)) {
     return;
   }
+  if (
+    agentRuntime === "auto" ||
+    agentRuntime === "pi" ||
+    (agentRuntime === "codex" && agentRuntimeSource === "implicit")
+  ) {
+    return;
+  }
   await params.prepareAgentHarnessRuntime?.({
     provider: params.provider,
     model: params.model,
     agentHarnessRuntimeOverride,
   });
-  if (
-    agentRuntime !== "auto" &&
-    agentRuntime !== "pi" &&
-    !(agentRuntime === "codex" && agentRuntimeSource === "implicit") &&
-    !getRegisteredAgentHarness(agentRuntime)
-  ) {
+  if (!getRegisteredAgentHarness(agentRuntime)) {
     throw new MissingAgentHarnessError(agentRuntime);
   }
 }
@@ -548,7 +550,7 @@ function resolveFallbackSoonestCooldownExpiry(params: {
   return soonest;
 }
 
-function resolveImageFallbackCandidates(
+export function resolveImageFallbackCandidates(
   params: {
     cfg: OpenClawConfig | undefined;
     defaultProvider: string;
@@ -605,7 +607,7 @@ function resolveImageFallbackCandidates(
   return candidates;
 }
 
-function resolveImageFallbackDefaultProvider(cfg: OpenClawConfig | undefined): string {
+export function resolveImageFallbackDefaultProvider(cfg: OpenClawConfig | undefined): string {
   const configuredPrimary = resolveAgentModelPrimaryValue(cfg?.agents?.defaults?.imageModel);
   if (configuredPrimary?.trim()) {
     const aliasIndex = buildModelAliasIndex({
