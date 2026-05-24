@@ -996,9 +996,7 @@ function buildExecRunningResult(params: {
   cwd?: string;
   tail: string;
 }): AgentToolResult<ExecToolDetails> {
-  const warningText = params.warningText?.trim()
-    ? `${redactToolPayloadText(params.warningText)}`
-    : "";
+  const warningText = params.warningText?.trim() ? redactToolPayloadText(params.warningText) : "";
   return {
     content: [
       {
