@@ -36,7 +36,7 @@ import {
   normalizePluginsConfigWithRegistry,
 } from "./plugin-registry-contributions.js";
 import type { PluginRegistrySnapshot } from "./plugin-registry-snapshot.js";
-import { normalizePluginIdScope, serializePluginIdScope } from "./plugin-scope.js";
+import { normalizePluginIdScope } from "./plugin-scope.js";
 
 export type GatewayStartupPluginPlan = {
   channelPluginIds: readonly string[];
@@ -1163,7 +1163,14 @@ export function isMetadataSnapshotScopedForGatewayStartup(params: {
     params.pluginIdScope.resolve({ index: params.metadataSnapshot.index }),
   );
   const snapshotPluginIds = normalizePluginIdScope(params.metadataSnapshot.pluginIds);
-  return serializePluginIdScope(snapshotPluginIds) === serializePluginIdScope(expectedPluginIds);
+  if (expectedPluginIds === undefined || snapshotPluginIds === undefined) {
+    return expectedPluginIds === undefined && snapshotPluginIds === undefined;
+  }
+  if (expectedPluginIds.length === 0) {
+    return snapshotPluginIds.length === 0;
+  }
+  const snapshotPluginIdSet = new Set(snapshotPluginIds);
+  return expectedPluginIds.every((pluginId) => snapshotPluginIdSet.has(pluginId));
 }
 
 function manifestOwnsConfiguredGenerationProvider(params: {

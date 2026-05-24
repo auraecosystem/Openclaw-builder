@@ -462,6 +462,139 @@ describe("loadPluginLookUpTable", () => {
     expect(table.startup.pluginIds).toEqual(["openai", "browser"]);
   });
 
+  it("reuses a scoped provided metadata snapshot when it covers the startup scope", async () => {
+    const plugins = [
+      createManifestRecord({
+        id: "openai",
+        origin: "bundled",
+        enabledByDefault: true,
+        providers: ["openai"],
+        activation: {
+          onStartup: true,
+        },
+      }),
+      createManifestRecord({
+        id: "browser",
+        origin: "bundled",
+        enabledByDefault: true,
+        activation: {
+          onStartup: true,
+          onConfigPaths: ["browser"],
+        },
+      }),
+      createManifestRecord({
+        id: "telegram",
+        origin: "bundled",
+        channels: ["telegram"],
+      }),
+    ];
+    const config = {
+      browser: {
+        enabled: false,
+      },
+      plugins: {
+        allow: ["openai"],
+        entries: {
+          browser: { enabled: false },
+          openai: { enabled: true },
+        },
+        slots: { memory: "none" },
+      },
+    } as OpenClawConfig;
+    const index = createIndex(plugins, {
+      policyHash: resolveInstalledPluginIndexPolicyHash(config),
+    });
+    loadPluginManifestRegistryForInstalledIndex.mockImplementation(
+      (params: { pluginIds?: readonly string[] }) => ({
+        plugins: params.pluginIds
+          ? plugins.filter((plugin) => params.pluginIds?.includes(plugin.id))
+          : plugins,
+        diagnostics: [],
+      }),
+    );
+    const { loadPluginMetadataSnapshot } = await import("./plugin-metadata-snapshot.js");
+    const { loadPluginLookUpTable } = await import("./plugin-lookup-table.js");
+
+    const metadataSnapshot = loadPluginMetadataSnapshot({
+      config,
+      env: {},
+      index,
+      pluginIds: ["browser", "openai"],
+    });
+    expect(metadataSnapshot.pluginIds).toEqual(["browser", "openai"]);
+    expect(metadataSnapshot.metrics.manifestPluginCount).toBe(2);
+    loadPluginManifestRegistryForInstalledIndex.mockClear();
+
+    const table = loadPluginLookUpTable({
+      config,
+      env: {},
+      index,
+      metadataSnapshot,
+    });
+
+    expect(loadPluginManifestRegistryForInstalledIndex).not.toHaveBeenCalled();
+    expect(table.pluginIds).toEqual(["browser", "openai"]);
+    expect(table.metrics.indexPluginCount).toBe(3);
+    expect(table.metrics.manifestPluginCount).toBe(2);
+    expect(table.byPluginId.has("telegram")).toBe(false);
+    expect(table.startup.pluginIds).toEqual(["openai"]);
+  });
+
+  it("rebuilds a non-empty scoped provided snapshot for an empty startup scope", async () => {
+    const plugins = [
+      createManifestRecord({
+        id: "openai",
+        origin: "bundled",
+        enabledByDefault: true,
+        providers: ["openai"],
+        activation: {
+          onStartup: true,
+        },
+      }),
+    ];
+    const config = {
+      plugins: {
+        enabled: false,
+      },
+    } as OpenClawConfig;
+    const index = createIndex(plugins, {
+      policyHash: resolveInstalledPluginIndexPolicyHash(config),
+    });
+    loadPluginManifestRegistryForInstalledIndex.mockImplementation(
+      (params: { pluginIds?: readonly string[] }) => ({
+        plugins: params.pluginIds
+          ? plugins.filter((plugin) => params.pluginIds?.includes(plugin.id))
+          : plugins,
+        diagnostics: [],
+      }),
+    );
+    const { loadPluginMetadataSnapshot } = await import("./plugin-metadata-snapshot.js");
+    const { loadPluginLookUpTable } = await import("./plugin-lookup-table.js");
+
+    const metadataSnapshot = loadPluginMetadataSnapshot({
+      config,
+      env: {},
+      index,
+      pluginIds: ["openai"],
+    });
+    loadPluginManifestRegistryForInstalledIndex.mockClear();
+
+    const table = loadPluginLookUpTable({
+      config,
+      env: {},
+      index,
+      metadataSnapshot,
+    });
+
+    expect(loadPluginManifestRegistryForInstalledIndex).toHaveBeenCalledOnce();
+    expect(loadPluginManifestRegistryForInstalledIndex.mock.calls[0]?.[0]).toMatchObject({
+      pluginIds: [],
+    });
+    expect(table.pluginIds).toEqual([]);
+    expect(table.metrics.manifestPluginCount).toBe(0);
+    expect(table.startup.pluginIds).toEqual([]);
+  });
+
   it("derives startup ids from a provided metadata snapshot without reloading manifests", async () => {
     const plugins = [
       createManifestRecord({
