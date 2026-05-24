@@ -1,7 +1,11 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
+import {
+  clearCompactionProviders,
+  registerCompactionProvider,
+} from "../../plugins/compaction-provider.js";
 import { getCompactionSafeguardRuntime } from "../pi-hooks/compaction-safeguard-runtime.js";
 import compactionSafeguardExtension from "../pi-hooks/compaction-safeguard.js";
 import contextPruningExtension from "../pi-hooks/context-pruning.js";
@@ -49,6 +53,10 @@ function expectSafeguardRuntime(
 }
 
 describe("buildEmbeddedExtensionFactories", () => {
+  afterEach(() => {
+    clearCompactionProviders();
+  });
+
   it("enables quality-guard retries by default in safeguard mode", () => {
     const cfg = {
       agents: {
@@ -119,6 +127,63 @@ describe("buildEmbeddedExtensionFactories", () => {
     expect(getCompactionSafeguardRuntime(sessionManager)?.workspaceDir).toBe(
       "/tmp/openclaw-workspace",
     );
+  });
+
+  it("uses the selected memory.compaction plugin provider when no explicit provider is configured", () => {
+    registerCompactionProvider(
+      {
+        id: "slot-provider",
+        label: "Slot Provider",
+        summarize: async () => "summary",
+      },
+      { ownerPluginId: "memory-compactor" },
+    );
+
+    const { sessionManager } = buildSafeguardFactories({
+      plugins: {
+        slots: {
+          "memory.compaction": "memory-compactor",
+        },
+      },
+      agents: {
+        defaults: {
+          compaction: {
+            mode: "safeguard",
+          },
+        },
+      },
+    } as OpenClawConfig);
+
+    expect(getCompactionSafeguardRuntime(sessionManager)?.provider).toBe("slot-provider");
+  });
+
+  it("keeps explicit compaction.provider ahead of memory.compaction slot provider", () => {
+    registerCompactionProvider(
+      {
+        id: "slot-provider",
+        label: "Slot Provider",
+        summarize: async () => "summary",
+      },
+      { ownerPluginId: "memory-compactor" },
+    );
+
+    const { sessionManager } = buildSafeguardFactories({
+      plugins: {
+        slots: {
+          "memory.compaction": "memory-compactor",
+        },
+      },
+      agents: {
+        defaults: {
+          compaction: {
+            mode: "safeguard",
+            provider: "explicit-provider",
+          },
+        },
+      },
+    } as OpenClawConfig);
+
+    expect(getCompactionSafeguardRuntime(sessionManager)?.provider).toBe("explicit-provider");
   });
 
   it("enables cache-ttl pruning for custom anthropic-messages providers", () => {
