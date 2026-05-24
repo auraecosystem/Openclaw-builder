@@ -2,6 +2,7 @@ import type { Bot } from "grammy";
 import type { Message } from "grammy/types";
 import type {
   DmPolicy,
+  MarkdownTableMode,
   OpenClawConfig,
   ReplyToMode,
   TelegramAccountConfig,
@@ -23,6 +24,8 @@ import { dispatchTelegramMessage } from "./bot-message-dispatch.js";
 import type { TelegramBotOptions } from "./bot.types.js";
 import type { TelegramContext } from "./bot/types.js";
 import { resolveTelegramConversationRoute } from "./conversation-route.js";
+import { markdownToTelegramChunks } from "./format.js";
+import { resolveMarkdownTableMode } from "./send.runtime.js";
 
 const DEFAULT_GUEST_FALLBACK_TEXT = "I could not produce a visible answer. Please try again.";
 const TELEGRAM_GUEST_MESSAGE_TEXT_LIMIT = 4096;
@@ -50,6 +53,7 @@ type TelegramAnswerGuestQueryPayload = {
     title: string;
     input_message_content: {
       message_text: string;
+      parse_mode?: "HTML";
     };
     description?: string;
   };
@@ -129,9 +133,14 @@ function buildGuestSessionKey(params: {
 function buildGuestAnswerPayload(
   guestQueryId: string,
   text: string,
+  options: { tableMode?: MarkdownTableMode } = {},
 ): TelegramAnswerGuestQueryPayload {
   const trimmed = text.trim();
-  const messageText = trimmed.slice(0, TELEGRAM_GUEST_MESSAGE_TEXT_LIMIT);
+  const chunk = markdownToTelegramChunks(trimmed, TELEGRAM_GUEST_MESSAGE_TEXT_LIMIT, {
+    tableMode: options.tableMode,
+  })[0];
+  const messageText = chunk?.html ?? trimmed.slice(0, TELEGRAM_GUEST_MESSAGE_TEXT_LIMIT);
+  const description = chunk?.text ?? trimmed;
   return {
     guest_query_id: guestQueryId,
     result: {
@@ -140,8 +149,9 @@ function buildGuestAnswerPayload(
       title: GUEST_RESULT_TITLE,
       input_message_content: {
         message_text: messageText,
+        parse_mode: "HTML",
       },
-      ...(messageText ? { description: messageText.slice(0, 120) } : {}),
+      ...(description ? { description: description.slice(0, 120) } : {}),
     },
   };
 }
@@ -150,13 +160,18 @@ async function answerGuestQuery(params: {
   bot: Bot;
   guestQueryId: string;
   text: string;
+  tableMode?: MarkdownTableMode;
 }): Promise<boolean> {
   const api = params.bot.api as unknown as TelegramGuestApi;
   const answer = api.raw?.answerGuestQuery;
   if (typeof answer !== "function") {
     throw new Error("Telegram API client does not expose raw.answerGuestQuery");
   }
-  await answer(buildGuestAnswerPayload(params.guestQueryId, params.text));
+  await answer(
+    buildGuestAnswerPayload(params.guestQueryId, params.text, {
+      tableMode: params.tableMode,
+    }),
+  );
   return true;
 }
 
@@ -228,6 +243,11 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
         bot: params.bot,
         guestQueryId,
         text,
+        tableMode: resolveMarkdownTableMode({
+          cfg: freshCfg,
+          channel: "telegram",
+          accountId: params.account.accountId,
+        }),
       });
       return answered;
     };

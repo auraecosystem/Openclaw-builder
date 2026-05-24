@@ -522,7 +522,10 @@ describe("createTelegramBot", () => {
       guest_query_id: "guest-query-1",
       result: expect.objectContaining({
         type: "article",
-        input_message_content: { message_text: "guest answer" },
+        input_message_content: expect.objectContaining({
+          message_text: "guest answer",
+          parse_mode: "HTML",
+        }),
       }),
     });
     expect(replySpy.mock.calls.at(0)?.[1]?.sourceReplyDeliveryMode).toBe("automatic");
@@ -629,6 +632,7 @@ describe("createTelegramBot", () => {
     );
     const payload = answerGuestQuerySpy.mock.calls.at(0)?.[0];
     expect(payload?.result.input_message_content.message_text).toBe("guest answer");
+    expect(payload?.result.input_message_content.parse_mode).toBe("HTML");
     expect(sendMessageSpy).not.toHaveBeenCalled();
   });
 
@@ -645,6 +649,11 @@ describe("createTelegramBot", () => {
         setup: () =>
           replySpy.mockResolvedValue([{ text: "first answer" }, { text: "second answer" }]),
         expected: "first answer",
+      },
+      {
+        name: "formats markdown",
+        setup: () => replySpy.mockResolvedValue({ text: "Das ist ja **super**" }),
+        expected: "Das ist ja <b>super</b>",
       },
       {
         name: "skips progress",
@@ -680,6 +689,10 @@ describe("createTelegramBot", () => {
 
       expect(answerGuestQuerySpy, testCase.name).toHaveBeenCalledTimes(1);
       expect(getGuestAnswerText(), testCase.name).toBe(testCase.expected);
+      expect(
+        answerGuestQuerySpy.mock.calls.at(0)?.[0]?.result.input_message_content.parse_mode,
+        testCase.name,
+      ).toBe("HTML");
       expect(sendMessageSpy, testCase.name).not.toHaveBeenCalled();
     }
   });
