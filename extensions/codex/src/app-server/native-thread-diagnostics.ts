@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { embeddedAgentLog } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { emitTrustedDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { CodexAppServerThreadBinding } from "./session-binding.js";
@@ -16,6 +17,7 @@ export enum CodexNativeThreadLifecycleReason {
   MissingThreadBinding = "missing-thread-binding",
   AppServerRejectedThread = "app-server-rejected-thread",
   ContextEngineCompactionInvalidatedBinding = "context-engine-compaction-invalidated-binding",
+  ContextEngineCompactionPreservedBinding = "context-engine-compaction-preserved-binding",
   ThreadBootstrapSemanticReuse = "thread-bootstrap-semantic-reuse",
 }
 
@@ -23,6 +25,7 @@ export type CodexNativeThreadLifecycleAction =
   | "bypassed"
   | "failed"
   | "invalidated"
+  | "preserved"
   | "rejected"
   | "reused"
   | "rotated";
@@ -38,8 +41,14 @@ export type CodexNativeThreadLifecycleDiagnostic = {
   action: CodexNativeThreadLifecycleAction;
   reason: CodexNativeThreadLifecycleReason;
   threadId?: string;
+  sessionFile?: string;
+  previousSessionFile?: string;
+  successorSessionFile?: string;
+  compactionRolledOver?: boolean;
   sessionKey?: string;
   sessionId?: string;
+  previousSessionId?: string;
+  successorSessionId?: string;
   runId?: string;
   bindingMode?: CodexNativeThreadBindingMode;
   contextEngineId?: string;
@@ -84,6 +93,13 @@ export type CodexNativeThreadLifecycleDiagnosticInput = CodexNativeThreadLifecyc
   message?: string;
   extra?: Record<string, unknown>;
 };
+
+const SENSITIVE_COMPARISON_FIELDS = new Set<string>([
+  "userMcpServersFingerprint",
+  "previousUserMcpServersFingerprint",
+  "environmentSelectionFingerprint",
+  "previousEnvironmentSelectionFingerprint",
+]);
 
 export function resolveCodexNativeThreadBindingMode(
   binding: Pick<CodexAppServerThreadBinding, "contextEngine" | "threadId"> | undefined,
@@ -137,9 +153,29 @@ function compactDiagnosticPayload(
     if (typeof value === "number" && !Number.isFinite(value)) {
       continue;
     }
-    payload[key] = value;
+    payload[key] = sanitizeDiagnosticValue(key, value);
   }
   return payload as CodexNativeThreadLifecycleDiagnostic;
+}
+
+function sanitizeDiagnosticValue(key: string, value: unknown): unknown {
+  if (SENSITIVE_COMPARISON_FIELDS.has(key) && typeof value === "string") {
+    if (/^sha256:[a-f0-9]{64}$/i.test(value)) {
+      return value;
+    }
+    return fingerprintDiagnosticString(key, value);
+  }
+  return value;
+}
+
+function fingerprintDiagnosticString(key: string, value: string): string {
+  const hash = createHash("sha256");
+  hash.update("openclaw:codex:native-thread-diagnostic:v1");
+  hash.update("\0");
+  hash.update(key);
+  hash.update("\0");
+  hash.update(value);
+  return `sha256:${hash.digest("hex")}`;
 }
 
 function compactDiagnosticLogPayload(
@@ -150,6 +186,7 @@ function compactDiagnosticLogPayload(
     "reason",
     "bindingMode",
     "projectionMode",
+    "compactionRolledOver",
     "contextTokenBudget",
     "sessionTokens",
     "nativeTokens",

@@ -16,7 +16,11 @@ import type { CodexAppServerClientFactory } from "./client-factory.js";
 import type { CodexAppServerClient } from "./client.js";
 import { maybeCompactCodexAppServerSession as maybeCompactCodexAppServerSessionImpl } from "./compact.js";
 import type { CodexServerNotification } from "./protocol.js";
-import { readCodexAppServerBinding, writeCodexAppServerBinding } from "./session-binding.js";
+import {
+  clearCodexAppServerBinding,
+  readCodexAppServerBinding,
+  writeCodexAppServerBinding,
+} from "./session-binding.js";
 
 let tempDir: string;
 let codexAppServerClientFactoryForTest: CodexAppServerClientFactory | undefined;
@@ -48,6 +52,35 @@ async function writeTestBinding(options: { authProfileId?: string } = {}): Promi
     threadId: "thread-1",
     cwd: tempDir,
     ...options,
+  });
+  return sessionFile;
+}
+
+async function writeThreadBootstrapTestBinding(
+  options: {
+    sessionFile?: string;
+    threadId?: string;
+    epoch?: string;
+    fingerprint?: string;
+  } = {},
+): Promise<string> {
+  const sessionFile = options.sessionFile ?? path.join(tempDir, "session.jsonl");
+  await writeCodexAppServerBinding(sessionFile, {
+    threadId: options.threadId ?? "thread-bootstrap",
+    cwd: tempDir,
+    dynamicToolsFingerprint: "[]",
+    contextEngine: {
+      schemaVersion: 1,
+      engineId: "lossless-claw",
+      policyFingerprint:
+        '{"schemaVersion":1,"engineId":"lossless-claw","ownsCompaction":true,"contextTokenBudget":777,"projectionMaxChars":4000}',
+      projection: {
+        schemaVersion: 1,
+        mode: "thread_bootstrap",
+        epoch: options.epoch ?? "epoch-1",
+        ...(options.fingerprint ? { fingerprint: options.fingerprint } : {}),
+      },
+    },
   });
   return sessionFile;
 }
@@ -916,6 +949,280 @@ describe("maybeCompactCodexAppServerSession", () => {
         contextTokenBudget: 777,
         sessionTokens: 123,
       }),
+    );
+  });
+
+  it("preserves a thread-bootstrap binding after same-file owning context-engine compaction", async () => {
+    const sessionFile = await writeThreadBootstrapTestBinding({
+      epoch: "epoch-stable",
+      fingerprint: "projection-fingerprint",
+    });
+    const compact = vi.fn(async () => ({
+      ok: true,
+      compacted: true,
+      result: {
+        summary: "engine summary",
+        firstKeptEntryId: "entry-1",
+        tokensBefore: 55,
+        details: { engine: "lossless-claw" },
+      },
+    }));
+    const contextEngine: ContextEngine = {
+      info: { id: "lossless-claw", name: "Lossless Claw", ownsCompaction: true },
+      assemble: vi.fn() as never,
+      ingest: vi.fn() as never,
+      compact,
+      maintain: vi.fn(async () => ({ changed: false, bytesFreed: 0, rewrittenEntries: 0 })),
+    };
+    const lifecycleDiagnostics = collectCodexNativeThreadLifecycleEvents();
+
+    const result = requireCompactResult(
+      await maybeCompactCodexAppServerSession({
+        sessionId: "session-1",
+        sessionKey: "agent:main:session-1",
+        sessionFile,
+        workspaceDir: tempDir,
+        contextEngine,
+        contextTokenBudget: 777,
+        currentTokenCount: 123,
+        trigger: "manual",
+      }),
+    );
+    await waitForDiagnosticEventsDrained();
+    lifecycleDiagnostics.unsubscribe();
+
+    expect(result.ok).toBe(true);
+    expect(result.compacted).toBe(true);
+    const details = compactDetails(result);
+    expect(details.codexThreadBindingInvalidated).toBe(false);
+    expect(details.codexThreadBindingPreserved).toBe(true);
+    expect(details.codexSuccessorThreadBindingInvalidated).toBe(false);
+    const savedBinding = await readCodexAppServerBinding(sessionFile);
+    expect(savedBinding?.threadId).toBe("thread-bootstrap");
+    expect(savedBinding?.contextEngine?.projection?.epoch).toBe("epoch-stable");
+    expect(savedBinding?.contextEngine?.projection?.fingerprint).toBe("projection-fingerprint");
+    expect(lifecycleDiagnostics.events).toContainEqual(
+      expect.objectContaining({
+        type: "codex.native_thread.lifecycle",
+        action: "preserved",
+        reason: "context-engine-compaction-preserved-binding",
+        threadId: "thread-bootstrap",
+        bindingMode: "thread_bootstrap",
+        contextEngineId: "lossless-claw",
+        projectionEpoch: "epoch-stable",
+        projectionFingerprint: "projection-fingerprint",
+        sessionId: "session-1",
+        sessionFile: "session.jsonl",
+        previousSessionFile: "session.jsonl",
+        compactionRolledOver: false,
+        semanticReuse: true,
+      }),
+    );
+  });
+
+  it("restores a same-file thread-bootstrap binding when compaction clears the sidecar", async () => {
+    const sessionFile = await writeThreadBootstrapTestBinding({
+      threadId: "thread-bootstrap-cleared",
+      epoch: "epoch-stable",
+      fingerprint: "projection-fingerprint",
+    });
+    const compact = vi.fn(async () => {
+      await clearCodexAppServerBinding(sessionFile);
+      return {
+        ok: true,
+        compacted: true,
+        result: {
+          summary: "engine summary",
+          firstKeptEntryId: "entry-1",
+          tokensBefore: 55,
+        },
+      };
+    });
+    const contextEngine: ContextEngine = {
+      info: { id: "lossless-claw", name: "Lossless Claw", ownsCompaction: true },
+      assemble: vi.fn() as never,
+      ingest: vi.fn() as never,
+      compact,
+      maintain: vi.fn(async () => ({ changed: false, bytesFreed: 0, rewrittenEntries: 0 })),
+    };
+
+    const result = requireCompactResult(
+      await maybeCompactCodexAppServerSession({
+        sessionId: "session-1",
+        sessionKey: "agent:main:session-1",
+        sessionFile,
+        workspaceDir: tempDir,
+        contextEngine,
+        contextTokenBudget: 777,
+        currentTokenCount: 123,
+        trigger: "manual",
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.compacted).toBe(true);
+    const details = compactDetails(result);
+    expect(details.codexThreadBindingInvalidated).toBe(false);
+    expect(details.codexThreadBindingPreserved).toBe(true);
+    expect(details.codexSuccessorThreadBindingInvalidated).toBe(false);
+    const restoredBinding = await readCodexAppServerBinding(sessionFile);
+    expect(restoredBinding?.threadId).toBe("thread-bootstrap-cleared");
+    expect(restoredBinding?.contextEngine?.projection?.epoch).toBe("epoch-stable");
+    expect(restoredBinding?.contextEngine?.projection?.fingerprint).toBe("projection-fingerprint");
+  });
+
+  it("copies a thread-bootstrap binding to the successor transcript after owning context-engine rollover", async () => {
+    const sessionFile = await writeThreadBootstrapTestBinding({
+      threadId: "thread-bootstrap-rollover",
+      epoch: "epoch-rollover",
+    });
+    const successorFile = path.join(tempDir, "session.compacted.jsonl");
+    const compact = vi.fn(async () => {
+      await clearCodexAppServerBinding(sessionFile);
+      return {
+        ok: true,
+        compacted: true,
+        result: {
+          summary: "engine summary",
+          firstKeptEntryId: "entry-1",
+          tokensBefore: 55,
+          sessionId: "session-1-compacted",
+          sessionFile: successorFile,
+        },
+      };
+    });
+    const contextEngine: ContextEngine = {
+      info: { id: "lossless-claw", name: "Lossless Claw", ownsCompaction: true },
+      assemble: vi.fn() as never,
+      ingest: vi.fn() as never,
+      compact,
+      maintain: vi.fn(async () => ({ changed: false, bytesFreed: 0, rewrittenEntries: 0 })),
+    };
+    const lifecycleDiagnostics = collectCodexNativeThreadLifecycleEvents();
+
+    const result = requireCompactResult(
+      await maybeCompactCodexAppServerSession({
+        sessionId: "session-1",
+        sessionKey: "agent:main:session-1",
+        sessionFile,
+        workspaceDir: tempDir,
+        contextEngine,
+        contextTokenBudget: 777,
+      }),
+    );
+    await waitForDiagnosticEventsDrained();
+    lifecycleDiagnostics.unsubscribe();
+
+    expect(result.ok).toBe(true);
+    expect(result.compacted).toBe(true);
+    expect(result.result?.sessionId).toBe("session-1-compacted");
+    expect(result.result?.sessionFile).toBe(successorFile);
+    const details = compactDetails(result);
+    expect(details.codexThreadBindingInvalidated).toBe(false);
+    expect(details.codexThreadBindingPreserved).toBe(true);
+    expect(details.codexSuccessorThreadBindingInvalidated).toBe(false);
+    expect(await readCodexAppServerBinding(sessionFile)).toBeUndefined();
+    const successorBinding = await readCodexAppServerBinding(successorFile);
+    expect(successorBinding?.threadId).toBe("thread-bootstrap-rollover");
+    expect(successorBinding?.sessionFile).toBe(successorFile);
+    expect(successorBinding?.contextEngine?.projection?.epoch).toBe("epoch-rollover");
+    expect(lifecycleDiagnostics.events).toContainEqual(
+      expect.objectContaining({
+        type: "codex.native_thread.lifecycle",
+        action: "preserved",
+        reason: "context-engine-compaction-preserved-binding",
+        threadId: "thread-bootstrap-rollover",
+        bindingMode: "thread_bootstrap",
+        contextEngineId: "lossless-claw",
+        projectionEpoch: "epoch-rollover",
+        sessionId: "session-1-compacted",
+        previousSessionId: "session-1",
+        sessionFile: "session.compacted.jsonl",
+        previousSessionFile: "session.jsonl",
+        successorSessionFile: "session.compacted.jsonl",
+        successorSessionId: "session-1-compacted",
+        compactionRolledOver: true,
+        semanticReuse: true,
+      }),
+    );
+  });
+
+  it("reports successor invalidation when a preserved thread-bootstrap binding replaces an existing successor binding", async () => {
+    const sessionFile = await writeThreadBootstrapTestBinding({
+      threadId: "thread-bootstrap-rollover",
+      epoch: "epoch-rollover",
+    });
+    const successorFile = path.join(tempDir, "session.compacted.jsonl");
+    await writeCodexAppServerBinding(successorFile, {
+      threadId: "thread-bootstrap-rollover",
+      cwd: tempDir,
+    });
+    const compact = vi.fn(async () => ({
+      ok: true,
+      compacted: true,
+      result: {
+        summary: "engine summary",
+        firstKeptEntryId: "entry-1",
+        tokensBefore: 55,
+        sessionId: "session-1-compacted",
+        sessionFile: successorFile,
+      },
+    }));
+    const contextEngine: ContextEngine = {
+      info: { id: "lossless-claw", name: "Lossless Claw", ownsCompaction: true },
+      assemble: vi.fn() as never,
+      ingest: vi.fn() as never,
+      compact,
+      maintain: vi.fn(async () => ({ changed: false, bytesFreed: 0, rewrittenEntries: 0 })),
+    };
+    const lifecycleDiagnostics = collectCodexNativeThreadLifecycleEvents();
+
+    const result = requireCompactResult(
+      await maybeCompactCodexAppServerSession({
+        sessionId: "session-1",
+        sessionKey: "agent:main:session-1",
+        sessionFile,
+        workspaceDir: tempDir,
+        contextEngine,
+        contextTokenBudget: 777,
+      }),
+    );
+    await waitForDiagnosticEventsDrained();
+    lifecycleDiagnostics.unsubscribe();
+
+    const details = compactDetails(result);
+    expect(details.codexThreadBindingInvalidated).toBe(true);
+    expect(details.codexThreadBindingPreserved).toBe(true);
+    expect(details.codexSuccessorThreadBindingInvalidated).toBe(true);
+    expect(await readCodexAppServerBinding(sessionFile)).toBeUndefined();
+    const successorBinding = await readCodexAppServerBinding(successorFile);
+    expect(successorBinding?.threadId).toBe("thread-bootstrap-rollover");
+    expect(successorBinding?.contextEngine?.projection?.epoch).toBe("epoch-rollover");
+    expect(lifecycleDiagnostics.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "codex.native_thread.lifecycle",
+          action: "invalidated",
+          reason: "context-engine-compaction-invalidated-binding",
+          threadId: "thread-bootstrap-rollover",
+          bindingMode: "legacy",
+          sessionId: "session-1-compacted",
+          sessionFile: "session.compacted.jsonl",
+          previousSessionFile: "session.jsonl",
+          compactionRolledOver: true,
+        }),
+        expect.objectContaining({
+          type: "codex.native_thread.lifecycle",
+          action: "preserved",
+          reason: "context-engine-compaction-preserved-binding",
+          threadId: "thread-bootstrap-rollover",
+          bindingMode: "thread_bootstrap",
+          sessionId: "session-1-compacted",
+          sessionFile: "session.compacted.jsonl",
+          previousSessionFile: "session.jsonl",
+          compactionRolledOver: true,
+        }),
+      ]),
     );
   });
 

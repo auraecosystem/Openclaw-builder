@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   embeddedAgentLog,
   isActiveHarnessContextEngine,
@@ -953,13 +954,25 @@ function fingerprintDynamicTools(dynamicTools: CodexDynamicToolSpec[]): string {
 function fingerprintUserMcpServersConfigPatch(
   configPatch: JsonObject | undefined,
 ): string | undefined {
-  return configPatch ? JSON.stringify(stabilizeJsonValue(configPatch)) : undefined;
+  return configPatch
+    ? fingerprintStableJsonValue("openclaw:codex:user-mcp-servers:v1", configPatch)
+    : undefined;
 }
 
 function fingerprintEnvironmentSelection(
   environments: CodexTurnEnvironmentParams[] | undefined,
 ): string | undefined {
-  return environments ? JSON.stringify(environments.map(stabilizeJsonValue)) : undefined;
+  return environments
+    ? fingerprintStableJsonValue("openclaw:codex:environment-selection:v1", environments)
+    : undefined;
+}
+
+function fingerprintStableJsonValue(namespace: string, value: JsonValue): string {
+  const hash = createHash("sha256");
+  hash.update(namespace);
+  hash.update("\0");
+  hash.update(JSON.stringify(stabilizeJsonValue(value)));
+  return `sha256:${hash.digest("hex")}`;
 }
 
 function fingerprintDynamicToolSpec(tool: JsonValue): JsonValue {
