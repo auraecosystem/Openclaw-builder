@@ -453,6 +453,10 @@ function buildModelCatalogMetadata(
   const aliasByKey = new Map<string, string>();
   const configuredModels = params.cfg.agents?.defaults?.models ?? {};
   for (const [rawKey, entryRaw] of Object.entries(configuredModels)) {
+    const trimmedKey = rawKey.trim();
+    if (trimmedKey.endsWith("/*") && normalizeProviderId(trimmedKey.slice(0, -2))) {
+      continue;
+    }
     const key = resolveAllowlistModelKey({
       cfg: params.cfg,
       raw: rawKey,
