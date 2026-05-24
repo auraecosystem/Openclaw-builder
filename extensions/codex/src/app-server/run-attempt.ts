@@ -4008,6 +4008,9 @@ async function buildDynamicTools(input: DynamicToolBuildParams) {
   if (params.disableTools || !supportsModelTools(params.model)) {
     return [];
   }
+  if (shouldSkipCodexDynamicToolBuild(input)) {
+    return [];
+  }
   const modelHasVision = params.model.input?.includes("image") ?? false;
   const agentDir = params.agentDir ?? resolveAgentDir(params.config ?? {}, input.sessionAgentId);
   const createOpenClawCodingTools =
@@ -4111,6 +4114,16 @@ async function buildDynamicTools(input: DynamicToolBuildParams) {
     modelApi: params.model.api,
     model: params.model,
   });
+}
+
+function shouldSkipCodexDynamicToolBuild(input: DynamicToolBuildParams): boolean {
+  if (isCodexMemoryFlushRun(input.params)) {
+    return false;
+  }
+  if (shouldForceMessageTool(input.params) || input.forceHeartbeatTool === true) {
+    return false;
+  }
+  return isCodexDynamicToolExcluded(input.pluginConfig, ["*"]);
 }
 
 function includeForcedCodexDynamicToolAllow(

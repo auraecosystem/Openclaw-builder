@@ -1674,6 +1674,39 @@ describe("runCodexAppServerAttempt", () => {
     }
   });
 
+  it("skips Codex dynamic tool construction when all dynamic tools are excluded", async () => {
+    const createTools = vi.fn(() => [
+      createRuntimeDynamicTool("exec"),
+      createRuntimeDynamicTool("process"),
+      createRuntimeDynamicTool("message"),
+    ]);
+    testing.setOpenClawCodingToolsFactoryForTests(createTools);
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const params = createParams(sessionFile, workspaceDir);
+    params.disableTools = false;
+    params.runtimePlan = createCodexRuntimePlanFixture();
+    const sandboxSessionKey = params.sessionKey;
+    if (!sandboxSessionKey) {
+      throw new Error("createParams must provide a sessionKey for Codex dynamic tool tests.");
+    }
+
+    const tools = await testing.buildDynamicTools({
+      params,
+      resolvedWorkspace: workspaceDir,
+      effectiveWorkspace: workspaceDir,
+      sandboxSessionKey,
+      sandbox: undefined,
+      runAbortController: new AbortController(),
+      sessionAgentId: "main",
+      pluginConfig: { codexDynamicToolsExclude: ["*"] },
+      onYieldDetected: () => undefined,
+    });
+
+    expect(tools).toEqual([]);
+    expect(createTools).not.toHaveBeenCalled();
+  });
+
   it("points yielded sandbox_exec follow-up guidance at sandbox_process", async () => {
     const execTool = createRuntimeDynamicTool("exec");
     vi.mocked(execTool.execute).mockResolvedValueOnce({
