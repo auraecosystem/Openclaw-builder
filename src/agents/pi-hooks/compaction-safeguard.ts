@@ -1319,16 +1319,23 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
 
       // Validate identifiers survived final capping. The quality guard loop
       // checks the uncapped summary; capping can remove identifiers at the
-      // truncation boundary. In strict mode, re-append lost identifiers so
-      // they survive the cap rather than silently returning a lossy summary.
+      // truncation boundary. In strict mode, re-append lost identifiers only
+      // when the recovered summary stays within the cap budget.
       if (identifierPolicy === "strict" && transcriptIdentifiers.length > 0) {
         const postCapLost = computeLostIdentifiers(transcriptIdentifiers, summary);
         if (postCapLost.length > 0) {
-          log.warn(
-            `Compaction safeguard: final capping removed ${postCapLost.length} identifier(s); re-appending.`,
-          );
           const recoveryBlock = postCapLost.map((id) => `- ${id}`).join("\n");
-          summary = `${summary}\n\n## Exact identifiers (recovered)\n${recoveryBlock}`;
+          const recovered = `${summary}\n\n## Exact identifiers (recovered)\n${recoveryBlock}`;
+          if (recovered.length <= MAX_COMPACTION_SUMMARY_CHARS) {
+            log.warn(
+              `Compaction safeguard: final capping removed ${postCapLost.length} identifier(s); re-appending.`,
+            );
+            summary = recovered;
+          } else {
+            log.warn(
+              `Compaction safeguard: final capping removed ${postCapLost.length} identifier(s); recovery would exceed cap, skipping.`,
+            );
+          }
         }
       }
 

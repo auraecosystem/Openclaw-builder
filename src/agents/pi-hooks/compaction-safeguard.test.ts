@@ -1265,6 +1265,32 @@ describe("compaction-safeguard recent-turn preservation", () => {
     expect(ids).toContain("host.local:18789");
   });
 
+  it("extracts credential-shaped values from tool call arguments", () => {
+    const text = extractMessageTextForIdentifiers({
+      role: "assistant",
+      content: [
+        {
+          type: "toolCall",
+          id: "call_cred",
+          name: "configure",
+          arguments: { apiKey: "sk-proj-abc123def456", endpoint: "https://api.acme.io/v1" },
+        },
+      ],
+    });
+    expect(text).toContain("sk-proj-abc123def456"); // pragma: allowlist secret
+    expect(text).toContain("https://api.acme.io/v1");
+  });
+
+  it("extracts credential-shaped values from tool result content", () => {
+    const text = extractMessageTextForIdentifiers({
+      role: "toolResult",
+      toolCallId: "call_cred",
+      toolName: "configure",
+      content: [{ type: "text", text: "Token: ghp_xYz1234567890abcDEF set for repo" }],
+    });
+    expect(text).toContain("ghp_xYz1234567890abcDEF"); // pragma: allowlist secret
+  });
+
   it("computes lost identifiers between source and summary", () => {
     const source = ["A1B2C3D4E5F6", "https://example.com/api", "/tmp/data.log"]; // pragma: allowlist secret
     const summary = "Deployed to https://example.com/api with config at /tmp/data.log";
