@@ -17,7 +17,7 @@ import { hasGlobalHooks } from "../../plugins/hook-runner-global.js";
 import { PluginApprovalResolutions } from "../../plugins/types.js";
 import { uniqueValues } from "../../shared/string-normalization.js";
 import { asBoolean } from "../../utils/boolean.js";
-import { runBeforeToolCallHook } from "../pi-tools.before-tool-call.js";
+import { hasBeforeToolCallPolicy, runBeforeToolCallHook } from "../pi-tools.before-tool-call.js";
 import { stableStringify } from "../stable-stringify.js";
 import { normalizeToolName } from "../tool-policy.js";
 import { callGatewayTool } from "../tools/gateway.js";
@@ -423,7 +423,7 @@ export function buildNativeHookRelayCommand(params: {
 
 function nativeHookRelayEventHasLocalWork(event: NativeHookRelayEvent): boolean {
   if (event === "pre_tool_use") {
-    return true;
+    return hasBeforeToolCallPolicy();
   }
   if (event === "post_tool_use") {
     return hasGlobalHooks("after_tool_call");
