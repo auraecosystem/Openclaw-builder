@@ -273,6 +273,48 @@ describe("MemoryIndexManager.readFile", () => {
     }
   });
 
+  it("retries transient read errors before returning workspace memory content", async () => {
+    const relPath = "memory/retry.md";
+    const absPath = path.join(workspaceDir, relPath);
+    await fs.mkdir(path.dirname(absPath), { recursive: true });
+    await fs.writeFile(absPath, "first\nsecond", "utf-8");
+
+    const realOpen = fs.open;
+    let attempts = 0;
+    const openSpy = vi
+      .spyOn(fs, "open")
+      .mockImplementation(async (...args: Parameters<typeof realOpen>) => {
+        const [target, flags, mode] = args;
+        if (typeof target === "string" && path.resolve(target) === absPath && attempts++ === 0) {
+          const err = new Error(
+            "Unknown system error -11: Unknown system error -11, open",
+          ) as NodeJS.ErrnoException;
+          err.code = "UNKNOWN";
+          err.errno = -11;
+          throw err;
+        }
+        return await realOpen(target, flags, mode);
+      });
+
+    try {
+      await expect(
+        readMemoryFile({
+          workspaceDir,
+          extraPaths: [],
+          relPath,
+        }),
+      ).resolves.toEqual({
+        text: "first\nsecond",
+        path: relPath,
+        from: 1,
+        lines: 2,
+      });
+      expect(attempts).toBe(2);
+    } finally {
+      openSpy.mockRestore();
+    }
+  });
+
   it("rejects non-memory paths", async () => {
     await expect(
       readMemoryFile({

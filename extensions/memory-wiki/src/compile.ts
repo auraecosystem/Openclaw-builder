@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { retryTransientMemoryRead } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
 import {
   replaceManagedMarkdownBlock,
   withTrailingNewline,
@@ -355,7 +356,10 @@ async function readPageSummaries(rootDir: string): Promise<WikiPageSummary[]> {
   const pages = await Promise.all(
     filePaths.map(async (relativePath) => {
       const absolutePath = path.join(rootDir, relativePath);
-      const raw = await fs.readFile(absolutePath, "utf8");
+      const raw = await retryTransientMemoryRead(
+        () => fs.readFile(absolutePath, "utf8"),
+        `read wiki page ${absolutePath}`,
+      );
       return toWikiPageSummary({ absolutePath, relativePath, raw });
     }),
   );
