@@ -73,7 +73,9 @@ function buildExecForegroundResult(params: {
   cwd?: string;
   warningText?: string;
 }): AgentToolResult<ExecToolDetails> {
-  const warningText = params.warningText?.trim() ? `${params.warningText}\n\n` : "";
+  const warningText = params.warningText?.trim()
+    ? `${redactToolPayloadText(params.warningText)}\n\n`
+    : "";
   const aggregated = redactToolPayloadText(params.outcome.aggregated);
   if (params.outcome.status === "failed") {
     return failedTextResult(
@@ -994,11 +996,14 @@ function buildExecRunningResult(params: {
   cwd?: string;
   tail: string;
 }): AgentToolResult<ExecToolDetails> {
+  const warningText = params.warningText?.trim()
+    ? `${redactToolPayloadText(params.warningText)}`
+    : "";
   return {
     content: [
       {
         type: "text",
-        text: `${params.warningText ?? ""}Command still running (session ${params.sessionId}, pid ${params.pid ?? "n/a"}). Use process (list/poll/log/write/send-keys/submit/paste/kill/clear/remove) for follow-up.`,
+        text: `${warningText}Command still running (session ${params.sessionId}, pid ${params.pid ?? "n/a"}). Use process (list/poll/log/write/send-keys/submit/paste/kill/clear/remove) for follow-up.`,
       },
     ],
     details: redactSecrets({

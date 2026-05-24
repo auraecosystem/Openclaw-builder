@@ -77,6 +77,24 @@ describe("exec foreground failures", () => {
     expect(details.aggregated).toContain("OPENAI_API_KEY=sk-pro…7890");
   });
 
+  it("redacts secret-shaped warning text before returning foreground results", () => {
+    const result = __testing.buildExecForegroundResult({
+      warningText: `Warning: ${fakeSecretOutput}`,
+      outcome: {
+        status: "completed",
+        exitCode: 0,
+        exitSignal: null,
+        durationMs: 1,
+        aggregated: "ok\n",
+        timedOut: false,
+      },
+    });
+
+    const text = (result.content[0] as { text?: string }).text ?? "";
+    expect(text).not.toContain(fakeSecretOutput);
+    expect(text).toContain("OPENAI_API_KEY=sk-pro…7890");
+  });
+
   it("redacts secret-shaped output from background exec details tail", () => {
     const result = __testing.buildExecRunningResult({
       sessionId: "sess-redact-background",
@@ -90,6 +108,22 @@ describe("exec foreground failures", () => {
     expect(details.status).toBe("running");
     expect(details.tail).not.toContain(fakeSecretOutput);
     expect(details.tail).toContain("OPENAI_API_KEY=***");
+  });
+
+  it("redacts secret-shaped warning text before returning background exec results", () => {
+    const result = __testing.buildExecRunningResult({
+      warningText: `Warning: ${fakeSecretOutput}\n\n`,
+      sessionId: "sess-redact-background-warning",
+      pid: 12345,
+      startedAt: Date.now(),
+      cwd: "/tmp",
+      tail: "still running\n",
+    });
+
+    const text = (result.content[0] as { text?: string }).text ?? "";
+    expect(text).not.toContain(fakeSecretOutput);
+    expect(text).toContain("OPENAI_API_KEY=sk-pro…7890");
+    expect(text).toContain("Command still running");
   });
 
   it("rejects invalid host values before launching a command", async () => {

@@ -704,6 +704,7 @@ export async function runExecProcess(opts: {
       return;
     }
     const tailText = redactToolPayloadText(session.tail || session.aggregated);
+    const warnings = opts.warnings?.map((warning) => redactToolPayloadText(warning));
     // Note: opts.onUpdate() is provided by pi-agent-core's agent-loop and
     // internally pushes Promise.resolve(emit(event)) into an updateEvents
     // array.  Because emit → processEvents is async, any failure (e.g.
@@ -714,9 +715,7 @@ export async function runExecProcess(opts: {
     // signal (Layer 2) — both of which prevent this call from ever being
     // reached after the agent run has ended.
     opts.onUpdate({
-      content: [
-        { type: "text", text: renderExecUpdateText({ tailText, warnings: opts.warnings }) },
-      ],
+      content: [{ type: "text", text: renderExecUpdateText({ tailText, warnings }) }],
       details: {
         status: "running",
         sessionId,
