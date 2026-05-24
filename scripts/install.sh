@@ -2534,10 +2534,19 @@ run_doctor() {
     if [[ -z "$claw" ]]; then
         ui_info "Skipping doctor (openclaw not on PATH yet)"
         warn_openclaw_not_found
-        return 0
+        return 1
     fi
-    run_quiet_step "Running doctor" "$claw" doctor --non-interactive || true
+    local doctor_exit=0
+    run_quiet_step "Running doctor" "$claw" doctor --non-interactive || doctor_exit=$?
+    if (( doctor_exit == 130 )); then
+        abort_install_int
+    fi
+    if (( doctor_exit != 0 )); then
+        ui_warn "Doctor exited with status $doctor_exit"
+        return 1
+    fi
     ui_success "Doctor complete"
+    return 0
 }
 
 maybe_open_dashboard() {
@@ -2897,7 +2906,9 @@ main() {
         run_doctor_after=true
     fi
     if [[ "$run_doctor_after" == "true" ]]; then
-        run_doctor
+        if run_doctor; then
+            should_open_dashboard=true
+        fi
     fi
 
     # Step 7: If BOOTSTRAP.md is still present in the workspace, resume onboarding
