@@ -25,6 +25,7 @@ import { resolveSilentReplySettings } from "../../config/silent-reply.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
 import { measureDiagnosticsTimelineSpan } from "../../infra/diagnostics-timeline.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { clearCommandLane, getQueueSize } from "../../process/command-queue.js";
 import {
   isAcpSessionKey,
@@ -83,6 +84,7 @@ import {
   waitForReplyRunEndBySessionId,
   type ReplyOperation,
 } from "./reply-run-registry.js";
+import { createReplyTimingTracker } from "./reply-timing-tracker.js";
 import { resolveRoutedDeliveryThreadId } from "./routed-delivery-thread.js";
 import { resolveRuntimePolicySessionKey } from "./runtime-policy-session-key.js";
 import { resolveBareSessionResetPromptState } from "./session-reset-prompt.js";
@@ -109,6 +111,8 @@ type InternalGetReplyOptions = GetReplyOptions & {
 
 type AgentDefaults = NonNullable<OpenClawConfig["agents"]>["defaults"];
 type ExecOverrides = Pick<ExecToolDefaults, "host" | "security" | "ask" | "node">;
+
+const preparedReplyTimingLog = createSubsystemLogger("auto-reply/pre-agent-timing");
 
 export function resolvePromptSilentReplyConversationType(params: {
   ctx: Pick<
@@ -446,12 +450,30 @@ export async function runPreparedReply(
     isHeartbeat,
     queueMode: perMessageQueueMode ?? "configured",
   };
-  const traceRunPhase = <T>(name: string, run: () => Promise<T> | T): Promise<T> =>
-    measureDiagnosticsTimelineSpan(name, run, {
-      phase: "agent-turn",
-      config: cfg,
-      attributes: traceAttributes,
+  const preparedTiming = createReplyTimingTracker({ log: preparedReplyTimingLog });
+  const logPreparedTiming = (reason: string) =>
+    preparedTiming.logIfSlow({
+      message: `prepared reply pre-agent timings provider=${provider} model=${model} sessionId=${
+        sessionId ?? "unknown"
+      } sessionKey=${sessionKey ?? "unknown"} agentId=${agentId}`,
+      outcome: "milestone",
+      reason,
+      details: {
+        provider,
+        model,
+        sessionId,
+        sessionKey,
+        agentId,
+      },
     });
+  const traceRunPhase = <T>(name: string, run: () => Promise<T> | T): Promise<T> =>
+    preparedTiming.measure(name, () =>
+      measureDiagnosticsTimelineSpan(name, run, {
+        phase: "agent-turn",
+        config: cfg,
+        attributes: traceAttributes,
+      }),
+    );
   const promptSessionCtx = resolvePromptSessionContextForSystemEvent({
     sessionCtx,
     sessionEntry,
@@ -708,7 +730,11 @@ export async function runPreparedReply(
   if (!resolvedThinkLevel && prefixedBodyBase) {
     const parts = prefixedBodyBase.split(/\s+/);
     const maybeLevel = normalizeThinkLevel(parts[0]);
-    const thinkingCatalog = maybeLevel ? await modelState.resolveThinkingCatalog() : undefined;
+    const thinkingCatalog = maybeLevel
+      ? await traceRunPhase("reply.resolve_thinking_catalog_for_hint", () =>
+          modelState.resolveThinkingCatalog(),
+        )
+      : undefined;
     if (
       maybeLevel &&
       isThinkingLevelSupported({ provider, model, level: maybeLevel, catalog: thinkingCatalog })
@@ -789,9 +815,13 @@ export async function runPreparedReply(
     await traceRunPhase("reply.build_prompt_bodies", () => rebuildPromptBodies());
   const isRoomEvent = inboundEventKind === "room_event";
   if (!resolvedThinkLevel) {
-    resolvedThinkLevel = await modelState.resolveDefaultThinkingLevel();
+    resolvedThinkLevel = await traceRunPhase("reply.resolve_default_thinking", () =>
+      modelState.resolveDefaultThinkingLevel(),
+    );
   }
-  const thinkingCatalog = await modelState.resolveThinkingCatalog();
+  const thinkingCatalog = await traceRunPhase("reply.resolve_thinking_catalog", () =>
+    modelState.resolveThinkingCatalog(),
+  );
   if (
     !isThinkingLevelSupported({
       provider,
@@ -1196,6 +1226,7 @@ export async function runPreparedReply(
         }
       : undefined;
 
+  logPreparedTiming("before_run_agent");
   return runReplyAgent({
     commandBody: prefixedCommandBody,
     transcriptCommandBody,
