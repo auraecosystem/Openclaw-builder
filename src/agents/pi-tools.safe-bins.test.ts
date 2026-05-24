@@ -110,6 +110,7 @@ vi.mock("../process/supervisor/index.js", () => ({
 
 vi.mock("./channel-tools.js", () => ({
   copyChannelAgentToolMeta: vi.fn((_from, to) => to),
+  getChannelAgentToolMeta: () => undefined,
   listChannelAgentTools: () => [],
 }));
 
