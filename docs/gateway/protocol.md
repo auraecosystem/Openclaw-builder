@@ -749,6 +749,7 @@ rather than the pre-handshake defaults.
   - `gateway.controlUi.dangerouslyDisableDeviceAuth=true` (break-glass, severe security downgrade).
   - direct-loopback `gateway-client` backend RPCs authenticated with the shared
     gateway token/password.
+- Device-less operator sessions are still treated as **unbound**: OpenClaw clears self-declared operator scopes when a session is not bound to an authenticated device identity/token (for example, trusted-proxy Control UI connects without device identity). This often shows up as “connected, but methods return `missing scope`”. For UI sessions, prefer HTTPS so the browser can generate device identity and complete pairing; use `dangerouslyDisableDeviceAuth` only as a temporary break-glass.
 - All connections must sign the server-provided `connect.challenge` nonce.
 
 ### Device auth migration diagnostics

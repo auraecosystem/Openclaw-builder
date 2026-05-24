@@ -53,6 +53,16 @@ Use `trusted-proxy` auth mode when:
 
 When `gateway.auth.mode = "trusted-proxy"` is active and the request passes trusted-proxy checks, Control UI WebSocket sessions can connect without device pairing identity.
 
+Scope implications:
+
+- **Device-less sessions connect but get no operator scopes.** When a Control UI session connects without device identity, OpenClaw clears the requested scope list to an empty set (`[]`). This prevents self-declared permissions on a session that isn't bound to an approved paired device/token.
+- If you see “connection succeeds but methods report `missing scope`”, use HTTPS (secure context) so the browser can generate device identity and complete pairing. See [Control UI insecure HTTP](/web/control-ui#insecure-http).
+- Break-glass only: `gateway.controlUi.dangerouslyDisableDeviceAuth=true` preserves requested scopes even without device identity. This is a severe security downgrade; revert quickly. See [Control UI insecure HTTP](/web/control-ui#insecure-http).
+
+Reverse-proxy scope capping:
+
+- If your proxy sends `x-openclaw-scopes` on the WebSocket **upgrade request**, OpenClaw caps the Control UI session scopes to the intersection of (requested scopes) ∩ (declared scopes). This header does not grant additional scopes; it only constrains what the session can hold.
+
 Implications:
 
 - Pairing is no longer the primary gate for Control UI access in this mode.
@@ -309,7 +319,7 @@ Loopback trusted-proxy identity headers still fail closed: same-host callers are
 
 ## Operator scopes header
 
-Trusted-proxy auth is an **identity-bearing** HTTP mode, so callers may optionally declare operator scopes with `x-openclaw-scopes`.
+Trusted-proxy auth is an **identity-bearing** HTTP mode, so callers may optionally declare operator scopes with `x-openclaw-scopes` on **HTTP API requests**.
 
 Examples:
 
@@ -324,6 +334,7 @@ Behavior:
 - When the header is absent, normal identity-bearing HTTP APIs fall back to the standard operator default scope set.
 - Gateway-auth **plugin HTTP routes** are narrower by default: when `x-openclaw-scopes` is absent, their runtime scope falls back to `operator.write`.
 - Browser-origin HTTP requests still have to pass `gateway.controlUi.allowedOrigins` (or deliberate Host-header fallback mode) even after trusted-proxy auth succeeds.
+- For Control UI WebSocket sessions, `x-openclaw-scopes` (when present on the upgrade request) is treated as a scope **cap**, not a grant. See [Control UI pairing behavior](#control-ui-pairing-behavior).
 
 Practical rule: send `x-openclaw-scopes` explicitly when you want a trusted-proxy request to be narrower than the defaults, or when a gateway-auth plugin route needs something stronger than write scope.
 
@@ -407,6 +418,20 @@ The audit checks for:
     - You are not relying on wildcard origins unless you intentionally want allow-all behavior.
     - If you intentionally use Host-header fallback mode, `gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback=true` is set deliberately.
 
+  </Accordion>
+  <Accordion title="Connection succeeds but methods report missing scope">
+    Symptoms:
+
+    - The Control UI opens and the WebSocket stays connected, but actions fail with errors like `missing scope: operator.read` or `missing scope: operator.admin`.
+
+    Common causes:
+
+    - **Device-less Control UI session:** trusted-proxy auth can admit the WebSocket connection without device identity, but OpenClaw clears scopes on device-less Control UI sessions (by design). Use HTTPS (secure context) so the browser can generate device identity and complete pairing. See [Control UI insecure HTTP](/web/control-ui#insecure-http).
+    - **Overly narrow `x-openclaw-scopes`:** if your proxy injects `x-openclaw-scopes` on the WebSocket upgrade request, the Control UI session scopes are capped to that set. An empty header value yields no scopes.
+
+    Break-glass only:
+
+    - If you fully trust the network path and need emergency access, set `gateway.controlUi.dangerouslyDisableDeviceAuth=true` temporarily. Revert quickly; it is a severe security downgrade.
   </Accordion>
   <Accordion title="WebSocket still failing">
     Make sure your proxy:
