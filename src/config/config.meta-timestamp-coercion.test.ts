@@ -86,7 +86,11 @@ describe("meta.lastTouchedAt numeric timestamp coercion", () => {
 
     for (const entry of cases) {
       const branches = schemaAt(schema, entry.path).anyOf ?? [];
-      expect(branches.map((branch) => branch.type).toSorted()).toEqual(entry.types);
+      expect(
+        branches
+          .map((branch) => branch.type)
+          .toSorted((left, right) => String(left).localeCompare(String(right))),
+      ).toEqual(entry.types);
       expect(branches.every((branch) => Object.keys(branch).length > 0)).toBe(true);
       if (entry.arrayItemsType) {
         expect(branches.find((branch) => branch.type === "array")?.items?.type).toBe(
