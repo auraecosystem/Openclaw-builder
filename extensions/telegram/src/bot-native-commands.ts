@@ -1356,6 +1356,10 @@ export const registerTelegramNativeCommands = ({
           return;
         }
         const { threadSpec, route, mediaLocalRoots, tableMode, chunkMode } = runtimeContext;
+        const targetSessionEntry = nativeCommandRuntime.getSessionEntry({
+          agentId: route.agentId,
+          sessionKey: route.sessionKey,
+        });
         const deliveryBaseOptions = buildCommandDeliveryBaseOptions({
           cfg: runtimeCfg,
           chatId,
@@ -1416,6 +1420,7 @@ export const registerTelegramNativeCommands = ({
             sessionKey: route.sessionKey,
             sessionId: sessionFileContext.sessionId,
             sessionFile: sessionFileContext.sessionFile,
+            authProfileId: targetSessionEntry?.authProfileOverride,
             commandBody,
             config: runtimeCfg,
             from,
