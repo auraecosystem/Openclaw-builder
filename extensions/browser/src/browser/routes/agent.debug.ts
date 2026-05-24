@@ -40,7 +40,10 @@ import {
   withRouteTabContext,
   withPlaywrightRouteContext,
 } from "./agent.shared.js";
-import { resolveWritableOutputPathOrRespond } from "./output-paths.js";
+import {
+  resolveOutputDirectoryPathOrRespond,
+  resolveWritableOutputPathOrRespond,
+} from "./output-paths.js";
 import { DEFAULT_TRACE_DIR } from "./path-output.js";
 import type { BrowserRouteRegistrar } from "./types.js";
 import { asyncBrowserRoute, jsonError, toBoolean, toNumber, toStringOrEmpty } from "./utils.js";
@@ -90,8 +93,8 @@ function screencastKey(profileName: string, targetId: string): string {
   return `${profileName}:${targetId}`;
 }
 
-function defaultScreencastPath(): string {
-  return path.join(DEFAULT_TRACE_DIR, `browser-screencast-${crypto.randomUUID()}.webm`);
+function defaultScreencastFileName(): string {
+  return `browser-screencast-${crypto.randomUUID()}.webm`;
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -678,13 +681,28 @@ export function registerBrowserAgentDebugRoutes(
           if (!requireChromeMcpProfile(res, profileCtx)) {
             return;
           }
+          const requestedOutputDir = toStringOrEmpty(body.outputDirPath);
+          let outputDirPath: string | undefined;
+          if (requestedOutputDir) {
+            const resolvedOutputDir = await resolveOutputDirectoryPathOrRespond({
+              res,
+              rootDir: DEFAULT_TRACE_DIR,
+              requestedPath: requestedOutputDir,
+              scopeLabel: "lighthouse output directory",
+              ensureRootDir: true,
+            });
+            if (!resolvedOutputDir) {
+              return;
+            }
+            outputDirPath = resolvedOutputDir;
+          }
           const result = await runChromeMcpLighthouseAudit({
             profileName: profileCtx.profile.name,
             profile: profileCtx.profile,
             targetId: tab.targetId,
             mode: parseMode(body.mode),
             device: parseDevice(body.device),
-            outputDirPath: toStringOrEmpty(body.outputDirPath) || undefined,
+            outputDirPath,
             timeoutMs: toNumber(body.timeoutMs),
           });
           const url = await resolveTabUrl(tab.url);
@@ -709,7 +727,17 @@ export function registerBrowserAgentDebugRoutes(
             return;
           }
           const requestedPath = toStringOrEmpty(body.path) || toStringOrEmpty(body.filePath);
-          const filePath = requestedPath || defaultScreencastPath();
+          const filePath = await resolveWritableOutputPathOrRespond({
+            res,
+            rootDir: DEFAULT_TRACE_DIR,
+            requestedPath,
+            scopeLabel: "screencast directory",
+            defaultFileName: defaultScreencastFileName(),
+            ensureRootDir: true,
+          });
+          if (!filePath) {
+            return;
+          }
           const output = await startChromeMcpScreencast({
             profileName: profileCtx.profile.name,
             profile: profileCtx.profile,
