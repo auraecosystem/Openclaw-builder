@@ -77,6 +77,7 @@ export type SessionListRow = {
   lastThreadId?: string | number;
   transcriptPath?: string;
   messages?: unknown[];
+  resumable?: boolean;
 };
 
 export function resolveSessionToolContext(opts?: {
