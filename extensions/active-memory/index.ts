@@ -45,8 +45,7 @@ const DEFAULT_QMD_SEARCH_MODE = "search" as const;
 const DEFAULT_TRANSCRIPT_DIR = "active-memory";
 const DEFAULT_CIRCUIT_BREAKER_MAX_TIMEOUTS = 3;
 const DEFAULT_CIRCUIT_BREAKER_COOLDOWN_MS = 60_000;
-const DEFAULT_ACTIVE_MEMORY_TOOLS_ALLOW = ["memory_search", "memory_get"] as const;
-const LANCEDB_ACTIVE_MEMORY_TOOLS_ALLOW = ["memory_recall"] as const;
+const DEFAULT_ACTIVE_MEMORY_TOOLS_ALLOW = ["memory_search", "memory_get", "memory_recall"] as const;
 const MAX_ACTIVE_MEMORY_TOOLS_ALLOW = 32;
 const ACTIVE_MEMORY_RESERVED_TOOLS_ALLOW = new Set([
   "*",
@@ -465,9 +464,8 @@ function isReservedActiveMemoryToolsAllowEntry(value: string): boolean {
 }
 
 function resolveDefaultToolsAllow(cfg: OpenClawConfig | undefined): string[] {
-  return cfg?.plugins?.slots?.memory === "memory-lancedb"
-    ? [...LANCEDB_ACTIVE_MEMORY_TOOLS_ALLOW]
-    : [...DEFAULT_ACTIVE_MEMORY_TOOLS_ALLOW];
+  void cfg;
+  return [...DEFAULT_ACTIVE_MEMORY_TOOLS_ALLOW];
 }
 
 function resolveToolsAllow(params: { pluginToolsAllow: unknown; cfg?: OpenClawConfig }): string[] {
