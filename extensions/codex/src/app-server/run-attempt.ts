@@ -3824,16 +3824,68 @@ function resolveCodexAppServerHookChannelId(
   }).channelId;
 }
 
+type CodexDynamicToolBuildStageTiming = {
+  name: string;
+  durationMs: number;
+  elapsedMs: number;
+};
+
+type CodexDynamicToolBuildStageSummary = {
+  totalMs: number;
+  stages: CodexDynamicToolBuildStageTiming[];
+};
+
+const CODEX_DYNAMIC_TOOL_BUILD_WARN_TOTAL_MS = 1_000;
+const CODEX_DYNAMIC_TOOL_BUILD_WARN_STAGE_MS = 500;
+
+function createCodexDynamicToolBuildStageTracker(): {
+  mark: (name: string) => void;
+  snapshot: () => CodexDynamicToolBuildStageSummary;
+} {
+  const startedAt = Date.now();
+  let previousAt = startedAt;
+  const stages: CodexDynamicToolBuildStageTiming[] = [];
+  const toMs = (value: number) => Math.max(0, Math.round(value));
+  return {
+    mark(name) {
+      const currentAt = Date.now();
+      stages.push({
+        name,
+        durationMs: toMs(currentAt - previousAt),
+        elapsedMs: toMs(currentAt - startedAt),
+      });
+      previousAt = currentAt;
+    },
+    snapshot() {
+      return {
+        totalMs: toMs(Date.now() - startedAt),
+        stages: stages.slice(),
+      };
+    },
+  };
+}
+
+function shouldWarnCodexDynamicToolBuildStageSummary(
+  summary: CodexDynamicToolBuildStageSummary,
+): boolean {
+  return (
+    summary.totalMs >= CODEX_DYNAMIC_TOOL_BUILD_WARN_TOTAL_MS ||
+    summary.stages.some((stage) => stage.durationMs >= CODEX_DYNAMIC_TOOL_BUILD_WARN_STAGE_MS)
+  );
+}
+
 async function buildDynamicTools(input: DynamicToolBuildParams) {
   const { params } = input;
   if (params.disableTools || !supportsModelTools(params.model)) {
     return [];
   }
+  const toolBuildStages = createCodexDynamicToolBuildStageTracker();
   const modelHasVision = params.model.input?.includes("image") ?? false;
   const agentDir = params.agentDir ?? resolveAgentDir(params.config ?? {}, input.sessionAgentId);
   const createOpenClawCodingTools =
     openClawCodingToolsFactoryForTests ??
     (await import("openclaw/plugin-sdk/agent-harness")).createOpenClawCodingTools;
+  toolBuildStages.mark("load-agent-harness-tools");
   const sessionKeys = resolveOpenClawCodingToolsSessionKeys(params, input.sandboxSessionKey);
   const allTools = createOpenClawCodingTools({
     agentId: input.sessionAgentId,
@@ -3903,7 +3955,11 @@ async function buildDynamicTools(input: DynamicToolBuildParams) {
         data: { name: "sessions_yield", message },
       });
     },
+    recordToolPrepStage: (name) => {
+      toolBuildStages.mark(name);
+    },
   });
+  toolBuildStages.mark("create-openclaw-coding-tools");
   const codexFilteredTools = addNodeShellDynamicToolsIfNeeded(
     addSandboxShellDynamicToolsIfAvailable(
       isCodexMemoryFlushRun(params)
@@ -3915,13 +3971,16 @@ async function buildDynamicTools(input: DynamicToolBuildParams) {
     allTools,
     input,
   );
+  toolBuildStages.mark("codex-filtering");
   const visionFilteredTools = filterToolsForVisionInputs(codexFilteredTools, {
     modelHasVision,
     hasInboundImages: (params.images?.length ?? 0) > 0,
   });
+  toolBuildStages.mark("vision-filtering");
   const toolsAllow = includeForcedCodexDynamicToolAllow(params.toolsAllow, params);
   const filteredTools = filterCodexDynamicToolsForAllowlist(visionFilteredTools, toolsAllow);
-  return normalizeAgentRuntimeTools({
+  toolBuildStages.mark("allowlist-filter");
+  const normalizedTools = normalizeAgentRuntimeTools({
     runtimePlan: input.ignoreRuntimePlan ? undefined : params.runtimePlan,
     tools: filteredTools,
     provider: params.provider,
@@ -3932,6 +3991,26 @@ async function buildDynamicTools(input: DynamicToolBuildParams) {
     modelApi: params.model.api,
     model: params.model,
   });
+  toolBuildStages.mark("runtime-normalization");
+  const summary = toolBuildStages.snapshot();
+  if (shouldWarnCodexDynamicToolBuildStageSummary(summary)) {
+    embeddedAgentLog.warn("codex app-server dynamic tool build timings", {
+      runId: params.runId,
+      sessionId: params.sessionId,
+      phase: input.forceHeartbeatTool ? "registered-tools" : "runtime-tools",
+      totalMs: summary.totalMs,
+      stages: summary.stages,
+      allToolCount: allTools.length,
+      codexFilteredToolCount: codexFilteredTools.length,
+      visionFilteredToolCount: visionFilteredTools.length,
+      filteredToolCount: filteredTools.length,
+      normalizedToolCount: normalizedTools.length,
+      forceHeartbeatTool: input.forceHeartbeatTool === true,
+      ignoreRuntimePlan: input.ignoreRuntimePlan === true,
+      nativeToolSurfaceEnabled: input.nativeToolSurfaceEnabled === true,
+    });
+  }
+  return normalizedTools;
 }
 
 function includeForcedCodexDynamicToolAllow(
