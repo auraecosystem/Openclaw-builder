@@ -3,7 +3,11 @@ import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { MsgContext } from "../templating.js";
 import { handleContextCommand } from "./commands-context-command.js";
-import { handleExportTrajectoryCommand, handleStatusCommand } from "./commands-info.js";
+import {
+  handleExportTrajectoryCommand,
+  handleSkillCommandUsage,
+  handleStatusCommand,
+} from "./commands-info.js";
 import { buildStatusReply } from "./commands-status.js";
 import type { HandleCommandsParams } from "./commands-types.js";
 import { handleWhoamiCommand } from "./commands-whoami.js";
@@ -154,6 +158,37 @@ describe("info command handlers", () => {
     expect(result?.reply?.text).toContain("User id: 12345");
     expect(result?.reply?.text).toContain("Username: @TestUser");
     expect(result?.reply?.text).toContain("AllowFrom: 12345");
+  });
+
+  it("returns usage for bare /skill without continuing to the agent", async () => {
+    const params = buildInfoParams("/skill", {
+      commands: { text: true },
+    } as OpenClawConfig);
+    params.skillCommands = [
+      {
+        name: "demo_skill",
+        skillName: "demo-skill",
+        description: "Demo skill",
+      },
+    ];
+
+    const result = await handleSkillCommandUsage(params, true);
+
+    expect(result?.shouldContinue).toBe(false);
+    expect(result?.reply?.text).toContain("Usage: /skill <name> [input]");
+    expect(result?.reply?.text).toContain("Available: demo-skill");
+  });
+
+  it("returns an unknown skill reply for unmatched /skill targets", async () => {
+    const params = buildInfoParams("/skill missing input", {
+      commands: { text: true },
+    } as OpenClawConfig);
+
+    const result = await handleSkillCommandUsage(params, true);
+
+    expect(result?.shouldContinue).toBe(false);
+    expect(result?.reply?.text).toContain("Unknown skill: missing");
+    expect(result?.reply?.text).toContain("Usage: /skill <name> [input]");
   });
 
   it("uses the canonical command sender identity for /whoami AllowFrom", async () => {
