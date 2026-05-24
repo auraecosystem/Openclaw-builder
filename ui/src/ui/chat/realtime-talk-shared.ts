@@ -234,6 +234,11 @@ function waitForChatResult(params: {
       cleanup();
       reject(new Error("OpenClaw tool call timed out"));
     }, params.timeoutMs);
+    let emptyFinalTimer: number | undefined;
+    const resolveEmptyFinalFallback = () => {
+      cleanup();
+      resolve("OpenClaw finished with no text.");
+    };
     const onAbort = () => {
       cleanup();
       reject(new DOMException("OpenClaw tool call aborted", "AbortError"));
@@ -250,8 +255,13 @@ function waitForChatResult(params: {
       }
       emitRealtimeTalkAgentProgress(params.emitTalkEvent, payload);
       if (payload.state === "final") {
-        cleanup();
-        resolve(extractTextFromMessage(payload.message) || "OpenClaw finished with no text.");
+        const finalText = extractTextFromMessage(payload.message);
+        if (finalText) {
+          cleanup();
+          resolve(finalText);
+          return;
+        }
+        emptyFinalTimer ??= window.setTimeout(resolveEmptyFinalFallback, 250);
       } else if (payload.state === "aborted") {
         cleanup();
         reject(
@@ -264,6 +274,10 @@ function waitForChatResult(params: {
     });
     function cleanup() {
       window.clearTimeout(timer);
+      if (emptyFinalTimer !== undefined) {
+        window.clearTimeout(emptyFinalTimer);
+        emptyFinalTimer = undefined;
+      }
       params.signal?.removeEventListener("abort", onAbort);
       unsubscribe();
     }
