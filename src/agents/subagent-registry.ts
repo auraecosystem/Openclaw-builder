@@ -384,7 +384,7 @@ function scheduleLifecycleCatchRecovery(runId: string, expectedOutcomeStatus: st
     void completeSubagentRun({
       runId,
       endedAt: entry.endedAt,
-      outcome: entry.outcome ?? { status: expectedOutcomeStatus as "ok" | "error" },
+      outcome: entry.outcome ?? { status: expectedOutcomeStatus as "ok" | "error" | "timeout" },
       reason: entry.endedReason ?? SUBAGENT_ENDED_REASON_COMPLETE,
       sendFarewell: true,
       accountId: entry.requesterOrigin?.accountId,
@@ -469,7 +469,7 @@ function schedulePendingLifecycleTimeout(params: { runId: string; endedAt: numbe
     };
     void completeSubagentRun(completionParams).catch((err) => {
       log.warn("lifecycle timeout completion failed", { err, runId: params.runId });
-      scheduleLifecycleCatchRecovery(params.runId, "error");
+      scheduleLifecycleCatchRecovery(params.runId, "timeout");
     });
   }, LIFECYCLE_TIMEOUT_RETRY_GRACE_MS);
   timer.unref?.();
