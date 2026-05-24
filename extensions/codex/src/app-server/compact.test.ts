@@ -1053,6 +1053,42 @@ describe("maybeCompactCodexAppServerSession", () => {
       expect(vi.getTimerCount()).toBe(0);
     });
 
+    it("uses the explicit active agent id for legacy-key owning compaction timeout", async () => {
+      const sessionFile = await writeTestBinding();
+      const compact = vi.fn<ContextEngine["compact"]>(() => new Promise(() => {}));
+      const contextEngine: ContextEngine = {
+        info: { id: "lossless-claw", name: "Lossless Claw", ownsCompaction: true },
+        assemble: vi.fn() as never,
+        ingest: vi.fn() as never,
+        compact,
+      };
+
+      vi.useFakeTimers();
+      const pendingResult = maybeCompactCodexAppServerSession({
+        sessionId: "session-1",
+        sessionKey: "legacy-session-key",
+        agentId: "lossless-agent",
+        sessionFile,
+        workspaceDir: tempDir,
+        contextEngine,
+        config: {
+          agents: {
+            defaults: { compaction: { timeoutSeconds: 60 } },
+            list: [{ id: "lossless-agent", compaction: { timeoutSeconds: 1 } }],
+          },
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      const result = requireCompactResult(await pendingResult);
+
+      expect(result.ok).toBe(false);
+      expect(result.compacted).toBe(false);
+      expect(result.reason).toContain("timed out");
+      expect(compact).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
     it("threads a composed caller abort signal into the owning context-engine compact()", async () => {
       const sessionFile = await writeTestBinding();
       const controller = new AbortController();

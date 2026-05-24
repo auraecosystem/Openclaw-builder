@@ -75,6 +75,7 @@ export async function compactEmbeddedPiSession(
   const agentIds = resolveSessionAgentIds({
     sessionKey: params.sessionKey,
     config: params.config,
+    agentId: params.agentId,
   });
   const agentDir = params.agentDir ?? resolveAgentDir(params.config ?? {}, agentIds.sessionAgentId);
   const resolvedWorkspaceDir = resolveUserPath(params.workspaceDir);
@@ -86,6 +87,7 @@ export async function compactEmbeddedPiSession(
   if (!contextTokenBudget || !Number.isFinite(contextTokenBudget) || contextTokenBudget <= 0) {
     const resolvedCompactionTarget = resolveEmbeddedCompactionTarget({
       config: params.config,
+      agentId: agentIds.sessionAgentId,
       provider: params.provider,
       modelId: params.model,
       authProfileId: params.authProfileId,
@@ -167,6 +169,7 @@ export async function compactEmbeddedPiSession(
         const { sessionAgentId } = resolveSessionAgentIds({
           sessionKey: params.sessionKey,
           config: params.config,
+          agentId: params.agentId,
         });
         const resolvedMessageProvider = params.messageChannel ?? params.messageProvider;
         const hookCtx = {
@@ -217,7 +220,7 @@ export async function compactEmbeddedPiSession(
               force: params.trigger === "manual",
               runtimeContext,
             },
-            resolveCompactionTimeoutMs(params.config),
+            resolveCompactionTimeoutMs(params.config, sessionAgentId),
             params.abortSignal,
           );
         } catch (compactErr) {
@@ -239,7 +242,10 @@ export async function compactEmbeddedPiSession(
         let postCompactionSessionFile = delegatedSessionFile ?? params.sessionFile;
         let postCompactionLeafId: string | undefined;
         if (result.ok && result.compacted) {
-          if (shouldRotateCompactionTranscript(params.config) && !delegatedRotatedTranscript) {
+          if (
+            shouldRotateCompactionTranscript(params.config, agentIds.sessionAgentId) &&
+            !delegatedRotatedTranscript
+          ) {
             try {
               const rotation = await rotateTranscriptFileAfterCompaction({
                 sessionFile: params.sessionFile,
@@ -296,6 +302,7 @@ export async function compactEmbeddedPiSession(
             reason: "compaction",
             runtimeContext,
             config: params.config,
+            agentId: agentIds.sessionAgentId,
           });
         }
         if (engineOwnsCompaction && result.ok && result.compacted) {
@@ -303,6 +310,7 @@ export async function compactEmbeddedPiSession(
             config: params.config,
             sessionKey: params.sessionKey,
             sessionFile: postCompactionSessionFile,
+            agentId: agentIds.sessionAgentId,
           });
         }
         if (
@@ -370,6 +378,7 @@ function buildCompactionContextEngineRuntimeContext(params: {
   const { sessionAgentId } = resolveSessionAgentIds({
     sessionKey: params.params.sessionKey,
     config: params.params.config,
+    agentId: params.params.agentId,
   });
   return {
     ...params.params,
@@ -378,6 +387,7 @@ function buildCompactionContextEngineRuntimeContext(params: {
       messageChannel: params.params.messageChannel,
       messageProvider: params.params.messageProvider,
       agentAccountId: params.params.agentAccountId,
+      agentId: sessionAgentId,
       currentChannelId: params.params.currentChannelId,
       currentThreadTs: params.params.currentThreadTs,
       currentMessageId: params.params.currentMessageId,
@@ -392,6 +402,7 @@ function buildCompactionContextEngineRuntimeContext(params: {
       modelId: params.params.model,
       modelFallbacksOverride: params.params.modelFallbacksOverride,
       thinkLevel: params.params.thinkLevel,
+      useCompactionThinkingLevel: true,
       reasoningLevel: params.params.reasoningLevel,
       bashElevated: params.params.bashElevated,
       extraSystemPrompt: params.params.extraSystemPrompt,

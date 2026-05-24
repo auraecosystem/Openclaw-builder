@@ -1746,6 +1746,7 @@ export async function runEmbeddedPiAgent(
                     messageChannel: params.messageChannel,
                     messageProvider: params.messageProvider,
                     agentAccountId: params.agentAccountId,
+                    agentId: sessionAgentId,
                     currentChannelId: params.currentChannelId,
                     currentThreadTs: params.currentThreadTs,
                     currentMessageId: params.currentMessageId,
@@ -1759,6 +1760,7 @@ export async function runEmbeddedPiAgent(
                     modelId,
                     modelFallbacksOverride: params.modelFallbacksOverride,
                     thinkLevel,
+                    useCompactionThinkingLevel: true,
                     reasoningLevel: params.reasoningLevel,
                     bashElevated: params.bashElevated,
                     extraSystemPrompt: params.extraSystemPrompt,
@@ -1803,7 +1805,7 @@ export async function runEmbeddedPiAgent(
                     compactionTarget: "budget",
                     runtimeContext: timeoutCompactionRuntimeContext,
                   },
-                  resolveCompactionTimeoutMs(params.config),
+                  resolveCompactionTimeoutMs(params.config, sessionAgentId),
                   params.abortSignal,
                 );
               } catch (compactErr) {
@@ -1834,6 +1836,7 @@ export async function runEmbeddedPiAgent(
                     config: params.config,
                     sessionKey: params.sessionKey,
                     sessionFile: activeSessionFile,
+                    agentId: sessionAgentId,
                   });
                 }
                 log.info(
@@ -1928,6 +1931,7 @@ export async function runEmbeddedPiAgent(
                     messageChannel: params.messageChannel,
                     messageProvider: params.messageProvider,
                     agentAccountId: params.agentAccountId,
+                    agentId: sessionAgentId,
                     currentChannelId: params.currentChannelId,
                     currentThreadTs: params.currentThreadTs,
                     currentMessageId: params.currentMessageId,
@@ -1940,6 +1944,7 @@ export async function runEmbeddedPiAgent(
                     provider,
                     modelId,
                     thinkLevel,
+                    useCompactionThinkingLevel: true,
                     reasoningLevel: params.reasoningLevel,
                     bashElevated: params.bashElevated,
                     extraSystemPrompt: params.extraSystemPrompt,
@@ -1990,7 +1995,7 @@ export async function runEmbeddedPiAgent(
                     compactionTarget: "budget",
                     runtimeContext: overflowCompactionRuntimeContext,
                   },
-                  resolveCompactionTimeoutMs(params.config),
+                  resolveCompactionTimeoutMs(params.config, sessionAgentId),
                   params.abortSignal,
                 );
                 if (compactResult.ok && compactResult.compacted) {

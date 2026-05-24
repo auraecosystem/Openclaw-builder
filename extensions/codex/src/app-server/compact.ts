@@ -63,6 +63,7 @@ export async function maybeCompactCodexAppServerSession(
         reason: "compaction",
         runtimeContext: params.contextEngineRuntimeContext,
         config: params.config,
+        agentId: params.agentId,
       });
     } catch (error) {
       embeddedAgentLog.warn("context engine compaction maintenance failed after Codex compaction", {
@@ -111,7 +112,7 @@ async function compactOwningContextEngine(
         force,
         runtimeContext: params.contextEngineRuntimeContext,
       },
-      resolveCompactionTimeoutMs(params.config),
+      resolveCompactionTimeoutMs(params.config, params.agentId),
       params.abortSignal,
     );
   } catch (error) {
@@ -140,6 +141,7 @@ async function compactOwningContextEngine(
         reason: "compaction",
         runtimeContext: params.contextEngineRuntimeContext,
         config: params.config,
+        agentId: params.agentId,
       });
     } catch (error) {
       embeddedAgentLog.warn("context engine compaction maintenance failed", {

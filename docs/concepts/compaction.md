@@ -91,6 +91,26 @@ This works with local models too, for example a second Ollama model dedicated to
 ```
 
 When unset, compaction starts with the active session model. If summarization fails with a model-fallback-eligible provider error, OpenClaw retries that compaction attempt through the session's existing model fallback chain. The fallback choice is temporary and is not written back to session state. An explicit `agents.defaults.compaction.model` override remains exact and does not inherit the session fallback chain.
+Per-agent `agents.list[].compaction.model` overrides are also supported. Omit `agents.list[].compaction` to inherit `agents.defaults.compaction`; set only the per-agent fields that should differ. Per-agent `agents.list[].compaction` deep-merges over `agents.defaults.compaction`, so unspecified fields continue to inherit the defaults.
+
+### Thinking level
+
+By default, compaction uses the active session's thinking level. Set `agents.defaults.compaction.thinkingLevel` when summarization should use a different reasoning budget than normal replies. Use `"off"` to explicitly disable reasoning for compaction:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "compaction": {
+        "model": "openai/gpt-5.4-mini",
+        "thinkingLevel": "off"
+      }
+    }
+  }
+}
+```
+
+Per-agent `agents.list[].compaction.thinkingLevel` uses the same merge semantics as other per-agent compaction settings.
 
 ### Identifier preservation
 
@@ -150,6 +170,7 @@ Before compaction, OpenClaw can run a **silent memory flush** turn to store dura
 ```
 
 The memory-flush model override is exact and does not inherit the active session fallback chain. See [Memory](/concepts/memory) for details and config.
+Per-agent `agents.list[].compaction.memoryFlush.model` overrides are supported through the same merge semantics: omit `agents.list[].compaction` to inherit the default block, or set only the nested `memoryFlush` fields that should differ for that agent.
 
 ## Pluggable compaction providers
 

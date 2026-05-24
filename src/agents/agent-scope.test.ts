@@ -180,6 +180,158 @@ describe("resolveAgentConfig", () => {
     });
   });
 
+  it("inherits default compaction and contextPruning when per-agent blocks are absent", () => {
+    const cfg: OpenClawConfig = {
+      agents: {
+        defaults: {
+          compaction: {
+            mode: "default",
+            reserveTokensFloor: 20_000,
+            model: "gpt-5.4",
+          },
+          contextPruning: {
+            mode: "off",
+            minPrunableToolChars: 8_192,
+          },
+        },
+        list: [{ id: "main" }],
+      },
+    };
+
+    expect(resolveAgentConfig(cfg, "main")?.compaction).toEqual({
+      mode: "default",
+      reserveTokensFloor: 20_000,
+      model: "gpt-5.4",
+    });
+    expect(resolveAgentConfig(cfg, "main")?.contextPruning).toEqual({
+      mode: "off",
+      minPrunableToolChars: 8_192,
+    });
+  });
+
+  it("merges default compaction and contextPruning with per-agent blocks", () => {
+    const cfg: OpenClawConfig = {
+      agents: {
+        defaults: {
+          compaction: {
+            mode: "default",
+            reserveTokensFloor: 20_000,
+            model: "gpt-5.4",
+          },
+          contextPruning: {
+            mode: "off",
+            minPrunableToolChars: 8_192,
+          },
+        },
+        list: [
+          {
+            id: "main",
+            compaction: {
+              reserveTokensFloor: 24_000,
+            },
+            contextPruning: {
+              mode: "cache-ttl",
+              ttl: "15m",
+            },
+          },
+        ],
+      },
+    };
+
+    expect(resolveAgentConfig(cfg, "main")?.compaction).toEqual({
+      mode: "default",
+      reserveTokensFloor: 24_000,
+      model: "gpt-5.4",
+    });
+    expect(resolveAgentConfig(cfg, "main")?.contextPruning).toEqual({
+      mode: "cache-ttl",
+      minPrunableToolChars: 8_192,
+      ttl: "15m",
+    });
+  });
+
+  it("inherits compaction and contextPruning from empty per-agent blocks", () => {
+    const cfg: OpenClawConfig = {
+      agents: {
+        defaults: {
+          compaction: {
+            model: "gpt-5.4",
+            provider: "test-provider",
+          },
+          contextPruning: {
+            mode: "cache-ttl",
+            ttl: "15m",
+          },
+        },
+        list: [
+          {
+            id: "main",
+            compaction: {},
+            contextPruning: {},
+          },
+        ],
+      },
+    };
+
+    expect(resolveAgentConfig(cfg, "main")?.compaction).toEqual({
+      model: "gpt-5.4",
+      provider: "test-provider",
+    });
+    expect(resolveAgentConfig(cfg, "main")?.contextPruning).toEqual({
+      mode: "cache-ttl",
+      ttl: "15m",
+    });
+  });
+
+  it("deep-merges nested per-agent compaction and contextPruning blocks", () => {
+    const cfg: OpenClawConfig = {
+      agents: {
+        defaults: {
+          compaction: {
+            qualityGuard: { enabled: true, maxRetries: 1 },
+            memoryFlush: {
+              enabled: true,
+              model: "ollama/qwen3:8b",
+              prompt: "Write durable notes.",
+            },
+          },
+          contextPruning: {
+            mode: "cache-ttl",
+            tools: { allow: ["exec"], deny: ["browser"] },
+            hardClear: { enabled: true, placeholder: "[trimmed]" },
+          },
+        },
+        list: [
+          {
+            id: "main",
+            compaction: {
+              qualityGuard: { maxRetries: 3 },
+              memoryFlush: { model: "openai/gpt-5.4-mini" },
+            },
+            contextPruning: {
+              tools: { deny: ["image_generate"] },
+              hardClear: { placeholder: "[cleared]" },
+            },
+          },
+        ],
+      },
+    };
+
+    expect(resolveAgentConfig(cfg, "main")?.compaction).toEqual({
+      qualityGuard: { enabled: true, maxRetries: 3 },
+      memoryFlush: {
+        enabled: true,
+        model: "openai/gpt-5.4-mini",
+        prompt: "Write durable notes.",
+      },
+    });
+    expect(resolveAgentConfig(cfg, "main")?.contextPruning).toEqual({
+      mode: "cache-ttl",
+      tools: { allow: ["exec"], deny: ["image_generate"] },
+      hardClear: { enabled: true, placeholder: "[cleared]" },
+    });
+  });
+
   it("resolves explicit and effective model primary separately", () => {
     const cfgWithStringDefault = {
       agents: {

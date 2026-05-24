@@ -113,6 +113,88 @@ describe("buildEmbeddedCompactionRuntimeContext", () => {
     expect(result.authProfileId).toBe("openai:p1");
   });
 
+  it("prefers a per-agent compaction.model override over defaults", () => {
+    const result = buildEmbeddedCompactionRuntimeContext({
+      workspaceDir: "/tmp/workspace",
+      agentDir: "/tmp/agent",
+      agentId: "worker",
+      config: {
+        agents: {
+          defaults: {
+            compaction: {
+              model: "gpt-4o",
+            },
+          },
+          list: [
+            {
+              id: "worker",
+              compaction: {
+                model: "anthropic/claude-opus-4-6",
+              },
+            },
+          ],
+        },
+      } as OpenClawConfig,
+      provider: "openai",
+      modelId: "gpt-3.5-turbo",
+      authProfileId: "openai:p1",
+    });
+
+    expect(result.provider).toBe("anthropic");
+    expect(result.model).toBe("claude-opus-4-6");
+    expect(result.authProfileId).toBeUndefined();
+  });
+
+  it("inherits default model override when per-agent compaction is empty", () => {
+    const result = buildEmbeddedCompactionRuntimeContext({
+      workspaceDir: "/tmp/workspace",
+      agentDir: "/tmp/agent",
+      agentId: "worker",
+      config: {
+        agents: {
+          defaults: {
+            compaction: {
+              model: "anthropic/claude-opus-4-6",
+            },
+          },
+          list: [{ id: "worker", compaction: {} }],
+        },
+      } as OpenClawConfig,
+      provider: "openai",
+      modelId: "gpt-5.5",
+      authProfileId: "openai:p1",
+    });
+
+    expect(result.provider).toBe("anthropic");
+    expect(result.model).toBe("claude-opus-4-6");
+    expect(result.authProfileId).toBeUndefined();
+  });
+
+  it("inherits default model override when partial per-agent compaction omits model", () => {
+    const result = buildEmbeddedCompactionRuntimeContext({
+      workspaceDir: "/tmp/workspace",
+      agentDir: "/tmp/agent",
+      agentId: "worker",
+      config: {
+        agents: {
+          defaults: {
+            compaction: {
+              model: "anthropic/claude-opus-4-6",
+            },
+          },
+          list: [{ id: "worker", compaction: { keepRecentTokens: 12_000 } }],
+        },
+      } as OpenClawConfig,
+      provider: "openai",
+      modelId: "gpt-5.5",
+      authProfileId: "openai:p1",
+    });
+
+    expect(result.provider).toBe("anthropic");
+    expect(result.model).toBe("claude-opus-4-6");
+    expect(result.authProfileId).toBeUndefined();
+  });
+
   it("uses session model when no compaction.model override configured", () => {
     const result = buildEmbeddedCompactionRuntimeContext({
       workspaceDir: "/tmp/workspace",
@@ -209,5 +291,68 @@ describe("buildEmbeddedCompactionRuntimeContext", () => {
       model: "gpt-5.4",
       authProfileId: undefined,
     });
+  });
+
+  it("uses configured default compaction.thinkingLevel for compaction runtime contexts", () => {
+    const result = buildEmbeddedCompactionRuntimeContext({
+      workspaceDir: "/tmp/workspace",
+      agentDir: "/tmp/agent",
+      config: {
+        agents: { defaults: { compaction: { thinkingLevel: "off" } } },
+      } as OpenClawConfig,
+      thinkLevel: "high",
+      useCompactionThinkingLevel: true,
+    });
+
+    expect(result.thinkLevel).toBe("off");
+  });
+
+  it("prefers per-agent compaction.thinkingLevel over default compaction thinking", () => {
+    const result = buildEmbeddedCompactionRuntimeContext({
+      workspaceDir: "/tmp/workspace",
+      agentDir: "/tmp/agent",
+      agentId: "worker",
+      config: {
+        agents: {
+          defaults: { compaction: { thinkingLevel: "off" } },
+          list: [{ id: "worker", compaction: { thinkingLevel: "low" } }],
+        },
+      } as OpenClawConfig,
+      thinkLevel: "high",
+      useCompactionThinkingLevel: true,
+    });
+
+    expect(result.thinkLevel).toBe("low");
+  });
+
+  it("inherits default compaction.thinkingLevel from empty per-agent compaction", () => {
+    const result = buildEmbeddedCompactionRuntimeContext({
+      workspaceDir: "/tmp/workspace",
+      agentDir: "/tmp/agent",
+      agentId: "worker",
+      config: {
+        agents: {
+          defaults: { compaction: { thinkingLevel: "off" } },
+          list: [{ id: "worker", compaction: {} }],
+        },
+      } as OpenClawConfig,
+      thinkLevel: "high",
+      useCompactionThinkingLevel: true,
+    });
+
+    expect(result.thinkLevel).toBe("off");
+  });
+
+  it("keeps ordinary runtime contexts on the caller thinking level", () => {
+    const result = buildEmbeddedCompactionRuntimeContext({
+      workspaceDir: "/tmp/workspace",
+      agentDir: "/tmp/agent",
+      config: {
+        agents: { defaults: { compaction: { thinkingLevel: "off" } } },
+      } as OpenClawConfig,
+      thinkLevel: "high",
+    });
+
+    expect(result.thinkLevel).toBe("high");
   });
 });

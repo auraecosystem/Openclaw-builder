@@ -183,6 +183,29 @@ describe("agent defaults schema", () => {
     expect(agent.bootstrapTotalMaxChars).toBe(16384);
   });
 
+  it("accepts per-agent compaction and contextPruning overrides", () => {
+    const agent = AgentEntrySchema.parse({
+      id: "worker",
+      contextPruning: {
+        mode: "cache-ttl",
+        ttl: "15m",
+      },
+      compaction: {
+        mode: "safeguard",
+        reserveTokensFloor: 24_000,
+        model: "anthropic/claude-opus-4-6",
+        thinkingLevel: "off",
+      },
+    });
+
+    expect(agent.contextPruning?.mode).toBe("cache-ttl");
+    expect(agent.contextPruning?.ttl).toBe("15m");
+    expect(agent.compaction?.mode).toBe("safeguard");
+    expect(agent.compaction?.reserveTokensFloor).toBe(24_000);
+    expect(agent.compaction?.model).toBe("anthropic/claude-opus-4-6");
+    expect(agent.compaction?.thinkingLevel).toBe("off");
+  });
+
   it("rejects invalid per-agent bootstrap profile overrides", () => {
     expectSchemaFailurePath(
       AgentEntrySchema.safeParse({ id: "worker", contextInjection: "unknown" }),
@@ -278,6 +301,27 @@ describe("agent defaults schema", () => {
     })!;
     expect(result.compaction?.truncateAfterCompaction).toBe(true);
     expect(result.compaction?.maxActiveTranscriptBytes).toBe("20mb");
+  });
+
+  it("accepts legacy byte-size strings for compaction transcript limits", () => {
+    const defaults = AgentDefaultsSchema.parse({
+      compaction: {
+        maxActiveTranscriptBytes: "1.5gb",
+      },
+    })!;
+    const agent = AgentEntrySchema.parse({
+      id: "test",
+      compaction: {
+        maxActiveTranscriptBytes: "20m",
+        memoryFlush: {
+          forceFlushTranscriptBytes: "1.5gb",
+        },
+      },
+    });
+
+    expect(defaults.compaction?.maxActiveTranscriptBytes).toBe("1.5gb");
+    expect(agent.compaction?.maxActiveTranscriptBytes).toBe("20m");
+    expect(agent.compaction?.memoryFlush?.forceFlushTranscriptBytes).toBe("1.5gb");
   });
 
   it("accepts compaction.midTurnPrecheck.enabled", () => {

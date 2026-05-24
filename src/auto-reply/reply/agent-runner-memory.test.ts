@@ -74,6 +74,7 @@ type EmbeddedPiAgentParams = {
 type CompactEmbeddedPiSessionParams = {
   sessionKey?: string;
   sandboxSessionKey?: string;
+  agentId?: string;
   currentTokenCount?: number;
   sessionFile?: string;
   sessionId?: string;
@@ -697,6 +698,53 @@ describe("runMemoryFlushIfNeeded", () => {
     const compactCall = requireCompactEmbeddedPiSessionCall();
     expect(compactCall.sessionKey).toBe("agent:main:main");
     expect(compactCall.sandboxSessionKey).toBe("agent:main:telegram:default:direct:12345");
+  });
+
+  it("uses inherited reserveTokensFloor for Codex-runtime preflight projection with empty agent compaction", async () => {
+    clearMemoryPluginState();
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 5_000,
+      totalTokensFresh: false,
+    };
+
+    await runPreflightCompactionIfNeeded({
+      cfg: {
+        agents: {
+          defaults: {
+            model: "openai/gpt-5.5",
+            compaction: { reserveTokensFloor: 3_000 },
+          },
+          list: [
+            {
+              id: "codex-worker",
+              model: { primary: "openai/gpt-5.5" },
+              models: { "openai/gpt-5.5": { agentRuntime: { id: "codex" } } },
+              compaction: {},
+            },
+          ],
+        },
+      },
+      followupRun: createTestFollowupRun({
+        agentId: "codex-worker",
+        provider: "openai",
+        model: "gpt-5.5",
+        sessionKey: "agent:codex-worker:main",
+      }),
+      defaultModel: "gpt-5.5",
+      agentCfgContextTokens: 10_000,
+      sessionEntry,
+      sessionStore: { "agent:codex-worker:main": sessionEntry },
+      sessionKey: "agent:codex-worker:main",
+      isHeartbeat: false,
+      replyOperation: createReplyOperation(),
+    });
+
+    expect(compactEmbeddedPiSessionMock).toHaveBeenCalledTimes(1);
+    const compactCall = requireCompactEmbeddedPiSessionCall();
+    expect(compactCall.agentId).toBe("codex-worker");
+    expect(compactCall.currentTokenCount).toBe(5_000);
   });
 
   it("updates the active preflight run after transcript rotation", async () => {

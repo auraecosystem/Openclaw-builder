@@ -1,6 +1,11 @@
 import type { SourceReplyDeliveryMode } from "../../auto-reply/get-reply-options.types.js";
-import type { ReasoningLevel, ThinkLevel } from "../../auto-reply/thinking.js";
+import {
+  normalizeThinkLevel,
+  type ReasoningLevel,
+  type ThinkLevel,
+} from "../../auto-reply/thinking.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { resolveAgentConfig } from "../agent-scope-config.js";
 import {
   listActiveProcessSessionReferences,
   type ActiveProcessSessionReference,
@@ -41,15 +46,21 @@ export type EmbeddedCompactionRuntimeContext = {
  */
 export function resolveEmbeddedCompactionTarget(params: {
   config?: OpenClawConfig;
+  agentId?: string | null;
   provider?: string | null;
   modelId?: string | null;
   authProfileId?: string | null;
   defaultProvider?: string;
   defaultModel?: string;
 }): { provider: string | undefined; model: string | undefined; authProfileId: string | undefined } {
+  const compaction =
+    params.config && params.agentId
+      ? (resolveAgentConfig(params.config, params.agentId)?.compaction ??
+        params.config.agents?.defaults?.compaction)
+      : params.config?.agents?.defaults?.compaction;
   const provider = params.provider?.trim() || params.defaultProvider;
   const model = params.modelId?.trim() || params.defaultModel;
-  const override = params.config?.agents?.defaults?.compaction?.model?.trim();
+  const override = compaction?.model?.trim();
   if (!override) {
     return {
       provider,
@@ -76,11 +87,27 @@ export function resolveEmbeddedCompactionTarget(params: {
   };
 }
 
+export function resolveEmbeddedCompactionThinkingLevel(params: {
+  config?: OpenClawConfig;
+  agentId?: string | null;
+  thinkLevel?: ThinkLevel | null;
+}): ThinkLevel {
+  const configured = normalizeThinkLevel(
+    (params.config && params.agentId
+      ? (resolveAgentConfig(params.config, params.agentId)?.compaction ??
+        params.config.agents?.defaults?.compaction)
+      : params.config?.agents?.defaults?.compaction
+    )?.thinkingLevel,
+  );
+  return configured ?? normalizeThinkLevel(params.thinkLevel) ?? "off";
+}
+
 export function buildEmbeddedCompactionRuntimeContext(params: {
   sessionKey?: string | null;
   messageChannel?: string | null;
   messageProvider?: string | null;
   agentAccountId?: string | null;
+  agentId?: string | null;
   currentChannelId?: string | null;
   currentThreadTs?: string | null;
   currentMessageId?: string | number | null;
@@ -95,6 +122,7 @@ export function buildEmbeddedCompactionRuntimeContext(params: {
   modelId?: string | null;
   modelFallbacksOverride?: string[];
   thinkLevel?: ThinkLevel;
+  useCompactionThinkingLevel?: boolean;
   reasoningLevel?: ReasoningLevel;
   bashElevated?: ExecElevatedDefaults;
   extraSystemPrompt?: string;
@@ -104,6 +132,7 @@ export function buildEmbeddedCompactionRuntimeContext(params: {
 }): EmbeddedCompactionRuntimeContext {
   const resolved = resolveEmbeddedCompactionTarget({
     config: params.config,
+    agentId: params.agentId,
     provider: params.provider,
     modelId: params.modelId,
     authProfileId: params.authProfileId,
@@ -132,7 +161,13 @@ export function buildEmbeddedCompactionRuntimeContext(params: {
     provider: resolved.provider,
     model: resolved.model,
     modelFallbacksOverride: params.modelFallbacksOverride,
-    thinkLevel: params.thinkLevel,
+    thinkLevel: params.useCompactionThinkingLevel
+      ? resolveEmbeddedCompactionThinkingLevel({
+          config: params.config,
+          agentId: params.agentId,
+          thinkLevel: params.thinkLevel,
+        })
+      : params.thinkLevel,
     reasoningLevel: params.reasoningLevel,
     bashElevated: params.bashElevated,
     extraSystemPrompt: params.extraSystemPrompt,

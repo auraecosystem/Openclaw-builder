@@ -526,6 +526,7 @@ export function buildAfterTurnRuntimeContext(params: {
   tokenBudget?: number;
   currentTokenCount?: number;
   promptCache?: ContextEnginePromptCacheInfo;
+  useCompactionThinkingLevel?: boolean;
 }): ContextEngineRuntimeContext {
   return {
     ...buildEmbeddedCompactionRuntimeContext({
@@ -533,6 +534,7 @@ export function buildAfterTurnRuntimeContext(params: {
       messageChannel: params.attempt.messageChannel,
       messageProvider: params.attempt.messageProvider,
       agentAccountId: params.attempt.agentAccountId,
+      agentId: params.activeAgentId,
       currentChannelId: params.attempt.currentChannelId,
       currentThreadTs: params.attempt.currentThreadTs,
       currentMessageId: params.attempt.currentMessageId,
@@ -545,6 +547,7 @@ export function buildAfterTurnRuntimeContext(params: {
       provider: params.attempt.provider,
       modelId: params.attempt.modelId,
       thinkLevel: params.attempt.thinkLevel,
+      useCompactionThinkingLevel: params.useCompactionThinkingLevel,
       reasoningLevel: params.attempt.reasoningLevel,
       bashElevated: params.attempt.bashElevated,
       extraSystemPrompt: params.attempt.extraSystemPrompt,
@@ -564,6 +567,7 @@ export function buildAfterTurnRuntimeContext(params: {
       contextEnginePluginId: params.contextEnginePluginId,
       purpose: "context-engine.after-turn",
     }),
+    ...(params.activeAgentId ? { activeAgentId: params.activeAgentId } : {}),
     ...(typeof params.tokenBudget === "number" &&
     Number.isFinite(params.tokenBudget) &&
     params.tokenBudget > 0

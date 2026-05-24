@@ -49,6 +49,7 @@ export function createPreparedEmbeddedPiSettingsManager(params: {
   cwd: string;
   agentDir: string;
   cfg?: OpenClawConfig;
+  agentId?: string | null;
   pluginMetadataSnapshot?: PluginMetadataSnapshot;
   /** Resolved context window budget so reserve-token floor can be capped for small models. */
   contextTokenBudget?: number;
@@ -59,6 +60,7 @@ export function createPreparedEmbeddedPiSettingsManager(params: {
   applyPiCompactionSettingsFromConfig({
     settingsManager,
     cfg: params.cfg,
+    agentId: params.agentId,
     contextTokenBudget: params.contextTokenBudget,
   });
   // Disable the pi-coding-agent auto-retry. OpenClaw has its own comprehensive

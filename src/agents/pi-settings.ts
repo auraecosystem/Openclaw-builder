@@ -1,6 +1,7 @@
 import type { AgentCompactionMode } from "../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { ContextEngineInfo } from "../context-engine/types.js";
+import { resolveAgentConfig } from "./agent-scope-config.js";
 import { MIN_PROMPT_BUDGET_RATIO, MIN_PROMPT_BUDGET_TOKENS } from "./pi-compaction-constants.js";
 import { resolveProviderEndpoint } from "./provider-attribution.js";
 import { normalizeProviderId } from "./provider-id.js";
@@ -43,8 +44,15 @@ export function ensurePiCompactionReserveTokens(params: {
   return { didOverride: true, reserveTokens: minReserveTokens };
 }
 
-export function resolveCompactionReserveTokensFloor(cfg?: OpenClawConfig): number {
-  const raw = cfg?.agents?.defaults?.compaction?.reserveTokensFloor;
+export function resolveCompactionReserveTokensFloor(
+  cfg?: OpenClawConfig,
+  agentId?: string | null,
+): number {
+  const raw = (
+    cfg && agentId
+      ? (resolveAgentConfig(cfg, agentId)?.compaction ?? cfg.agents?.defaults?.compaction)
+      : cfg?.agents?.defaults?.compaction
+  )?.reserveTokensFloor;
   if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) {
     return Math.floor(raw);
   }
@@ -68,6 +76,7 @@ function toPositiveInt(value: unknown): number | undefined {
 export function applyPiCompactionSettingsFromConfig(params: {
   settingsManager: PiSettingsManagerLike;
   cfg?: OpenClawConfig;
+  agentId?: string | null;
   /** When known, the resolved context window budget for the current model. */
   contextTokenBudget?: number;
 }): {
@@ -76,11 +85,15 @@ export function applyPiCompactionSettingsFromConfig(params: {
 } {
   const currentReserveTokens = params.settingsManager.getCompactionReserveTokens();
   const currentKeepRecentTokens = params.settingsManager.getCompactionKeepRecentTokens();
-  const compactionCfg = params.cfg?.agents?.defaults?.compaction;
+  const compactionCfg =
+    params.cfg && params.agentId
+      ? (resolveAgentConfig(params.cfg, params.agentId)?.compaction ??
+        params.cfg.agents?.defaults?.compaction)
+      : params.cfg?.agents?.defaults?.compaction;
 
   const configuredReserveTokens = toNonNegativeInt(compactionCfg?.reserveTokens);
   const configuredKeepRecentTokens = toPositiveInt(compactionCfg?.keepRecentTokens);
-  let reserveTokensFloor = resolveCompactionReserveTokensFloor(params.cfg);
+  let reserveTokensFloor = resolveCompactionReserveTokensFloor(params.cfg, params.agentId);
 
   // Cap the floor to a safe fraction of the context window so that
   // small-context models (e.g. Ollama with 16 K tokens) are not starved of
@@ -126,8 +139,14 @@ export function applyPiCompactionSettingsFromConfig(params: {
 }
 
 /** Resolve the compaction mode after provider-backed safeguard promotion. */
-export function resolveEffectiveCompactionMode(cfg?: OpenClawConfig): AgentCompactionMode {
-  const compaction = cfg?.agents?.defaults?.compaction;
+export function resolveEffectiveCompactionMode(
+  cfg?: OpenClawConfig,
+  agentId?: string | null,
+): AgentCompactionMode {
+  const compaction =
+    cfg && agentId
+      ? (resolveAgentConfig(cfg, agentId)?.compaction ?? cfg.agents?.defaults?.compaction)
+      : cfg?.agents?.defaults?.compaction;
   if (compaction?.provider) {
     return "safeguard";
   }

@@ -52,7 +52,11 @@ import {
   type NativeHookRelayEvent,
   type NativeHookRelayRegistrationHandle,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
-import { markAuthProfileBlockedUntil, resolveAgentDir } from "openclaw/plugin-sdk/agent-runtime";
+import {
+  markAuthProfileBlockedUntil,
+  resolveAgentConfig,
+  resolveAgentDir,
+} from "openclaw/plugin-sdk/agent-runtime";
 import {
   emitTrustedDiagnosticEvent,
   hasPendingInternalDiagnosticEvent,
@@ -844,18 +848,22 @@ async function rotateOversizedCodexAppServerStartupBinding(params: {
   agentDir: string;
   codexHome?: string;
   config: EmbeddedRunAttemptParams["config"] | undefined;
+  sessionAgentId?: string | null;
 }): Promise<CodexAppServerThreadBinding | undefined> {
   const binding = params.binding;
   if (!binding?.threadId) {
     return binding;
   }
-  if (params.config?.agents?.defaults?.compaction?.truncateAfterCompaction !== true) {
+  const compactionConfig =
+    params.config && params.sessionAgentId
+      ? (resolveAgentConfig(params.config, params.sessionAgentId)?.compaction ??
+        params.config?.agents?.defaults?.compaction)
+      : params.config?.agents?.defaults?.compaction;
+  if (compactionConfig?.truncateAfterCompaction !== true) {
     return binding;
   }
   const sessionRecord = await readCodexSessionRecordForSessionFile(params.sessionFile);
-  const maxBytes = parseCodexAppServerByteLimit(
-    params.config?.agents?.defaults?.compaction?.maxActiveTranscriptBytes,
-  );
+  const maxBytes = parseCodexAppServerByteLimit(compactionConfig.maxActiveTranscriptBytes);
   const rolloutFiles = await listCodexAppServerRolloutFilesForThread(
     params.agentDir,
     binding.threadId,
@@ -1001,6 +1009,7 @@ export async function runCodexAppServerAttempt(
     agentDir,
     codexHome: appServer.start.env?.CODEX_HOME,
     config: params.config,
+    sessionAgentId,
   });
   const startupAuthProfileCandidate =
     params.runtimePlan?.auth.forwardedAuthProfileId ??
@@ -1110,6 +1119,7 @@ export async function runCodexAppServerAttempt(
     pluginConfig,
     forceHeartbeatTool: true,
     ignoreRuntimePlan: true,
+    skipRuntimeToolNormalization: true,
     onYieldDetected: () => {
       yieldDetected = true;
     },
@@ -1158,7 +1168,7 @@ export async function runCodexAppServerAttempt(
   const activeContextEnginePluginId = activeContextEngine
     ? resolveContextEngineOwnerPluginId(activeContextEngine)
     : undefined;
-  const buildActiveContextEngineRuntimeContext = () =>
+  const buildActiveContextEngineRuntimeContext = (options: { forCompaction?: boolean } = {}) =>
     buildHarnessContextEngineRuntimeContext({
       attempt: buildActiveRunAttemptParams(),
       workspaceDir: effectiveWorkspace,
@@ -1166,6 +1176,7 @@ export async function runCodexAppServerAttempt(
       activeAgentId: sessionAgentId,
       contextEnginePluginId: activeContextEnginePluginId,
       tokenBudget: params.contextTokenBudget,
+      useCompactionThinkingLevel: options.forCompaction,
     });
   const forceContextEngineCompactionForCodexOverflow = async (
     error: unknown,
@@ -1186,7 +1197,7 @@ export async function runCodexAppServerAttempt(
       },
     );
     try {
-      const runtimeContext = buildActiveContextEngineRuntimeContext();
+      const runtimeContext = buildActiveContextEngineRuntimeContext({ forCompaction: true });
       const overflowTokenCount = params.contextTokenBudget ?? params.contextWindowInfo?.tokens;
       // Bound the plugin-owned compaction with the same finite safety timeout
       // that protects native runtime compaction, and thread the run-level
@@ -1209,7 +1220,7 @@ export async function runCodexAppServerAttempt(
               }
             : runtimeContext,
         },
-        resolveCompactionTimeoutMs(params.config),
+        resolveCompactionTimeoutMs(params.config, sessionAgentId),
         runAbortController.signal,
       );
       embeddedAgentLog.info("codex app-server context-engine forced compaction result", {
@@ -1226,7 +1237,9 @@ export async function runCodexAppServerAttempt(
         return false;
       }
       adoptContextEngineCompactionTranscript(compactResult);
-      const maintenanceRuntimeContext = buildActiveContextEngineRuntimeContext();
+      const maintenanceRuntimeContext = buildActiveContextEngineRuntimeContext({
+        forCompaction: true,
+      });
       await runHarnessContextEngineMaintenance({
         contextEngine: activeContextEngine,
         sessionId: activeSessionId,
@@ -1235,6 +1248,7 @@ export async function runCodexAppServerAttempt(
         reason: "compaction",
         runtimeContext: maintenanceRuntimeContext,
         config: params.config,
+        agentId: sessionAgentId,
       });
       return true;
     } catch (compactErr) {
@@ -1257,6 +1271,7 @@ export async function runCodexAppServerAttempt(
       runtimeContext: buildActiveContextEngineRuntimeContext(),
       runMaintenance: runHarnessContextEngineMaintenance,
       config: params.config,
+      agentId: sessionAgentId,
       warn: (message) => embeddedAgentLog.warn(message),
     });
     historyMessages =
@@ -1324,6 +1339,7 @@ export async function runCodexAppServerAttempt(
         contextTokenBudget: params.contextTokenBudget,
         reserveTokens: resolveCodexContextEngineProjectionReserveTokens({
           config: params.config,
+          activeAgentId: sessionAgentId,
         }),
       }),
       toolPayloadMode: contextEngineProjection ? "preserve" : "elide",
@@ -1334,6 +1350,7 @@ export async function runCodexAppServerAttempt(
           expectedBinding: buildContextEngineBinding(
             buildActiveRunAttemptParams(),
             contextEngineProjection,
+            sessionAgentId,
           ),
           projection: contextEngineProjection,
           dynamicToolsFingerprint: codexDynamicToolsFingerprint(toolBridge.specs),
@@ -1443,8 +1460,10 @@ export async function runCodexAppServerAttempt(
       return undefined;
     }
     const reserveTokens =
-      resolveCodexContextEngineProjectionReserveTokens({ config: params.config }) ??
-      DEFAULT_CODEX_PROJECTION_RESERVE_TOKENS;
+      resolveCodexContextEngineProjectionReserveTokens({
+        config: params.config,
+        activeAgentId: sessionAgentId,
+      }) ?? DEFAULT_CODEX_PROJECTION_RESERVE_TOKENS;
     const renderedDeveloperInstructions = buildRenderedCodexDeveloperInstructions();
     const renderedChars = codexTurnPromptText.length + renderedDeveloperInstructions.length;
     return shouldPreemptivelyCompactBeforePrompt({
@@ -1482,8 +1501,10 @@ export async function runCodexAppServerAttempt(
             ? params.contextTokenBudget
             : (params.contextWindowInfo?.tokens ?? 0),
         reserveTokens:
-          resolveCodexContextEngineProjectionReserveTokens({ config: params.config }) ??
-          DEFAULT_CODEX_PROJECTION_RESERVE_TOKENS,
+          resolveCodexContextEngineProjectionReserveTokens({
+            config: params.config,
+            activeAgentId: sessionAgentId,
+          }) ?? DEFAULT_CODEX_PROJECTION_RESERVE_TOKENS,
         ...(contextSessionKey ? { sessionKey: contextSessionKey } : {}),
         ...(activeSessionId ? { sessionId: activeSessionId } : {}),
         ...(activeSessionFile ? { sessionFile: activeSessionFile } : {}),
@@ -3284,6 +3305,7 @@ export async function runCodexAppServerAttempt(
         }),
         runMaintenance: runHarnessContextEngineMaintenance,
         config: params.config,
+        agentId: sessionAgentId,
         warn: (message) => embeddedAgentLog.warn(message),
       });
     }
@@ -3976,6 +3998,7 @@ type DynamicToolBuildParams = {
   pluginConfig: CodexPluginConfig;
   forceHeartbeatTool?: boolean;
   ignoreRuntimePlan?: boolean;
+  skipRuntimeToolNormalization?: boolean;
   onYieldDetected: () => void;
 };
 
@@ -4100,6 +4123,9 @@ async function buildDynamicTools(input: DynamicToolBuildParams) {
   });
   const toolsAllow = includeForcedCodexDynamicToolAllow(params.toolsAllow, params);
   const filteredTools = filterCodexDynamicToolsForAllowlist(visionFilteredTools, toolsAllow);
+  if (input.skipRuntimeToolNormalization) {
+    return filteredTools;
+  }
   return normalizeAgentRuntimeTools({
     runtimePlan: input.ignoreRuntimePlan ? undefined : params.runtimePlan,
     tools: filteredTools,
