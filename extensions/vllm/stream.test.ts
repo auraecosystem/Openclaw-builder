@@ -257,7 +257,7 @@ describe("wrapVllmProviderStream", () => {
           id: "Qwen/Qwen3-8B",
           reasoning: true,
           params: { qwenThinkingFormat: "chat-template" },
-        } as Model<"openai-completions">,
+        } as unknown as Model<"openai-completions">,
         streamFn: undefined,
       } as never),
     ).toBeTypeOf("function");

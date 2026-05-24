@@ -93,7 +93,7 @@ export function createVllmQwenThinkingWrapper(params: {
       delete payloadObj.reasoning;
     },
     {
-      shouldPatch: ({ model }) => model.api === "openai-completions" && model.reasoning !== false,
+      shouldPatch: ({ model }) => model.api === "openai-completions" && (model.reasoning ?? true),
     },
   );
 }
