@@ -12,6 +12,8 @@ type FormatChannelPrimerLine = typeof import("../channels/registry.js").formatCh
 type FormatChannelSelectionLine =
   typeof import("../channels/registry.js").formatChannelSelectionLine;
 type IsChannelConfigured = typeof import("../config/channel-configured.js").isChannelConfigured;
+type ListChannelSetupPlugins =
+  typeof import("../channels/plugins/setup-registry.js").listChannelSetupPlugins;
 type ChannelSetupStatusModule = typeof import("./channel-setup.status.js");
 type NoteChannelPrimerChannels = Parameters<
   typeof import("./channel-setup.status.js").noteChannelPrimer
@@ -34,6 +36,12 @@ const formatChannelSelectionLine = vi.hoisted(() =>
   vi.fn<FormatChannelSelectionLine>((meta) => `${meta.label} — ${meta.blurb}`),
 );
 const isChannelConfigured = vi.hoisted(() => vi.fn<IsChannelConfigured>(() => false));
+const listChannelSetupPlugins = vi.hoisted(() => vi.fn<ListChannelSetupPlugins>(() => []));
+
+vi.mock("../channels/plugins/setup-registry.js", () => ({
+  listChannelSetupPlugins: (...args: Parameters<ListChannelSetupPlugins>) =>
+    listChannelSetupPlugins(...args),
+}));
 
 vi.mock("../channels/chat-meta.js", () => ({
   listChatChannels: () => listChatChannels(),
@@ -105,6 +113,8 @@ describe("resolveChannelSetupSelectionContributions", () => {
     );
     formatChannelSelectionLine.mockImplementation((meta) => `${meta.label} — ${meta.blurb}`);
     isChannelConfigured.mockReturnValue(false);
+    listChannelSetupPlugins.mockReset();
+    listChannelSetupPlugins.mockReturnValue([]);
     ({
       collectChannelStatus,
       noteChannelStatus,
@@ -241,6 +251,20 @@ describe("resolveChannelSetupSelectionContributions", () => {
       value: "bad\u001B[31m\nid",
       label: "bad\\nid",
     });
+  });
+
+  it("passes config into fallback setup plugin discovery", async () => {
+    const cfg = {
+      channels: { irc: { enabled: false } },
+      plugins: { entries: { irc: { enabled: false } } },
+    };
+
+    await collectChannelStatus({
+      cfg: cfg as never,
+      accountOverrides: {},
+    });
+
+    expect(listChannelSetupPlugins).toHaveBeenCalledWith({ config: cfg });
   });
 
   it("sanitizes channel labels in status note lines", async () => {
