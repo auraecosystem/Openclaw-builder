@@ -30,6 +30,7 @@ import {
   triggerChromeMcpExtensionAction,
   uninstallChromeMcpExtension,
 } from "../chrome-mcp.js";
+import type { ResolvedBrowserChromeMcpCapabilities, ResolvedBrowserProfile } from "../config.js";
 import { getBrowserProfileCapabilities } from "../profile-capabilities.js";
 import type { BrowserRouteContext } from "../server-context.js";
 import {
@@ -86,6 +87,45 @@ function requireChromeMcpProfile(
     return false;
   }
   return true;
+}
+
+function readChromeMcpCapability(
+  profile: unknown,
+  capability: keyof ResolvedBrowserChromeMcpCapabilities,
+): boolean {
+  const resolvedProfile = profile as Partial<ResolvedBrowserProfile>;
+  if (resolvedProfile.chromeMcp?.capabilities) {
+    return resolvedProfile.chromeMcp.capabilities[capability];
+  }
+  return false;
+}
+
+function requireChromeMcpCapability(
+  res: { status: (code: number) => { json: (body: unknown) => void } },
+  profileCtx: { profile: unknown },
+  capability: keyof ResolvedBrowserChromeMcpCapabilities,
+  configPath: string,
+) {
+  if (!requireChromeMcpProfile(res, profileCtx)) {
+    return false;
+  }
+  if (readChromeMcpCapability(profileCtx.profile, capability)) {
+    return true;
+  }
+  const profile = profileCtx.profile as Partial<ResolvedBrowserProfile>;
+  const profileName = profile.name ? ` for profile "${profile.name}"` : "";
+  const perProfileConfigPath = profile.name
+    ? `browser.profiles[${JSON.stringify(profile.name)}].chromeMcp.capabilities.${capability}`
+    : undefined;
+  const enableHint = perProfileConfigPath
+    ? `Enable ${perProfileConfigPath}=true, or ${configPath}=true for all profiles, to allow this operation.`
+    : `Enable ${configPath}=true to allow this operation.`;
+  jsonError(
+    res as never,
+    403,
+    `Chrome MCP capability "${capability}" is disabled${profileName}. ${enableHint}`,
+  );
+  return false;
 }
 
 const activeScreencasts = new Map<string, string>();
@@ -345,6 +385,16 @@ export function registerBrowserAgentDebugRoutes(
         enforceCurrentUrlAllowed: true,
         run: async ({ cdpUrl, tab, profileCtx, resolveTabUrl }) => {
           if (getBrowserProfileCapabilities(profileCtx.profile).usesChromeMcp) {
+            if (
+              !requireChromeMcpCapability(
+                res,
+                profileCtx,
+                "diagnostics",
+                "browser.chromeMcp.capabilities.diagnostics",
+              )
+            ) {
+              return;
+            }
             const output = await startChromeMcpPerformanceTrace({
               profileName: profileCtx.profile.name,
               profile: profileCtx.profile,
@@ -398,6 +448,17 @@ export function registerBrowserAgentDebugRoutes(
         enforceCurrentUrlAllowed: true,
         run: async ({ cdpUrl, tab, profileCtx, resolveTabUrl }) => {
           const usesChromeMcp = getBrowserProfileCapabilities(profileCtx.profile).usesChromeMcp;
+          if (
+            usesChromeMcp &&
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "diagnostics",
+              "browser.chromeMcp.capabilities.diagnostics",
+            )
+          ) {
+            return;
+          }
           const id = crypto.randomUUID();
           const tracePath = await resolveWritableOutputPathOrRespond({
             res,
@@ -473,6 +534,16 @@ export function registerBrowserAgentDebugRoutes(
               "trace insight analysis is only supported for Chrome MCP profiles",
             );
           }
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "diagnostics",
+              "browser.chromeMcp.capabilities.diagnostics",
+            )
+          ) {
+            return;
+          }
           const output = await analyzeChromeMcpPerformanceInsight({
             profileName: profileCtx.profile.name,
             profile: profileCtx.profile,
@@ -509,7 +580,14 @@ export function registerBrowserAgentDebugRoutes(
         targetId,
         enforceCurrentUrlAllowed: true,
         run: async ({ tab, profileCtx, resolveTabUrl }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "diagnostics",
+              "browser.chromeMcp.capabilities.diagnostics",
+            )
+          ) {
             return;
           }
           const id = crypto.randomUUID();
@@ -559,7 +637,14 @@ export function registerBrowserAgentDebugRoutes(
         targetId: resolveTargetIdFromBody(body),
         enforceCurrentUrlAllowed: true,
         run: async ({ profileCtx }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "diagnostics",
+              "browser.chromeMcp.capabilities.diagnostics",
+            )
+          ) {
             return;
           }
           const heapSnapshotPath = await resolveHeapSnapshotReadPathOrRespond(res, filePath);
@@ -593,7 +678,14 @@ export function registerBrowserAgentDebugRoutes(
         targetId: resolveTargetIdFromBody(body),
         enforceCurrentUrlAllowed: true,
         run: async ({ profileCtx }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "diagnostics",
+              "browser.chromeMcp.capabilities.diagnostics",
+            )
+          ) {
             return;
           }
           const heapSnapshotPath = await resolveHeapSnapshotReadPathOrRespond(res, filePath);
@@ -633,7 +725,14 @@ export function registerBrowserAgentDebugRoutes(
         targetId: resolveTargetIdFromBody(body),
         enforceCurrentUrlAllowed: true,
         run: async ({ profileCtx }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "diagnostics",
+              "browser.chromeMcp.capabilities.diagnostics",
+            )
+          ) {
             return;
           }
           const heapSnapshotPath = await resolveHeapSnapshotReadPathOrRespond(res, filePath);
@@ -674,7 +773,14 @@ export function registerBrowserAgentDebugRoutes(
         targetId: resolveTargetIdFromBody(body),
         enforceCurrentUrlAllowed: true,
         run: async ({ profileCtx }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "diagnostics",
+              "browser.chromeMcp.capabilities.diagnostics",
+            )
+          ) {
             return;
           }
           const heapSnapshotPath = await resolveHeapSnapshotReadPathOrRespond(res, filePath);
@@ -707,7 +813,14 @@ export function registerBrowserAgentDebugRoutes(
         targetId: resolveTargetIdFromBody(body),
         enforceCurrentUrlAllowed: true,
         run: async ({ tab, profileCtx, resolveTabUrl }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "diagnostics",
+              "browser.chromeMcp.capabilities.diagnostics",
+            )
+          ) {
             return;
           }
           const requestedOutputDir = toStringOrEmpty(body.outputDirPath);
@@ -752,7 +865,14 @@ export function registerBrowserAgentDebugRoutes(
         targetId: resolveTargetIdFromBody(body),
         enforceCurrentUrlAllowed: true,
         run: async ({ tab, profileCtx, resolveTabUrl }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "diagnostics",
+              "browser.chromeMcp.capabilities.diagnostics",
+            )
+          ) {
             return;
           }
           const requestedPath = toStringOrEmpty(body.path) || toStringOrEmpty(body.filePath);
@@ -793,7 +913,14 @@ export function registerBrowserAgentDebugRoutes(
         targetId: resolveTargetIdFromBody(body),
         enforceCurrentUrlAllowed: true,
         run: async ({ tab, profileCtx, resolveTabUrl }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "diagnostics",
+              "browser.chromeMcp.capabilities.diagnostics",
+            )
+          ) {
             return;
           }
           const requestedPath = toStringOrEmpty(body.path) || toStringOrEmpty(body.filePath);
@@ -843,7 +970,14 @@ export function registerBrowserAgentDebugRoutes(
         ctx,
         targetId: resolveTargetIdFromQuery(req.query),
         run: async ({ profileCtx }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "extensions",
+              "browser.chromeMcp.capabilities.extensions",
+            )
+          ) {
             return;
           }
           try {
@@ -884,7 +1018,14 @@ export function registerBrowserAgentDebugRoutes(
         ctx,
         targetId: resolveTargetIdFromBody(body),
         run: async ({ profileCtx }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "extensionMutation",
+              "browser.chromeMcp.capabilities.extensionMutation",
+            )
+          ) {
             return;
           }
           const output = await installChromeMcpExtension({
@@ -913,7 +1054,14 @@ export function registerBrowserAgentDebugRoutes(
         ctx,
         targetId: resolveTargetIdFromBody(body),
         run: async ({ profileCtx }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "extensionMutation",
+              "browser.chromeMcp.capabilities.extensionMutation",
+            )
+          ) {
             return;
           }
           const output = await uninstallChromeMcpExtension({
@@ -942,7 +1090,14 @@ export function registerBrowserAgentDebugRoutes(
         ctx,
         targetId: resolveTargetIdFromBody(body),
         run: async ({ profileCtx }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "extensionMutation",
+              "browser.chromeMcp.capabilities.extensionMutation",
+            )
+          ) {
             return;
           }
           const output = await reloadChromeMcpExtension({
@@ -971,7 +1126,14 @@ export function registerBrowserAgentDebugRoutes(
         ctx,
         targetId: resolveTargetIdFromBody(body),
         run: async ({ profileCtx }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "extensionMutation",
+              "browser.chromeMcp.capabilities.extensionMutation",
+            )
+          ) {
             return;
           }
           const output = await triggerChromeMcpExtensionAction({
@@ -996,7 +1158,14 @@ export function registerBrowserAgentDebugRoutes(
         targetId: resolveTargetIdFromQuery(req.query),
         enforceCurrentUrlAllowed: true,
         run: async ({ tab, profileCtx, resolveTabUrl }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "extensions",
+              "browser.chromeMcp.capabilities.extensions",
+            )
+          ) {
             return;
           }
           const tabId = await getChromeMcpTabId({
@@ -1022,7 +1191,14 @@ export function registerBrowserAgentDebugRoutes(
         targetId: resolveTargetIdFromQuery(req.query),
         enforceCurrentUrlAllowed: true,
         run: async ({ tab, profileCtx, resolveTabUrl }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "thirdPartyTools",
+              "browser.chromeMcp.capabilities.thirdPartyTools",
+            )
+          ) {
             return;
           }
           const result = await listChromeMcpThirdPartyDeveloperTools({
@@ -1053,7 +1229,14 @@ export function registerBrowserAgentDebugRoutes(
         targetId: resolveTargetIdFromBody(body),
         enforceCurrentUrlAllowed: true,
         run: async ({ tab, profileCtx, resolveTabUrl }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "thirdPartyToolExecution",
+              "browser.chromeMcp.capabilities.thirdPartyToolExecution",
+            )
+          ) {
             return;
           }
           const result = await executeChromeMcpThirdPartyDeveloperTool({
@@ -1093,7 +1276,14 @@ export function registerBrowserAgentDebugRoutes(
         targetId: resolveTargetIdFromQuery(req.query),
         enforceCurrentUrlAllowed: true,
         run: async ({ tab, profileCtx, resolveTabUrl }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "webMcpTools",
+              "browser.chromeMcp.capabilities.webMcpTools",
+            )
+          ) {
             return;
           }
           const result = await listChromeMcpWebMcpTools({
@@ -1124,7 +1314,14 @@ export function registerBrowserAgentDebugRoutes(
         targetId: resolveTargetIdFromBody(body),
         enforceCurrentUrlAllowed: true,
         run: async ({ tab, profileCtx, resolveTabUrl }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "webMcpToolExecution",
+              "browser.chromeMcp.capabilities.webMcpToolExecution",
+            )
+          ) {
             return;
           }
           const result = await executeChromeMcpWebMcpTool({
@@ -1166,7 +1363,14 @@ export function registerBrowserAgentDebugRoutes(
         targetId: resolveTargetIdFromQuery(req.query),
         enforceCurrentUrlAllowed: true,
         run: async ({ tab, profileCtx, resolveTabUrl }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "diagnostics",
+              "browser.chromeMcp.capabilities.diagnostics",
+            )
+          ) {
             return;
           }
           const message = await getChromeMcpConsoleMessage({
@@ -1193,7 +1397,14 @@ export function registerBrowserAgentDebugRoutes(
         targetId: resolveTargetIdFromQuery(req.query),
         enforceCurrentUrlAllowed: true,
         run: async ({ tab, profileCtx, resolveTabUrl }) => {
-          if (!requireChromeMcpProfile(res, profileCtx)) {
+          if (
+            !requireChromeMcpCapability(
+              res,
+              profileCtx,
+              "diagnostics",
+              "browser.chromeMcp.capabilities.diagnostics",
+            )
+          ) {
             return;
           }
           const requestedRequestFilePath = toStringOrEmpty(req.query.requestFilePath);
