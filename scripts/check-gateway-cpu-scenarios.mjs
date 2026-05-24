@@ -206,7 +206,9 @@ async function main() {
       qaOutputArg,
       ...options.qaScenarios.flatMap((id) => ["--scenario", id]),
     ]);
-    steps.push(runStep("qa suite", qaCommand.command, qaCommand.args, qaCommand.options));
+    steps.push(
+      runStep("qa suite", qaCommand.command, qaCommand.args, qaCommand.options),
+    );
   }
 
   const startup = readJsonIfExists(startupOutput);

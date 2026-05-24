@@ -461,7 +461,10 @@ function shouldUseFullCheckoutForCleanSparseBlacksmithSync(commandArgs, provider
   if (commandArgs[0] !== "run" || providerName !== "blacksmith-testbox") {
     return false;
   }
-  if (hasOption(commandArgs, "--no-sync") || hasOption(commandArgs, "--id")) {
+  if (
+    hasOption(commandArgs, "--no-sync") ||
+    hasOption(commandArgs, "--id")
+  ) {
     return false;
   }
 
