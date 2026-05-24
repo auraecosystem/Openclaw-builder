@@ -1,8 +1,8 @@
 # PR #85646 — trust-filter current-head real behavior proof
 
-Generated: 2026-05-24T18:53:02.840Z
+Generated: 2026-05-24T20:10:14.279Z
 Branch: `feature/codex-skills-developer-instructions` (resolve HEAD via `git log -1 --format=%H -- docs/research/runtime-context-surface-f1-trust-filter-current-head-proof.md` to pin the captured commit SHA — the artifact intentionally avoids embedding the SHA because regenerating after an amend would otherwise loop).
-Snapshot schema version: `2`
+Snapshot schema version: `3`
 
 ## Source fixtures
 
@@ -73,7 +73,7 @@ Legacy snapshot = pre-PR session storage that lacks `schemaVersion`, `trustedDev
 | Snapshot variant          | `isSkillsSnapshotSchemaOutdated` returns | Expected behavior                            |
 | ------------------------- | ---------------------------------------- | -------------------------------------------- |
 | Legacy (no schemaVersion) | `true`                                   | `true` → forced refresh on next session turn |
-| Current (schemaVersion=2) | `false`                                  | `false` → reuse persisted snapshot           |
+| Current (schemaVersion=3) | `false`                                  | `false` → reuse persisted snapshot           |
 
 Coverage: `src/agents/skills/snapshot-hydration.test.ts`. Both the legacy `undefined` `schemaVersion` and the stale `schemaVersion < current` branches are pinned.
 
