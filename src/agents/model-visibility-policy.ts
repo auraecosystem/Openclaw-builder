@@ -25,6 +25,8 @@ export function createModelVisibilityPolicy(
     defaultProvider: string;
     defaultModel?: string;
     agentId?: string;
+    allowManifestNormalization?: boolean;
+    allowPluginNormalization?: boolean;
   } & ModelManifestNormalizationContext,
 ): ModelVisibilityPolicy {
   return createModelVisibilityPolicyWithFallbacks({
@@ -36,6 +38,8 @@ export function createModelVisibilityPolicy(
       cfg: params.cfg,
       agentId: params.agentId,
     }),
+    allowManifestNormalization: params.allowManifestNormalization ?? false,
+    allowPluginNormalization: params.allowPluginNormalization ?? false,
     manifestPlugins: params.manifestPlugins,
   });
 }

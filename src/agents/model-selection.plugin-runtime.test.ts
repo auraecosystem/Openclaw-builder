@@ -72,4 +72,70 @@ describe("model-selection plugin runtime normalization", () => {
     });
     expect(normalizeProviderModelIdWithPluginMock).not.toHaveBeenCalled();
   });
+
+  it("keeps model visibility policy construction off plugin runtime hooks by default", async () => {
+    normalizeProviderModelIdWithPluginMock.mockImplementation(({ provider, context }) => {
+      if (
+        provider === "custom-provider" &&
+        (context as { modelId?: string }).modelId === "custom-legacy-model"
+      ) {
+        return "custom-modern-model";
+      }
+      return undefined;
+    });
+
+    const { createModelVisibilityPolicy } = await import("./model-visibility-policy.js");
+
+    const policy = createModelVisibilityPolicy({
+      cfg: {
+        agents: {
+          defaults: {
+            models: {
+              "custom-provider/custom-legacy-model": {},
+            },
+          },
+        },
+      },
+      catalog: [],
+      defaultProvider: "custom-provider",
+      defaultModel: "custom-legacy-model",
+    });
+
+    expect(policy.allowedKeys.has("custom-provider/custom-legacy-model")).toBe(true);
+    expect(policy.allowedKeys.has("custom-provider/custom-modern-model")).toBe(false);
+    expect(normalizeProviderModelIdWithPluginMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates explicit plugin runtime normalization opt-in through model visibility policy", async () => {
+    normalizeProviderModelIdWithPluginMock.mockImplementation(({ provider, context }) => {
+      if (
+        provider === "custom-provider" &&
+        (context as { modelId?: string }).modelId === "custom-legacy-model"
+      ) {
+        return "custom-modern-model";
+      }
+      return undefined;
+    });
+
+    const { createModelVisibilityPolicy } = await import("./model-visibility-policy.js");
+
+    const policy = createModelVisibilityPolicy({
+      cfg: {
+        agents: {
+          defaults: {
+            models: {
+              "custom-provider/custom-legacy-model": {},
+            },
+          },
+        },
+      },
+      catalog: [],
+      defaultProvider: "custom-provider",
+      defaultModel: "custom-legacy-model",
+      allowPluginNormalization: true,
+    });
+
+    expect(policy.allowedKeys.has("custom-provider/custom-modern-model")).toBe(true);
+    expect(normalizeProviderModelIdWithPluginMock).toHaveBeenCalled();
+  });
 });

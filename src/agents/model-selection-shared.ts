@@ -347,12 +347,16 @@ export function resolveAllowlistModelKey(
     cfg?: OpenClawConfig;
     raw: string;
     defaultProvider: string;
+    allowManifestNormalization?: boolean;
+    allowPluginNormalization?: boolean;
   } & ModelManifestNormalizationContext,
 ): string | null {
   const parsed = parseModelRefWithCompatAlias({
     cfg: params.cfg,
     raw: params.raw,
     defaultProvider: params.defaultProvider,
+    allowManifestNormalization: params.allowManifestNormalization,
+    allowPluginNormalization: params.allowPluginNormalization,
     manifestPlugins: params.manifestPlugins,
   });
   if (!parsed) {
@@ -440,6 +444,8 @@ function buildModelCatalogMetadata(
   params: {
     cfg: OpenClawConfig;
     defaultProvider: string;
+    allowManifestNormalization?: boolean;
+    allowPluginNormalization?: boolean;
   } & ModelManifestNormalizationContext,
 ): ModelCatalogMetadata {
   const configuredByKey = new Map<string, ModelCatalogEntry>();
@@ -461,6 +467,8 @@ function buildModelCatalogMetadata(
       cfg: params.cfg,
       raw: rawKey,
       defaultProvider: params.defaultProvider,
+      allowManifestNormalization: params.allowManifestNormalization,
+      allowPluginNormalization: params.allowPluginNormalization,
       manifestPlugins: params.manifestPlugins,
     });
     if (!key) {
@@ -664,6 +672,8 @@ export function buildAllowedModelSetWithFallbacks(
   const metadata = buildModelCatalogMetadata({
     cfg: params.cfg,
     defaultProvider: params.defaultProvider,
+    allowManifestNormalization: params.allowManifestNormalization,
+    allowPluginNormalization: params.allowPluginNormalization,
     manifestPlugins: params.manifestPlugins,
   });
   const configuredCatalog = buildConfiguredModelCatalog({
@@ -1096,9 +1106,13 @@ export function resolveAllowedModelSelection(
     allowAny: boolean;
     allowedKeys: ReadonlySet<string>;
     allowedCatalog: readonly ModelCatalogEntry[];
+    allowManifestNormalization?: boolean;
+    allowPluginNormalization?: boolean;
   } & ModelManifestNormalizationContext,
 ): ModelRef | null {
   const current = normalizeModelRef(params.provider, params.model, {
+    allowManifestNormalization: params.allowManifestNormalization,
+    allowPluginNormalization: params.allowPluginNormalization,
     manifestPlugins: params.manifestPlugins,
   });
   if (
@@ -1112,6 +1126,8 @@ export function resolveAllowedModelSelection(
     return null;
   }
   return normalizeModelRef(fallback.provider, fallback.id, {
+    allowManifestNormalization: params.allowManifestNormalization,
+    allowPluginNormalization: params.allowPluginNormalization,
     manifestPlugins: params.manifestPlugins,
   });
 }
@@ -1155,6 +1171,8 @@ export function createModelVisibilityPolicyWithFallbacks(
     defaultProvider: string;
     defaultModel?: string;
     fallbackModels: readonly string[];
+    allowManifestNormalization?: boolean;
+    allowPluginNormalization?: boolean;
   } & ModelManifestNormalizationContext,
 ): ModelVisibilityPolicy {
   const visibility = parseConfiguredModelVisibilityEntries({ cfg: params.cfg });
@@ -1167,6 +1185,8 @@ export function createModelVisibilityPolicyWithFallbacks(
       cfg: params.cfg,
       raw,
       defaultProvider: params.defaultProvider,
+      allowManifestNormalization: params.allowManifestNormalization,
+      allowPluginNormalization: params.allowPluginNormalization,
       manifestPlugins: params.manifestPlugins,
     });
     if (key) {
@@ -1190,6 +1210,8 @@ export function createModelVisibilityPolicyWithFallbacks(
         allowAny: allowed.allowAny,
         allowedKeys: allowed.allowedKeys,
         allowedCatalog: allowed.allowedCatalog,
+        allowManifestNormalization: params.allowManifestNormalization,
+        allowPluginNormalization: params.allowPluginNormalization,
         manifestPlugins: params.manifestPlugins,
       }),
     visibleCatalog: ({ catalog, defaultVisibleCatalog, view }) => {
