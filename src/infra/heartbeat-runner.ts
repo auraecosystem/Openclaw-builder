@@ -1362,6 +1362,9 @@ export async function runHeartbeatOnce(opts: {
   const shouldHonorActiveReplyRuns = opts.intent !== "immediate" && opts.intent !== "manual";
   const listActiveReplyRuns =
     opts.deps?.listActiveReplyRunSessionKeys ?? listActiveReplyRunSessionKeys;
+  // Scheduled heartbeats are background work, so defer them when any session on
+  // the same agent is already replying; immediate/manual wakes keep their
+  // existing semantics for explicit user/system actions.
   if (shouldHonorActiveReplyRuns && hasActiveReplyRunForAgent(agentId, listActiveReplyRuns)) {
     emitHeartbeatEvent({
       status: "skipped",

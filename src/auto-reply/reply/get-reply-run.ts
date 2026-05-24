@@ -450,7 +450,10 @@ export async function runPreparedReply(
     isHeartbeat,
     queueMode: perMessageQueueMode ?? "configured",
   };
-  const preparedTiming = createReplyTimingTracker({ log: preparedReplyTimingLog });
+  // Keep the expensive pre-agent profiler disabled in normal production turns;
+  // when enabled it isolates catalog/auth/skill startup without changing the
+  // reply execution path.
+  const preparedTiming = createReplyTimingTracker({ log: preparedReplyTimingLog, config: cfg });
   const logPreparedTiming = (reason: string) =>
     preparedTiming.logIfSlow({
       message: `prepared reply pre-agent timings provider=${provider} model=${model} sessionId=${
@@ -819,17 +822,29 @@ export async function runPreparedReply(
       modelState.resolveDefaultThinkingLevel(),
     );
   }
-  const thinkingCatalog = await traceRunPhase("reply.resolve_thinking_catalog", () =>
-    modelState.resolveThinkingCatalog(),
-  );
-  if (
-    !isThinkingLevelSupported({
+  let thinkingCatalog =
+    modelState.allowedModelCatalog.length > 0 ? modelState.allowedModelCatalog : undefined;
+  let thinkingLevelSupported = isThinkingLevelSupported({
+    provider,
+    model,
+    level: resolvedThinkLevel,
+    catalog: thinkingCatalog,
+  });
+  if (!thinkingLevelSupported) {
+    // Only hydrate the runtime model catalog when the lightweight catalog/static
+    // provider profile cannot prove support. The full catalog load was a
+    // 14s+ reply-blocking cost for known Codex models that already support xhigh.
+    thinkingCatalog = await traceRunPhase("reply.resolve_thinking_catalog", () =>
+      modelState.resolveThinkingCatalog(),
+    );
+    thinkingLevelSupported = isThinkingLevelSupported({
       provider,
       model,
       level: resolvedThinkLevel,
       catalog: thinkingCatalog,
-    })
-  ) {
+    });
+  }
+  if (!thinkingLevelSupported) {
     const explicitThink = directives.hasThinkDirective && directives.thinkLevel !== undefined;
     if (explicitThink) {
       typing.cleanup();

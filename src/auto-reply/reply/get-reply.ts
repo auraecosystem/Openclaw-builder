@@ -213,14 +213,15 @@ export async function getReplyFromConfig(
   configOverride?: OpenClawConfig,
 ): Promise<ReplyPayload | ReplyPayload[] | undefined> {
   const isFastTestEnv = process.env.OPENCLAW_TEST_FAST === "1";
-  const resolverTiming = createReplyTimingTracker({ log: replyResolverTimingLog });
-  const cfg = resolverTiming.measureSync("reply.resolve_config", () =>
-    resolveGetReplyConfig({
-      getRuntimeConfig,
-      isFastTestEnv,
-      configOverride,
-    }),
-  );
+  const cfg = resolveGetReplyConfig({
+    getRuntimeConfig,
+    isFastTestEnv,
+    configOverride,
+  });
+  // Profiler spans stay inert unless diagnostics enable `profiler` or
+  // `reply.profiler`, so normal replies do not pay per-stage Date.now/array
+  // bookkeeping while we can still split resolver costs on demand.
+  const resolverTiming = createReplyTimingTracker({ log: replyResolverTimingLog, config: cfg });
   const useFastTestBootstrap = resolverTiming.measureSync("reply.resolve_fast_test_bootstrap", () =>
     shouldUseReplyFastTestBootstrap({
       isFastTestEnv,

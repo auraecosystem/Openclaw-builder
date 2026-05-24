@@ -128,6 +128,7 @@ import {
   mergeCodexThreadConfigs,
   shouldBuildCodexPluginThreadConfig,
 } from "./plugin-thread-config.js";
+import { isCodexAppServerProfilerEnabled } from "./profiler-flag.js";
 import {
   assertCodexTurnStartResponse,
   readCodexDynamicToolCallParams,
@@ -340,6 +341,9 @@ async function ensureCodexWorkspaceDirOnce(workspaceDir: string): Promise<void> 
   if (ensuredCodexWorkspaceDirs.has(normalized)) {
     return;
   }
+  // Codex attempts re-enter the same workspace repeatedly; caching successful
+  // mkdirs avoids repeated fs work that showed up as multi-second stalls when
+  // the gateway event loop was already under CPU pressure.
   await fs.mkdir(normalized, { recursive: true });
   ensuredCodexWorkspaceDirs.add(normalized);
 }
@@ -947,7 +951,12 @@ export async function runCodexAppServerAttempt(
   } = {},
 ): Promise<EmbeddedRunAttemptResult> {
   const attemptStartedAt = Date.now();
-  const preDynamicStartupStages = createCodexDynamicToolBuildStageTracker();
+  const profilerEnabled = isCodexAppServerProfilerEnabled(params.config);
+  // Startup phase timings are profiler-gated because this function runs before
+  // every Codex turn; normal production should not do timing bookkeeping here.
+  const preDynamicStartupStages = createCodexDynamicToolBuildStageTracker({
+    enabled: profilerEnabled,
+  });
   const attemptClientFactory = options.clientFactory ?? defaultCodexAppServerClientFactory;
   const pluginConfig = readCodexPluginConfig(options.pluginConfig);
   const computerUseConfig = resolveCodexComputerUseConfig({ pluginConfig });
@@ -1132,6 +1141,7 @@ export async function runCodexAppServerAttempt(
     runAbortController,
     sessionAgentId,
     pluginConfig,
+    profilerEnabled,
     onYieldDetected: () => {
       yieldDetected = true;
     },
@@ -1146,6 +1156,7 @@ export async function runCodexAppServerAttempt(
     runAbortController,
     sessionAgentId,
     pluginConfig,
+    profilerEnabled,
     forceHeartbeatTool: true,
     ignoreRuntimePlan: true,
     onYieldDetected: () => {
@@ -3838,6 +3849,7 @@ type DynamicToolBuildParams = {
   runAbortController: AbortController;
   sessionAgentId: string;
   pluginConfig: CodexPluginConfig;
+  profilerEnabled?: boolean;
   forceHeartbeatTool?: boolean;
   ignoreRuntimePlan?: boolean;
   onYieldDetected: () => void;
@@ -3881,10 +3893,19 @@ type CodexDynamicToolBuildStageSummary = {
 const CODEX_DYNAMIC_TOOL_BUILD_WARN_TOTAL_MS = 1_000;
 const CODEX_DYNAMIC_TOOL_BUILD_WARN_STAGE_MS = 500;
 
-function createCodexDynamicToolBuildStageTracker(): {
+function createCodexDynamicToolBuildStageTracker(options: { enabled?: boolean } = {}): {
   mark: (name: string) => void;
   snapshot: () => CodexDynamicToolBuildStageSummary;
 } {
+  if (!options.enabled) {
+    return {
+      mark() {},
+      snapshot() {
+        return { totalMs: 0, stages: [] };
+      },
+    };
+  }
+
   const startedAt = Date.now();
   let previousAt = startedAt;
   const stages: CodexDynamicToolBuildStageTiming[] = [];
@@ -3932,7 +3953,11 @@ async function buildDynamicTools(input: DynamicToolBuildParams) {
   if (params.disableTools || !supportsModelTools(params.model)) {
     return [];
   }
-  const toolBuildStages = createCodexDynamicToolBuildStageTracker();
+  // Dynamic tool construction is on the reply hot path, so per-stage
+  // Date.now/span bookkeeping runs only when the Codex profiler flag is set.
+  const toolBuildStages = createCodexDynamicToolBuildStageTracker({
+    enabled: input.profilerEnabled,
+  });
   const modelHasVision = params.model.input?.includes("image") ?? false;
   const agentDir = params.agentDir ?? resolveAgentDir(params.config ?? {}, input.sessionAgentId);
   const createOpenClawCodingTools =

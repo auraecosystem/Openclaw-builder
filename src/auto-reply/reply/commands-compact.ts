@@ -53,6 +53,8 @@ function extractCompactInstructions(params: {
 
 function isCompactionSkipReason(reason?: string): boolean {
   const text = normalizeOptionalLowercaseString(reason) ?? "";
+  // Manual /compact mirrors preflight semantics: already-small sessions are a
+  // successful no-op, not a failed compaction.
   return (
     text.includes("nothing to compact") ||
     text.includes("below threshold") ||

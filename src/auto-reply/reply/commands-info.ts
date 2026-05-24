@@ -113,6 +113,8 @@ export const handleSkillCommandUsage: CommandHandler = async (params, allowTextC
   if (normalized !== "/skill" && !normalized.startsWith("/skill ")) {
     return null;
   }
+  // Bare or unknown /skill commands are deterministic help responses; handling
+  // them here avoids falling through into a full agent/model turn.
   if (!params.command.isAuthorizedSender) {
     logVerbose(
       `Ignoring /skill from unauthorized sender: ${params.command.senderId || "<unknown>"}`,

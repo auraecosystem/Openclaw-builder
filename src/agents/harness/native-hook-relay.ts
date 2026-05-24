@@ -423,6 +423,8 @@ export function buildNativeHookRelayCommand(params: {
 
 function nativeHookRelayEventHasLocalWork(event: NativeHookRelayEvent): boolean {
   if (event === "pre_tool_use") {
+    // Avoid spawning a native hook relay for every Codex tool call when there
+    // is no before_tool_call hook or trusted-tool policy to enforce.
     return hasBeforeToolCallPolicy();
   }
   if (event === "post_tool_use") {

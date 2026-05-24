@@ -1,3 +1,6 @@
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { isDiagnosticFlagEnabled } from "../../infra/diagnostic-flags.js";
+
 type ReplyTimingSpan = {
   name: string;
   durationMs: number;
@@ -13,14 +16,7 @@ type ReplyTimingLogger = {
   warn: (message: string, details?: Record<string, unknown>) => void;
 };
 
-const DEFAULT_TIMING_WARN_TOTAL_MS = 1_000;
-const DEFAULT_TIMING_WARN_STAGE_MS = 500;
-
-export function createReplyTimingTracker(params: {
-  log: ReplyTimingLogger;
-  totalWarnMs?: number;
-  stageWarnMs?: number;
-}): {
+type ReplyTimingTracker = {
   measure: <T>(name: string, run: () => Promise<T> | T) => Promise<T>;
   measureSync: <T>(name: string, run: () => T) => T;
   logIfSlow: (params: {
@@ -30,7 +26,47 @@ export function createReplyTimingTracker(params: {
     error?: string;
     details?: Record<string, unknown>;
   }) => void;
-} {
+};
+
+const DEFAULT_TIMING_WARN_TOTAL_MS = 1_000;
+const DEFAULT_TIMING_WARN_STAGE_MS = 500;
+
+export function isReplyProfilerEnabled(params?: {
+  config?: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
+}): boolean {
+  const cfg = params?.config;
+  const env = params?.env ?? process.env;
+  return (
+    isDiagnosticFlagEnabled("profiler", cfg, env) ||
+    isDiagnosticFlagEnabled("reply.profiler", cfg, env)
+  );
+}
+
+export function createReplyTimingTracker(params: {
+  log: ReplyTimingLogger;
+  config?: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
+  enabled?: boolean;
+  totalWarnMs?: number;
+  stageWarnMs?: number;
+}): ReplyTimingTracker {
+  const enabled =
+    params.enabled ?? isReplyProfilerEnabled({ config: params.config, env: params.env });
+  if (!enabled) {
+    // Normal production turns use pass-through wrappers so added profiling
+    // calls do not allocate spans or call Date.now on the hot reply path.
+    return {
+      async measure(_name, run) {
+        return await run();
+      },
+      measureSync(_name, run) {
+        return run();
+      },
+      logIfSlow() {},
+    };
+  }
+
   const startedAt = Date.now();
   const spans: ReplyTimingSpan[] = [];
   let didLog = false;

@@ -26,6 +26,8 @@ export function classifyCompactionReason(reason?: string): string {
   if (text.includes("nothing to compact")) {
     return "no_compactable_entries";
   }
+  // Backends use both phrases for the same harmless state: the transcript is
+  // already small enough, so preflight compaction should skip instead of fail.
   if (text.includes("below threshold") || text.includes("already under target")) {
     return "below_threshold";
   }

@@ -19,6 +19,7 @@ import {
   mergeCodexThreadConfigs,
   type CodexPluginThreadConfig,
 } from "./plugin-thread-config.js";
+import { isCodexAppServerProfilerEnabled } from "./profiler-flag.js";
 import {
   assertCodexThreadResumeResponse,
   assertCodexThreadStartResponse,
@@ -96,7 +97,7 @@ type CodexThreadLifecycleTimingSummary = {
 const CODEX_THREAD_LIFECYCLE_TIMING_WARN_TOTAL_MS = 1_000;
 const CODEX_THREAD_LIFECYCLE_TIMING_WARN_STAGE_MS = 500;
 
-function createCodexThreadLifecycleTimingTracker(): {
+function createCodexThreadLifecycleTimingTracker(options: { enabled?: boolean } = {}): {
   measure: <T>(name: string, run: () => Promise<T> | T) => Promise<T>;
   measureSync: <T>(name: string, run: () => T) => T;
   logIfSlow: (params: {
@@ -107,6 +108,18 @@ function createCodexThreadLifecycleTimingTracker(): {
     threadId?: string;
   }) => void;
 } {
+  if (!options.enabled) {
+    return {
+      async measure(_name, run) {
+        return await run();
+      },
+      measureSync(_name, run) {
+        return run();
+      },
+      logIfSlow() {},
+    };
+  }
+
   const startedAt = Date.now();
   let didLog = false;
   const spans: CodexThreadLifecycleTimingSpan[] = [];
@@ -196,7 +209,11 @@ export async function startOrResumeThread(params: {
   pluginThreadConfig?: CodexPluginThreadConfigProvider;
   contextEngineProjection?: CodexContextEngineThreadBootstrapProjection;
 }): Promise<CodexAppServerThreadLifecycleBinding> {
-  const lifecycleTiming = createCodexThreadLifecycleTimingTracker();
+  // Thread lifecycle spans are useful when profiling startup churn, but normal
+  // turns should not pay Date.now/span-array overhead while resuming threads.
+  const lifecycleTiming = createCodexThreadLifecycleTimingTracker({
+    enabled: isCodexAppServerProfilerEnabled(params.params.config),
+  });
   const dynamicToolsFingerprint = lifecycleTiming.measureSync("fingerprint_dynamic_tools", () =>
     fingerprintDynamicTools(params.dynamicTools),
   );

@@ -38,6 +38,9 @@ export function createModelVisibilityPolicy(
       cfg: params.cfg,
       agentId: params.agentId,
     }),
+    // Model visibility is used by lightweight status/list paths. Keep plugin
+    // manifest normalization opt-in so those paths do not load plugin runtime
+    // metadata unless a caller explicitly needs it.
     allowManifestNormalization: params.allowManifestNormalization ?? false,
     allowPluginNormalization: params.allowPluginNormalization ?? false,
     manifestPlugins: params.manifestPlugins,

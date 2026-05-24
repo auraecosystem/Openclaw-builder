@@ -111,6 +111,7 @@ import { createBlockReplyDeliveryHandler } from "./reply-delivery.js";
 import type { ReplyMediaContext } from "./reply-media-paths.js";
 import { createReplyMediaContext } from "./reply-media-paths.runtime.js";
 import type { ReplyOperation } from "./reply-run-registry.js";
+import { isReplyProfilerEnabled } from "./reply-timing-tracker.js";
 import type { TypingSignaler } from "./typing-mode.js";
 
 // Maximum number of LiveSessionModelSwitchError retries before surfacing a
@@ -134,7 +135,7 @@ const agentTurnTimingLog = createSubsystemLogger("auto-reply/agent-turn-timing")
 const AGENT_TURN_TIMING_WARN_TOTAL_MS = 1_000;
 const AGENT_TURN_TIMING_WARN_STAGE_MS = 500;
 
-function createAgentTurnTimingTracker(): {
+function createAgentTurnTimingTracker(options: { profilerEnabled?: boolean } = {}): {
   measure: <T>(name: string, run: () => Promise<T> | T) => Promise<T>;
   measureSync: <T>(name: string, run: () => T) => T;
   logIfSlow: (params: {
@@ -151,6 +152,22 @@ function createAgentTurnTimingTracker(): {
     milestone: string;
   }) => void;
 } {
+  if (!options.profilerEnabled) {
+    // This tracker wraps the agent-turn hot path. Without an explicit profiler
+    // flag, keep every wrapper pass-through so normal turns avoid Date.now and
+    // span-array work entirely.
+    return {
+      async measure(_name, run) {
+        return await run();
+      },
+      measureSync(_name, run) {
+        return run();
+      },
+      logIfSlow() {},
+      logMilestoneIfSlow() {},
+    };
+  }
+
   const startedAt = Date.now();
   let didLog = false;
   const spans: AgentTurnTimingSpan[] = [];
@@ -219,6 +236,9 @@ function createAgentTurnTimingTracker(): {
       );
     },
     logMilestoneIfSlow(params) {
+      if (!options.profilerEnabled) {
+        return;
+      }
       const summary = snapshot();
       if (!shouldLog(summary)) {
         return;
@@ -1352,7 +1372,9 @@ export async function runAgentTurnWithFallback(params: {
   };
 
   const runId = params.opts?.runId ?? crypto.randomUUID();
-  const agentTurnTiming = createAgentTurnTimingTracker();
+  const agentTurnTiming = createAgentTurnTimingTracker({
+    profilerEnabled: isReplyProfilerEnabled({ config: runtimeConfig }),
+  });
   if (isDiagnosticsEnabled(runtimeConfig)) {
     logSessionTurnCreated({
       runId,
@@ -1743,6 +1765,8 @@ export async function runAgentTurnWithFallback(params: {
       const runLane = CommandLane.Main;
       let queuedUserMessagePersistedAcrossFallback = false;
       let assistantErrorPersistedAcrossFallback = false;
+      // Profiler-only milestone: it separates fallback setup from the actual
+      // model run without adding extra live logs/snapshots to normal turns.
       agentTurnTiming.logMilestoneIfSlow({
         runId,
         sessionId: params.followupRun.run.sessionId,
@@ -2014,6 +2038,8 @@ export async function runAgentTurnWithFallback(params: {
                 sessionKey: params.sessionKey,
               });
               try {
+                // Profiler-only milestone: it exposes time spent before Codex
+                // dispatch while leaving the regular embedded run path inert.
                 agentTurnTiming.logMilestoneIfSlow({
                   runId,
                   sessionId: params.followupRun.run.sessionId,

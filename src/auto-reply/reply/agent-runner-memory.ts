@@ -179,6 +179,9 @@ function resolveEffectivePromptTokens(
 
 function isPreflightCompactionSkipReason(reason?: string): boolean {
   const classification = classifyCompactionReason(reason);
+  // Preflight compaction is a guardrail, not a hard dependency. These classes
+  // mean the context engine found nothing useful to compact, so the reply should
+  // continue instead of surfacing a generic user-facing failure.
   return (
     classification === "below_threshold" ||
     classification === "no_compactable_entries" ||
