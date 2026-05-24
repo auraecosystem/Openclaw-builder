@@ -1,6 +1,6 @@
 # PR #85646 — trust-filter current-head real behavior proof
 
-Generated: 2026-05-24T20:10:14.279Z
+Generated: 2026-05-24T20:36:34.726Z
 Branch: `feature/codex-skills-developer-instructions` (resolve HEAD via `git log -1 --format=%H -- docs/research/runtime-context-surface-f1-trust-filter-current-head-proof.md` to pin the captured commit SHA — the artifact intentionally avoids embedding the SHA because regenerating after an amend would otherwise loop).
 Snapshot schema version: `3`
 
