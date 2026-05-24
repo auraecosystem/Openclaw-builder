@@ -6,9 +6,11 @@ Docs: https://docs.openclaw.ai
 
 ### Changes
 
-### Fixes
-- iMessage: mark authorized slash-command turns as text-sourced commands so `/status`, `/new`, and `/restart` acknowledgements return to the source conversation. (#82642) thanks @homer-byte.
+- Docs/secrets: regenerate the SecretRef credential surface marker blocks from the registry-backed credential matrix, add `pnpm gen:secretref-docs` / `check:secretref-docs`, and wire the check into preflight guards so contributor branches no longer hit late drift failures. (#44289)
 
+### Fixes
+
+- iMessage: mark authorized slash-command turns as text-sourced commands so `/status`, `/new`, and `/restart` acknowledgements return to the source conversation. (#82642) thanks @homer-byte.
 
 ## 2026.5.24
 
