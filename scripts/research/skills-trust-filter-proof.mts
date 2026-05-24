@@ -50,7 +50,9 @@ async function writeSkill(params: {
 }
 
 function hash(input: string | undefined): string {
-  if (!input) return "(undefined)";
+  if (!input) {
+    return "(undefined)";
+  }
   return createHash("sha256").update(input).digest("hex").slice(0, 12);
 }
 
@@ -221,9 +223,11 @@ async function main(): Promise<void> {
     lines.push("# PR #85646 — trust-filter current-head real behavior proof");
     lines.push("");
     lines.push(`Generated: ${new Date().toISOString()}`);
-    lines.push(`Branch: \`${gitBranch()}\` (resolve HEAD via \`git log -1 --format=%H -- ${
-      "docs/research/runtime-context-surface-f1-trust-filter-current-head-proof.md"
-    }\` to pin the captured commit SHA — the artifact intentionally avoids embedding the SHA because regenerating after an amend would otherwise loop).`);
+    const ARTIFACT_PATH =
+      "docs/research/runtime-context-surface-f1-trust-filter-current-head-proof.md";
+    lines.push(
+      `Branch: \`${gitBranch()}\` (resolve HEAD via \`git log -1 --format=%H -- ${ARTIFACT_PATH}\` to pin the captured commit SHA — the artifact intentionally avoids embedding the SHA because regenerating after an amend would otherwise loop).`,
+    );
     lines.push(`Snapshot schema version: \`${SKILL_SNAPSHOT_SCHEMA_VERSION}\``);
     lines.push("");
     lines.push("## Source fixtures");
@@ -312,7 +316,6 @@ async function main(): Promise<void> {
     lines.push("- No live OpenAI Codex backend rollout. The earlier 10-turn live benchmark in the PR body remains the wire-stability / cacheRead / token-growth proof for the bundled developer lane; this current-head artifact pins the structural invariants the live benchmark would re-establish (developer lane filtered to bundled, reference lane carries non-bundled, legacy snapshots force-refresh).");
     lines.push("- No 50/100-turn long-session benchmark.");
     lines.push("- Personal-source (`agents-skills-personal`) skills are exercised by `src/agents/skills/source.ts` (`agents-skills-personal` is in the same untrusted bucket as the other non-bundled sources). The trust-filter policy and the reference fragment apply identically to personal-source entries.");
-    lines.push("");
     process.stdout.write(`${lines.join("\n")}\n`);
   } finally {
     rmSync(root, { recursive: true, force: true });
