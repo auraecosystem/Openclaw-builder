@@ -518,6 +518,19 @@ describe("browser config", () => {
     expect(remote?.executablePath).toBe("/usr/bin/chrome-global");
   });
 
+  it("passes global noSandbox through resolved profiles for Chrome MCP pipe launch", () => {
+    const resolved = resolveBrowserConfig({
+      noSandbox: true,
+      profiles: {
+        pipe: { driver: "existing-session", color: "#AA00AA", mcpArgs: ["--isolated"] },
+      },
+    });
+
+    const pipe = resolveProfile(resolved, "pipe");
+    expect(pipe?.driver).toBe("existing-session");
+    expect(pipe?.noSandbox).toBe(true);
+  });
+
   it("uses base protocol for profiles with only cdpPort", () => {
     const resolved = resolveBrowserConfig({
       cdpUrl: "https://example.com:9443",
@@ -913,6 +926,7 @@ describe("browser config", () => {
       headlessSource: "default",
       mcpArgs: undefined,
       mcpCommand: undefined,
+      noSandbox: false,
       userDataDir: undefined,
     });
   });

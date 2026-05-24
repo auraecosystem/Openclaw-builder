@@ -467,7 +467,7 @@ async function executeBrowserRouteAction(params: {
   body?: unknown;
   timeoutMs?: number;
 }) {
-  const query = { ...(params.query ?? {}), profile: params.profile };
+  const query = { ...params.query, profile: params.profile };
   const result = params.proxyRequest
     ? await params.proxyRequest({
         method: params.method,
