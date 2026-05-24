@@ -424,6 +424,7 @@ export const dispatchTelegramMessage = async ({
     reactionApi,
     removeAckAfterReply,
     statusReactionController: rawStatusReactionController,
+    suppressSilentReplyFallback: callbackSuppressSilentFallback,
   } = context;
   const isRoomEvent = ctxPayload.InboundEventKind === "room_event";
   const statusReactionController = isRoomEvent ? null : rawStatusReactionController;
@@ -1369,6 +1370,20 @@ export const dispatchTelegramMessage = async ({
                 cfg,
                 dispatcherOptions: {
                   ...replyPipeline,
+                  // Telegram callback_query button taps can be valid no-op control
+                  // turns.  Treat exact NO_REPLY as group-like silence for those
+                  // synthetic turns so the direct-chat rewrite does not create a
+                  // visible fallback after a button tap.
+                  ...(callbackSuppressSilentFallback
+                    ? {
+                        silentReplyContext: {
+                          cfg,
+                          sessionKey: ctxPayload.SessionKey,
+                          surface: "telegram",
+                          conversationType: "group" as const,
+                        },
+                      }
+                    : {}),
                   beforeDeliver: async (payload) => payload,
                   deliver: async (payload, info) => {
                     if (isDispatchSuperseded()) {
@@ -1916,8 +1931,15 @@ export const dispatchTelegramMessage = async ({
     });
   }
 
+  const silentCallbackSuppressed =
+    callbackSuppressSilentFallback && !dispatchError && !deliverySummary.delivered && !sentFallback;
+
   const hasFinalResponse =
-    deliverySummary.delivered || sentFallback || suppressSilentReplyFallback || queuedFinal;
+    silentCallbackSuppressed ||
+    deliverySummary.delivered ||
+    sentFallback ||
+    suppressSilentReplyFallback ||
+    queuedFinal;
 
   if (statusReactionController && !hasFinalResponse) {
     void finalizeTelegramStatusReaction({ outcome: "error", hasFinalResponse: false }).catch(
