@@ -62,6 +62,10 @@ import {
   type CodexAppServerToolTelemetry,
 } from "./event-projector.js";
 import {
+  CodexNativeThreadLifecycleReason,
+  emitCodexNativeThreadLifecycleDiagnostic,
+} from "./native-thread-diagnostics.js";
+import {
   buildCodexPluginAppCacheKey,
   resolveCodexPluginAppCacheEndpoint,
 } from "./plugin-app-cache-key.js";
@@ -107,6 +111,24 @@ type RunCodexAppServerAttemptOptions = NonNullable<
 
 function flushDiagnosticEvents() {
   return waitForDiagnosticEventsDrained();
+}
+
+type CodexNativeThreadLifecycleEvent = Extract<
+  DiagnosticEventPayload,
+  { type: "codex.native_thread.lifecycle" }
+>;
+
+function collectCodexNativeThreadLifecycleEvents(): {
+  events: CodexNativeThreadLifecycleEvent[];
+  unsubscribe: () => void;
+} {
+  const events: CodexNativeThreadLifecycleEvent[] = [];
+  const unsubscribe = onInternalDiagnosticEvent((event) => {
+    if (event.type === "codex.native_thread.lifecycle") {
+      events.push(event);
+    }
+  });
+  return { events, unsubscribe };
 }
 
 function activeDiagnosticToolKeys(events: DiagnosticEventPayload[]): Set<string> {
@@ -875,6 +897,70 @@ describe("runCodexAppServerAttempt", () => {
     vi.unstubAllEnvs();
     await closeCodexSandboxExecServersForTests();
     await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("keeps scoped native-thread diagnostic identifiers out of generic logs", async () => {
+    const info = vi.spyOn(embeddedAgentLog, "info").mockImplementation(() => undefined);
+    const lifecycleDiagnostics = collectCodexNativeThreadLifecycleEvents();
+
+    emitCodexNativeThreadLifecycleDiagnostic({
+      action: "rotated",
+      reason: CodexNativeThreadLifecycleReason.NativeTokenGuard,
+      runId: "run-1",
+      sessionId: "session-1",
+      sessionKey: "agent:main:session-1",
+      threadId: "thread-1",
+      bindingMode: "thread_bootstrap",
+      contextEngineId: "lossless-claw",
+      contextEnginePolicyFingerprint: "policy-fingerprint",
+      projectionEpoch: "epoch-1",
+      projectionFingerprint: "projection-fingerprint",
+      nativeTokens: 86_000,
+      maxActiveTranscriptTokens: 70_000,
+      contextEngineProjectionContributed: true,
+      extra: {
+        reason: "free-form app-server error",
+        sessionKey: "agent:other:session-2",
+        sessionFile: "/private/session.jsonl",
+        error: "thread not found: thread-1",
+      },
+    });
+    await flushDiagnosticEvents();
+    lifecycleDiagnostics.unsubscribe();
+
+    const logPayload = info.mock.calls[0]?.[1];
+    expect(logPayload).toMatchObject({
+      action: "rotated",
+      reason: "native-token-guard",
+      bindingMode: "thread_bootstrap",
+      nativeTokens: 86_000,
+      maxActiveTranscriptTokens: 70_000,
+      contextEngineProjectionContributed: true,
+    });
+    expect(logPayload).not.toHaveProperty("threadId");
+    expect(logPayload).not.toHaveProperty("runId");
+    expect(logPayload).not.toHaveProperty("sessionId");
+    expect(logPayload).not.toHaveProperty("sessionKey");
+    expect(logPayload).not.toHaveProperty("contextEngineId");
+    expect(logPayload).not.toHaveProperty("contextEnginePolicyFingerprint");
+    expect(logPayload).not.toHaveProperty("projectionEpoch");
+    expect(logPayload).not.toHaveProperty("projectionFingerprint");
+    expect(logPayload).not.toHaveProperty("sessionFile");
+    expect(logPayload).not.toHaveProperty("error");
+    expect(lifecycleDiagnostics.events).toContainEqual(
+      expect.objectContaining({
+        type: "codex.native_thread.lifecycle",
+        action: "rotated",
+        reason: "native-token-guard",
+        runId: "run-1",
+        sessionId: "session-1",
+        sessionKey: "agent:main:session-1",
+        threadId: "thread-1",
+        contextEnginePolicyFingerprint: "policy-fingerprint",
+        projectionEpoch: "epoch-1",
+        projectionFingerprint: "projection-fingerprint",
+      }),
+    );
   });
 
   it("filters Codex-native dynamic tools from app-server tool exposure", () => {
@@ -1824,6 +1910,7 @@ describe("runCodexAppServerAttempt", () => {
       }
       throw new Error(`unexpected method: ${method}`);
     });
+    const lifecycleDiagnostics = collectCodexNativeThreadLifecycleEvents();
 
     const binding = await startOrResumeThread({
       client: { request } as never,
@@ -1834,10 +1921,70 @@ describe("runCodexAppServerAttempt", () => {
       mcpServersFingerprint: "mcp-v2",
       mcpServersFingerprintEvaluated: true,
     });
+    await flushDiagnosticEvents();
+    lifecycleDiagnostics.unsubscribe();
 
     expect(request.mock.calls.map(([method]) => method)).toEqual(["thread/start"]);
     expect(binding.threadId).toBe("new-thread");
     expect(binding.mcpServersFingerprint).toBe("mcp-v2");
+    expect(lifecycleDiagnostics.events).toContainEqual(
+      expect.objectContaining({
+        type: "codex.native_thread.lifecycle",
+        action: "rotated",
+        reason: "mcp-config-mismatch",
+        threadId: "old-thread",
+        previousMcpServersFingerprint: "mcp-v1",
+        mcpServersFingerprint: "mcp-v2",
+      }),
+    );
+  });
+
+  it("starts a new Codex thread when the environment selection changes", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    await writeCodexAppServerBinding(sessionFile, {
+      threadId: "old-thread",
+      cwd: workspaceDir,
+      dynamicToolsFingerprint: JSON.stringify([]),
+      environmentSelectionFingerprint: JSON.stringify([
+        { cwd: "/workspace", environmentId: "env-old" },
+      ]),
+    });
+    const request = vi.fn(async (method: string, _params: unknown) => {
+      if (method === "thread/start") {
+        return threadStartResult("new-thread");
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+    const lifecycleDiagnostics = collectCodexNativeThreadLifecycleEvents();
+
+    const binding = await startOrResumeThread({
+      client: { request } as never,
+      params: createParams(sessionFile, workspaceDir),
+      cwd: workspaceDir,
+      dynamicTools: [],
+      appServer: createThreadLifecycleAppServerOptions(),
+      environmentSelection: [{ cwd: "/workspace", environmentId: "env-new" }],
+    });
+    await flushDiagnosticEvents();
+    lifecycleDiagnostics.unsubscribe();
+
+    expect(request.mock.calls.map(([method]) => method)).toEqual(["thread/start"]);
+    expect(binding.threadId).toBe("new-thread");
+    const lifecycleEvent = lifecycleDiagnostics.events.find(
+      (event) => event.reason === "environment-selection-mismatch",
+    );
+    expect(lifecycleEvent).toEqual(
+      expect.objectContaining({
+        type: "codex.native_thread.lifecycle",
+        action: "rotated",
+        reason: "environment-selection-mismatch",
+        threadId: "old-thread",
+        previousEnvironmentSelectionFingerprint: expect.stringMatching(/^sha256:/),
+        environmentSelectionFingerprint: expect.stringMatching(/^sha256:/),
+      }),
+    );
+    expect(JSON.stringify(lifecycleEvent)).not.toContain("/workspace");
   });
 
   it("starts a no-MCP Codex thread when MCP config is evaluated empty", async () => {
@@ -9631,6 +9778,7 @@ describe("runCodexAppServerAttempt", () => {
         },
       })}\n`,
     );
+    const lifecycleDiagnostics = collectCodexNativeThreadLifecycleEvents();
 
     const binding = await testing.rotateOversizedCodexAppServerStartupBinding({
       binding: await readCodexAppServerBinding(sessionFile),
@@ -9647,8 +9795,329 @@ describe("runCodexAppServerAttempt", () => {
         },
       } as never,
     });
+    await flushDiagnosticEvents();
+    lifecycleDiagnostics.unsubscribe();
 
     expect(binding?.threadId).toBe("thread-existing");
+    expect(lifecycleDiagnostics.events.some((event) => event.reason === "native-token-guard")).toBe(
+      false,
+    );
+    const savedBinding = await readCodexAppServerBinding(sessionFile);
+    expect(savedBinding?.threadId).toBe("thread-existing");
+  });
+
+  it("honors a configured native rollout token limit above the default", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const agentDir = path.join(tempDir, "agent");
+    await writeExistingBinding(sessionFile, workspaceDir, { dynamicToolsFingerprint: "[]" });
+    await fs.writeFile(
+      path.join(path.dirname(sessionFile), "sessions.json"),
+      JSON.stringify({
+        "agent:main:session-1": {
+          sessionFile,
+          totalTokens: 12_000,
+        },
+      }),
+    );
+    const rolloutDir = path.join(agentDir, "codex-home", "sessions");
+    await fs.mkdir(rolloutDir, { recursive: true });
+    await fs.writeFile(
+      path.join(rolloutDir, "rollout-thread-existing.jsonl"),
+      `${JSON.stringify({
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              total_tokens: 86_000,
+            },
+          },
+        },
+      })}\n`,
+    );
+    const lifecycleDiagnostics = collectCodexNativeThreadLifecycleEvents();
+
+    const binding = await testing.rotateOversizedCodexAppServerStartupBinding({
+      binding: await readCodexAppServerBinding(sessionFile),
+      sessionFile,
+      agentDir,
+      config: {
+        agents: {
+          defaults: {
+            compaction: {
+              truncateAfterCompaction: true,
+              maxActiveTranscriptBytes: "1mb",
+              maxActiveTranscriptTokens: "120k",
+            },
+          },
+        },
+      } as never,
+    });
+    await flushDiagnosticEvents();
+    lifecycleDiagnostics.unsubscribe();
+
+    expect(binding?.threadId).toBe("thread-existing");
+    expect(lifecycleDiagnostics.events.some((event) => event.reason === "native-token-guard")).toBe(
+      false,
+    );
+    const savedBinding = await readCodexAppServerBinding(sessionFile);
+    expect(savedBinding?.threadId).toBe("thread-existing");
+  });
+
+  it("clears native rollouts at a configured token limit below the default", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const agentDir = path.join(tempDir, "agent");
+    await writeExistingBinding(sessionFile, workspaceDir, { dynamicToolsFingerprint: "[]" });
+    await fs.writeFile(
+      path.join(path.dirname(sessionFile), "sessions.json"),
+      JSON.stringify({
+        "agent:main:session-1": {
+          sessionFile,
+          totalTokens: 12_000,
+        },
+      }),
+    );
+    const rolloutDir = path.join(agentDir, "codex-home", "sessions");
+    await fs.mkdir(rolloutDir, { recursive: true });
+    await fs.writeFile(
+      path.join(rolloutDir, "rollout-thread-existing.jsonl"),
+      `${JSON.stringify({
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              total_tokens: 60_000,
+            },
+          },
+        },
+      })}\n`,
+    );
+    const lifecycleDiagnostics = collectCodexNativeThreadLifecycleEvents();
+
+    const binding = await testing.rotateOversizedCodexAppServerStartupBinding({
+      binding: await readCodexAppServerBinding(sessionFile),
+      sessionFile,
+      agentDir,
+      config: {
+        agents: {
+          defaults: {
+            compaction: {
+              truncateAfterCompaction: true,
+              maxActiveTranscriptBytes: "1mb",
+              maxActiveTranscriptTokens: "50k",
+            },
+          },
+        },
+      } as never,
+    });
+    await flushDiagnosticEvents();
+    lifecycleDiagnostics.unsubscribe();
+
+    expect(binding).toBeUndefined();
+    expect(lifecycleDiagnostics.events).toContainEqual(
+      expect.objectContaining({
+        type: "codex.native_thread.lifecycle",
+        action: "rotated",
+        reason: "native-token-guard",
+        threadId: "thread-existing",
+        bindingMode: "legacy",
+        maxActiveTranscriptTokens: 50_000,
+        nativeTokens: 60_000,
+      }),
+    );
+    const savedBinding = await readCodexAppServerBinding(sessionFile);
+    expect(savedBinding).toBeUndefined();
+  });
+
+  it("disables native rollout token rotation when configured to zero", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const agentDir = path.join(tempDir, "agent");
+    await writeExistingBinding(sessionFile, workspaceDir, { dynamicToolsFingerprint: "[]" });
+    await fs.writeFile(
+      path.join(path.dirname(sessionFile), "sessions.json"),
+      JSON.stringify({
+        "agent:main:session-1": {
+          sessionFile,
+          totalTokens: 12_000,
+        },
+      }),
+    );
+    const rolloutDir = path.join(agentDir, "codex-home", "sessions");
+    await fs.mkdir(rolloutDir, { recursive: true });
+    await fs.writeFile(
+      path.join(rolloutDir, "rollout-thread-existing.jsonl"),
+      `${JSON.stringify({
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              total_tokens: 86_000,
+            },
+          },
+        },
+      })}\n`,
+    );
+    const lifecycleDiagnostics = collectCodexNativeThreadLifecycleEvents();
+
+    const binding = await testing.rotateOversizedCodexAppServerStartupBinding({
+      binding: await readCodexAppServerBinding(sessionFile),
+      sessionFile,
+      agentDir,
+      config: {
+        agents: {
+          defaults: {
+            compaction: {
+              truncateAfterCompaction: true,
+              maxActiveTranscriptBytes: "1mb",
+              maxActiveTranscriptTokens: 0,
+            },
+          },
+        },
+      } as never,
+    });
+    await flushDiagnosticEvents();
+    lifecycleDiagnostics.unsubscribe();
+
+    expect(binding?.threadId).toBe("thread-existing");
+    expect(lifecycleDiagnostics.events.some((event) => event.reason === "native-token-guard")).toBe(
+      false,
+    );
+    const savedBinding = await readCodexAppServerBinding(sessionFile);
+    expect(savedBinding?.threadId).toBe("thread-existing");
+  });
+
+  it("preserves bindings above a configured token limit from session totals", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const agentDir = path.join(tempDir, "agent");
+    await writeExistingBinding(sessionFile, workspaceDir, { dynamicToolsFingerprint: "[]" });
+    await fs.writeFile(
+      path.join(path.dirname(sessionFile), "sessions.json"),
+      JSON.stringify({
+        "agent:main:session-1": {
+          sessionFile,
+          totalTokens: 86_000,
+        },
+      }),
+    );
+
+    const binding = await testing.rotateOversizedCodexAppServerStartupBinding({
+      binding: await readCodexAppServerBinding(sessionFile),
+      sessionFile,
+      agentDir,
+      config: {
+        agents: {
+          defaults: {
+            compaction: {
+              truncateAfterCompaction: true,
+              maxActiveTranscriptBytes: "1mb",
+              maxActiveTranscriptTokens: "120k",
+            },
+          },
+        },
+      } as never,
+    });
+
+    expect(binding?.threadId).toBe("thread-existing");
+    const savedBinding = await readCodexAppServerBinding(sessionFile);
+    expect(savedBinding?.threadId).toBe("thread-existing");
+  });
+
+  it("clears bindings below a configured token limit from session totals", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const agentDir = path.join(tempDir, "agent");
+    await writeExistingBinding(sessionFile, workspaceDir, { dynamicToolsFingerprint: "[]" });
+    await fs.writeFile(
+      path.join(path.dirname(sessionFile), "sessions.json"),
+      JSON.stringify({
+        "agent:main:session-1": {
+          sessionFile,
+          totalTokens: 60_000,
+        },
+      }),
+    );
+
+    const binding = await testing.rotateOversizedCodexAppServerStartupBinding({
+      binding: await readCodexAppServerBinding(sessionFile),
+      sessionFile,
+      agentDir,
+      config: {
+        agents: {
+          defaults: {
+            compaction: {
+              truncateAfterCompaction: true,
+              maxActiveTranscriptBytes: "1mb",
+              maxActiveTranscriptTokens: "50k",
+            },
+          },
+        },
+      } as never,
+    });
+
+    expect(binding).toBeUndefined();
+    const savedBinding = await readCodexAppServerBinding(sessionFile);
+    expect(savedBinding).toBeUndefined();
+  });
+
+  it("keeps byte rotation active when token rotation is configured to zero", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const agentDir = path.join(tempDir, "agent");
+    await writeExistingBinding(sessionFile, workspaceDir, { dynamicToolsFingerprint: "[]" });
+    const rolloutDir = path.join(agentDir, "codex-home", "sessions");
+    await fs.mkdir(rolloutDir, { recursive: true });
+    await fs.writeFile(path.join(rolloutDir, "rollout-thread-existing.jsonl"), "x".repeat(2_000));
+
+    const binding = await testing.rotateOversizedCodexAppServerStartupBinding({
+      binding: await readCodexAppServerBinding(sessionFile),
+      sessionFile,
+      agentDir,
+      config: {
+        agents: {
+          defaults: {
+            compaction: {
+              truncateAfterCompaction: true,
+              maxActiveTranscriptBytes: 1_000,
+              maxActiveTranscriptTokens: 0,
+            },
+          },
+        },
+      } as never,
+    });
+
+    expect(binding).toBeUndefined();
+    const savedBinding = await readCodexAppServerBinding(sessionFile);
+    expect(savedBinding).toBeUndefined();
+  });
+
+  it("skips rollout directory scans when native rollout limits are disabled", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const agentDir = path.join(tempDir, "agent");
+    await writeExistingBinding(sessionFile, workspaceDir, { dynamicToolsFingerprint: "[]" });
+    const readdirSpy = vi.spyOn(fs, "readdir");
+
+    const binding = await testing.rotateOversizedCodexAppServerStartupBinding({
+      binding: await readCodexAppServerBinding(sessionFile),
+      sessionFile,
+      agentDir,
+      config: {
+        agents: {
+          defaults: {
+            compaction: {
+              truncateAfterCompaction: true,
+              maxActiveTranscriptTokens: 0,
+            },
+          },
+        },
+      } as never,
+    });
+
+    expect(binding?.threadId).toBe("thread-existing");
+    expect(readdirSpy).not.toHaveBeenCalled();
     const savedBinding = await readCodexAppServerBinding(sessionFile);
     expect(savedBinding?.threadId).toBe("thread-existing");
   });
@@ -9777,7 +10246,7 @@ describe("runCodexAppServerAttempt", () => {
     await fs.mkdir(rolloutDir, { recursive: true });
     const rolloutFile = path.join(rolloutDir, "rollout-thread-existing.jsonl");
     await fs.writeFile(rolloutFile, "x".repeat(2_000));
-    const readFileSpy = vi.spyOn(fs, "readFile");
+    const openSpy = vi.spyOn(fs, "open");
 
     const binding = await testing.rotateOversizedCodexAppServerStartupBinding({
       binding: await readCodexAppServerBinding(sessionFile),
@@ -9796,7 +10265,7 @@ describe("runCodexAppServerAttempt", () => {
     });
 
     expect(binding).toBeUndefined();
-    expect(readFileSpy.mock.calls.some(([file]) => file === rolloutFile)).toBe(false);
+    expect(openSpy.mock.calls.some(([file]) => file === rolloutFile)).toBe(false);
     const savedBinding = await readCodexAppServerBinding(sessionFile);
     expect(savedBinding).toBeUndefined();
   });
@@ -9818,6 +10287,7 @@ describe("runCodexAppServerAttempt", () => {
     const rolloutDir = path.join(agentDir, "codex-home", "sessions");
     await fs.mkdir(rolloutDir, { recursive: true });
     await fs.writeFile(path.join(rolloutDir, "rollout-thread-existing.jsonl"), "x".repeat(1_000));
+    const lifecycleDiagnostics = collectCodexNativeThreadLifecycleEvents();
 
     const binding = await testing.rotateOversizedCodexAppServerStartupBinding({
       binding: await readCodexAppServerBinding(sessionFile),
@@ -9834,8 +10304,21 @@ describe("runCodexAppServerAttempt", () => {
         },
       } as never,
     });
+    await flushDiagnosticEvents();
+    lifecycleDiagnostics.unsubscribe();
 
     expect(binding).toBeUndefined();
+    expect(lifecycleDiagnostics.events).toContainEqual(
+      expect.objectContaining({
+        type: "codex.native_thread.lifecycle",
+        action: "rotated",
+        reason: "native-byte-guard",
+        threadId: "thread-existing",
+        bindingMode: "legacy",
+        maxActiveTranscriptBytes: 1_000,
+        nativeTranscriptBytes: 1_000,
+      }),
+    );
     const savedBinding = await readCodexAppServerBinding(sessionFile);
     expect(savedBinding).toBeUndefined();
   });
@@ -10179,6 +10662,7 @@ describe("runCodexAppServerAttempt", () => {
       policyContext: pluginAppPolicyContext,
       diagnostics: [],
     }));
+    const lifecycleDiagnostics = collectCodexNativeThreadLifecycleEvents();
 
     await startOrResumeThread({
       client: { request } as never,
@@ -10194,6 +10678,7 @@ describe("runCodexAppServerAttempt", () => {
         build: buildDenyAllPluginThreadConfig,
       },
     });
+    await flushDiagnosticEvents();
     const savedAfterDeny = await readCodexAppServerBinding(sessionFile);
 
     expect(savedAfterDeny?.threadId).toBe("thread-existing");
@@ -10213,6 +10698,8 @@ describe("runCodexAppServerAttempt", () => {
         build: buildEnabledPluginThreadConfig,
       },
     });
+    await flushDiagnosticEvents();
+    lifecycleDiagnostics.unsubscribe();
 
     expect(buildDenyAllPluginThreadConfig).toHaveBeenCalledTimes(1);
     expect(buildEnabledPluginThreadConfig).toHaveBeenCalledTimes(1);
@@ -10232,6 +10719,16 @@ describe("runCodexAppServerAttempt", () => {
     expect(savedAfterAllowed?.pluginAppsFingerprint).toBe("plugin-apps-config-1");
     expect(savedAfterAllowed?.pluginAppsInputFingerprint).toBe("plugin-apps-input-1");
     expect(savedAfterAllowed?.pluginAppPolicyContext).toEqual(pluginAppPolicyContext);
+    expect(lifecycleDiagnostics.events).toContainEqual(
+      expect.objectContaining({
+        type: "codex.native_thread.lifecycle",
+        action: "bypassed",
+        reason: "native-tool-surface-disabled",
+        threadId: "thread-existing",
+        bindingMode: "transient",
+        nativeToolSurfaceEnabled: false,
+      }),
+    );
   });
 
   it("preserves the binding when the app-server closes during thread resume", async () => {
@@ -10259,6 +10756,45 @@ describe("runCodexAppServerAttempt", () => {
     expect(request.mock.calls.map(([method]) => method)).toEqual(["thread/resume"]);
     const binding = await readCodexAppServerBinding(sessionFile);
     expect(binding?.threadId).toBe("thread-existing");
+  });
+
+  it("starts a fresh Codex thread and emits an app-server resume rejection reason when resume fails", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    await writeExistingBinding(sessionFile, workspaceDir, { dynamicToolsFingerprint: "[]" });
+    const appServer = createThreadLifecycleAppServerOptions();
+    const request = vi.fn(async (method: string) => {
+      if (method === "thread/resume") {
+        throw new Error("thread not found");
+      }
+      if (method === "thread/start") {
+        return threadStartResult("thread-fresh");
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+    const lifecycleDiagnostics = collectCodexNativeThreadLifecycleEvents();
+
+    const binding = await startOrResumeThread({
+      client: { request } as never,
+      params: createParams(sessionFile, workspaceDir),
+      cwd: workspaceDir,
+      dynamicTools: [],
+      appServer,
+    });
+    await flushDiagnosticEvents();
+    lifecycleDiagnostics.unsubscribe();
+
+    expect(binding.threadId).toBe("thread-fresh");
+    expect(request.mock.calls.map(([method]) => method)).toEqual(["thread/resume", "thread/start"]);
+    expect(lifecycleDiagnostics.events).toContainEqual(
+      expect.objectContaining({
+        type: "codex.native_thread.lifecycle",
+        action: "rejected",
+        reason: "app-server-rejected-thread",
+        threadId: "thread-existing",
+        bindingMode: "legacy",
+      }),
+    );
   });
 
   it("restarts the app-server once when a shared client closes during startup", async () => {
@@ -10645,6 +11181,7 @@ describe("runCodexAppServerAttempt", () => {
       policyContext: emptyPolicyContext,
       diagnostics: [],
     }));
+    const lifecycleDiagnostics = collectCodexNativeThreadLifecycleEvents();
 
     await startOrResumeThread({
       client: { request } as never,
@@ -10659,6 +11196,8 @@ describe("runCodexAppServerAttempt", () => {
         build: buildPluginThreadConfig,
       },
     });
+    await flushDiagnosticEvents();
+    lifecycleDiagnostics.unsubscribe();
 
     expect(buildPluginThreadConfig).toHaveBeenCalledTimes(1);
     const requestCalls = request.mock.calls as unknown as Array<[string, { config?: unknown }]>;
@@ -10678,6 +11217,18 @@ describe("runCodexAppServerAttempt", () => {
     expect(binding?.threadId).toBe("thread-revalidated");
     expect(binding?.pluginAppsFingerprint).toBe("plugin-apps-empty");
     expect(binding?.pluginAppPolicyContext).toEqual(emptyPolicyContext);
+    expect(lifecycleDiagnostics.events).toContainEqual(
+      expect.objectContaining({
+        type: "codex.native_thread.lifecycle",
+        action: "rotated",
+        reason: "plugin-app-config-mismatch",
+        threadId: "thread-existing",
+        previousPluginAppsFingerprint: "plugin-apps-config-1",
+        pluginAppsFingerprint: "plugin-apps-empty",
+        previousPluginAppsInputFingerprint: "plugin-apps-input-1",
+        pluginAppsInputFingerprint: "plugin-apps-input-1",
+      }),
+    );
   });
 
   it("keeps the existing plugin app binding when revalidation fails", async () => {
@@ -11021,6 +11572,7 @@ describe("runCodexAppServerAttempt", () => {
       dynamicTools: [createMessageDynamicTool("Send and manage messages.", ["send"])],
       appServer,
     });
+    const lifecycleDiagnostics = collectCodexNativeThreadLifecycleEvents();
     const binding = await startOrResumeThread({
       client: { request } as never,
       params,
@@ -11028,9 +11580,21 @@ describe("runCodexAppServerAttempt", () => {
       dynamicTools: [createMessageDynamicTool("Send and manage messages.", ["send", "read"])],
       appServer,
     });
+    await flushDiagnosticEvents();
+    lifecycleDiagnostics.unsubscribe();
 
     expect(binding.threadId).toBe("thread-2");
     expect(request.mock.calls.map(([method]) => method)).toEqual(["thread/start", "thread/start"]);
+    expect(lifecycleDiagnostics.events).toContainEqual(
+      expect.objectContaining({
+        type: "codex.native_thread.lifecycle",
+        action: "rotated",
+        reason: "dynamic-tools-mismatch",
+        threadId: "thread-1",
+        previousDynamicToolsFingerprint: expect.any(String),
+        dynamicToolsFingerprint: expect.any(String),
+      }),
+    );
   });
 
   it("passes configured app-server policy, sandbox, service tier, and model on resume", async () => {

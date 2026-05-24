@@ -544,6 +544,13 @@ export type AgentCompactionConfig = {
    */
   maxActiveTranscriptBytes?: number | string;
   /**
+   * Codex app-server native-thread token reuse guard for already-bound
+   * threads. Defaults to 70000 when unset. Set to a larger token count for
+   * trusted long-running Codex sessions, or 0 to disable this proactive token
+   * guard while preserving semantic binding invalidation and byte limits.
+   */
+  maxActiveTranscriptTokens?: number | string;
+  /**
    * Send brief compaction notices to the user when compaction starts and completes.
    * Default: false (silent by default).
    */

@@ -2723,6 +2723,8 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
             case "diagnostic.async_queue.dropped":
               recordAsyncQueueDropped(evt);
               return;
+            case "codex.native_thread.lifecycle":
+              return;
             case "telemetry.exporter":
               recordTelemetryExporter(evt, metadata);
               return;
