@@ -1324,13 +1324,8 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
         const postCapLost = computeLostIdentifiers(transcriptIdentifiers, summary);
         if (postCapLost.length > 0) {
           log.warn(
-            `Compaction safeguard: final capping removed ${postCapLost.length} identifier(s); re-appending to preserve.`,
+            `Compaction safeguard: final capping removed ${postCapLost.length} identifier(s) from summary.`,
           );
-          // Re-append lost identifiers so they survive capping. This may
-          // slightly exceed the cap, but identifier preservation is more
-          // important than strict length.
-          const identifierBlock = `\n## Exact identifiers\n${postCapLost.join("\n")}`;
-          summary += identifierBlock;
         }
       }
 
