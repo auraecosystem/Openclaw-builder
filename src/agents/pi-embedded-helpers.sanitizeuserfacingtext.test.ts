@@ -421,6 +421,35 @@ describe("sanitizeUserFacingText", () => {
     );
   });
 
+  it("strips truncation sentinel lines from user-facing text", () => {
+    expect(sanitizeUserFacingText("...(truncated)...")).toBe("");
+    expect(sanitizeUserFacingText("  ...(truncated)...\t")).toBe("");
+    expect(sanitizeUserFacingText("Hello\n...(truncated)...\nWorld")).toBe("Hello\nWorld");
+    expect(sanitizeUserFacingText("Hello\n\u2026(truncated)\u2026\nWorld")).toBe("Hello\nWorld");
+    expect(sanitizeUserFacingText("Result\n[... 5000 more characters truncated]\nEnd")).toBe(
+      "Result\nEnd",
+    );
+    expect(
+      sanitizeUserFacingText(
+        "Text\n\u2026(truncated TOOLS.md: kept 200+100 chars of 5000)\u2026\nMore",
+      ),
+    ).toBe("Text\nMore");
+    expect(sanitizeUserFacingText("Data\n[\u2026truncated 200+100/5000]\nRest")).toBe("Data\nRest");
+    // Bootstrap read-file sentinel
+    expect(
+      sanitizeUserFacingText("Before\n[...truncated, read AGENTS.md for full content...]\nAfter"),
+    ).toBe("Before\nAfter");
+    expect(sanitizeUserFacingText("[...truncated, read src/foo/bar.ts for full content...]")).toBe(
+      "",
+    );
+  });
+
+  it("preserves normal prose ellipses and bracketed text", () => {
+    expect(sanitizeUserFacingText("Wait... let me think")).toBe("Wait... let me think");
+    expect(sanitizeUserFacingText("See [the docs] for more")).toBe("See [the docs] for more");
+    expect(sanitizeUserFacingText("I truncated the list")).toBe("I truncated the list");
+  });
+
   it("strips marked internal runtime context blocks but keeps real reply text", () => {
     const input = [
       INTERNAL_RUNTIME_CONTEXT_BEGIN,
