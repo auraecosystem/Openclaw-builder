@@ -390,6 +390,49 @@ describe("loadPluginMetadataSnapshot process memo", () => {
     expect(loadPluginManifestRegistryForInstalledIndex).not.toHaveBeenCalled();
   });
 
+  it("does not reuse an unscoped current snapshot for a scoped resolver request", () => {
+    const index = makeIndex("demo");
+    loadPluginRegistrySnapshotWithMetadata.mockReturnValue({
+      source: "runtime",
+      snapshot: index,
+      diagnostics: [],
+    });
+    loadPluginManifestRegistryForInstalledIndex.mockImplementation(
+      ({ pluginIds }: { pluginIds?: readonly string[] }) => ({
+        ...makeManifestRegistry(pluginIds?.[0] ?? "demo"),
+        plugins: pluginIds?.map((pluginId) => makeManifestRegistry(pluginId).plugins[0]!) ?? [
+          makeManifestRegistry("demo").plugins[0]!,
+        ],
+      }),
+    );
+    const unscoped = loadPluginMetadataSnapshot({
+      config: {},
+      env: {},
+      index,
+    });
+    setCurrentPluginMetadataSnapshot(unscoped, {
+      config: {},
+      env: {},
+    });
+    loadPluginManifestRegistryForInstalledIndex.mockClear();
+
+    const scoped = resolvePluginMetadataSnapshot({
+      config: {},
+      env: {},
+      index,
+      pluginIdScope: {
+        key: "demo-only",
+        resolve: () => ["demo"],
+      },
+    });
+
+    expect(scoped).not.toBe(unscoped);
+    expect(scoped.pluginIds).toEqual(["demo"]);
+    expect(loadPluginManifestRegistryForInstalledIndex).toHaveBeenCalledWith(
+      expect.objectContaining({ pluginIds: ["demo"] }),
+    );
+  });
+
   it("does not scan persisted registry files when the caller provides an index", () => {
     const stateDir = tempStateDir();
     writePersistedIndex({ pluginId: "demo", stateDir });

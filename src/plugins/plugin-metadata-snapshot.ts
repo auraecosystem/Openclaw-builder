@@ -604,6 +604,8 @@ export function resolvePluginMetadataSnapshot(
     const current = getCurrentPluginMetadataSnapshot({
       config: params.config,
       env: params.env,
+      ...(params.pluginIds !== undefined ? { pluginIds: params.pluginIds } : {}),
+      ...(params.pluginIdScope !== undefined ? { pluginIdScope: params.pluginIdScope } : {}),
       ...(params.workspaceDir !== undefined ? { workspaceDir: params.workspaceDir } : {}),
       ...(params.allowWorkspaceScopedCurrent === true
         ? { allowWorkspaceScopedSnapshot: true }
@@ -620,6 +622,7 @@ export function resolvePluginMetadataSnapshot(
         snapshot: current,
         config: params.config,
         env: params.env,
+        allowScopedSnapshot: params.pluginIds !== undefined || params.pluginIdScope !== undefined,
         workspaceDir:
           params.workspaceDir ??
           (params.allowWorkspaceScopedCurrent === true ? current.workspaceDir : undefined),

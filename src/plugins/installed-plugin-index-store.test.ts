@@ -217,6 +217,59 @@ describe("installed plugin index persistence", () => {
     expect(persisted.plugins[0]?.compat).toEqual(["activation-config-path-hint"]);
   });
 
+  it("preserves contribution metadata across persisted index roundtrips", async () => {
+    const stateDir = makeTempDir();
+    const index = createIndex({
+      plugins: [
+        {
+          pluginId: "provider-owner",
+          manifestPath: "/plugins/provider-owner/openclaw.plugin.json",
+          manifestHash: "provider-owner-manifest-hash",
+          rootDir: "/plugins/provider-owner",
+          origin: "bundled",
+          enabled: true,
+          startup: {
+            sidecar: false,
+            memory: false,
+            deferConfiguredChannelFullLoadUntilAfterListen: false,
+            agentHarnesses: [],
+          },
+          contributions: {
+            channels: ["demo-channel"],
+            channelConfigs: ["demo-channel"],
+            providers: ["demo-provider"],
+            modelCatalogProviders: ["demo-provider"],
+            modelSupportPrefixes: ["demo-"],
+            modelSupportPatterns: ["^demo-[0-9]+$"],
+            autoEnableProviderIds: ["demo-auth"],
+            commandAliases: ["demo-command"],
+            contracts: {
+              webSearchProviders: ["demo-search"],
+            },
+          },
+          compat: [],
+        },
+      ],
+    });
+
+    await writePersistedInstalledPluginIndex(index, { stateDir });
+
+    const persisted = requirePersisted(await readPersistedInstalledPluginIndex({ stateDir }));
+    expect(persisted.plugins[0]?.contributions).toEqual({
+      channels: ["demo-channel"],
+      channelConfigs: ["demo-channel"],
+      providers: ["demo-provider"],
+      modelCatalogProviders: ["demo-provider"],
+      modelSupportPrefixes: ["demo-"],
+      modelSupportPatterns: ["^demo-[0-9]+$"],
+      autoEnableProviderIds: ["demo-auth"],
+      commandAliases: ["demo-command"],
+      contracts: {
+        webSearchProviders: ["demo-search"],
+      },
+    });
+  });
+
   it("marks legacy config-path startup indexes stale so update rebuilds them", async () => {
     const stateDir = makeTempDir();
     const pluginDir = path.join(stateDir, "plugins", "demo");

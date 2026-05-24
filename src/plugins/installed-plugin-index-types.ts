@@ -36,6 +36,18 @@ export type InstalledPluginStartupInfo = {
   configPaths?: readonly string[];
 };
 
+export type InstalledPluginContributionInfo = {
+  channels: readonly string[];
+  channelConfigs: readonly string[];
+  providers: readonly string[];
+  modelCatalogProviders: readonly string[];
+  modelSupportPrefixes: readonly string[];
+  modelSupportPatterns: readonly string[];
+  autoEnableProviderIds: readonly string[];
+  commandAliases: readonly string[];
+  contracts: Readonly<Record<string, readonly string[]>>;
+};
+
 export type InstalledPluginInstallRecordInfo = Pick<
   PluginInstallRecord,
   | "source"
@@ -109,6 +121,7 @@ export type InstalledPluginIndexRecord = {
   enabledByDefaultOnPlatforms?: readonly string[];
   syntheticAuthRefs?: readonly string[];
   startup: InstalledPluginStartupInfo;
+  contributions?: InstalledPluginContributionInfo;
   compat: readonly PluginCompatCode[];
 };
 

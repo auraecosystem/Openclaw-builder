@@ -174,6 +174,23 @@ describe("current plugin metadata snapshot", () => {
     expect(getCurrentPluginMetadataSnapshot({ config, pluginIds: ["demo"] })).toBeUndefined();
   });
 
+  it("requires exact plugin scope when the caller derives scope from the current index", () => {
+    const config = { plugins: { allow: ["demo", "other"] } };
+    const pluginIdScope = {
+      key: "test-scope",
+      resolve: () => ["demo", "other"],
+    };
+    const unscoped = createSnapshot({ config });
+    setCurrentPluginMetadataSnapshot(unscoped, { config });
+
+    expect(getCurrentPluginMetadataSnapshot({ config, pluginIdScope })).toBeUndefined();
+
+    const scoped = createSnapshot({ config, pluginIds: ["other", "demo"] });
+    setCurrentPluginMetadataSnapshot(scoped, { config });
+
+    expect(getCurrentPluginMetadataSnapshot({ config, pluginIdScope })).toBe(scoped);
+  });
+
   it("rejects a current snapshot when env-resolved plugin load paths change", () => {
     const config = { plugins: { load: { paths: ["~/plugins"] } } };
     const snapshot = createSnapshot({ config });

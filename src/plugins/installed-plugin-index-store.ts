@@ -53,6 +53,18 @@ const InstalledPluginIndexStartupSchema = z.object({
   configPaths: StringArraySchema.optional(),
 });
 
+const InstalledPluginIndexContributionSchema = z.object({
+  channels: StringArraySchema,
+  channelConfigs: StringArraySchema,
+  providers: StringArraySchema,
+  modelCatalogProviders: StringArraySchema,
+  modelSupportPrefixes: StringArraySchema,
+  modelSupportPatterns: StringArraySchema,
+  autoEnableProviderIds: StringArraySchema,
+  commandAliases: StringArraySchema,
+  contracts: z.record(z.string(), StringArraySchema),
+});
+
 const InstalledPluginFileSignatureSchema = z.object({
   size: z.number(),
   mtimeMs: z.number(),
@@ -88,6 +100,7 @@ const InstalledPluginIndexRecordSchema = z.object({
   enabledByDefaultOnPlatforms: StringArraySchema.optional(),
   syntheticAuthRefs: StringArraySchema.optional(),
   startup: InstalledPluginIndexStartupSchema,
+  contributions: InstalledPluginIndexContributionSchema.optional(),
   compat: z.array(z.string()),
 });
 

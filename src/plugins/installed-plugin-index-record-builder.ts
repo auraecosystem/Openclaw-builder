@@ -10,6 +10,7 @@ import { describePluginInstallSource } from "./install-source-info.js";
 import { hashJson, safeFileSignature, safeHashFile } from "./installed-plugin-index-hash.js";
 import { hasOptionalMissingPluginManifestFile } from "./installed-plugin-index-manifest.js";
 import type {
+  InstalledPluginContributionInfo,
   InstalledPluginIndexRecord,
   InstalledPluginInstallRecordInfo,
   InstalledPluginPackageChannelInfo,
@@ -41,6 +42,27 @@ function buildStartupInfo(record: PluginManifestRecord): InstalledPluginStartupI
       ...(record.cliBackends ?? []),
     ]),
     configPaths: sortUnique(record.activation?.onConfigPaths),
+  };
+}
+
+function buildContributionInfo(record: PluginManifestRecord): InstalledPluginContributionInfo {
+  const contracts = Object.fromEntries(
+    Object.entries(record.contracts ?? {}).map(([key, values]) => [key, sortUnique(values)]),
+  );
+  return {
+    channels: sortUnique(record.channels),
+    channelConfigs: sortUnique(Object.keys(record.channelConfigs ?? {})),
+    providers: sortUnique(record.providers),
+    modelCatalogProviders: sortUnique([
+      ...Object.keys(record.modelCatalog?.providers ?? {}),
+      ...Object.keys(record.modelCatalog?.aliases ?? {}),
+      ...(record.modelCatalog?.suppressions ?? []).map((entry) => entry.provider),
+    ]),
+    modelSupportPrefixes: sortUnique(record.modelSupport?.modelPrefixes),
+    modelSupportPatterns: sortUnique(record.modelSupport?.modelPatterns),
+    autoEnableProviderIds: sortUnique(record.autoEnableWhenConfiguredProviders),
+    commandAliases: sortUnique(record.commandAliases?.map((alias) => alias.name)),
+    contracts,
   };
 }
 
@@ -243,6 +265,7 @@ export function buildInstalledPluginIndexRecords(params: {
       origin: record.origin,
       enabled,
       startup: buildStartupInfo(record),
+      contributions: buildContributionInfo(record),
       compat: collectPluginManifestCompatCodes(record),
     };
     if (record.format && record.format !== "openclaw") {
