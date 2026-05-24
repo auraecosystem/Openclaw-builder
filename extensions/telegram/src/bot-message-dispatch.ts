@@ -105,6 +105,7 @@ import {
   type LaneName,
 } from "./lane-delivery.js";
 import { createNativeTelegramToolProgressDraft } from "./native-tool-progress-draft.js";
+import { recordOutboundMessageForPromptContext } from "./outbound-message-context.js";
 import {
   createTelegramReasoningStepState,
   splitTelegramReasoningText,
@@ -228,29 +229,54 @@ type DispatchTelegramMessageParams = {
   textLimit: number;
   telegramCfg: TelegramAccountConfig;
   telegramDeps?: TelegramBotDeps;
-  opts: Pick<TelegramBotOptions, "token">;
+  opts: Pick<TelegramBotOptions, "token" | "mediaMaxMb">;
 };
 
 type TelegramReasoningLevel = "off" | "on" | "stream";
 
 type TelegramTranscriptMirrorPayload = { text?: string; mediaUrls?: string[] };
+type TelegramSessionStore = ReturnType<typeof loadSessionStore>;
+type FreshTelegramSessionStoreLoader = ((agentId: string) => {
+  storePath: string;
+  store: TelegramSessionStore;
+}) & {
+  clear: () => void;
+};
+
+function createFreshTelegramSessionStoreLoader(params: {
+  cfg: OpenClawConfig;
+  telegramDeps: TelegramBotDeps;
+}): FreshTelegramSessionStoreLoader {
+  const storesByPath = new Map<string, TelegramSessionStore>();
+  const load = ((agentId: string) => {
+    const storePath = params.telegramDeps.resolveStorePath(params.cfg.session?.store, { agentId });
+    const cachedStore = storesByPath.get(storePath);
+    if (cachedStore) {
+      return { storePath, store: cachedStore };
+    }
+    const store = (params.telegramDeps.loadSessionStore ?? loadSessionStore)(storePath, {
+      skipCache: true,
+    });
+    storesByPath.set(storePath, store);
+    return { storePath, store };
+  }) as FreshTelegramSessionStoreLoader;
+  load.clear = () => storesByPath.clear();
+  return load;
+}
 
 function resolveTelegramReasoningLevel(params: {
   cfg: OpenClawConfig;
   sessionKey?: string;
   agentId: string;
-  telegramDeps: TelegramBotDeps;
+  loadFreshSessionStore: FreshTelegramSessionStoreLoader;
 }): TelegramReasoningLevel {
-  const { cfg, sessionKey, agentId, telegramDeps } = params;
+  const { cfg, sessionKey, agentId } = params;
   const configDefault = resolveTelegramConfigReasoningDefault(cfg, agentId);
   if (!sessionKey) {
     return configDefault;
   }
   try {
-    const storePath = telegramDeps.resolveStorePath(cfg.session?.store, { agentId });
-    const store = (telegramDeps.loadSessionStore ?? loadSessionStore)(storePath, {
-      skipCache: true,
-    });
+    const { store } = params.loadFreshSessionStore(agentId);
     const entry = resolveSessionStoreEntry({ store, sessionKey }).existing;
     const level = entry?.reasoningLevel;
     if (level === "on" || level === "stream" || level === "off") {
@@ -284,19 +310,14 @@ async function mirrorTelegramAssistantReplyToTranscript(params: {
   cfg: OpenClawConfig;
   route: TelegramMessageContext["route"];
   sessionKey: string;
-  telegramDeps: TelegramBotDeps;
+  loadFreshSessionStore: FreshTelegramSessionStoreLoader;
   payload: TelegramTranscriptMirrorPayload;
 }) {
   const text = resolveTelegramMirroredTranscriptText(params.payload);
   if (!text) {
     return;
   }
-  const storePath = params.telegramDeps.resolveStorePath(params.cfg.session?.store, {
-    agentId: params.route.agentId,
-  });
-  const store = (params.telegramDeps.loadSessionStore ?? loadSessionStore)(storePath, {
-    skipCache: true,
-  });
+  const { storePath, store } = params.loadFreshSessionStore(params.route.agentId);
   const sessionEntry = resolveSessionStoreEntry({
     store,
     sessionKey: params.sessionKey,
@@ -383,6 +404,7 @@ export const dispatchTelegramMessage = async ({
   const dispatchStartedAt = Date.now();
   const telegramDeps =
     injectedTelegramDeps ?? (await import("./bot-deps.js")).defaultTelegramBotDeps;
+  const loadFreshSessionStore = createFreshTelegramSessionStoreLoader({ cfg, telegramDeps });
   const {
     ctxPayload,
     msg,
@@ -498,7 +520,7 @@ export const dispatchTelegramMessage = async ({
     cfg,
     sessionKey: ctxPayload.SessionKey,
     agentId: route.agentId,
-    telegramDeps,
+    loadFreshSessionStore,
   });
   const forceBlockStreamingForReasoning = resolvedReasoningLevel === "on";
   const streamReasoningDraft = resolvedReasoningLevel === "stream";
@@ -634,9 +656,9 @@ export const dispatchTelegramMessage = async ({
     }
     activeAnswerDraftIsToolProgressOnly = true;
   }
-  const renderProgressDraft = async (options?: { flush?: boolean }) => {
+  const renderProgressDraft = async (options?: { flush?: boolean }): Promise<boolean> => {
     if (!answerLane.stream || streamMode !== "progress") {
-      return;
+      return false;
     }
     const streamText = formatChannelProgressDraftText({
       entry: telegramCfg,
@@ -645,7 +667,7 @@ export const dispatchTelegramMessage = async ({
       formatLine: formatProgressAsMarkdownCode,
     });
     if (!streamText || streamText === answerLane.lastPartialText) {
-      return;
+      return false;
     }
     await prepareAnswerLaneForToolProgress();
     answerLane.lastPartialText = streamText;
@@ -655,15 +677,23 @@ export const dispatchTelegramMessage = async ({
     if (options?.flush) {
       await answerLane.stream.flush();
     }
+    return true;
   };
   const progressDraftGate = createChannelProgressDraftGate({
-    onStart: () => renderProgressDraft({ flush: true }),
+    onStart: async () => {
+      await renderProgressDraft({ flush: true });
+    },
   });
+  let finalAnswerDeliveryStarted = false;
+  let finalAnswerDelivered = false;
   const pushStreamToolProgress = async (
     line?: string | ChannelProgressDraftLine,
     options?: { toolName?: string; startImmediately?: boolean },
   ) => {
     if (!answerLane.stream) {
+      return false;
+    }
+    if (answerLane.finalized || finalAnswerDeliveryStarted || finalAnswerDelivered) {
       return false;
     }
     if (options?.toolName !== undefined && !isChannelProgressDraftWorkToolName(options.toolName)) {
@@ -951,12 +981,7 @@ export const dispatchTelegramMessage = async ({
       return undefined;
     }
     try {
-      const storePath = telegramDeps.resolveStorePath(cfg.session?.store, {
-        agentId: route.agentId,
-      });
-      const store = (telegramDeps.loadSessionStore ?? loadSessionStore)(storePath, {
-        skipCache: true,
-      });
+      const { storePath, store } = loadFreshSessionStore(route.agentId);
       const sessionEntry = resolveSessionStoreEntry({
         store,
         sessionKey,
@@ -993,6 +1018,7 @@ export const dispatchTelegramMessage = async ({
     runtime,
     bot,
     mediaLocalRoots,
+    mediaMaxBytes: (opts.mediaMaxMb ?? telegramCfg.mediaMaxMb ?? 100) * 1024 * 1024,
     replyToMode,
     textLimit,
     thread: threadSpec,
@@ -1010,7 +1036,7 @@ export const dispatchTelegramMessage = async ({
             cfg,
             route,
             sessionKey,
-            telegramDeps,
+            loadFreshSessionStore,
             payload,
           });
         }
@@ -1173,7 +1199,7 @@ export const dispatchTelegramMessage = async ({
       }
       return result.delivered;
     };
-    const emitPreviewFinalizedHook = (result: LaneDeliveryResult) => {
+    const emitPreviewFinalizedHook = async (result: LaneDeliveryResult) => {
       if (isDispatchSuperseded() || result.kind !== "preview-finalized") {
         return;
       }
@@ -1187,6 +1213,26 @@ export const dispatchTelegramMessage = async ({
         isGroup: deliveryBaseOptions.mirrorIsGroup,
         groupId: deliveryBaseOptions.mirrorGroupId,
       });
+      try {
+        await (
+          telegramDeps.recordOutboundMessageForPromptContext ??
+          recordOutboundMessageForPromptContext
+        )({
+          cfg,
+          account: { accountId: route.accountId },
+          chatId: deliveryBaseOptions.chatId,
+          message: { message_id: result.delivery.messageId },
+          messageId: result.delivery.messageId,
+          text: result.delivery.promptContextContent ?? result.delivery.content,
+          ...(threadSpec.id !== undefined ? { messageThreadId: threadSpec.id } : {}),
+        });
+      } catch (error) {
+        logVerbose(
+          `telegram: failed to record streamed reply for prompt context: ${formatErrorMessage(
+            error,
+          )}`,
+        );
+      }
       if (deliveryBaseOptions.transcriptMirror && result.delivery.content) {
         void deliveryBaseOptions
           .transcriptMirror({ text: result.delivery.content })
@@ -1240,8 +1286,12 @@ export const dispatchTelegramMessage = async ({
         resetDraftLaneState(answerLane);
       }
       const delivered = await sendPayload(applyTextToPayload(payload, text), { durable: true });
+      if (!delivered) {
+        return { kind: "skipped" };
+      }
       answerLane.finalized = true;
-      return delivered ? { kind: "sent" } : { kind: "skipped" };
+      finalAnswerDelivered = true;
+      return { kind: "sent" };
     };
     const resolveTranscriptBackedFinalText = async (text: string): Promise<string> =>
       await resolveTranscriptBackedChannelFinalText({
@@ -1251,12 +1301,7 @@ export const dispatchTelegramMessage = async ({
 
     if (isDmTopic) {
       try {
-        const storePath = telegramDeps.resolveStorePath(cfg.session?.store, {
-          agentId: route.agentId,
-        });
-        const store = (telegramDeps.loadSessionStore ?? loadSessionStore)(storePath, {
-          skipCache: true,
-        });
+        const { store } = loadFreshSessionStore(route.agentId);
         const sessionKey = ctxPayload.SessionKey;
         if (sessionKey) {
           const entry = resolveSessionStoreEntry({ store, sessionKey }).existing;
@@ -1268,6 +1313,7 @@ export const dispatchTelegramMessage = async ({
         logVerbose(`auto-topic-label: session store error: ${formatErrorMessage(err)}`);
       }
     }
+    loadFreshSessionStore.clear();
 
     if (statusReactionController && !isRoomEvent) {
       void statusReactionController.setThinking();
@@ -1341,9 +1387,6 @@ export const dispatchTelegramMessage = async ({
                     }
                     const effectivePayload = deduped;
 
-                    if (info.kind === "final") {
-                      await enqueueDraftLaneEvent(async () => {});
-                    }
                     if (
                       shouldSuppressLocalTelegramExecApprovalPrompt({
                         cfg,
@@ -1361,6 +1404,20 @@ export const dispatchTelegramMessage = async ({
                     );
                     const segments = split.segments;
                     const reply = resolveSendableOutboundReplyParts(effectivePayload);
+                    if (info.kind === "final" && (reply.text.length > 0 || reply.hasMedia)) {
+                      finalAnswerDeliveryStarted = true;
+                    }
+                    if (info.kind === "final") {
+                      await enqueueDraftLaneEvent(async () => {});
+                    }
+                    if (
+                      info.kind === "tool" &&
+                      (finalAnswerDeliveryStarted || finalAnswerDelivered) &&
+                      !reply.hasMedia &&
+                      !hasExecApprovalPayload(effectivePayload)
+                    ) {
+                      return;
+                    }
 
                     const deliverFinalAnswerText = async (
                       answerPayload: ReplyPayload,
@@ -1372,13 +1429,17 @@ export const dispatchTelegramMessage = async ({
                         return deliverProgressModeFinalAnswer(answerPayload, finalText);
                       }
                       await rotateAnswerLaneAfterToolProgress();
-                      return deliverLaneText({
+                      const result = await deliverLaneText({
                         laneName: "answer",
                         text: finalText,
                         payload: answerPayload,
                         infoKind: "final",
                         buttons,
                       });
+                      if (result.kind !== "skipped") {
+                        finalAnswerDelivered = true;
+                      }
+                      return result;
                     };
 
                     const flushBufferedFinalAnswer = async () => {
@@ -1444,7 +1505,7 @@ export const dispatchTelegramMessage = async ({
                               buttons: telegramButtons,
                             });
                       if (info.kind === "final") {
-                        emitPreviewFinalizedHook(result);
+                        await emitPreviewFinalizedHook(result);
                       }
                       blockDelivered = blockDelivered || result.kind !== "skipped";
                       if (segment.lane === "reasoning") {
@@ -1481,6 +1542,9 @@ export const dispatchTelegramMessage = async ({
                           durable: info.kind === "final",
                         });
                       }
+                      if (info.kind === "final" && delivered) {
+                        finalAnswerDelivered = true;
+                      }
                       if (info.kind === "final") {
                         await flushBufferedFinalAnswer();
                       }
@@ -1504,6 +1568,9 @@ export const dispatchTelegramMessage = async ({
                     const delivered = await sendPayload(effectivePayload, {
                       durable: info.kind === "final",
                     });
+                    if (info.kind === "final" && delivered) {
+                      finalAnswerDelivered = true;
+                    }
                     if (info.kind === "final") {
                       await flushBufferedFinalAnswer();
                     }
@@ -1733,8 +1800,8 @@ export const dispatchTelegramMessage = async ({
       dispatchError = err;
       runtime.error?.(danger(`telegram dispatch failed: ${String(err)}`));
     } finally {
-      await draftLaneEventQueue;
       progressDraftGate.cancel();
+      await draftLaneEventQueue;
       nativeToolProgressDraft?.stop();
       const lanesToCleanup: Array<{ laneName: LaneName; lane: DraftLaneState }> = [
         { laneName: "answer", lane: answerLane },
