@@ -55,6 +55,7 @@ import {
   applyOpenAIResponsesPayloadPolicy,
   resolveOpenAIResponsesPayloadPolicy,
 } from "./openai-responses-payload-policy.js";
+import { resolveReplayableResponsesMessageId } from "./openai-responses-replay.js";
 import {
   findOpenAIStrictToolSchemaDiagnostics,
   normalizeOpenAIStrictToolParameters,
@@ -1086,6 +1087,7 @@ function convertResponsesMessages(
       }
     } else if (msg.role === "assistant") {
       const output: ResponseInput = [];
+      let previousReplayItemWasReasoning = false;
       const isDifferentModel =
         msg.model !== model.id && msg.provider === model.provider && msg.api === model.api;
       for (const block of msg.content) {
@@ -1120,12 +1122,16 @@ function convertResponsesMessages(
               continue;
             }
             output.push(replayableReasoningItem as ResponseInputItem);
+            previousReplayItemWasReasoning = true;
           }
         } else if (block.type === "text") {
           const textSignature = parseTextSignature(block.textSignature);
-          let msgId = shouldReplayResponsesItemIds
-            ? (textSignature?.id ?? `msg_${msgIndex}`)
-            : undefined;
+          let msgId = resolveReplayableResponsesMessageId({
+            replayResponsesItemIds: shouldReplayResponsesItemIds,
+            textSignatureId: textSignature?.id,
+            fallbackId: `msg_${msgIndex}`,
+            previousReplayItemWasReasoning,
+          });
           msgId = normalizeResponsesReplayItemId(msgId, "msg");
           const messageItem: ReplayableResponseOutputMessage = {
             type: "message",
@@ -1142,6 +1148,7 @@ function convertResponsesMessages(
             phase: textSignature?.phase,
           };
           output.push(messageItem as ResponseInputItem);
+          previousReplayItemWasReasoning = false;
         } else if (block.type === "toolCall") {
           const [callId, itemIdRaw] = block.id.split("|");
           const itemId =
@@ -1158,6 +1165,7 @@ function convertResponsesMessages(
                 ? block.arguments
                 : JSON.stringify(block.arguments ?? {}),
           });
+          previousReplayItemWasReasoning = false;
         }
       }
       if (output.length > 0) {
