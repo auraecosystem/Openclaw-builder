@@ -157,7 +157,11 @@ import {
   resolvePluginSdkScopedAliasMap,
   shouldPreferNativeModuleLoad,
 } from "./sdk-alias.js";
-import { listMemoryRolesSelectedForPlugin, resolveMemoryRoleSlots } from "./slot-resolution.js";
+import {
+  listConfiguredMemoryRolePluginIds,
+  listMemoryRolesSelectedForPlugin,
+  resolveMemoryRoleSlots,
+} from "./slot-resolution.js";
 import { hasKind, kindsEqual } from "./slots.js";
 import { encodeStartupTraceSegment } from "./startup-trace-segment.js";
 import type {
@@ -248,6 +252,58 @@ function resolveDreamingSidecarEngineId(params: {
     cfg: params.cfg,
   });
   return dreamingConfig.enabled ? DEFAULT_MEMORY_DREAMING_PLUGIN_ID : null;
+}
+
+function isAllowedMemoryRoleSlotSelection(params: {
+  pluginId: string;
+  normalized: NormalizedPluginsConfig;
+}): boolean {
+  if (!params.normalized.enabled) {
+    return false;
+  }
+  if (params.normalized.deny.includes(params.pluginId)) {
+    return false;
+  }
+  if (params.normalized.entries[params.pluginId]?.enabled === false) {
+    return false;
+  }
+  return true;
+}
+
+function applyMemoryRoleSlotActivation(params: {
+  pluginId: string;
+  normalized: NormalizedPluginsConfig;
+  selectedMemoryRolePluginIds: ReadonlySet<string>;
+  activationState: ReturnType<typeof resolveEffectivePluginActivationState>;
+  enableState: ReturnType<typeof resolveEffectiveEnableState>;
+}): {
+  activationState: ReturnType<typeof resolveEffectivePluginActivationState>;
+  enableState: ReturnType<typeof resolveEffectiveEnableState>;
+} {
+  if (
+    params.enableState.enabled ||
+    !params.selectedMemoryRolePluginIds.has(params.pluginId) ||
+    !isAllowedMemoryRoleSlotSelection({
+      pluginId: params.pluginId,
+      normalized: params.normalized,
+    })
+  ) {
+    return {
+      activationState: params.activationState,
+      enableState: params.enableState,
+    };
+  }
+  const selectedState = {
+    enabled: true,
+    activated: true,
+    explicitlyEnabled: true,
+    source: "explicit" as const,
+    reason: "selected memory slot",
+  };
+  return {
+    activationState: selectedState,
+    enableState: selectedState,
+  };
 }
 
 export class PluginLoadFailureError extends Error {
@@ -1791,7 +1847,10 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
 
     const seenIds = new Map<string, PluginRecord["origin"]>();
     const memoryRoleSlots = resolveMemoryRoleSlots({ cfg });
-    const memorySlots = Object.values(memoryRoleSlots);
+    const selectedMemoryRolePluginIds = new Set(listConfiguredMemoryRolePluginIds({ cfg }));
+    const memorySlots = [
+      ...new Set([...Object.values(memoryRoleSlots), ...selectedMemoryRolePluginIds]),
+    ];
     const memorySlot = memoryRoleSlots.recall;
     let selectedMemoryPluginId: string | null = null;
     let memorySlotMatched = false;
@@ -1814,7 +1873,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
       if (!matchesRequestedScope) {
         continue;
       }
-      const activationState = resolveEffectivePluginActivationState({
+      const rawActivationState = resolveEffectivePluginActivationState({
         id: pluginId,
         origin: candidate.origin,
         config: normalized,
@@ -1841,7 +1900,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
           trustedOfficialInstall: manifestRecord.trustedOfficialInstall,
           enabled: false,
           compat: collectPluginManifestCompatCodes(manifestRecord),
-          activationState,
+          activationState: rawActivationState,
           syntheticAuthRefs: manifestRecord.syntheticAuthRefs,
           channelIds: manifestRecord.channels,
           providerIds: manifestRecord.providers,
@@ -1855,13 +1914,20 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
         continue;
       }
 
-      const enableState = resolveEffectiveEnableState({
+      const rawEnableState = resolveEffectiveEnableState({
         id: pluginId,
         origin: candidate.origin,
         config: normalized,
         rootConfig: cfg,
         enabledByDefault: isPluginEnabledByDefaultForPlatform(manifestRecord),
         activationSource,
+      });
+      const { activationState, enableState } = applyMemoryRoleSlotActivation({
+        pluginId,
+        normalized,
+        selectedMemoryRolePluginIds,
+        activationState: rawActivationState,
+        enableState: rawEnableState,
       });
       const entry = normalized.entries[pluginId];
       const record = createPluginRecord({
@@ -2077,6 +2143,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
           record.memoryRolesSelected = listMemoryRolesSelectedForPlugin({
             cfg,
             pluginId: record.id,
+            includeConfiguredAgentSlots: true,
           });
         }
       }
@@ -2412,6 +2479,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
             record.memoryRolesSelected = listMemoryRolesSelectedForPlugin({
               cfg,
               pluginId: record.id,
+              includeConfiguredAgentSlots: true,
             });
           }
         }
@@ -2671,7 +2739,10 @@ export async function loadOpenClawPluginCliRegistry(
 
   const seenIds = new Map<string, PluginRecord["origin"]>();
   const memoryRoleSlots = resolveMemoryRoleSlots({ cfg });
-  const memorySlots = Object.values(memoryRoleSlots);
+  const selectedMemoryRolePluginIds = new Set(listConfiguredMemoryRolePluginIds({ cfg }));
+  const memorySlots = [
+    ...new Set([...Object.values(memoryRoleSlots), ...selectedMemoryRolePluginIds]),
+  ];
   const memorySlot = memoryRoleSlots.recall;
   let selectedMemoryPluginId: string | null = null;
   const dreamingEngineId = resolveDreamingSidecarEngineId({ cfg, memorySlot });
@@ -2690,7 +2761,7 @@ export async function loadOpenClawPluginCliRegistry(
     ) {
       continue;
     }
-    const activationState = resolveEffectivePluginActivationState({
+    const rawActivationState = resolveEffectivePluginActivationState({
       id: pluginId,
       origin: candidate.origin,
       config: normalized,
@@ -2717,7 +2788,7 @@ export async function loadOpenClawPluginCliRegistry(
         trustedOfficialInstall: manifestRecord.trustedOfficialInstall,
         enabled: false,
         compat: collectPluginManifestCompatCodes(manifestRecord),
-        activationState,
+        activationState: rawActivationState,
         syntheticAuthRefs: manifestRecord.syntheticAuthRefs,
         channelIds: manifestRecord.channels,
         providerIds: manifestRecord.providers,
@@ -2731,13 +2802,20 @@ export async function loadOpenClawPluginCliRegistry(
       continue;
     }
 
-    const enableState = resolveEffectiveEnableState({
+    const rawEnableState = resolveEffectiveEnableState({
       id: pluginId,
       origin: candidate.origin,
       config: normalized,
       rootConfig: cfg,
       enabledByDefault: isPluginEnabledByDefaultForPlatform(manifestRecord),
       activationSource,
+    });
+    const { activationState, enableState } = applyMemoryRoleSlotActivation({
+      pluginId,
+      normalized,
+      selectedMemoryRolePluginIds,
+      activationState: rawActivationState,
+      enableState: rawEnableState,
     });
     const entry = normalized.entries[pluginId];
     const record = createPluginRecord({
@@ -2915,6 +2993,7 @@ export async function loadOpenClawPluginCliRegistry(
         record.memoryRolesSelected = listMemoryRolesSelectedForPlugin({
           cfg,
           pluginId: record.id,
+          includeConfiguredAgentSlots: true,
         });
       }
     }
