@@ -437,33 +437,38 @@ describe("sessions_spawn tool", () => {
     expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
   });
 
-  it("rejects toolsAllow for persistent native subagent sessions", async () => {
+  it("passes toolsAllow through for persistent native subagent sessions", async () => {
     const tool = createSessionsSpawnTool({
       agentSessionKey: "agent:main:main",
     });
 
-    await expect(
-      tool.execute("call-tools-session", {
-        task: "build feature",
+    await tool.execute("call-tools-session", {
+      task: "build feature",
+      mode: "session",
+      thread: true,
+      toolsAllow: ["read"],
+    });
+
+    await tool.execute("call-tools-thread", {
+      task: "build feature",
+      thread: true,
+      toolsAllow: ["exec"],
+    });
+
+    expect(hoisted.spawnSubagentDirectMock).toHaveBeenCalledTimes(2);
+    expect(mockCallArg(hoisted.spawnSubagentDirectMock, 0, 0, "spawnSubagentDirect")).toMatchObject(
+      {
         mode: "session",
         thread: true,
         toolsAllow: ["read"],
-      }),
-    ).rejects.toThrow(
-      'toolsAllow is only supported for one-shot runtime="subagent" runs; persistent thread/session spawns cannot enforce it on follow-up turns.',
+      },
     );
-
-    await expect(
-      tool.execute("call-tools-thread", {
-        task: "build feature",
+    expect(mockCallArg(hoisted.spawnSubagentDirectMock, 1, 0, "spawnSubagentDirect")).toMatchObject(
+      {
         thread: true,
-        toolsAllow: ["read"],
-      }),
-    ).rejects.toThrow(
-      'toolsAllow is only supported for one-shot runtime="subagent" runs; persistent thread/session spawns cannot enforce it on follow-up turns.',
+        toolsAllow: ["exec"],
+      },
     );
-
-    expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
     expect(hoisted.spawnAcpDirectMock).not.toHaveBeenCalled();
   });
 

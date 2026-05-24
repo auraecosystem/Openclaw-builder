@@ -389,11 +389,6 @@ export function createSessionsSpawnTool(
           ? Math.max(0, Math.floor(timeoutSecondsCandidate))
           : undefined;
       const thread = params.thread === true;
-      if (runtime === "subagent" && toolsAllow !== undefined && (thread || mode === "session")) {
-        throw new ToolInputError(
-          'toolsAllow is only supported for one-shot runtime="subagent" runs; persistent thread/session spawns cannot enforce it on follow-up turns.',
-        );
-      }
       const attachments = Array.isArray(params.attachments)
         ? (params.attachments as Array<{
             name: string;
