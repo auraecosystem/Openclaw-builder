@@ -1076,17 +1076,21 @@ function ensureListener() {
       if (isBlockedLivenessState(livenessState)) {
         clearPendingLifecycleError(evt.runId);
         clearPendingLifecycleTimeout(evt.runId);
-        await completeSubagentRun({
+        const blockedParams = {
           runId: evt.runId,
           endedAt,
           outcome: {
-            status: "error",
+            status: "error" as const,
             error: formatBlockedLivenessError(error),
           },
           reason: SUBAGENT_ENDED_REASON_ERROR,
           sendFarewell: true,
           accountId: entry.requesterOrigin?.accountId,
           triggerCleanup: true,
+        };
+        await completeSubagentRun(blockedParams).catch((err) => {
+          log.warn("lifecycle blocked completion failed", { err, runId: evt.runId });
+          scheduleLifecycleCatchRecovery(evt.runId, () => completeSubagentRun(blockedParams));
         });
         return;
       }
@@ -1121,7 +1125,10 @@ function ensureListener() {
         accountId: entry.requesterOrigin?.accountId,
         triggerCleanup: true,
       };
-      await completeSubagentRun(completionParams);
+      await completeSubagentRun(completionParams).catch((err) => {
+        log.warn("lifecycle ok completion failed", { err, runId: evt.runId });
+        scheduleLifecycleCatchRecovery(evt.runId, () => completeSubagentRun(completionParams));
+      });
     })().catch((err) => {
       log.warn("lifecycle event handler failed", { err, runId: evt.runId });
     });
