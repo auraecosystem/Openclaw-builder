@@ -1209,6 +1209,36 @@ describe("compaction-safeguard recent-turn preservation", () => {
     expect(text).toContain("/etc/nginx/nginx.conf");
   });
 
+  it("extracts identifiers from tool_use blocks (Anthropic format)", () => {
+    const text = extractMessageTextForIdentifiers({
+      role: "assistant",
+      content: [
+        {
+          type: "tool_use",
+          id: "toolu_abc123",
+          name: "bash",
+          input: { command: "cat /var/log/app-8f3a2b1c.log" },
+        },
+      ],
+    });
+    expect(text).toContain("/var/log/app-8f3a2b1c.log");
+  });
+
+  it("extracts identifiers from function_call blocks (legacy OpenAI format)", () => {
+    const text = extractMessageTextForIdentifiers({
+      role: "assistant",
+      content: [
+        {
+          type: "function_call",
+          id: "call_xyz789",
+          name: "read_file",
+          arguments: '{"path":"/home/user/config-deadbeef.json"}',
+        },
+      ],
+    });
+    expect(text).toContain("/home/user/config-deadbeef.json");
+  });
+
   it("extracts identifiers across all messages in a transcript", () => {
     const ids = extractIdentifiersFromMessages([
       { role: "user", content: "check hash a1b2c3d4e5f6" },

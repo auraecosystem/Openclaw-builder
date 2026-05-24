@@ -167,7 +167,13 @@ export function extractOpaqueIdentifiers(text: string): string[] {
   ).slice(0, MAX_EXTRACTED_IDENTIFIERS);
 }
 
-const TOOL_CALL_BLOCK_TYPES = new Set(["toolCall", "toolUse", "functionCall"]);
+const TOOL_CALL_BLOCK_TYPES = new Set([
+  "toolCall",
+  "toolUse",
+  "tool_use",
+  "functionCall",
+  "function_call",
+]);
 
 export function extractMessageTextForIdentifiers(message: unknown): string {
   if (!message || typeof message !== "object") {
