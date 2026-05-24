@@ -243,7 +243,19 @@ export async function waitForAgentJob(params: {
     });
 
     const timerDelayMs = Math.max(1, Math.min(Math.floor(timeoutMs), 2_147_483_647));
-    const timer = setTimeout(() => finish(null), timerDelayMs);
+    const timer = setTimeout(() => {
+      // If a lifecycle error arrived during the wait but its grace period hasn't
+      // elapsed yet, surface that snapshot instead of discarding it as a plain
+      // timeout. Without this check the error message is swallowed and the
+      // caller reports a generic timeout even though an error was already queued.
+      const pendingErr = getPendingAgentRunError(runId);
+      if (pendingErr) {
+        recordAgentRunSnapshot(pendingErr.snapshot);
+        finish(pendingErr.snapshot);
+      } else {
+        finish(null);
+      }
+    }, timerDelayMs);
     onAbort = () => finish(null);
     signal?.addEventListener("abort", onAbort, { once: true });
   });
