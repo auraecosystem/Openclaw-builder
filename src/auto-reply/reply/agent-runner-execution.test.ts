@@ -866,7 +866,7 @@ describe("runAgentTurnWithFallback", () => {
     });
   });
 
-  it("keeps fallback auth available for later same-provider fallback models", async () => {
+  it("keeps fallback auth available without clobbering an existing fallback pin", async () => {
     const probe = {
       provider: "anthropic",
       model: "claude-sonnet-4-6",
@@ -924,7 +924,7 @@ describe("runAgentTurnWithFallback", () => {
     });
     expectRecordFields(sessionEntry as unknown as Record<string, unknown>, {
       providerOverride: "openai",
-      modelOverride: "gpt-5.5",
+      modelOverride: "gpt-5.4",
       modelOverrideSource: "auto",
       modelOverrideFallbackOriginProvider: "anthropic",
       modelOverrideFallbackOriginModel: "claude-sonnet-4-6",
@@ -933,7 +933,7 @@ describe("runAgentTurnWithFallback", () => {
     });
   });
 
-  it("keeps the primary origin when an auto pin is cleared before fallback persists", async () => {
+  it("does not re-persist an auto pin cleared before fallback cleanup", async () => {
     const probe = {
       provider: "anthropic",
       model: "claude-sonnet-4-6",
@@ -984,18 +984,16 @@ describe("runAgentTurnWithFallback", () => {
       getActiveSessionEntry: () => activeSessionStore[sessionKey],
     });
 
-    expectRecordFields(activeSessionStore[sessionKey] as unknown as Record<string, unknown>, {
-      providerOverride: "openai",
-      modelOverride: "gpt-5.5",
-      modelOverrideSource: "auto",
-      modelOverrideFallbackOriginProvider: "anthropic",
-      modelOverrideFallbackOriginModel: "claude-sonnet-4-6",
-      authProfileOverride: "openai:fallback",
-      authProfileOverrideSource: "auto",
-    });
+    expect(activeSessionStore[sessionKey].providerOverride).toBeUndefined();
+    expect(activeSessionStore[sessionKey].modelOverride).toBeUndefined();
+    expect(activeSessionStore[sessionKey].modelOverrideSource).toBeUndefined();
+    expect(activeSessionStore[sessionKey].modelOverrideFallbackOriginProvider).toBeUndefined();
+    expect(activeSessionStore[sessionKey].modelOverrideFallbackOriginModel).toBeUndefined();
+    expect(activeSessionStore[sessionKey].authProfileOverride).toBeUndefined();
+    expect(activeSessionStore[sessionKey].authProfileOverrideSource).toBeUndefined();
   });
 
-  it("re-persists cross-provider same-model fallback pins after an in-flight clear", async () => {
+  it("does not re-persist cross-provider same-model fallback pins after an in-flight clear", async () => {
     const probe = {
       provider: "openai",
       model: "gpt-5.5",
@@ -1046,15 +1044,13 @@ describe("runAgentTurnWithFallback", () => {
       getActiveSessionEntry: () => activeSessionStore[sessionKey],
     });
 
-    expectRecordFields(activeSessionStore[sessionKey] as unknown as Record<string, unknown>, {
-      providerOverride: "azure",
-      modelOverride: "gpt-5.5",
-      modelOverrideSource: "auto",
-      modelOverrideFallbackOriginProvider: "openai",
-      modelOverrideFallbackOriginModel: "gpt-5.5",
-      authProfileOverride: "azure:fallback",
-      authProfileOverrideSource: "auto",
-    });
+    expect(activeSessionStore[sessionKey].providerOverride).toBeUndefined();
+    expect(activeSessionStore[sessionKey].modelOverride).toBeUndefined();
+    expect(activeSessionStore[sessionKey].modelOverrideSource).toBeUndefined();
+    expect(activeSessionStore[sessionKey].modelOverrideFallbackOriginProvider).toBeUndefined();
+    expect(activeSessionStore[sessionKey].modelOverrideFallbackOriginModel).toBeUndefined();
+    expect(activeSessionStore[sessionKey].authProfileOverride).toBeUndefined();
+    expect(activeSessionStore[sessionKey].authProfileOverrideSource).toBeUndefined();
   });
 
   it("keeps primary auth on same-provider primary probes", async () => {
@@ -5179,7 +5175,6 @@ describe("runAgentTurnWithFallback", () => {
       shouldEmitToolResult: () => true,
       shouldEmitToolOutput: () => false,
       pendingToolTasks: new Set(),
-      resetSessionAfterCompactionFailure: async () => false,
       resetSessionAfterRoleOrderingConflict: async () => false,
       isHeartbeat: false,
       sessionKey: "main",
@@ -5254,7 +5249,6 @@ describe("runAgentTurnWithFallback", () => {
       shouldEmitToolResult: () => true,
       shouldEmitToolOutput: () => false,
       pendingToolTasks: new Set(),
-      resetSessionAfterCompactionFailure: async () => false,
       resetSessionAfterRoleOrderingConflict: async () => false,
       isHeartbeat: false,
       sessionKey: "main",
@@ -5351,7 +5345,6 @@ describe("runAgentTurnWithFallback", () => {
       shouldEmitToolResult: () => true,
       shouldEmitToolOutput: () => false,
       pendingToolTasks: new Set(),
-      resetSessionAfterCompactionFailure: async () => false,
       resetSessionAfterRoleOrderingConflict: async () => false,
       isHeartbeat: false,
       sessionKey: "main",
@@ -5442,7 +5435,6 @@ describe("runAgentTurnWithFallback", () => {
       shouldEmitToolResult: () => true,
       shouldEmitToolOutput: () => false,
       pendingToolTasks: new Set(),
-      resetSessionAfterCompactionFailure: async () => false,
       resetSessionAfterRoleOrderingConflict: async () => false,
       isHeartbeat: false,
       sessionKey: "main",
@@ -5541,7 +5533,7 @@ describe("runAgentTurnWithFallback", () => {
     expect(sessionEntry.modelOverrideSource).toBeUndefined();
   });
 
-  it("persists fallback selection for recovered auto overrides without modelOverrideSource", async () => {
+  it("keeps recovered auto overrides without modelOverrideSource temporary", async () => {
     state.runWithModelFallbackMock.mockImplementation(
       async (params: { run: (provider: string, model: string) => Promise<unknown> }) => ({
         result: await params.run("openai-codex", "gpt-5.4"),
@@ -5598,9 +5590,9 @@ describe("runAgentTurnWithFallback", () => {
     });
 
     expect(result.kind).toBe("success");
-    expect(sessionEntry.providerOverride).toBe("openai-codex");
-    expect(sessionEntry.modelOverride).toBe("gpt-5.4");
-    expect(sessionEntry.modelOverrideSource).toBe("auto");
+    expect(sessionEntry.providerOverride).toBe("bailian");
+    expect(sessionEntry.modelOverride).toBe("qwen3.6-plus");
+    expect(sessionEntry.modelOverrideSource).toBeUndefined();
     expect(sessionEntry.modelOverrideFallbackOriginProvider).toBe("minimax");
     expect(sessionEntry.modelOverrideFallbackOriginModel).toBe("MiniMax-M2.7");
   });

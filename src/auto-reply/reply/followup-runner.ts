@@ -1196,8 +1196,7 @@ export function createFollowupRunner(params: {
               expected: autoFallbackSelectionToClear,
             });
           const currentFallbackStateEntry =
-            (replySessionKey ? sessionStore?.[replySessionKey] : undefined) ??
-            fallbackStateEntry;
+            (replySessionKey ? sessionStore?.[replySessionKey] : undefined) ?? fallbackStateEntry;
           if (
             didPersistAutoFallbackCleanup &&
             currentFallbackStateEntry &&
