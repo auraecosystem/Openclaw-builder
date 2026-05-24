@@ -389,6 +389,8 @@ export const ar: TranslationMap = {
     expand: "توسيع الشريط الجانبي",
     collapse: "طي الشريط الجانبي",
     resize: "تغيير حجم الشريط الجانبي",
+    recentSessionsExpand: "Expand recent sessions",
+    recentSessionsCollapse: "Collapse recent sessions",
   },
   tabs: {
     agents: "الوكلاء",

@@ -390,6 +390,8 @@ export const pt_BR: TranslationMap = {
     expand: "Expandir barra lateral",
     collapse: "Recolher barra lateral",
     resize: "Redimensionar barra lateral",
+    recentSessionsExpand: "Expand recent sessions",
+    recentSessionsCollapse: "Collapse recent sessions",
   },
   tabs: {
     agents: "Agentes",

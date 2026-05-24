@@ -388,6 +388,8 @@ export const th: TranslationMap = {
     expand: "ขยายแถบด้านข้าง",
     collapse: "ย่อแถบด้านข้าง",
     resize: "ปรับขนาดแถบด้านข้าง",
+    recentSessionsExpand: "Expand recent sessions",
+    recentSessionsCollapse: "Collapse recent sessions",
   },
   tabs: {
     agents: "เอเจนต์",

@@ -392,6 +392,8 @@ export const it: TranslationMap = {
     expand: "Espandi barra laterale",
     collapse: "Comprimi barra laterale",
     resize: "Ridimensiona barra laterale",
+    recentSessionsExpand: "Expand recent sessions",
+    recentSessionsCollapse: "Collapse recent sessions",
   },
   tabs: {
     agents: "Agenti",

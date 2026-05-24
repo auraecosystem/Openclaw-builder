@@ -390,6 +390,8 @@ export const id: TranslationMap = {
     expand: "Perluas bilah samping",
     collapse: "Ciutkan bilah samping",
     resize: "Ubah ukuran bilah samping",
+    recentSessionsExpand: "Expand recent sessions",
+    recentSessionsCollapse: "Collapse recent sessions",
   },
   tabs: {
     agents: "Agen",

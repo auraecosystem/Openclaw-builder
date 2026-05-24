@@ -388,6 +388,8 @@ export const zh_CN: TranslationMap = {
     expand: "展开侧边栏",
     collapse: "折叠侧边栏",
     resize: "调整侧边栏大小",
+    recentSessionsExpand: "Expand recent sessions",
+    recentSessionsCollapse: "Collapse recent sessions",
   },
   tabs: {
     agents: "代理",

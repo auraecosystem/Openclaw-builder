@@ -390,6 +390,8 @@ export const vi: TranslationMap = {
     expand: "Mở rộng thanh bên",
     collapse: "Thu gọn thanh bên",
     resize: "Thay đổi kích thước thanh bên",
+    recentSessionsExpand: "Expand recent sessions",
+    recentSessionsCollapse: "Collapse recent sessions",
   },
   tabs: {
     agents: "Agent",

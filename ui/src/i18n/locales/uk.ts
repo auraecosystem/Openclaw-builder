@@ -391,6 +391,8 @@ export const uk: TranslationMap = {
     expand: "Розгорнути бічну панель",
     collapse: "Згорнути бічну панель",
     resize: "Змінити розмір бічної панелі",
+    recentSessionsExpand: "Expand recent sessions",
+    recentSessionsCollapse: "Collapse recent sessions",
   },
   tabs: {
     agents: "Агенти",
