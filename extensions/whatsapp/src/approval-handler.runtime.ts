@@ -65,13 +65,17 @@ function replaceApprovalIdPlaceholder(text: string | undefined, approvalId: stri
   return (text ?? "").replace(/\/approve\s+<id>/g, `/approve ${approvalId}`);
 }
 
+function listDecisionActions(view: PendingApprovalView): ExecApprovalReplyDecision[] {
+  return view.actions.flatMap((action) => (action.kind === "decision" ? [action.decision] : []));
+}
+
 function buildPendingPayload(params: {
   request: ApprovalRequest;
   approvalKind: "exec" | "plugin";
   nowMs: number;
   view: PendingApprovalView;
 }): WhatsAppPendingDelivery {
-  const allowedDecisions = params.view.actions.map((action) => action.decision);
+  const allowedDecisions = listDecisionActions(params.view);
   const payload =
     params.approvalKind === "plugin"
       ? buildPluginApprovalPendingReplyPayload({

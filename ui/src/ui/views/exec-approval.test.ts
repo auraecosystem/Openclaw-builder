@@ -3,10 +3,7 @@
 import { nothing, render } from "lit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "../../i18n/index.ts";
-import {
-  getRenderedModalDialog,
-  installDialogPolyfill,
-} from "../../test-helpers/modal-dialog.ts";
+import { getRenderedModalDialog, installDialogPolyfill } from "../../test-helpers/modal-dialog.ts";
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import type { AppViewState } from "../app-view-state.ts";
 import type { ExecApprovalRequest } from "../controllers/exec-approval.ts";
@@ -138,6 +135,53 @@ describe("approval and confirmation modals", () => {
     dispatchEscape(dialog);
 
     expect(handleExecApprovalDecision).toHaveBeenCalledTimes(1);
+    expect(handleExecApprovalDecision).toHaveBeenCalledWith("deny");
+  });
+
+  it("renders plugin command actions and only available decision buttons", async () => {
+    const handleExecApprovalDecision = vi.fn(async () => undefined);
+    const request: ExecApprovalRequest = {
+      id: "plugin-approval-1",
+      kind: "plugin",
+      request: {
+        command: "World proof required",
+        agentId: "main",
+        sessionKey: "main",
+      },
+      pluginTitle: "World proof required",
+      pluginDescription: "Verify with World before exec runs.",
+      pluginSeverity: "warning",
+      pluginId: "agentkit",
+      allowedDecisions: ["deny"],
+      actions: [
+        {
+          kind: "command",
+          label: "Verify once",
+          style: "primary",
+          command: "/agentkit approve plugin-approval-1 allow-once",
+        },
+      ],
+      createdAtMs: Date.now(),
+      expiresAtMs: Date.now() + 60_000,
+    };
+
+    render(
+      renderExecApprovalPrompt(
+        createExecState({ execApprovalQueue: [request], handleExecApprovalDecision }),
+      ),
+      container,
+    );
+    await getRenderedDialog();
+
+    expect(container.querySelector(".exec-approval-command-action")?.textContent).toContain(
+      "/agentkit approve plugin-approval-1 allow-once",
+    );
+    const buttons = Array.from(container.querySelectorAll(".exec-approval-actions button")).map(
+      (button) => button.textContent?.trim(),
+    );
+    expect(buttons).toEqual(["Deny"]);
+
+    container.querySelector<HTMLButtonElement>(".exec-approval-actions button")?.click();
     expect(handleExecApprovalDecision).toHaveBeenCalledWith("deny");
   });
 
