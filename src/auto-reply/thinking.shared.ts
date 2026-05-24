@@ -27,8 +27,10 @@ export type ThinkingCatalogEntry = {
   id: string;
   reasoning?: boolean;
   compat?: {
+    thinkingFormat?: string;
     supportedReasoningEfforts?: readonly string[] | null;
   } | null;
+  params?: Record<string, unknown> | null;
 };
 
 export const BASE_THINKING_LEVELS: ThinkLevel[] = ["off", "minimal", "low", "medium", "high"];

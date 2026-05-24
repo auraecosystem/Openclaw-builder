@@ -823,6 +823,79 @@ describe("model-selection", () => {
       expect(model?.id).toBe("google/gemini-3.1-pro-preview");
       expect(model?.name).toBe("Gemini 3 Pro");
     });
+
+    it("carries configured model params into catalog entries for provider policy", () => {
+      const cfg = {
+        agents: {
+          defaults: {
+            models: {
+              "vllm/Qwen/Qwen3-8B": {
+                params: {
+                  temperature: 0.2,
+                  qwenThinkingFormat: "top-level",
+                },
+              },
+            },
+          },
+        },
+        models: {
+          providers: {
+            vllm: {
+              models: [
+                {
+                  id: "Qwen/Qwen3-8B",
+                  name: "Qwen 3 8B",
+                  reasoning: true,
+                  params: {
+                    qwenThinkingFormat: "chat-template",
+                    topP: 0.95,
+                  },
+                  compat: {
+                    thinkingFormat: "qwen-chat-template",
+                  },
+                },
+              ],
+            },
+          },
+        },
+      } as unknown as OpenClawConfig;
+
+      const model = buildConfiguredModelCatalog({ cfg }).find(
+        (entry) => entry.provider === "vllm" && entry.id === "Qwen/Qwen3-8B",
+      );
+      expect(model?.params).toEqual({
+        qwenThinkingFormat: "top-level",
+        topP: 0.95,
+        temperature: 0.2,
+      });
+      expect(model?.compat).toEqual({ thinkingFormat: "qwen-chat-template" });
+      expect(model?.reasoning).toBe(true);
+    });
+
+    it("synthesizes per-model params from allowlist-only entries for provider policy", () => {
+      const cfg = {
+        agents: {
+          defaults: {
+            models: {
+              "vllm/Qwen/Qwen3-8B": {
+                params: {
+                  qwenThinkingFormat: "chat-template",
+                },
+              },
+            },
+          },
+        },
+      } as unknown as OpenClawConfig;
+
+      expect(buildConfiguredModelCatalog({ cfg })).toEqual([
+        {
+          provider: "vllm",
+          id: "Qwen/Qwen3-8B",
+          name: "Qwen/Qwen3-8B",
+          params: { qwenThinkingFormat: "chat-template" },
+        },
+      ]);
+    });
   });
 
   describe("buildModelAliasIndex", () => {
@@ -914,6 +987,71 @@ describe("model-selection", () => {
           alias: "GPT Test Z Alias",
           contextWindow: 64_000,
           compat: { supportedReasoningEfforts: ["low", "medium", "high", "xhigh"] },
+        },
+      ]);
+    });
+
+    it("overlays configured provider metadata after manifest model normalization", () => {
+      const cfg: OpenClawConfig = {
+        models: {
+          providers: {
+            nvidia: {
+              models: [
+                {
+                  id: "llama-fast",
+                  name: "Configured Llama Fast",
+                  contextWindow: 128_000,
+                  params: { qwenThinkingFormat: "top-level" },
+                },
+              ],
+            },
+          },
+        },
+      } as unknown as OpenClawConfig;
+
+      const result = buildAllowedModelSet({
+        cfg,
+        catalog: [{ provider: "nvidia", id: "nvidia/llama-fast", name: "Runtime Llama Fast" }],
+        defaultProvider: "anthropic",
+      });
+
+      expect(result.allowedCatalog).toEqual([
+        {
+          provider: "nvidia",
+          id: "nvidia/llama-fast",
+          name: "Configured Llama Fast",
+          contextWindow: 128_000,
+          params: { qwenThinkingFormat: "top-level" },
+        },
+      ]);
+    });
+
+    it("preserves discovered catalog names when applying allowlist-only params", () => {
+      const cfg: OpenClawConfig = {
+        agents: {
+          defaults: {
+            model: { primary: "vllm/Qwen/Qwen3-8B" },
+            models: {
+              "vllm/Qwen/Qwen3-8B": {
+                params: { qwenThinkingFormat: "chat-template" },
+              },
+            },
+          },
+        },
+      } as unknown as OpenClawConfig;
+
+      const result = buildAllowedModelSet({
+        cfg,
+        catalog: [{ provider: "vllm", id: "Qwen/Qwen3-8B", name: "Qwen 3 8B" }],
+        defaultProvider: "anthropic",
+      });
+
+      expect(result.allowedCatalog).toEqual([
+        {
+          provider: "vllm",
+          id: "Qwen/Qwen3-8B",
+          name: "Qwen 3 8B",
+          params: { qwenThinkingFormat: "chat-template" },
         },
       ]);
     });

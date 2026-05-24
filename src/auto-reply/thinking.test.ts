@@ -255,6 +255,38 @@ describe("listThinkingLevels", () => {
     ).toBe("max");
   });
 
+  it("passes catalog params and compat into provider thinking profiles", () => {
+    providerRuntimeMocks.resolveProviderThinkingProfile.mockImplementation(({ context }) =>
+      context.reasoning === true &&
+      context.params?.qwenThinkingFormat === "chat-template" &&
+      context.compat?.thinkingFormat === "qwen-chat-template"
+        ? {
+            levels: [{ id: "off" }, { id: "low", label: "on" }],
+            defaultLevel: "off",
+          }
+        : undefined,
+    );
+    const catalog = [
+      {
+        provider: "vllm",
+        id: "Qwen/Qwen3-8B",
+        reasoning: true,
+        params: { qwenThinkingFormat: "chat-template" },
+        compat: { thinkingFormat: "qwen-chat-template" },
+      },
+    ];
+
+    expect(listThinkingLevelLabels("vllm", "Qwen/Qwen3-8B", catalog)).toEqual(["off", "on"]);
+    expect(
+      resolveSupportedThinkingLevel({
+        provider: "vllm",
+        model: "Qwen/Qwen3-8B",
+        level: "high",
+        catalog,
+      }),
+    ).toBe("low");
+  });
+
   it("uses catalog compat reasoning efforts to expose xhigh for configured custom models", () => {
     const catalog = [
       {

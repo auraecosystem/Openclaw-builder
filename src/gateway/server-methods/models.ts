@@ -15,11 +15,24 @@ import {
 import type { GatewayRequestHandlers } from "./types.js";
 
 type ModelsListView = ModelCatalogBrowseView;
+type ModelListEntry = Awaited<ReturnType<typeof loadModelCatalogForBrowse>>[number];
 
 let loggedSlowModelsListCatalog = false;
 
 function resolveModelsListView(params: Record<string, unknown>): ModelsListView {
   return typeof params.view === "string" ? (params.view as ModelsListView) : "default";
+}
+
+function redactModelListEntry(entry: ModelListEntry): ModelListEntry {
+  if (!("params" in entry)) {
+    return entry;
+  }
+  const { params: _params, ...publicEntry } = entry;
+  return publicEntry;
+}
+
+function redactModelList(entries: ModelListEntry[]): ModelListEntry[] {
+  return entries.map(redactModelListEntry);
 }
 
 export const modelsHandlers: GatewayRequestHandlers = {
@@ -56,7 +69,7 @@ export const modelsHandlers: GatewayRequestHandlers = {
         },
       });
       if (view === "all") {
-        respond(true, { models: catalog }, undefined);
+        respond(true, { models: redactModelList(catalog) }, undefined);
         return;
       }
       const models = await resolveVisibleModelCatalog({
@@ -67,7 +80,7 @@ export const modelsHandlers: GatewayRequestHandlers = {
         view,
         runtimeAuthDiscovery: false,
       });
-      respond(true, { models }, undefined);
+      respond(true, { models: redactModelList(models) }, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
