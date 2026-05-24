@@ -808,6 +808,7 @@ export async function initSessionState(params: {
     sessionEntry.outputTokens = undefined;
     sessionEntry.estimatedCostUsd = undefined;
     sessionEntry.contextTokens = undefined;
+    sessionEntry.contextBudgetStatus = undefined;
     // Skills snapshots are prompt/runtime caches. Do not preserve a stale
     // snapshot through /new; the next turn must rebuild the visible skill list.
     sessionEntry.skillsSnapshot = undefined;
@@ -850,6 +851,12 @@ export async function initSessionState(params: {
       sessionFile: previousSessionEntry.sessionFile,
       agentId,
       reason: "reset",
+      onArchiveError: (error, sourcePath) => {
+        log.warn(
+          `failed to archive previous session transcript ${sourcePath} for session ${previousSessionEntry.sessionId}`,
+          { error: String(error) },
+        );
+      },
     });
     previousSessionTranscript = resolveStableSessionEndTranscript({
       sessionId: previousSessionEntry.sessionId,

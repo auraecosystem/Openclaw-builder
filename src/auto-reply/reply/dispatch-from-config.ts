@@ -63,6 +63,7 @@ import {
   logSessionStateChange,
   markDiagnosticSessionProgress,
 } from "../../logging/diagnostic.js";
+import { matchPluginCommand } from "../../plugins/commands.js";
 import {
   buildPluginBindingDeclinedText,
   buildPluginBindingErrorText,
@@ -73,6 +74,7 @@ import {
   toPluginConversationBinding,
 } from "../../plugins/conversation-binding.js";
 import { getGlobalHookRunner, getGlobalPluginRegistry } from "../../plugins/hook-runner-global.js";
+import type { PluginHookReplyDispatchEvent } from "../../plugins/hook-types.js";
 import { isAcpSessionKey } from "../../routing/session-key.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
@@ -94,8 +96,14 @@ import {
   resolveCommandTurnContext,
   resolveCommandTurnTargetSessionKey,
 } from "../command-turn-context.js";
+import {
+  findCommandByNativeName,
+  normalizeCommandBody,
+  resolveTextCommand,
+} from "../commands-registry.js";
 import type { BlockReplyContext } from "../get-reply-options.types.js";
 import {
+  copyReplyPayloadMetadata,
   getReplyPayloadMetadata,
   isReplyPayloadStatusNotice,
   markReplyPayloadAsTtsSupplement,
@@ -228,7 +236,10 @@ async function maybeApplyTtsToReplyPayload(
     return params.payload;
   }
   const { maybeApplyTtsToPayload } = await loadTtsRuntime();
-  return maybeApplyTtsToPayload(params);
+  const ttsPayload = await maybeApplyTtsToPayload(params);
+  return ttsPayload === params.payload
+    ? ttsPayload
+    : copyReplyPayloadMetadata(params.payload, ttsPayload);
 }
 
 const AUDIO_PLACEHOLDER_RE = /^<media:audio>(\s*\([^)]*\))?$/i;
@@ -349,19 +360,24 @@ const resolveBoundAcpDispatchSessionKey = (params: {
 const createShouldEmitVerboseProgress = (params: {
   sessionKey?: string;
   storePath?: string;
+  initialExplicitLevel?: string;
   fallbackLevel: string;
 }) => {
-  const resolveLevel = () => {
+  const resolveCurrentExplicitLevel = () => {
     if (params.sessionKey && params.storePath) {
       try {
         const entry = readSessionEntry(params.storePath, params.sessionKey);
-        const currentLevel = normalizeVerboseLevel(entry?.verboseLevel ?? "");
-        if (currentLevel) {
-          return currentLevel;
-        }
+        return normalizeVerboseLevel(entry?.verboseLevel ?? "");
       } catch {
         // Ignore transient store read failures and fall back to the current dispatch snapshot.
       }
+    }
+    return normalizeVerboseLevel(params.initialExplicitLevel ?? "");
+  };
+  const resolveLevel = () => {
+    const explicitLevel = resolveCurrentExplicitLevel();
+    if (explicitLevel) {
+      return explicitLevel;
     }
     return normalizeVerboseLevel(params.fallbackLevel) ?? "off";
   };
@@ -377,6 +393,18 @@ type HarnessDefaultCandidate = {
   provider: string;
   model?: string;
 };
+
+function createReplyDispatchEvent(
+  params: Omit<PluginHookReplyDispatchEvent, "shouldSendToolSummaries"> & {
+    shouldSendToolSummaries: () => boolean;
+  },
+): PluginHookReplyDispatchEvent {
+  const { shouldSendToolSummaries, ...event } = params;
+  return Object.defineProperty(event, "shouldSendToolSummaries", {
+    enumerable: true,
+    get: shouldSendToolSummaries,
+  }) as PluginHookReplyDispatchEvent;
+}
 
 function resolveHarnessDefaultChannel(params: {
   ctx: FinalizedMsgContext;
@@ -408,10 +436,6 @@ function resolveHarnessDefaultParentSessionKey(params: {
 function resolveTurnModelOverride(
   replyOptions: DispatchFromConfigParams["replyOptions"],
 ): string | undefined {
-  const modelOverride = normalizeOptionalString(replyOptions?.modelOverride);
-  if (modelOverride) {
-    return modelOverride;
-  }
   if (replyOptions?.isHeartbeat !== true) {
     return undefined;
   }
@@ -571,6 +595,42 @@ const resolveHarnessSourceVisibleRepliesDefault = (params: {
     return undefined;
   }
 };
+
+function shouldBypassPluginOwnedBindingForCommand(ctx: FinalizedMsgContext): boolean {
+  const commandTurn = resolveCommandTurnContext(ctx);
+  if (!commandTurn.authorized) {
+    return false;
+  }
+  if (isNativeCommandTurn(commandTurn)) {
+    return true;
+  }
+  if (commandTurn.kind !== "text-slash") {
+    return false;
+  }
+  const commandBody = normalizeCommandBody(commandTurn.body ?? "", {
+    botUsername: ctx.BotUsername,
+  });
+  if (!commandBody.startsWith("/")) {
+    return false;
+  }
+  if (resolveTextCommand(commandBody)) {
+    return true;
+  }
+  const provider = normalizeOptionalString(ctx.Provider ?? ctx.Surface);
+  if (
+    commandTurn.commandName &&
+    findCommandByNativeName(commandTurn.commandName, provider, {
+      includeBundledChannelFallback: true,
+    })
+  ) {
+    return true;
+  }
+  return Boolean(
+    matchPluginCommand(commandBody, {
+      channel: normalizeOptionalString(ctx.Surface ?? ctx.Provider),
+    }),
+  );
+}
 
 async function clearPendingFinalDeliveryAfterSuccess(params: {
   storePath?: string;
@@ -833,6 +893,7 @@ export async function dispatchReplyFromConfig(
   const verboseProgress = createShouldEmitVerboseProgress({
     sessionKey: acpDispatchSessionKey,
     storePath: sessionStoreEntry.storePath,
+    initialExplicitLevel: sessionStoreEntry.entry?.verboseLevel,
     fallbackLevel:
       normalizeVerboseLevel(
         sessionStoreEntry.entry?.verboseLevel ??
@@ -1268,7 +1329,11 @@ export async function dispatchReplyFromConfig(
 
   if (pluginOwnedBinding) {
     touchConversationBindingRecord(pluginOwnedBinding.bindingId);
-    if (suppressDelivery) {
+    if (shouldBypassPluginOwnedBindingForCommand(ctx)) {
+      logVerbose(
+        `plugin-bound inbound command escaped plugin binding (plugin=${pluginOwnedBinding.pluginId} session=${sessionKey ?? "unknown"}); falling through to command processing`,
+      );
+    } else if (suppressDelivery) {
       // Plugin-bound inbound handlers typically emit outbound replies we
       // cannot rewind. When automatic delivery is suppressed, skip the plugin
       // claim and fall through to normal suppressed agent processing.
@@ -1432,11 +1497,9 @@ export async function dispatchReplyFromConfig(
     // so /stop can abort pre-run and in-run stalls through the same session lane.
     ensureDispatchReplyOperation();
 
-    const isSlackNonDirectSurface =
-      (ctx.Surface === "slack" || ctx.Provider === "slack") && ctx.ChatType !== "direct";
-    const shouldSendVerboseProgressMessages =
-      !isSlackNonDirectSurface && (ctx.ChatType !== "group" || ctx.IsForum === true);
-    const shouldSendToolSummaries = shouldSendVerboseProgressMessages;
+    const shouldSuppressDefaultToolProgressMessages = () => !shouldEmitVerboseProgress();
+    const shouldSendVerboseProgressMessages = () => !shouldSuppressDefaultToolProgressMessages();
+    const shouldSendToolSummaries = () => shouldSendVerboseProgressMessages();
     const shouldSendToolStartStatuses = false;
     const shouldDeliverVerboseProgressDespiteSourceSuppression = () =>
       suppressAutomaticSourceDelivery &&
@@ -1444,7 +1507,7 @@ export async function dispatchReplyFromConfig(
       ctx.InboundEventKind !== "room_event" &&
       !sendPolicyDenied &&
       shouldEmitVerboseProgress() &&
-      shouldSendVerboseProgressMessages;
+      shouldSendVerboseProgressMessages();
     let finalReplyDeliveryStarted = false;
     const hasExecApprovalPayload = (payload: ReplyPayload) => {
       const execApproval =
@@ -1579,7 +1642,7 @@ export async function dispatchReplyFromConfig(
       const replyDispatchResult = await traceReplyPhase("reply.reply_dispatch_hooks", () =>
         runWithReplyOperationAbort(dispatchAbortOperation, () =>
           hookRunner.runReplyDispatch(
-            {
+            createReplyDispatchEvent({
               ctx,
               runId: params.replyOptions?.runId,
               sessionKey: acpDispatchSessionKey,
@@ -1595,7 +1658,7 @@ export async function dispatchReplyFromConfig(
               originatingTo: routeReplyTo,
               shouldSendToolSummaries,
               sendPolicy,
-            },
+            }),
             {
               cfg,
               dispatcher: dispatchHookDispatcher,
@@ -1678,7 +1741,7 @@ export async function dispatchReplyFromConfig(
     }): Promise<void> => {
       if (
         shouldSuppressProgressDelivery() ||
-        !shouldSendVerboseProgressMessages ||
+        !shouldSendVerboseProgressMessages() ||
         didSendPlanStatusNotice
       ) {
         return;
@@ -1754,7 +1817,7 @@ export async function dispatchReplyFromConfig(
       ) {
         return null;
       }
-      if (shouldSendToolSummaries) {
+      if (shouldSendToolSummaries()) {
         return payload;
       }
       const execApproval =
@@ -1780,22 +1843,42 @@ export async function dispatchReplyFromConfig(
       originatingChannel: routeReplyChannel,
       systemEvent: shouldRouteToOriginating,
     });
-    const suppressDefaultToolProgressMessages =
-      params.replyOptions?.suppressDefaultToolProgressMessages === true;
-    const shouldSuppressDefaultToolProgressMessages = () =>
-      suppressDefaultToolProgressMessages && !shouldEmitVerboseProgress();
     const shouldSuppressProgressDelivery = () =>
       sendPolicyDenied ||
       (suppressDelivery && !shouldDeliverVerboseProgressDespiteSourceSuppression());
-    const hasVisibleRegularVerboseToolProgress =
+    const hasVisibleRegularVerboseToolProgress = () =>
       shouldEmitVerboseProgress() &&
       !shouldEmitFullVerboseProgress() &&
-      shouldSendVerboseProgressMessages &&
+      shouldSendVerboseProgressMessages() &&
       ctx.InboundEventKind !== "room_event" &&
       !shouldSuppressProgressDelivery();
+    let observedVisibleToolErrorProgress = false;
+    const markVisibleToolErrorProgress = () => {
+      if (hasVisibleRegularVerboseToolProgress()) {
+        observedVisibleToolErrorProgress = true;
+      }
+    };
+    const hasFailedProgressStatus = (payload: {
+      phase?: string;
+      status?: string;
+      exitCode?: number | null;
+    }) =>
+      payload.phase === "error" ||
+      payload.status === "failed" ||
+      payload.status === "error" ||
+      (typeof payload.exitCode === "number" && payload.exitCode !== 0);
+    const shouldSuppressToolErrorWarnings = () => {
+      if (params.replyOptions?.suppressToolErrorWarnings !== undefined) {
+        return params.replyOptions.suppressToolErrorWarnings;
+      }
+      if (!shouldEmitVerboseProgress()) {
+        return false;
+      }
+      return observedVisibleToolErrorProgress ? true : undefined;
+    };
     const suppressToolErrorWarnings =
       params.replyOptions?.suppressToolErrorWarnings ??
-      (hasVisibleRegularVerboseToolProgress ? true : undefined);
+      (observedVisibleToolErrorProgress ? true : undefined);
     const onToolResultFromReplyOptions = params.replyOptions?.onToolResult;
     const onPlanUpdateFromReplyOptions = params.replyOptions?.onPlanUpdate;
     const onApprovalEventFromReplyOptions = params.replyOptions?.onApprovalEvent;
@@ -1804,13 +1887,24 @@ export async function dispatchReplyFromConfig(
       params.replyOptions?.allowProgressCallbacksWhenSourceDeliverySuppressed === true;
     const shouldForwardProgressCallback = (options?: {
       forwardWhenSourceDeliverySuppressed?: boolean;
-    }) =>
-      !suppressAutomaticSourceDelivery ||
-      (allowSuppressedSourceProgressCallbacks &&
-        options?.forwardWhenSourceDeliverySuppressed === true);
+      requiresToolSummaryVisibility?: boolean;
+    }) => {
+      if (options?.requiresToolSummaryVisibility === true && !shouldSendToolSummaries()) {
+        return false;
+      }
+      return (
+        !suppressAutomaticSourceDelivery ||
+        (allowSuppressedSourceProgressCallbacks &&
+          options?.forwardWhenSourceDeliverySuppressed === true)
+      );
+    };
     const wrapProgressCallback = <Args extends unknown[]>(
       callback: ((...args: Args) => Promise<void> | void) | undefined,
-      options?: { forwardWhenSourceDeliverySuppressed?: boolean },
+      options?: {
+        forwardWhenSourceDeliverySuppressed?: boolean;
+        requiresToolSummaryVisibility?: boolean;
+        onForward?: (...args: Args) => void;
+      },
     ): ((...args: Args) => Promise<void>) | undefined => {
       if (!callback && (!suppressAutomaticSourceDelivery || !canTrackSession)) {
         return undefined;
@@ -1821,6 +1915,7 @@ export async function dispatchReplyFromConfig(
         }
         markProgress();
         if (shouldForwardProgressCallback(options)) {
+          options?.onForward?.(...args);
           await callback?.(...args);
         }
       };
@@ -1842,6 +1937,7 @@ export async function dispatchReplyFromConfig(
             ...getReplyOptions(),
             sourceReplyDeliveryMode,
             suppressToolErrorWarnings,
+            shouldSuppressToolErrorWarnings,
             typingPolicy: typing.typingPolicy,
             suppressTyping: typing.suppressTyping,
             onPartialReply: wrapProgressCallback(params.replyOptions?.onPartialReply),
@@ -1853,18 +1949,33 @@ export async function dispatchReplyFromConfig(
             onBlockReplyQueued: wrapProgressCallback(params.replyOptions?.onBlockReplyQueued),
             onToolStart: wrapProgressCallback(params.replyOptions?.onToolStart, {
               forwardWhenSourceDeliverySuppressed: true,
+              requiresToolSummaryVisibility: true,
             }),
             onItemEvent: wrapProgressCallback(params.replyOptions?.onItemEvent, {
               forwardWhenSourceDeliverySuppressed: true,
+              requiresToolSummaryVisibility: true,
+              onForward: (payload) => {
+                if (hasFailedProgressStatus(payload)) {
+                  markVisibleToolErrorProgress();
+                }
+              },
             }),
             onCommandOutput: wrapProgressCallback(params.replyOptions?.onCommandOutput, {
               forwardWhenSourceDeliverySuppressed: true,
+              requiresToolSummaryVisibility: true,
+              onForward: (payload) => {
+                if (hasFailedProgressStatus(payload)) {
+                  markVisibleToolErrorProgress();
+                }
+              },
             }),
             onCompactionStart: wrapProgressCallback(params.replyOptions?.onCompactionStart, {
               forwardWhenSourceDeliverySuppressed: true,
+              requiresToolSummaryVisibility: true,
             }),
             onCompactionEnd: wrapProgressCallback(params.replyOptions?.onCompactionEnd, {
               forwardWhenSourceDeliverySuppressed: true,
+              requiresToolSummaryVisibility: true,
             }),
             onToolResult: (payload: ReplyPayload) => {
               markProgress();
@@ -1873,7 +1984,7 @@ export async function dispatchReplyFromConfig(
                   return;
                 }
                 markInboundDedupeReplayUnsafe();
-                if (!suppressAutomaticSourceDelivery) {
+                if (!suppressAutomaticSourceDelivery && shouldSendToolSummaries()) {
                   await onToolResultFromReplyOptions?.(payload);
                 }
                 if (isDispatchOperationAborted()) {
@@ -1882,8 +1993,12 @@ export async function dispatchReplyFromConfig(
                 if (shouldSuppressProgressDelivery()) {
                   return;
                 }
+                const visibleToolPayload = resolveToolDeliveryPayload(payload);
+                if (!visibleToolPayload) {
+                  return;
+                }
                 const ttsPayload = await maybeApplyTtsToReplyPayload({
-                  payload,
+                  payload: visibleToolPayload,
                   cfg,
                   channel: deliveryChannel,
                   kind: "tool",
@@ -1912,6 +2027,9 @@ export async function dispatchReplyFromConfig(
                     return;
                   }
                 }
+                if (deliveryPayload.isError === true) {
+                  markVisibleToolErrorProgress();
+                }
                 if (shouldRouteToOriginating) {
                   await sendPayloadAsync(deliveryPayload, undefined, false);
                 } else {
@@ -1927,7 +2045,12 @@ export async function dispatchReplyFromConfig(
               }
               markProgress();
               markInboundDedupeReplayUnsafe();
-              if (shouldForwardProgressCallback({ forwardWhenSourceDeliverySuppressed: true })) {
+              if (
+                shouldForwardProgressCallback({
+                  forwardWhenSourceDeliverySuppressed: true,
+                  requiresToolSummaryVisibility: true,
+                })
+              ) {
                 await onPlanUpdateFromReplyOptions?.(payload);
               }
               if (isDispatchOperationAborted()) {
@@ -1944,7 +2067,12 @@ export async function dispatchReplyFromConfig(
               }
               markProgress();
               markInboundDedupeReplayUnsafe();
-              if (shouldForwardProgressCallback({ forwardWhenSourceDeliverySuppressed: true })) {
+              if (
+                shouldForwardProgressCallback({
+                  forwardWhenSourceDeliverySuppressed: true,
+                  requiresToolSummaryVisibility: true,
+                })
+              ) {
                 await onApprovalEventFromReplyOptions?.(payload);
               }
               if (isDispatchOperationAborted()) {
@@ -1969,7 +2097,12 @@ export async function dispatchReplyFromConfig(
               }
               markProgress();
               markInboundDedupeReplayUnsafe();
-              if (shouldForwardProgressCallback({ forwardWhenSourceDeliverySuppressed: true })) {
+              if (
+                shouldForwardProgressCallback({
+                  forwardWhenSourceDeliverySuppressed: true,
+                  requiresToolSummaryVisibility: true,
+                })
+              ) {
                 await onPatchSummaryFromReplyOptions?.(payload);
               }
               if (isDispatchOperationAborted()) {
@@ -2089,7 +2222,7 @@ export async function dispatchReplyFromConfig(
       if (hookRunner?.hasHooks("reply_dispatch")) {
         const tailDispatchResult = await runWithReplyOperationAbort(dispatchAbortOperation, () =>
           hookRunner.runReplyDispatch(
-            {
+            createReplyDispatchEvent({
               ctx,
               runId: params.replyOptions?.runId,
               sessionKey: acpDispatchSessionKey,
@@ -2106,7 +2239,7 @@ export async function dispatchReplyFromConfig(
               shouldSendToolSummaries,
               sendPolicy,
               isTailDispatch: true,
-            },
+            }),
             {
               cfg,
               dispatcher: dispatchHookDispatcher,
