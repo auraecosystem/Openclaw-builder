@@ -61,6 +61,7 @@ import {
   markDiagnosticSessionProgress,
 } from "../../logging/diagnostic.js";
 import { createDiagnosticMessageLifecycle } from "../../logging/message-lifecycle.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { matchPluginCommand } from "../../plugins/commands.js";
 import {
   buildPluginBindingDeclinedText,
@@ -779,6 +780,90 @@ function createAbortAwareDispatcher(params: {
   return dispatcher;
 }
 
+type ReplyHotPathTimingSpan = {
+  name: string;
+  durationMs: number;
+  elapsedMs: number;
+};
+
+type ReplyHotPathTimingSummary = {
+  totalMs: number;
+  spans: ReplyHotPathTimingSpan[];
+};
+
+const replyHotPathTimingLog = createSubsystemLogger("auto-reply/reply-timing");
+const REPLY_HOT_PATH_TIMING_WARN_TOTAL_MS = 1_000;
+const REPLY_HOT_PATH_TIMING_WARN_STAGE_MS = 500;
+
+function createReplyHotPathTimingTracker(): {
+  measure: <T>(name: string, run: () => Promise<T> | T) => Promise<T>;
+  logIfSlow: (params: {
+    channel: string;
+    messageId?: number | string;
+    sessionKey?: string;
+    outcome: "completed" | "skipped" | "error";
+    reason?: string;
+  }) => void;
+} {
+  const startedAt = Date.now();
+  let didLog = false;
+  const spans: ReplyHotPathTimingSpan[] = [];
+  const toMs = (value: number) => Math.max(0, Math.round(value));
+  const snapshot = (): ReplyHotPathTimingSummary => ({
+    totalMs: toMs(Date.now() - startedAt),
+    spans: spans.slice(),
+  });
+  const shouldLog = (summary: ReplyHotPathTimingSummary) =>
+    summary.totalMs >= REPLY_HOT_PATH_TIMING_WARN_TOTAL_MS ||
+    summary.spans.some((span) => span.durationMs >= REPLY_HOT_PATH_TIMING_WARN_STAGE_MS);
+  const formatSpans = (summary: ReplyHotPathTimingSummary) =>
+    summary.spans.length > 0
+      ? summary.spans
+          .map((span) => `${span.name}:${span.durationMs}ms@${span.elapsedMs}ms`)
+          .join(",")
+      : "none";
+  return {
+    async measure(name, run) {
+      const spanStartedAt = Date.now();
+      try {
+        return await run();
+      } finally {
+        spans.push({
+          name,
+          durationMs: toMs(Date.now() - spanStartedAt),
+          elapsedMs: toMs(Date.now() - startedAt),
+        });
+      }
+    },
+    logIfSlow(params) {
+      if (didLog) {
+        return;
+      }
+      const summary = snapshot();
+      if (!shouldLog(summary)) {
+        return;
+      }
+      didLog = true;
+      replyHotPathTimingLog.warn(
+        `reply hot path timings channel=${params.channel} messageId=${
+          params.messageId ?? "unknown"
+        } sessionKey=${params.sessionKey ?? "unknown"} outcome=${params.outcome} totalMs=${
+          summary.totalMs
+        } stages=${formatSpans(summary)}${params.reason ? ` reason=${params.reason}` : ""}`,
+        {
+          channel: params.channel,
+          messageId: params.messageId,
+          sessionKey: params.sessionKey,
+          outcome: params.outcome,
+          reason: params.reason,
+          totalMs: summary.totalMs,
+          spans: summary.spans,
+        },
+      );
+    },
+  };
+}
+
 export type {
   DispatchFromConfigParams,
   DispatchFromConfigResult,
@@ -812,12 +897,15 @@ export async function dispatchReplyFromConfig(
     hasSessionKey: Boolean(sessionKey),
     hasRunId: typeof params.replyOptions?.runId === "string",
   };
+  const replyHotPathTiming = createReplyHotPathTimingTracker();
   const traceReplyPhase = <T>(name: string, run: () => Promise<T> | T): Promise<T> =>
-    measureDiagnosticsTimelineSpan(name, run, {
-      phase: "agent-turn",
-      config: cfg,
-      attributes: traceAttributes,
-    });
+    replyHotPathTiming.measure(name, () =>
+      measureDiagnosticsTimelineSpan(name, run, {
+        phase: "agent-turn",
+        config: cfg,
+        attributes: traceAttributes,
+      }),
+    );
   let agentDispatchStartedAt = 0;
 
   const recordProcessed = (
@@ -827,6 +915,15 @@ export async function dispatchReplyFromConfig(
       error?: string;
     },
   ) => {
+    if (diagnosticsEnabled) {
+      replyHotPathTiming.logIfSlow({
+        channel,
+        messageId,
+        sessionKey,
+        outcome,
+        reason: opts?.reason,
+      });
+    }
     messageLifecycle.markProcessed(outcome, opts);
   };
 

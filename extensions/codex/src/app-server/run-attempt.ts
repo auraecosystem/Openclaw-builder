@@ -3658,6 +3658,7 @@ function createCodexNativeHookRelay(params: {
     }),
     signal: params.signal,
     command: {
+      nice: 10,
       timeoutMs: params.options?.gatewayTimeoutMs,
     },
   });

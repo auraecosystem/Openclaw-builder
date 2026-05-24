@@ -2284,4 +2284,18 @@ describe("native hook relay command builder", () => {
       "openclaw hooks relay --provider codex --relay-id relay-1 --event permission_request --timeout 5000",
     );
   });
+
+  it("can lower native hook relay process priority", () => {
+    expect(
+      buildNativeHookRelayCommand({
+        provider: "codex",
+        relayId: "relay-1",
+        event: "pre_tool_use",
+        executable: "openclaw",
+        nice: 10,
+      }),
+    ).toBe(
+      "nice -n 10 openclaw hooks relay --provider codex --relay-id relay-1 --event pre_tool_use --timeout 5000",
+    );
+  });
 });
