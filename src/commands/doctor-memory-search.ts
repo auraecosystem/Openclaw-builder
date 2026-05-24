@@ -33,6 +33,7 @@ import {
   getActiveMemorySearchManager,
   resolveActiveMemoryBackendConfig,
 } from "../plugins/memory-runtime.js";
+import { resolveMemoryRoleSlot } from "../plugins/slot-resolution.js";
 import { defaultSlotIdForKey } from "../plugins/slots.js";
 import { getProviderEnvVars } from "../secrets/provider-env-vars.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
@@ -314,7 +315,7 @@ function hasActiveAlternateMemoryPluginSlot(cfg: OpenClawConfig): boolean {
   if (!plugins.enabled) {
     return false;
   }
-  const memorySlot = plugins.slots["memory.recall"];
+  const memorySlot = resolveMemoryRoleSlot({ cfg, role: "recall" });
   if (typeof memorySlot !== "string" || memorySlot.length === 0) {
     return false;
   }

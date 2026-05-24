@@ -6,6 +6,7 @@ import { resolveGatewayProbeTarget } from "../gateway/probe-target.js";
 import type { GatewayProbeResult, probeGateway as probeGatewayFn } from "../gateway/probe.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../gateway/protocol/client-info.js";
 import type { MemoryProviderStatus } from "../memory-host-sdk/engine-storage.js";
+import { resolveMemoryRoleSlot } from "../plugins/slot-resolution.js";
 import { defaultSlotIdForKey } from "../plugins/slots.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import { isLoopbackIpAddress } from "../shared/net/ip.js";
@@ -176,9 +177,10 @@ export function resolveMemoryPluginStatus(cfg: OpenClawConfig): MemoryPluginStat
   if (!pluginsEnabled) {
     return { enabled: false, slot: null, reason: "plugins disabled" };
   }
+  const resolvedRecall = resolveMemoryRoleSlot({ cfg, role: "recall" });
   const rawRecall = normalizeOptionalString(cfg.plugins?.slots?.["memory.recall"]);
   const rawLegacyMemory = normalizeOptionalString(cfg.plugins?.slots?.memory);
-  const raw = rawRecall ?? rawLegacyMemory ?? "";
+  const raw = normalizeOptionalString(resolvedRecall) ?? rawRecall ?? rawLegacyMemory ?? "";
   if (normalizeOptionalLowercaseString(raw) === "none") {
     return {
       enabled: false,
