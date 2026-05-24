@@ -13,6 +13,8 @@ type ActiveWriteLockState = {
   active: boolean;
 };
 
+const activeSessionEventProcessing = new AsyncLocalStorage<unknown>();
+
 type LockOptions = {
   sessionFile: string;
   timeoutMs: number;
@@ -490,6 +492,9 @@ function readSessionFileFingerprintSync(sessionFile: string): SessionFileFingerp
 }
 
 async function waitForSessionEventQueue(session: unknown): Promise<void> {
+  if (activeSessionEventProcessing.getStore() === session) {
+    return;
+  }
   const owner = session as SessionEventQueueOwner;
   for (let attempts = 0; attempts < 5; attempts += 1) {
     const queue = owner?.["_agentEventQueue"];
@@ -567,10 +572,12 @@ export function installSessionEventWriteLock(params: {
     this: unknown,
     event: unknown,
   ) {
-    if (!eventMayReachTranscriptWriters(session, event)) {
-      return await original.call(this, event);
-    }
-    return await params.withSessionWriteLock(async () => await original.call(this, event));
+    return await activeSessionEventProcessing.run(session, async () => {
+      if (!eventMayReachTranscriptWriters(session, event)) {
+        return await original.call(this, event);
+      }
+      return await params.withSessionWriteLock(async () => await original.call(this, event));
+    });
   };
 }
 

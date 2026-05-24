@@ -1051,6 +1051,55 @@ describe("embedded attempt session lock lifecycle", () => {
     ]);
   });
 
+  it("does not wait on the session event queue from a hook running during active event processing", async () => {
+    const events: string[] = [];
+    let releaseQueue!: () => void;
+    const session = {
+      _agentEventQueue: new Promise<void>((resolve) => {
+        releaseQueue = resolve;
+      }),
+      _processAgentEvent: vi.fn(async (event: { type?: string }) => {
+        events.push(`process:${event.type}`);
+        await session.agent.beforeToolCall();
+        events.push("process:end");
+      }),
+      agent: {
+        beforeToolCall: vi.fn(async () => {
+          events.push("hook");
+        }),
+      },
+    };
+
+    installSessionEventWriteLock({
+      session,
+      withSessionWriteLock: async (run) => {
+        events.push("event-lock");
+        return await run();
+      },
+    });
+    installSessionExternalHookWriteLock({
+      session,
+      withSessionWriteLock: async (run) => {
+        events.push("hook-lock");
+        return await run();
+      },
+    });
+
+    const result = session["_processAgentEvent"]({ type: "tool_call" });
+    const completion = await Promise.race([
+      result.then(() => "done"),
+      new Promise<string>((resolve) => {
+        setTimeout(() => resolve("timeout"), 25);
+      }),
+    ]);
+
+    expect(completion).toBe("done");
+    expect(events).toEqual(["process:tool_call", "hook-lock", "hook", "process:end"]);
+
+    releaseQueue();
+    await result;
+  });
+
   it("locks Pi extension hooks that can mutate the session outside agent events", async () => {
     const locked: string[] = [];
     const called: string[] = [];
