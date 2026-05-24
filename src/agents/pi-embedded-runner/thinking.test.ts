@@ -11,6 +11,7 @@ import {
   sanitizeThinkingForRecovery,
   stripInvalidThinkingSignatures,
   wrapAnthropicStreamWithRecovery,
+  wrapOpenAIResponsesStreamWithReplayRecovery,
 } from "./thinking.js";
 
 type AssistantMessage = Extract<AgentMessage, { role: "assistant" }>;
@@ -582,5 +583,280 @@ describe("wrapAnthropicStreamWithRecovery", () => {
 
     await expect(response.result()).resolves.toEqual(finalMessage);
     expect(events).toHaveLength(2);
+  });
+});
+
+describe("wrapOpenAIResponsesStreamWithReplayRecovery", () => {
+  const invalidReasoningError = new Error(
+    '400 {"error":{"code":"thinking_signature_invalid","message":"The encrypted content for item rs_test could not be verified. Reason: Encrypted content could not be decrypted or parsed.","type":"invalid_request_error"}}',
+  );
+  const assistantMessage = (overrides: Partial<AssistantMessage>): AssistantMessage =>
+    castAgentMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "done" }],
+      api: "openai-responses",
+      provider: "openai",
+      model: "gpt-5",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: Date.now(),
+      ...overrides,
+    }) as AssistantMessage;
+  const createTransportErrorStream = () => {
+    const stream = createAssistantMessageEventStream();
+    const errorAssistant = assistantMessage({
+      content: [],
+      stopReason: "error",
+      errorMessage: invalidReasoningError.message,
+    } as Partial<AssistantMessage>);
+    queueMicrotask(() => {
+      stream.push({ type: "error", reason: "error", error: errorAssistant });
+      stream.end();
+    });
+    return stream;
+  };
+  const createDoneStream = () => {
+    const stream = createAssistantMessageEventStream();
+    const doneAssistant = assistantMessage({
+      content: [{ type: "text", text: "recovered" }],
+      stopReason: "stop",
+    });
+    queueMicrotask(() => {
+      stream.push({ type: "start", partial: doneAssistant });
+      stream.push({ type: "done", reason: "stop", message: doneAssistant });
+      stream.end();
+    });
+    return stream;
+  };
+
+  it("retries once with replayable reasoning dropped when the request is rejected before streaming", async () => {
+    let callCount = 0;
+    const contexts: Array<{ messages?: AgentMessage[] }> = [];
+    const wrapped = wrapOpenAIResponsesStreamWithReplayRecovery(
+      ((_model, context) => {
+        callCount += 1;
+        contexts.push(context as { messages?: AgentMessage[] });
+        return Promise.reject(invalidReasoningError);
+      }) as Parameters<typeof wrapOpenAIResponsesStreamWithReplayRecovery>[0],
+      { id: "test-session" },
+    );
+
+    const response = wrapped(
+      {} as never,
+      {
+        messages: castAgentMessages([
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                thinking: "internal",
+                thinkingSignature: JSON.stringify({ id: "rs_test", type: "reasoning" }),
+              },
+              { type: "text", text: "visible answer" },
+            ],
+          },
+        ]),
+      } as never,
+      {} as never,
+    ) as { result: () => Promise<unknown> };
+
+    await expect(response.result()).rejects.toBe(invalidReasoningError);
+
+    expect(callCount).toBe(2);
+    const retryMessage = contexts[1]?.messages?.[0];
+    if (!retryMessage || retryMessage.role !== "assistant") {
+      throw new Error(
+        "Expected OpenAI Responses recovery retry to start with an assistant message",
+      );
+    }
+    expect(retryMessage.content).toEqual([{ type: "text", text: "visible answer" }]);
+  });
+
+  it("retries once when the Responses transport emits a pre-start invalid reasoning error event", async () => {
+    let callCount = 0;
+    const wrapped = wrapOpenAIResponsesStreamWithReplayRecovery(
+      (() => {
+        callCount += 1;
+        return callCount === 1 ? createTransportErrorStream() : createDoneStream();
+      }) as Parameters<typeof wrapOpenAIResponsesStreamWithReplayRecovery>[0],
+      { id: "test-session" },
+    );
+
+    const response = wrapped({} as never, { messages: [] } as never, {} as never) as {
+      result: () => Promise<AssistantMessage>;
+    } & AsyncIterable<unknown>;
+    const events: unknown[] = [];
+    for await (const event of response) {
+      events.push(event);
+    }
+
+    await expect(response.result()).resolves.toMatchObject({
+      stopReason: "stop",
+      content: [{ type: "text", text: "recovered" }],
+    });
+    expect(callCount).toBe(2);
+    expect(events).toEqual([
+      expect.objectContaining({ type: "start" }),
+      expect.objectContaining({ type: "done" }),
+    ]);
+  });
+
+  it("retries once when an auth-wrapped Responses stream resolves to a pre-start invalid reasoning error event", async () => {
+    let callCount = 0;
+    const wrapped = wrapOpenAIResponsesStreamWithReplayRecovery(
+      (async () => {
+        callCount += 1;
+        return callCount === 1 ? createTransportErrorStream() : createDoneStream();
+      }) as Parameters<typeof wrapOpenAIResponsesStreamWithReplayRecovery>[0],
+      { id: "test-session" },
+    );
+
+    const response = (await wrapped({} as never, { messages: [] } as never, {} as never)) as {
+      result: () => Promise<AssistantMessage>;
+    } & AsyncIterable<unknown>;
+    const events: unknown[] = [];
+    for await (const event of response) {
+      events.push(event);
+    }
+
+    await expect(response.result()).resolves.toMatchObject({
+      stopReason: "stop",
+      content: [{ type: "text", text: "recovered" }],
+    });
+    expect(callCount).toBe(2);
+    expect(events).toEqual([
+      expect.objectContaining({ type: "start" }),
+      expect.objectContaining({ type: "done" }),
+    ]);
+  });
+
+  it("downgrades OpenAI function call ids after dropping paired reasoning", async () => {
+    const contexts: Array<{ messages?: AgentMessage[] }> = [];
+    const wrapped = wrapOpenAIResponsesStreamWithReplayRecovery(
+      ((_model, context) => {
+        contexts.push(context as { messages?: AgentMessage[] });
+        return Promise.reject(invalidReasoningError);
+      }) as Parameters<typeof wrapOpenAIResponsesStreamWithReplayRecovery>[0],
+      { id: "test-session" },
+    );
+
+    const response = wrapped(
+      {} as never,
+      {
+        messages: castAgentMessages([
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                thinking: "internal",
+                thinkingSignature: JSON.stringify({ id: "rs_test", type: "reasoning" }),
+              },
+              { type: "toolCall", id: "call_123|fc_123", name: "read", arguments: {} },
+            ],
+          },
+          {
+            role: "toolResult",
+            toolCallId: "call_123|fc_123",
+            toolName: "read",
+            content: [{ type: "text", text: "ok" }],
+          },
+        ]),
+      } as never,
+      {} as never,
+    ) as { result: () => Promise<unknown> };
+
+    await expect(response.result()).rejects.toBe(invalidReasoningError);
+
+    const retryAssistant = contexts[1]?.messages?.[0];
+    const retryToolResult = contexts[1]?.messages?.[1];
+    if (!retryAssistant || retryAssistant.role !== "assistant") {
+      throw new Error("Expected OpenAI Responses recovery retry assistant turn");
+    }
+    if (!retryToolResult || retryToolResult.role !== "toolResult") {
+      throw new Error("Expected OpenAI Responses recovery retry tool result");
+    }
+    expect(retryAssistant.content).toEqual([
+      { type: "toolCall", id: "call_123", name: "read", arguments: {} },
+    ]);
+    expect(retryToolResult.toolCallId).toBe("call_123");
+  });
+
+  it("keeps dropping replayable reasoning on later calls after recovery is activated", async () => {
+    const contexts: Array<{ messages?: AgentMessage[] }> = [];
+    const wrapped = wrapOpenAIResponsesStreamWithReplayRecovery(
+      ((_model, context) => {
+        contexts.push(context as { messages?: AgentMessage[] });
+        if (contexts.length === 1) {
+          return Promise.reject(invalidReasoningError);
+        }
+        return Promise.reject(new Error("done"));
+      }) as Parameters<typeof wrapOpenAIResponsesStreamWithReplayRecovery>[0],
+      { id: "test-session" },
+    );
+    const context = {
+      messages: castAgentMessages([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "thinking",
+              thinking: "internal",
+              thinkingSignature: JSON.stringify({ id: "rs_test", type: "reasoning" }),
+            },
+            { type: "text", text: "visible answer" },
+          ],
+        },
+      ]),
+    } as never;
+
+    const firstResponse = wrapped({} as never, context, {} as never) as {
+      result: () => Promise<unknown>;
+    };
+    await expect(firstResponse.result()).rejects.toThrow("done");
+    const secondResponse = wrapped({} as never, context, {} as never) as {
+      result: () => Promise<unknown>;
+    };
+    await expect(secondResponse.result()).rejects.toThrow("done");
+
+    const laterMessage = contexts[2]?.messages?.[0];
+    if (!laterMessage || laterMessage.role !== "assistant") {
+      throw new Error("Expected later OpenAI Responses call to start with an assistant message");
+    }
+    expect(laterMessage.content).toEqual([{ type: "text", text: "visible answer" }]);
+  });
+
+  it("does not retry when the stream fails after yielding a chunk", async () => {
+    let callCount = 0;
+    const wrapped = wrapOpenAIResponsesStreamWithReplayRecovery(
+      (() => {
+        callCount += 1;
+        return (async function* failingStream() {
+          yield "chunk";
+          throw invalidReasoningError;
+        })();
+      }) as unknown as Parameters<typeof wrapOpenAIResponsesStreamWithReplayRecovery>[0],
+      { id: "test-session" },
+    );
+
+    const chunks: unknown[] = [];
+    const response = wrapped({} as never, { messages: [] } as never, {} as never) as {
+      result: () => Promise<unknown>;
+    } & AsyncIterable<unknown>;
+    for await (const chunk of response) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toEqual(["chunk"]);
+    await expect(response.result()).rejects.toBe(invalidReasoningError);
+    expect(callCount).toBe(1);
   });
 });
