@@ -1176,6 +1176,7 @@ async function compactEmbeddedPiSessionDirectOnce(
             sessionManager,
             sessionId: params.sessionId,
             policy: transcriptPolicy,
+            preserveLatestAssistantThinking: false,
           });
           const validated = await validateReplayTurns({
             messages: prior,
