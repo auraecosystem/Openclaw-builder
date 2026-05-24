@@ -293,6 +293,8 @@ export type SessionTranscriptUsageSnapshot = {
   promptTokens?: number;
   outputTokens?: number;
   trailingBytesTokens?: number;
+  postCompactionTrailingBytesTokens?: number;
+  hasPostUsageCompactionMarker?: boolean;
 };
 
 // Keep a generous near-threshold window so large assistant outputs still trigger
@@ -320,6 +322,74 @@ function parseUsageFromTranscriptLine(line: string): ReturnType<typeof normalize
     // ignore bad lines
   }
   return undefined;
+}
+
+function collectTranscriptText(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (!Array.isArray(value)) {
+    return "";
+  }
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return "";
+      }
+      const text = (item as { text?: unknown }).text;
+      return typeof text === "string" ? text : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function transcriptLineHasPostUsageCompactionMarker(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      type?: unknown;
+      message?: { content?: unknown };
+      payload?: { type?: unknown; text?: unknown };
+    };
+    if (parsed.type === "compaction" || parsed.type === "session.compacted") {
+      return true;
+    }
+    const payloadType = parsed.payload?.type;
+    if (payloadType === "compaction" || payloadType === "session.compacted") {
+      return true;
+    }
+    const text = [
+      collectTranscriptText(parsed.message?.content),
+      collectTranscriptText(parsed.payload?.text),
+    ]
+      .filter(Boolean)
+      .join("\n");
+    return (
+      text.includes("[Post-compaction context refresh]") ||
+      text.includes("Session was just compacted.")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function estimateTranscriptLinesBytes(lines: string[]): number {
+  if (lines.length === 0) {
+    return 0;
+  }
+  return Buffer.byteLength(lines.join("\n"), "utf8") + lines.length;
+}
+
+function findLastPostUsageCompactionMarkerIndex(lines: string[]): number {
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (transcriptLineHasPostUsageCompactionMarker(lines[index] ?? "")) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function resolveSessionLogPath(
@@ -359,6 +429,8 @@ function deriveTranscriptUsageSnapshot(
     | {
         usage: ReturnType<typeof normalizeUsage> | undefined;
         trailingBytes?: number;
+        postCompactionTrailingBytes?: number;
+        hasPostUsageCompactionMarker?: boolean;
       }
     | undefined,
 ): SessionTranscriptUsageSnapshot | undefined {
@@ -378,11 +450,18 @@ function deriveTranscriptUsageSnapshot(
   return {
     promptTokens,
     outputTokens,
+    hasPostUsageCompactionMarker: snapshot.hasPostUsageCompactionMarker === true ? true : undefined,
     trailingBytesTokens:
       typeof snapshot.trailingBytes === "number" &&
       Number.isFinite(snapshot.trailingBytes) &&
       snapshot.trailingBytes > 0
         ? Math.ceil(snapshot.trailingBytes / FALLBACK_TRANSCRIPT_BYTES_PER_TOKEN)
+        : undefined,
+    postCompactionTrailingBytesTokens:
+      typeof snapshot.postCompactionTrailingBytes === "number" &&
+      Number.isFinite(snapshot.postCompactionTrailingBytes) &&
+      snapshot.postCompactionTrailingBytes > 0
+        ? Math.ceil(snapshot.postCompactionTrailingBytes / FALLBACK_TRANSCRIPT_BYTES_PER_TOKEN)
         : undefined,
   };
 }
@@ -462,6 +541,8 @@ async function readLastNonzeroUsageFromSessionLog(logPath: string) {
     const stat = await handle.stat();
     let position = stat.size;
     let leadingPartial = "";
+    let postUsageCompactionMarkerSeen = false;
+    let postCompactionTrailingBytes: number | undefined;
     while (position > 0) {
       const chunkSize = Math.min(TRANSCRIPT_TAIL_CHUNK_BYTES, position);
       const start = position - chunkSize;
@@ -481,12 +562,29 @@ async function readLastNonzeroUsageFromSessionLog(logPath: string) {
         const usage = parseUsageFromTranscriptLine(lines[i] ?? "");
         if (usage) {
           const trailingLines = lines.slice(i + 1);
-          const trailingBytesInChunk =
-            Buffer.byteLength(trailingLines.join("\n"), "utf8") + trailingLines.length;
+          const trailingBytesInChunk = estimateTranscriptLinesBytes(trailingLines);
+          const markerIndex = findLastPostUsageCompactionMarkerIndex(trailingLines);
+          const hasMarkerInTrailingLines = markerIndex >= 0;
+          const postCompactionTrailingBytesInChunk = hasMarkerInTrailingLines
+            ? suffixBytesOutsideCombined +
+              estimateTranscriptLinesBytes(trailingLines.slice(markerIndex + 1))
+            : undefined;
           return {
             usage,
             trailingBytes: suffixBytesOutsideCombined + trailingBytesInChunk,
+            hasPostUsageCompactionMarker: postUsageCompactionMarkerSeen || hasMarkerInTrailingLines,
+            postCompactionTrailingBytes: postUsageCompactionMarkerSeen
+              ? postCompactionTrailingBytes
+              : postCompactionTrailingBytesInChunk,
           };
+        }
+      }
+      if (!postUsageCompactionMarkerSeen) {
+        const markerIndex = findLastPostUsageCompactionMarkerIndex(lines);
+        if (markerIndex >= 0) {
+          postUsageCompactionMarkerSeen = true;
+          postCompactionTrailingBytes =
+            suffixBytesOutsideCombined + estimateTranscriptLinesBytes(lines.slice(markerIndex + 1));
         }
       }
       position = start;
@@ -496,6 +594,8 @@ async function readLastNonzeroUsageFromSessionLog(logPath: string) {
       ? {
           usage,
           trailingBytes: Math.max(0, stat.size - Buffer.byteLength(leadingPartial, "utf8")),
+          hasPostUsageCompactionMarker: postUsageCompactionMarkerSeen,
+          postCompactionTrailingBytes,
         }
       : undefined;
   } finally {
@@ -542,6 +642,7 @@ async function estimatePromptTokensFromSessionTranscript(params: {
         : undefined;
     const promptTokens = snapshot.usage?.promptTokens;
     const trailingBytesTokens = snapshot.usage?.trailingBytesTokens;
+    const postCompactionTrailingBytesTokens = snapshot.usage?.postCompactionTrailingBytesTokens;
     const messages = (await readSessionMessagesAsync(
       sessionId,
       params.storePath,
@@ -561,11 +662,26 @@ async function estimatePromptTokensFromSessionTranscript(params: {
     })();
     if (typeof promptTokens === "number" && Number.isFinite(promptTokens) && promptTokens > 0) {
       const outputTokens = snapshot.usage?.outputTokens;
-      const usagePromptTokens = Math.ceil(promptTokens) + (trailingBytesTokens ?? 0);
+      const rawUsagePromptTokens = Math.ceil(promptTokens);
+      const hasPostUsageCompactionMarker = snapshot.usage?.hasPostUsageCompactionMarker === true;
+      const hasStaleUsageSnapshot =
+        hasPostUsageCompactionMarker &&
+        typeof estimatedMessageTokens === "number" &&
+        rawUsagePromptTokens > estimatedMessageTokens * 2 + 10_000;
+      const boundedUsagePromptTokens = hasStaleUsageSnapshot
+        ? estimatedMessageTokens
+        : rawUsagePromptTokens;
+      const tailTokens = hasPostUsageCompactionMarker
+        ? (postCompactionTrailingBytesTokens ?? 0)
+        : (trailingBytesTokens ?? 0);
+      const usagePromptTokens = boundedUsagePromptTokens + tailTokens;
       return {
         promptTokens: Math.max(usagePromptTokens, estimatedMessageTokens ?? 0),
         outputTokens:
-          typeof outputTokens === "number" && Number.isFinite(outputTokens) && outputTokens > 0
+          !hasPostUsageCompactionMarker &&
+          typeof outputTokens === "number" &&
+          Number.isFinite(outputTokens) &&
+          outputTokens > 0
             ? Math.ceil(outputTokens)
             : undefined,
         transcriptBytesTokens,
