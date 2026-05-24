@@ -26,7 +26,7 @@ export function classifyCompactionReason(reason?: string): string {
   if (text.includes("nothing to compact")) {
     return "no_compactable_entries";
   }
-  if (text.includes("below threshold")) {
+  if (text.includes("below threshold") || text.includes("already under target")) {
     return "below_threshold";
   }
   if (text.includes("already compacted")) {

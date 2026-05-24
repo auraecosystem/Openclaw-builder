@@ -34,6 +34,10 @@ describe("classifyCompactionReason", () => {
     );
   });
 
+  it('classifies "already under target" as below threshold', () => {
+    expect(classifyCompactionReason("already under target")).toBe("below_threshold");
+  });
+
   it("classifies safeguard messages as guard-blocked", () => {
     expect(
       classifyCompactionReason(

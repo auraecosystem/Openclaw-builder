@@ -56,6 +56,7 @@ function isCompactionSkipReason(reason?: string): boolean {
   return (
     text.includes("nothing to compact") ||
     text.includes("below threshold") ||
+    text.includes("already under target") ||
     text.includes("already compacted") ||
     text.includes("no real conversation messages")
   );
@@ -73,6 +74,9 @@ function formatCompactionReason(reason?: string): string | undefined {
   }
   if (lower.includes("below threshold")) {
     return "context is below the compaction threshold";
+  }
+  if (lower.includes("already under target")) {
+    return "context is already under the compaction target";
   }
   if (lower.includes("already compacted")) {
     return "session was already compacted recently";
