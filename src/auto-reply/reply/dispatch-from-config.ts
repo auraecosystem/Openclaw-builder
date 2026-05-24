@@ -1624,8 +1624,7 @@ export async function dispatchReplyFromConfig(
       sourceReplyDeliveryMode === "message_tool_only" &&
       ctx.InboundEventKind !== "room_event" &&
       !sendPolicyDenied &&
-      params.replyOptions?.forceToolResultProgress === true &&
-      shouldSendToolSummaries();
+      params.replyOptions?.forceToolResultProgress === true;
     let finalReplyDeliveryStarted = false;
     const hasExecApprovalPayload = (payload: ReplyPayload) => {
       const execApproval =
@@ -2122,8 +2121,12 @@ export async function dispatchReplyFromConfig(
                 }
                 markInboundDedupeReplayUnsafe();
                 const isFastModeAutoProgress = isFastModeAutoProgressPayload(payload);
+                const isForcedToolProgress =
+                  shouldDeliverForcedToolProgressDespiteSourceSuppression();
                 const progressCallbackForwarded = shouldForwardProgressCallback({
                   forwardWhenSourceDeliverySuppressed: true,
+                  requiresToolSummaryVisibility:
+                    !isFastModeAutoProgress && !allowSuppressedSourceProgressCallbacks,
                 });
                 if (progressCallbackForwarded) {
                   await onToolResultFromReplyOptions?.(payload);
@@ -2140,11 +2143,13 @@ export async function dispatchReplyFromConfig(
                 if (
                   shouldSuppressProgressDelivery() &&
                   !isFastModeAutoProgress &&
-                  !shouldDeliverForcedToolProgressDespiteSourceSuppression()
+                  !isForcedToolProgress
                 ) {
                   return;
                 }
-                const visibleToolPayload = resolveToolDeliveryPayload(payload);
+                const visibleToolPayload = isForcedToolProgress
+                  ? payload
+                  : resolveToolDeliveryPayload(payload);
                 if (!visibleToolPayload) {
                   return;
                 }
@@ -2159,7 +2164,9 @@ export async function dispatchReplyFromConfig(
                   accountId: replyRoute.accountId,
                 });
                 const normalizedPayload = await normalizeReplyMediaPayload(ttsPayload);
-                const deliveryPayload = resolveToolDeliveryPayload(normalizedPayload);
+                const deliveryPayload = isForcedToolProgress
+                  ? normalizedPayload
+                  : resolveToolDeliveryPayload(normalizedPayload);
                 if (!deliveryPayload) {
                   return;
                 }
@@ -2168,7 +2175,8 @@ export async function dispatchReplyFromConfig(
                 }
                 if (
                   shouldSuppressLateTextOnlyToolProgress(deliveryPayload) &&
-                  !isFastModeAutoProgressPayload(deliveryPayload)
+                  !isFastModeAutoProgressPayload(deliveryPayload) &&
+                  !isForcedToolProgress
                 ) {
                   return;
                 }
@@ -2177,7 +2185,8 @@ export async function dispatchReplyFromConfig(
                 }
                 if (
                   shouldSuppressDefaultToolProgressMessages() &&
-                  !isFastModeAutoProgressPayload(deliveryPayload)
+                  !isFastModeAutoProgressPayload(deliveryPayload) &&
+                  !isForcedToolProgress
                 ) {
                   const hasMedia = resolveSendableOutboundReplyParts(deliveryPayload).hasMedia;
                   if (!hasMedia && !hasExecApprovalPayload(deliveryPayload)) {
