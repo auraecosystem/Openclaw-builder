@@ -995,6 +995,13 @@ export const OpenClawSchema = z
           })
           .strict()
           .optional(),
+        providerAuthPrewarm: z
+          .object({
+            enabled: z.boolean().optional(),
+            delayMs: z.number().int().min(0).optional(),
+          })
+          .strict()
+          .optional(),
         tls: z
           .object({
             enabled: z.boolean().optional(),
