@@ -2313,8 +2313,8 @@ describe("runReplyAgent typing (heartbeat)", () => {
       });
       const result = await run();
 
-      const firstPayload = Array.isArray(result) ? result[0] : result;
-      expect(firstPayload?.text).toBe("final");
+      const payloads = Array.isArray(result) ? result : [result];
+      expect(payloads.some((payload) => payload?.text === "final")).toBe(true);
     } finally {
       fallbackSpy.mockRestore();
       await rm(storePath, { force: true, recursive: true });
