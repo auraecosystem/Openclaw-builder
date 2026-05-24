@@ -1088,8 +1088,13 @@ describe("runCodexAppServerAttempt context-engine lifecycle", () => {
     // estimate over the budget. Without the skills lane being counted, the
     // precheck returns "fits" and compaction is never triggered.
     params.contextTokenBudget = 80_000;
+    const largeTrustedSkillsPrompt = "x".repeat(250_000);
     params.skillsSnapshot = {
-      prompt: "x".repeat(250_000),
+      // `prompt` is the legacy mixed-source field; the precheck must count
+      // what actually rides the developer-instructions lane, which is the
+      // bundled-only `trustedDeveloperPrompt` after the prompt-authority fix.
+      prompt: largeTrustedSkillsPrompt,
+      trustedDeveloperPrompt: largeTrustedSkillsPrompt,
       skills: [],
     };
 
