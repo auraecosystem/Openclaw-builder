@@ -1680,6 +1680,11 @@ export function buildVitestRunPlans(
     toRepoRelativeTarget(targetArg, cwd),
   );
   if (explicitConfigTargets.every(isVitestConfigFileTarget)) {
+    if (watchMode && explicitConfigTargets.length > 1) {
+      throw new Error(
+        "watch mode with mixed test suites is not supported; target one suite at a time or use a dedicated suite command",
+      );
+    }
     return explicitConfigTargets.map((config) => ({
       config,
       forwardedArgs: nonTargetArgs,
