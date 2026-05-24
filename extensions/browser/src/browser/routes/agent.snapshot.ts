@@ -15,7 +15,9 @@ import {
   buildAiSnapshotFromChromeMcpSnapshot,
   flattenChromeMcpSnapshotToAriaNodes,
 } from "../chrome-mcp.snapshot.js";
+import { isChromeReachable } from "../chrome.js";
 import { DEFAULT_BROWSER_SCREENSHOT_TIMEOUT_MS } from "../constants.js";
+import { BrowserError } from "../errors.js";
 import {
   assertBrowserNavigationAllowed,
   assertBrowserNavigationResultAllowed,
@@ -48,6 +50,7 @@ import type { BrowserResponse, BrowserRouteRegistrar } from "./types.js";
 import { asyncBrowserRoute, jsonError, toBoolean, toNumber, toStringOrEmpty } from "./utils.js";
 
 const CHROME_MCP_OVERLAY_ATTR = "data-openclaw-mcp-overlay";
+const EXISTING_SESSION_PDF_CDP_PROBE_TIMEOUT_MS = 500;
 
 function defaultExistingSessionDevToolsDirs(): string[] {
   const dirs = [path.join(os.homedir(), ".config", "google-chrome")];
@@ -82,7 +85,11 @@ function readDevToolsActivePortCdpUrl(dir: string | undefined): string | undefin
   }
 }
 
-function resolveExistingSessionPdfCdpUrl(profileCtx: ProfileContext, cdpUrl: string): string {
+async function resolveExistingSessionPdfCdpUrl(
+  profileCtx: ProfileContext,
+  cdpUrl: string,
+  ssrfPolicy?: Parameters<typeof isChromeReachable>[2],
+): Promise<string> {
   const explicit = cdpUrl.trim();
   if (explicit) {
     return explicit;
@@ -90,13 +97,17 @@ function resolveExistingSessionPdfCdpUrl(profileCtx: ProfileContext, cdpUrl: str
 
   for (const dir of [profileCtx.profile.userDataDir, ...defaultExistingSessionDevToolsDirs()]) {
     const resolved = readDevToolsActivePortCdpUrl(dir);
-    if (resolved) {
+    if (
+      resolved &&
+      (await isChromeReachable(resolved, EXISTING_SESSION_PDF_CDP_PROBE_TIMEOUT_MS, ssrfPolicy))
+    ) {
       return resolved;
     }
   }
 
-  throw new Error(
-    `existing-session PDF requires browser.profiles.${profileCtx.profile.name}.cdpUrl or a readable DevToolsActivePort file`,
+  throw new BrowserError(
+    `existing-session PDF requires browser.profiles.${profileCtx.profile.name}.cdpUrl or a reachable DevToolsActivePort HTTP CDP endpoint. Chrome MCP pipe sessions do not expose HTTP CDP for PDF generation; use screenshot/snapshot or configure a reachable cdpUrl.`,
+    501,
   );
 }
 
@@ -391,7 +402,11 @@ export function registerBrowserAgentSnapshotRoutes(
           enforceCurrentUrlAllowed: true,
           run: async ({ cdpUrl, tab }) => {
             const pdf = await printPdfViaCdp({
-              cdpUrl: resolveExistingSessionPdfCdpUrl(profileCtx, cdpUrl),
+              cdpUrl: await resolveExistingSessionPdfCdpUrl(
+                profileCtx,
+                cdpUrl,
+                ctx.state().resolved.ssrfPolicy,
+              ),
               targetId: tab.targetId,
               targetUrl: tab.url,
             });

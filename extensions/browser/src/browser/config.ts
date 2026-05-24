@@ -16,7 +16,7 @@ import {
   deriveDefaultBrowserControlPort,
 } from "../config/port-defaults.js";
 import type { SsrFPolicy } from "../infra/net/ssrf.js";
-import { resolveUserPath } from "../utils.js";
+import { CONFIG_DIR, resolveUserPath } from "../utils.js";
 import { parseBooleanValue } from "../utils/boolean.js";
 import { parseBrowserHttpUrl, redactCdpUrl, isLoopbackHost } from "./cdp.helpers.js";
 import {
@@ -105,8 +105,9 @@ export type ResolvedBrowserProfile = {
   executablePath?: string;
   headless: boolean;
   headlessSource?: "profile" | "config" | "default";
-  noSandbox: boolean;
+  noSandbox?: boolean;
   attachOnly: boolean;
+  cleanupBrowserProcesses?: boolean;
 };
 
 const DEFAULT_BROWSER_CDP_PORT_RANGE_START = 18800;
@@ -327,6 +328,16 @@ function ensureDefaultUserBrowserProfile(
   return result;
 }
 
+function isOpenClawManagedUserDataDir(profileName: string, userDataDir?: string): boolean {
+  if (!userDataDir) {
+    return false;
+  }
+  return (
+    path.resolve(userDataDir) ===
+    path.resolve(path.join(CONFIG_DIR, "browser", profileName, "user-data"))
+  );
+}
+
 export function resolveBrowserConfig(
   cfg: BrowserConfig | undefined,
   rootConfig?: OpenClawConfig,
@@ -472,13 +483,14 @@ export function resolveProfile(
 
   if (driver === "existing-session") {
     const existingSessionCdp = normalizeExistingSessionCdpUrl(rawProfileUrl, profileName);
+    const userDataDir = resolveUserPath(profile.userDataDir?.trim() || "") || undefined;
     return {
       name: profileName,
       cdpPort: 0,
       cdpUrl: existingSessionCdp?.cdpUrl ?? "",
       cdpHost: existingSessionCdp?.cdpHost ?? "",
       cdpIsLoopback: existingSessionCdp?.cdpIsLoopback ?? true,
-      userDataDir: resolveUserPath(profile.userDataDir?.trim() || "") || undefined,
+      userDataDir,
       mcpCommand: normalizeOptionalString(profile.mcpCommand),
       mcpArgs: normalizeStringList(profile.mcpArgs) ?? undefined,
       color: profile.color,
@@ -488,6 +500,9 @@ export function resolveProfile(
       headlessSource,
       noSandbox: resolved.noSandbox,
       attachOnly: true,
+      ...(isOpenClawManagedUserDataDir(profileName, userDataDir)
+        ? { cleanupBrowserProcesses: true }
+        : {}),
     };
   }
 
