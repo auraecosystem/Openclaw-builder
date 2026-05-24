@@ -37,6 +37,10 @@ vi.mock("../logger.js", () => ({
 
 vi.mock("../agents/pi-tools.js", () => ({
   resolveToolLoopDetectionConfig,
+  // Read-only HTTP wiring (added by this PR). Cron-regression tests don't
+  // exercise the coding-tool path — return an empty list so the resolver's
+  // post-construction filter (.filter(t => t.name === "read")) is a no-op.
+  createOpenClawCodingToolsRaw: () => [],
 }));
 
 vi.mock("../agents/pi-tools.before-tool-call.js", () => ({

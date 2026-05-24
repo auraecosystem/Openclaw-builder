@@ -93,18 +93,39 @@ export function collectGatewayConfigFindings(
   const reenabledOverHttp = DEFAULT_GATEWAY_HTTP_TOOL_DENY.filter((name) =>
     gatewayToolsAllow.has(name),
   );
-  if (reenabledOverHttp.length > 0) {
+  // Split read-only data-exposure tools from RCE / session-orchestration tools
+  // because the appropriate review for each is different (workspace content
+  // exposure vs. remote command execution / session spawning).
+  const reenabledReadOnly = reenabledOverHttp.filter((name) => name === "read");
+  const reenabledOrchestration = reenabledOverHttp.filter((name) => name !== "read");
+  if (reenabledOrchestration.length > 0) {
     const extraRisk = bind !== "loopback" || tailscaleMode === "funnel";
     findings.push({
       checkId: "gateway.tools_invoke_http.dangerous_allow",
       severity: extraRisk ? "critical" : "warn",
       title: "Gateway HTTP /tools/invoke re-enables dangerous tools",
       detail:
-        `gateway.tools.allow includes ${reenabledOverHttp.join(", ")} which removes them from the default HTTP deny list. ` +
+        `gateway.tools.allow includes ${reenabledOrchestration.join(", ")} which removes them from the default HTTP deny list. ` +
         "This can allow remote session spawning / control-plane actions via HTTP and increases RCE blast radius if the gateway is reachable.",
       remediation:
         "Remove these entries from gateway.tools.allow (recommended). " +
         "If you keep them enabled, keep gateway.bind loopback-only (or tailnet-only), restrict network exposure, and treat the gateway token/password as full-admin.",
+    });
+  }
+  if (reenabledReadOnly.length > 0) {
+    const extraRisk = bind !== "loopback" || tailscaleMode === "funnel";
+    findings.push({
+      checkId: "gateway.tools_invoke_http.host_read_allow",
+      severity: extraRisk ? "warn" : "warn",
+      title: "Gateway direct-invoke exposes host file reads",
+      detail:
+        "gateway.tools.allow includes read which exposes host filesystem read access over the authenticated direct-invoke surface — applies to BOTH HTTP POST /tools/invoke AND SDK RPC tools.invoke (they share the resolver via tools-invoke-shared.ts). " +
+        "By default the coding `read` tool is NOT confined to the workspace — it can read any file the gateway process can access on the host (config files, secrets, SSH keys, environment files, etc.). " +
+        "Threat shape is information disclosure (not RCE / session orchestration): callers with the gateway bearer credential can read any file the gateway user can read.",
+      remediation:
+        "Confirm host file content reachable by the gateway process is safe to expose over this surface. " +
+        "If not, remove read from gateway.tools.allow. " +
+        "If retained, also set `tools.fs.workspaceOnly: true` to confine reads to the workspace, keep gateway.bind loopback-only (or tailnet-only), and treat the gateway token as host-file-read-capable.",
     });
   }
   if (bind !== "loopback" && !hasSharedSecret && auth.mode !== "trusted-proxy") {

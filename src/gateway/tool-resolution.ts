@@ -1,5 +1,10 @@
-import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
+import {
+  resolveAgentDir,
+  resolveAgentWorkspaceDir,
+  resolveDefaultAgentId,
+} from "../agents/agent-scope.js";
 import { createOpenClawTools } from "../agents/openclaw-tools.js";
+import { createOpenClawCodingToolsRaw } from "../agents/pi-tools.js";
 import {
   resolveEffectiveToolPolicy,
   resolveGroupToolPolicy,
@@ -137,7 +142,7 @@ export function resolveGatewayScopedTools(params: {
     gatewayRequestedTools.length > 0 ? { allow: gatewayRequestedTools } : undefined,
   ].some(hasRestrictiveAllowPolicy);
 
-  const allTools = createOpenClawTools({
+  const gatewayTools = createOpenClawTools({
     agentSessionKey: params.sessionKey,
     agentChannel: params.messageProvider ?? undefined,
     agentAccountId: params.accountId,
@@ -168,6 +173,58 @@ export function resolveGatewayScopedTools(params: {
     inheritedToolAllowlist,
     inheritedToolDenylist,
   });
+
+  // Wire the `read` coding tool into the gateway direct-invoke surfaces so it
+  // is reachable for deterministic automation (CI/preflight checks, lint,
+  // browser capture flows) without a full LLM round-trip. This is the narrow
+  // first landing of the broader direct-invoke umbrella tracked in #37131:
+  //
+  // - Only `read` is materialized — write/edit/exec/process are NOT exposed
+  //   by this PR. Maintainer approval for opt-in mutating coding primitives
+  //   is deferred to a follow-up PR per the bot's "Narrow The First Landing"
+  //   rank-up move.
+  // - Gated on `surface === "http"`, which is the **direct-invoke marker**
+  //   set by `tools-invoke-shared.ts` for BOTH the HTTP `POST /tools/invoke`
+  //   route AND the SDK-facing JSON-RPC `tools.invoke` method (they share
+  //   the resolver). The `read` opt-in therefore applies to ALL direct-invoke
+  //   surfaces consistently — same shared-logic pattern established by the
+  //   merged sibling work in #74804. MCP loopback uses `surface === "loopback"`
+  //   and is unaffected.
+  // - Uses `createOpenClawCodingToolsRaw` (unwrapped) — `handleToolsInvokeHttp`
+  //   already calls `runBeforeToolCallHook` itself before dispatch, so the
+  //   tools must arrive unwrapped to avoid double-firing the hook and leaking
+  //   adjusted-params state.
+  // - Existing `gateway.tools.{allow,deny}` policy still applies; this only
+  //   adds `read` to the candidate set the policy filters.
+  // Construction plan limits the factory to just the base coding tool family
+  // (read/write/edit/apply_patch) — no shell (exec/process), no channel,
+  // OpenClaw, or plugin tools. Then we filter to `read`. This addresses
+  // ClawSweeper's [P2] "Pass a read-only construction plan before filtering"
+  // finding: without the plan, the default factory materializes the full set
+  // (shell + channel + OpenClaw + plugins) only to throw them away in the
+  // filter, wasting work and unnecessarily exercising plugin/channel surfaces
+  // for a request that only wants `read`.
+  const codingTools =
+    surface === "http"
+      ? createOpenClawCodingToolsRaw({
+          agentId: agentId ?? resolveDefaultAgentId(params.cfg),
+          sessionKey: params.sessionKey,
+          workspaceDir,
+          agentDir: resolveAgentDir(params.cfg, agentId ?? resolveDefaultAgentId(params.cfg)),
+          config: params.cfg,
+          toolConstructionPlan: {
+            includeBaseCodingTools: true,
+            includeShellTools: false,
+            includeChannelTools: false,
+            includeOpenClawTools: false,
+            includePluginTools: false,
+          },
+        }).filter((tool) => tool.name === "read")
+      : [];
+
+  // Gateway tools take precedence on name collision.
+  const gatewayToolNames = new Set(gatewayTools.map((t) => t.name));
+  const allTools = [...gatewayTools, ...codingTools.filter((t) => !gatewayToolNames.has(t.name))];
 
   const policyFiltered = applyToolPolicyPipeline({
     tools: allTools,
