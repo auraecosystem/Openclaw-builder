@@ -19,6 +19,8 @@ import type { SkillsLimitsConfig } from "./types.skills.js";
 import type { AgentToolsConfig, MemorySearchConfig } from "./types.tools.js";
 import type { TtsConfig } from "./types.tts.js";
 
+export type AgentPluginSlotsConfig = Omit<PluginSlotsConfig, "contextEngine">;
+
 export type AgentRuntimeAcpConfig = {
   /** ACP harness adapter id (for example codex, claude). */
   agent?: string;
@@ -158,7 +160,7 @@ export type AgentConfig = {
   params?: Record<string, unknown>;
   /** Optional per-agent plugin slot overrides. */
   plugins?: {
-    slots?: PluginSlotsConfig;
+    slots?: AgentPluginSlotsConfig;
   };
   tools?: AgentToolsConfig;
   /** Optional runtime descriptor for this agent. */
