@@ -11,6 +11,7 @@ import { createProcessTool } from "./bash-tools.process.js";
 import { processSchema } from "./bash-tools.schemas.js";
 
 const fakeSecretOutput = "OPENAI_API_KEY=sk-proj-redaction-canary-1234567890";
+const fakeFlagSecret = "sk-proj-redaction-canary-abcdefghijklmnopqrstuvwxyz1234567890";
 
 function resultText(result: Awaited<ReturnType<ReturnType<typeof createProcessTool>["execute"]>>) {
   return (result.content[0] as { text?: string }).text ?? "";
@@ -252,6 +253,39 @@ test("process write redacts secret-shaped command-derived details name", async (
   expect(resultText(written)).not.toContain(fakeSecretOutput);
   expect(JSON.stringify(details)).not.toContain(fakeSecretOutput);
   expect(details.name).toContain("OPENAI_API_KEY=");
+});
+
+test("process list, poll, log, and write redact secret-shaped flag values before deriving details name", async () => {
+  const sessionId = "sess-redact-flag-name";
+  const processTool = createProcessTool();
+  const session = createProcessSessionFixture({
+    id: sessionId,
+    command: `tool --api-key ${fakeFlagSecret}`,
+    backgrounded: true,
+  });
+  attachWritableStdin(session);
+  addSession(session);
+
+  const listed = await processTool.execute("toolcall-redact-flag-list", {
+    action: "list",
+  });
+  const polled = await pollSession(processTool, "toolcall-redact-flag-poll", sessionId);
+  const logged = await processTool.execute("toolcall-redact-flag-log", {
+    action: "log",
+    sessionId,
+  });
+  const written = await processTool.execute("toolcall-redact-flag-write", {
+    action: "write",
+    sessionId,
+    data: "input\n",
+  });
+
+  for (const result of [listed, polled, logged, written]) {
+    const serialized = JSON.stringify(result.details);
+    expect(serialized).not.toContain(fakeFlagSecret);
+    expect(serialized).not.toContain("abcdefghijklmnopqrstuvwxyz1234567890");
+    expect(serialized).toContain("sk-pro…7890");
+  }
 });
 
 test("process poll exposes adaptive retryInMs for repeated no-output polls", async () => {

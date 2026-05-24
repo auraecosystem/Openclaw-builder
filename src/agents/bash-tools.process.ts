@@ -16,11 +16,11 @@ import {
   setJobTtlMs,
 } from "./bash-process-registry.js";
 import { describeProcessTool } from "./bash-tools.descriptions.js";
+import { deriveRedactedProcessSessionName } from "./bash-tools.process-redaction.js";
 import { handleProcessSendKeys, type WritableStdin } from "./bash-tools.process-send-keys.js";
 import { processSchema } from "./bash-tools.schemas.js";
 import {
   clampWithDefault,
-  deriveSessionName,
   pad,
   readEnvInt,
   sliceLogLines,
@@ -68,7 +68,7 @@ function redactProcessToolDetails<T>(details: T): T {
 }
 
 function redactProcessSessionName(command: string): string | undefined {
-  return redactSecrets(deriveSessionName(command));
+  return deriveRedactedProcessSessionName(command);
 }
 
 type RunningSessionRuntime = {

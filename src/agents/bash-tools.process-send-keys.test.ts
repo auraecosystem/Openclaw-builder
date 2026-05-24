@@ -3,6 +3,7 @@ import { createProcessSessionFixture } from "./bash-process-registry.test-helper
 import { handleProcessSendKeys, type WritableStdin } from "./bash-tools.process-send-keys.js";
 
 const fakeSecretOutput = "OPENAI_API_KEY=sk-proj-redaction-canary-1234567890";
+const fakeFlagSecret = "sk-proj-redaction-canary-abcdefghijklmnopqrstuvwxyz1234567890";
 
 function createWritableStdinStub(): WritableStdin {
   return {
@@ -69,4 +70,22 @@ test("process send-keys redacts secret-shaped command-derived details name", asy
   expect((result.content[0] as { text?: string }).text).not.toContain(fakeSecretOutput);
   expect(JSON.stringify(details)).not.toContain(fakeSecretOutput);
   expect(details.name).toContain("OPENAI_API_KEY=");
+});
+
+test("process send-keys redacts secret-shaped flag values before deriving details name", async () => {
+  const result = await handleProcessSendKeys({
+    sessionId: "sess-redact-send-keys-flag-name",
+    session: createProcessSessionFixture({
+      id: "sess-redact-send-keys-flag-name",
+      command: `tool --api-key ${fakeFlagSecret}`,
+      backgrounded: true,
+    }),
+    stdin: createWritableStdinStub(),
+    keys: ["Enter"],
+  });
+  const details = result.details as { name?: string };
+
+  expect(JSON.stringify(details)).not.toContain(fakeFlagSecret);
+  expect(JSON.stringify(details)).not.toContain("abcdefghijklmnopqrstuvwxyz1234567890");
+  expect(details.name).toContain("sk-pro…7890");
 });
