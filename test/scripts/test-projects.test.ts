@@ -10,6 +10,7 @@ import {
   buildFullSuiteVitestRunPlans,
   buildVitestArgs,
   buildVitestRunPlans,
+  findUnmatchedExplicitTestTargets,
   listFullExtensionVitestProjectConfigs,
   orderFullSuiteSpecsForParallelRun,
   shouldAcquireLocalHeavyCheckLock,
@@ -1361,6 +1362,25 @@ describe("scripts/test-projects full-suite sharding", () => {
           includePatterns: null,
           watchMode: false,
         })),
+    );
+  });
+
+  it("runs explicit leaf project config targets as whole configs", () => {
+    const args = [
+      "test/vitest/vitest.agents-core.config.ts",
+      "test/vitest/vitest.agents-pi-embedded.config.ts",
+      "test/vitest/vitest.agents-support.config.ts",
+      "test/vitest/vitest.agents-tools.config.ts",
+    ];
+
+    expect(findUnmatchedExplicitTestTargets(args, process.cwd())).toEqual([]);
+    expect(buildVitestRunPlans(args, process.cwd())).toEqual(
+      args.map((config) => ({
+        config,
+        forwardedArgs: [],
+        includePatterns: null,
+        watchMode: false,
+      })),
     );
   });
 
