@@ -2898,7 +2898,6 @@ main() {
     fi
     if [[ "$run_doctor_after" == "true" ]]; then
         run_doctor
-        should_open_dashboard=true
     fi
 
     # Step 7: If BOOTSTRAP.md is still present in the workspace, resume onboarding
