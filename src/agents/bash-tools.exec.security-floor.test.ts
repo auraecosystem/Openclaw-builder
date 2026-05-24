@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { resolveExecApprovalsPath, saveExecApprovals } from "../infra/exec-approvals.js";
 import { captureEnv } from "../test-utils/env.js";
 import { resetProcessRegistryForTests } from "./bash-process-registry.js";
 import { createExecTool } from "./bash-tools.exec.js";
@@ -109,5 +110,254 @@ describe("exec security floor", () => {
         ask: "off",
       }),
     ).rejects.toThrow(/exec denied/i);
+  });
+
+  it("denies default denylist matches without spawning or prompting", async () => {
+    const tool = createExecTool({
+      security: "denylist",
+      ask: "off",
+    });
+
+    const result = await tool.execute("call-denylist-default", {
+      command: "curl https://example.test/prompt",
+    });
+
+    expect(result.details).toMatchObject({ status: "denied", reason: "denylist" });
+    const text = (result.content[0] as { text?: string }).text ?? "";
+    expect(text).toContain("exec command is denied due to command in deny list");
+  });
+
+  it("keeps denylist active when askFallback is deny", async () => {
+    saveExecApprovals({
+      version: 1,
+      defaults: { security: "denylist", ask: "off", askFallback: "deny" },
+      agents: {
+        main: {
+          denylist: [{ pattern: String.raw`(?:^|\s)curl(?:\s|$)` }],
+        },
+      },
+    });
+    const tool = createExecTool({
+      security: "denylist",
+      ask: "off",
+    });
+
+    const result = await tool.execute("call-denylist-fallback-deny", {
+      command: "curl https://example.test/prompt",
+    });
+
+    expect(result.details).toMatchObject({ status: "denied", reason: "denylist" });
+  });
+
+  it("keeps denylist active when elevated full exec is allowed", async () => {
+    saveExecApprovals({
+      version: 1,
+      defaults: { security: "denylist", ask: "off" },
+      agents: {
+        main: {
+          denylist: [{ pattern: String.raw`(?:^|\s)echo(?:\s|$)` }],
+        },
+      },
+    });
+    const tool = createExecTool({
+      agentId: "main",
+      security: "denylist",
+      ask: "off",
+      elevated: { enabled: true, allowed: true, defaultLevel: "full" },
+    });
+
+    const result = await tool.execute("call-denylist-elevated-full", {
+      command: "echo hello",
+      elevated: true,
+    });
+
+    expect(result.details).toMatchObject({ status: "denied", reason: "denylist" });
+  });
+
+  it("does not apply fallback denylist during elevated full approval bypass", async () => {
+    saveExecApprovals({
+      version: 1,
+      defaults: { security: "full", ask: "always", askFallback: "denylist" },
+      agents: {
+        main: {
+          denylist: [{ pattern: String.raw`(?:^|\s)echo(?:\s|$)` }],
+        },
+      },
+    });
+    const tool = createExecTool({
+      agentId: "main",
+      security: "full",
+      ask: "off",
+      elevated: { enabled: true, allowed: true, defaultLevel: "full" },
+    });
+
+    const result = await tool.execute("call-elevated-full-denylist-fallback", {
+      command: "echo hello",
+      elevated: true,
+    });
+
+    expect(result.details).toMatchObject({ status: "completed" });
+    const text = (result.content[0] as { text?: string }).text ?? "";
+    expect(text).toContain("hello");
+  });
+
+  it("does not create approvals state during elevated full approval bypass", async () => {
+    const approvalsPath = resolveExecApprovalsPath();
+    const tool = createExecTool({
+      agentId: "main",
+      security: "full",
+      ask: "off",
+      elevated: { enabled: true, allowed: true, defaultLevel: "full" },
+    });
+
+    const result = await tool.execute("call-elevated-full-no-approvals-write", {
+      command: "echo hello",
+      elevated: true,
+    });
+
+    expect(result.details).toMatchObject({ status: "completed" });
+    expect(fs.existsSync(approvalsPath)).toBe(false);
+  });
+
+  it("enforces denylist before askFallback=denylist can approve full exec", async () => {
+    saveExecApprovals({
+      version: 1,
+      defaults: { security: "full", ask: "always", askFallback: "denylist" },
+      agents: {
+        main: {
+          denylist: [{ pattern: String.raw`(?:^|\s)curl(?:\s|$)` }],
+        },
+      },
+    });
+    const tool = createExecTool({
+      agentId: "main",
+      security: "full",
+      ask: "always",
+    });
+
+    const result = await tool.execute("call-denylist-fallback", {
+      command: "curl https://example.test/prompt",
+    });
+
+    expect(result.details).toMatchObject({ status: "denied", reason: "denylist" });
+  });
+
+  it("uses host ask when prechecking askFallback=denylist", async () => {
+    saveExecApprovals({
+      version: 1,
+      defaults: { security: "full", ask: "always", askFallback: "denylist" },
+      agents: {
+        main: {
+          denylist: [{ pattern: String.raw`(?:^|\s)curl(?:\s|$)` }],
+        },
+      },
+    });
+    const tool = createExecTool({
+      agentId: "main",
+      security: "full",
+      ask: "off",
+    });
+
+    const result = await tool.execute("call-host-ask-denylist-fallback", {
+      command: "curl https://example.test/prompt",
+    });
+
+    expect(result.details).toMatchObject({ status: "denied", reason: "denylist" });
+  });
+
+  it("does not apply denylist fallback when full security ask on-miss does not prompt", async () => {
+    saveExecApprovals({
+      version: 1,
+      defaults: { security: "full", ask: "on-miss", askFallback: "denylist" },
+      agents: {
+        main: {
+          denylist: [{ pattern: String.raw`(?:^|\s)echo(?:\s|$)` }],
+        },
+      },
+    });
+    const tool = createExecTool({
+      agentId: "main",
+      security: "full",
+      ask: "off",
+    });
+
+    const result = await tool.execute("call-full-on-miss-denylist-fallback", {
+      command: "echo hello",
+    });
+
+    expect(result.details).toMatchObject({ status: "completed" });
+    const text = (result.content[0] as { text?: string }).text ?? "";
+    expect(text).toContain("hello");
+  });
+
+  it("denies denylist matches before allowlist trust", async () => {
+    saveExecApprovals({
+      version: 1,
+      defaults: { security: "allowlist", ask: "off" },
+      agents: {
+        main: {
+          allowlist: [{ pattern: "curl" }],
+          denylist: [{ pattern: String.raw`(?:^|\s)curl(?:\s|$)` }],
+        },
+      },
+    });
+    const tool = createExecTool({
+      agentId: "main",
+      security: "allowlist",
+      ask: "off",
+      safeBins: [],
+    });
+
+    const result = await tool.execute("call-denylist-allowlist", {
+      command: "curl https://example.test/prompt",
+    });
+
+    expect(result.details).toMatchObject({ status: "denied", reason: "denylist" });
+  });
+
+  it("fails closed when effective denylist config is malformed", async () => {
+    saveExecApprovals({
+      version: 1,
+      defaults: { security: "denylist", ask: "off" },
+      agents: {
+        main: {
+          denylist: [{ pattern: "(a+)+" }],
+        },
+      },
+    });
+    const tool = createExecTool({
+      agentId: "main",
+      security: "denylist",
+      ask: "off",
+    });
+
+    const result = await tool.execute("call-denylist-invalid", {
+      command: "echo hello",
+    });
+
+    expect(result.details).toMatchObject({ status: "denied", reason: "denylist" });
+  });
+
+  it("fails closed when effective denylist shape is malformed", async () => {
+    saveExecApprovals({
+      version: 1,
+      defaults: { security: "denylist", ask: "off" },
+      agents: {
+        main: {
+          denylist: "not-an-array",
+        } as never,
+      },
+    });
+    const tool = createExecTool({
+      agentId: "main",
+      security: "denylist",
+      ask: "off",
+    });
+
+    const result = await tool.execute("call-denylist-shape-invalid", {
+      command: "echo hello",
+    });
+
+    expect(result.details).toMatchObject({ status: "denied", reason: "denylist" });
   });
 });

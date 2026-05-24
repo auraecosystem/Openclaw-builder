@@ -23,9 +23,7 @@ export function resolvePluginMetadataControlPlaneFingerprint(
   });
 }
 
-export function isReusableCurrentPluginMetadataSnapshot(
-  snapshot: PluginMetadataSnapshot,
-): boolean {
+export function isReusableCurrentPluginMetadataSnapshot(snapshot: PluginMetadataSnapshot): boolean {
   return snapshot.registrySource !== "derived";
 }
 

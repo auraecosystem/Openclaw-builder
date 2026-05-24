@@ -562,7 +562,7 @@ const ToolExecSafeBinProfileSchema = z
 
 const ToolExecBaseShape = {
   host: z.enum(["auto", "sandbox", "gateway", "node"]).optional(),
-  security: z.enum(["deny", "allowlist", "full"]).optional(),
+  security: z.enum(["deny", "denylist", "allowlist", "full"]).optional(),
   ask: z.enum(["off", "on-miss", "always"]).optional(),
   node: z.string().optional(),
   pathPrepend: z.array(z.string()).optional(),
@@ -576,6 +576,7 @@ const ToolExecBaseShape = {
   cleanupMs: z.number().int().positive().optional(),
   notifyOnExit: z.boolean().optional(),
   notifyOnExitEmptySuccess: z.boolean().optional(),
+  logDenylistDenials: z.boolean().optional(),
   applyPatch: ToolExecApplyPatchSchema,
 } as const;
 

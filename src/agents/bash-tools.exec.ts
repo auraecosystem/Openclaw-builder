@@ -11,14 +11,17 @@ import {
   loadExecApprovals,
   maxAsk,
   requireValidExecTarget,
+  minSecurity,
+  resolveExecApprovalsReadOnly,
 } from "../infra/exec-approvals.js";
+import { evaluateExecDenylist } from "../infra/exec-denylist.js";
 import { resolveExecSafeBinRuntimePolicy } from "../infra/exec-safe-bin-runtime-policy.js";
 import { sanitizeHostExecEnvWithDiagnostics } from "../infra/host-env-security.js";
 import {
   getShellPathFromLoginShell,
   resolveShellEnvFallbackTimeoutMs,
 } from "../infra/shell-env.js";
-import { logInfo } from "../logger.js";
+import { logInfo, logWarn } from "../logger.js";
 import { parseAgentSessionKey, resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import {
@@ -90,6 +93,48 @@ function buildExecForegroundResult(params: {
     aggregated: params.outcome.aggregated,
     cwd: params.cwd,
   });
+}
+
+function shouldEvaluateExecDenylist(security: ExecSecurity): boolean {
+  return security === "denylist" || security === "allowlist";
+}
+
+function buildExecDenylistDeniedResult(params: {
+  host: ExecHost;
+  cwd?: string;
+  nodeId?: string;
+}): AgentToolResult<ExecToolDetails> {
+  return textResult("exec command is denied due to command in deny list", {
+    status: "denied",
+    reason: "denylist",
+    host: params.host,
+    cwd: params.cwd,
+    nodeId: params.nodeId,
+  });
+}
+
+function logExecDenylistDecision(params: {
+  decision: ReturnType<typeof evaluateExecDenylist>;
+  agentId?: string;
+  host: ExecHost;
+  trigger?: string;
+}) {
+  if (!params.decision.denied) {
+    return;
+  }
+  const parts = [
+    "exec denylist: denied command",
+    `hash=${params.decision.commandHash}`,
+    `length=${params.decision.commandLength}`,
+    `host=${params.host}`,
+    params.agentId ? `agent=${params.agentId}` : undefined,
+    params.trigger ? `trigger=${params.trigger}` : undefined,
+    params.decision.invalid ? `invalid=${params.decision.reason}` : undefined,
+    typeof params.decision.ruleIndex === "number"
+      ? `ruleIndex=${params.decision.ruleIndex}`
+      : undefined,
+  ].filter(Boolean);
+  logWarn(parts.join(" "));
 }
 
 const PREFLIGHT_ENV_OPTIONS_WITH_VALUES = new Set([
@@ -1261,6 +1306,7 @@ export function createExecTool(
   }
   const notifyOnExit = defaults?.notifyOnExit !== false;
   const notifyOnExitEmptySuccess = defaults?.notifyOnExitEmptySuccess === true;
+  const logDenylistDenials = defaults?.logDenylistDenials !== false;
   const notifySessionKey = normalizeOptionalString(defaults?.sessionKey);
   const notifyDeliveryContext = normalizeDeliveryContext({
     channel: defaults?.messageProvider,
@@ -1521,6 +1567,53 @@ export function createExecTool(
         applyPathPrepend(env, defaultPathPrepend);
       }
 
+      const resolvedApprovalsForDenylist = resolveExecApprovalsReadOnly(agentId, {
+        security: configuredSecurity,
+        ask,
+      });
+      const hostSecurityForDenylist =
+        host === "sandbox"
+          ? configuredSecurity
+          : minSecurity(configuredSecurity, resolvedApprovalsForDenylist.agent.security);
+      const hostAskForDenylist = bypassApprovals
+        ? "off"
+        : host === "sandbox"
+          ? ask
+          : maxAsk(ask, resolvedApprovalsForDenylist.agent.ask);
+      const askFallbackForDenylist = minSecurity(
+        hostSecurityForDenylist,
+        resolvedApprovalsForDenylist.agent.askFallback,
+      );
+      const shouldEvaluateFallbackDenylist =
+        hostSecurityForDenylist === "full" &&
+        hostAskForDenylist === "always" &&
+        askFallbackForDenylist === "denylist";
+      const denylistFallbackPrechecked =
+        shouldEvaluateExecDenylist(hostSecurityForDenylist) || shouldEvaluateFallbackDenylist;
+      if (denylistFallbackPrechecked) {
+        const denyDecision = evaluateExecDenylist({
+          command: params.command,
+          denylist: resolvedApprovalsForDenylist.denylist,
+          cwd: workdir,
+          env,
+        });
+        if (denyDecision.denied) {
+          if (logDenylistDenials) {
+            logExecDenylistDecision({
+              decision: denyDecision,
+              agentId,
+              host,
+              trigger: defaults?.trigger,
+            });
+          }
+          return buildExecDenylistDeniedResult({
+            host,
+            cwd: workdir,
+            nodeId: host === "node" ? params.node?.trim() || defaults?.node?.trim() : undefined,
+          });
+        }
+      }
+
       if (host === "node") {
         return executeNodeHostCommand({
           command: params.command,
@@ -1548,6 +1641,8 @@ export function createExecTool(
           notifySessionKey,
           notifyOnExit,
           trustedSafeBinDirs,
+          denylistFallbackPrechecked,
+          denylistFallbackDenylist: resolvedApprovalsForDenylist.denylist,
         });
       }
 
@@ -1589,6 +1684,7 @@ export function createExecTool(
           maxOutput,
           pendingMaxOutput,
           trustedSafeBinDirs,
+          denylistFallbackPrechecked,
         });
         if (gatewayResult.pendingResult) {
           return gatewayResult.pendingResult;

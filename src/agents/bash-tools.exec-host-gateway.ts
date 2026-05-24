@@ -5,6 +5,7 @@ import {
   addDurableCommandApproval,
   analyzeShellCommand,
   type ExecAsk,
+  type ExecHost,
   resolveExecApprovalAllowedDecisions,
   type ExecSecurity,
   buildEnforcedShellCommand,
@@ -15,6 +16,7 @@ import {
   resolveApprovalAuditTrustPath,
   requiresExecApproval,
 } from "../infra/exec-approvals.js";
+import { evaluateExecDenylist } from "../infra/exec-denylist.js";
 import type { SafeBinProfile } from "../infra/exec-safe-bin-policy.js";
 import { INTERNAL_MESSAGE_CHANNEL, normalizeMessageChannel } from "../utils/message-channel.js";
 import { markBackgrounded, tail } from "./bash-process-registry.js";
@@ -48,6 +50,7 @@ import type {
   ExecApprovalFollowupOutcome,
   ExecToolDetails,
 } from "./bash-tools.exec-types.js";
+import { textResult } from "./tools/common.js";
 
 export type ProcessGatewayAllowlistParams = {
   command: string;
@@ -82,6 +85,7 @@ export type ProcessGatewayAllowlistParams = {
   maxOutput: number;
   pendingMaxOutput: number;
   trustedSafeBinDirs?: ReadonlySet<string>;
+  denylistFallbackPrechecked?: boolean;
 };
 
 export type ProcessGatewayAllowlistResult = {
@@ -102,6 +106,18 @@ function hasGatewayAllowlistMiss(params: {
     (!params.analysisOk || !params.allowlistSatisfied) &&
     !params.durableApprovalSatisfied
   );
+}
+
+function buildExecDenylistDeniedResult(params: {
+  host: ExecHost;
+  cwd?: string;
+}): AgentToolResult<ExecToolDetails> {
+  return textResult("exec command is denied due to command in deny list", {
+    status: "denied",
+    reason: "denylist",
+    host: params.host,
+    cwd: params.cwd,
+  });
 }
 
 function normalizeCommandName(value: string | undefined): string {
@@ -509,6 +525,25 @@ export async function processGatewayAllowlist(
     );
   }
 
+  let denylistFallbackPrechecked = params.denylistFallbackPrechecked === true;
+  if (requiresAsk && askFallback === "denylist" && !denylistFallbackPrechecked) {
+    const denyDecision = evaluateExecDenylist({
+      command: params.command,
+      denylist: approvals.denylist,
+      cwd: params.workdir,
+      env: params.env,
+    });
+    denylistFallbackPrechecked = true;
+    if (denyDecision.denied) {
+      return {
+        pendingResult: buildExecDenylistDeniedResult({
+          host: "gateway",
+          cwd: params.workdir,
+        }),
+      };
+    }
+  }
+
   if (requiresAsk) {
     const requestArgs = buildDefaultExecApprovalRequestArgs({
       warnings: params.warnings,
@@ -561,6 +596,7 @@ export async function processGatewayAllowlist(
       const { baseDecision, approvedByAsk, deniedReason } = createExecApprovalDecisionState({
         decision: preResolvedDecision,
         askFallback,
+        denylistFallbackPrechecked,
       });
       const strictInlineEvalDecision = enforceStrictInlineEvalApprovalBoundary({
         baseDecision,
@@ -613,6 +649,7 @@ export async function processGatewayAllowlist(
       } = createExecApprovalDecisionState({
         decision,
         askFallback,
+        denylistFallbackPrechecked,
       });
       let approvedByAsk = initialApprovedByAsk;
       let deniedReason = initialDeniedReason;

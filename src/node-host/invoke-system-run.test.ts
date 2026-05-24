@@ -438,7 +438,7 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
     rawCommand?: string | null;
     systemRunPlan?: SystemRunApprovalPlan | null;
     cwd?: string;
-    security?: "full" | "allowlist";
+    security?: "full" | "denylist" | "allowlist";
     ask?: "off" | "on-miss" | "always";
     approvalDecision?: "allow" | "allow-always" | "deny" | null;
     approved?: boolean;
@@ -570,6 +570,70 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
     expect(shellWrapperCall.request?.rawCommand).toBe(
       '/bin/sh -lc "$0 \\"$1\\"" /usr/bin/touch /tmp/marker',
     );
+  });
+
+  it("denies node system.run denylist matches before execution", async () => {
+    const invoke = await runSystemInvoke({
+      preferMacAppExecHost: false,
+      command: ["curl", "https://example.test/prompt"],
+      security: "denylist",
+      ask: "off",
+    });
+
+    expect(invoke.runCommand).not.toHaveBeenCalled();
+    expectInvokeErrorMessage(invoke.sendInvokeResult, {
+      message: "exec command is denied due to command in deny list",
+    });
+  });
+
+  it("does not let broader host approvals bypass requested denylist security", async () => {
+    const approvals = loadExecApprovals();
+    saveExecApprovals({
+      ...approvals,
+      agents: {
+        ...approvals.agents,
+        main: {
+          security: "full",
+          ask: "off",
+        },
+      },
+    });
+
+    const invoke = await runSystemInvoke({
+      preferMacAppExecHost: false,
+      command: ["curl", "https://example.test/prompt"],
+      security: "denylist",
+      ask: "off",
+    });
+
+    expect(invoke.runCommand).not.toHaveBeenCalled();
+    expectInvokeErrorMessage(invoke.sendInvokeResult, {
+      message: "exec command is denied due to command in deny list",
+    });
+  });
+
+  it("does not let host approvals broaden configured ask policy", async () => {
+    const approvals = loadExecApprovals();
+    saveExecApprovals({
+      ...approvals,
+      defaults: {
+        security: "full",
+        ask: "off",
+        askFallback: "full",
+      },
+    });
+
+    const invoke = await runSystemInvoke({
+      preferMacAppExecHost: false,
+      command: ["echo", "ok"],
+      security: "full",
+      ask: "always",
+    });
+
+    expect(invoke.runCommand).not.toHaveBeenCalled();
+    expectInvokeErrorMessage(invoke.sendInvokeResult, {
+      message: "SYSTEM_RUN_DENIED: approval required",
+    });
   });
 
   const approvedEnvShellWrapperCases = [

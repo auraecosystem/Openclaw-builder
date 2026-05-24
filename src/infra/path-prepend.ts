@@ -65,9 +65,7 @@ export function removePathPrepend(
     return existing;
   }
 
-  const prependEntries = new Set<string>(
-    prepend.map((part) => part.trim()).filter(Boolean),
-  );
+  const prependEntries = new Set<string>(prepend.map((part) => part.trim()).filter(Boolean));
 
   const remaining: string[] = (existing ?? "")
     .split(path.delimiter)

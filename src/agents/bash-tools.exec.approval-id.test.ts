@@ -269,7 +269,7 @@ async function expectGatewayExecWithoutApproval(options: {
   config: Record<string, unknown>;
   command: string;
   ask?: "always" | "on-miss" | "off";
-  security?: "allowlist" | "full";
+  security?: "denylist" | "allowlist" | "full";
 }) {
   await writeExecApprovalsConfig(options.config);
   const calls: string[] = [];
@@ -679,7 +679,7 @@ describe("exec approvals", () => {
     const cases: Array<{
       config: Record<string, unknown>;
       ask?: "always" | "on-miss" | "off";
-      security?: "allowlist" | "full";
+      security?: "denylist" | "allowlist" | "full";
     }> = [
       {
         config: {

@@ -10,6 +10,7 @@ import { resolveGatewayAuth } from "../gateway/auth.js";
 import { isLoopbackHost, resolveGatewayBindHost } from "../gateway/net.js";
 import { resolveExecPolicyScopeSnapshot } from "../infra/exec-approvals-effective.js";
 import { loadExecApprovals, type ExecAsk, type ExecSecurity } from "../infra/exec-approvals.js";
+import { evaluateExecDenylist } from "../infra/exec-denylist.js";
 import { isLikelySensitiveModelProviderHeaderName } from "../secrets/model-provider-header-policy.js";
 import { hasConfiguredPlaintextSecretValue } from "../secrets/secret-value.js";
 import { discoverConfigSecretTargets } from "../secrets/target-registry.js";
@@ -63,8 +64,10 @@ function execSecurityRank(value: ExecSecurity): number {
       return 0;
     case "allowlist":
       return 1;
-    case "full":
+    case "denylist":
       return 2;
+    case "full":
+      return 3;
   }
   throw new Error("Unsupported exec security value");
 }
@@ -171,6 +174,32 @@ function collectDurableExecApprovalWarnings(cfg: OpenClawConfig): string[] {
   return [];
 }
 
+function collectExecDenylistValidationWarnings(): string[] {
+  const approvals = loadExecApprovals();
+  const warnings: string[] = [];
+  for (const [agentKey, agent] of Object.entries(approvals.agents ?? {})) {
+    const denylist = Array.isArray(agent.denylist) ? agent.denylist : [];
+    if (denylist.length === 0) {
+      continue;
+    }
+    const decision = evaluateExecDenylist({
+      command: "openclaw-doctor-denylist-validation",
+      denylist,
+    });
+    if (decision.denied && decision.invalid) {
+      const ruleText = typeof decision.ruleIndex === "number" ? ` rule ${decision.ruleIndex}` : "";
+      warnings.push(
+        [
+          `- exec-approvals agents.${agentKey}.denylist is invalid (${decision.reason}${ruleText}).`,
+          "  Exec denylist mode fails closed until a human operator fixes or removes the invalid rule.",
+          `  Inspect with: ${formatCliCommand("openclaw approvals get --gateway")}`,
+        ].join("\n"),
+      );
+    }
+  }
+  return warnings;
+}
+
 function collectExecFilesystemPolicyWarnings(cfg: OpenClawConfig): string[] {
   return collectExecFilesystemPolicyDriftHits(cfg).map((hit) =>
     [
@@ -244,6 +273,7 @@ export async function collectSecurityWarnings(
 
   warnings.push(...collectImplicitHeartbeatDirectPolicyWarnings(cfg));
   warnings.push(...collectExecPolicyConflictWarnings(cfg));
+  warnings.push(...collectExecDenylistValidationWarnings());
   warnings.push(...collectExecFilesystemPolicyWarnings(cfg));
   warnings.push(...collectPlaintextConfigSecretWarnings(cfg));
   warnings.push(...collectDurableExecApprovalWarnings(cfg));

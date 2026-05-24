@@ -844,9 +844,9 @@ export function buildBuiltinChatCommands(
         },
         {
           name: "security",
-          description: "deny, allowlist, or full",
+          description: "deny, denylist, allowlist, or full",
           type: "string",
-          choices: ["deny", "allowlist", "full"],
+          choices: ["deny", "denylist", "allowlist", "full"],
         },
         {
           name: "ask",
