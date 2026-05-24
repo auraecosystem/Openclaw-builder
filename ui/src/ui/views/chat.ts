@@ -376,6 +376,7 @@ interface ChatEphemeralState {
   searchOpen: boolean;
   searchQuery: string;
   pinnedExpanded: boolean;
+  composerComposing: boolean;
 }
 
 function createChatEphemeralState(): ChatEphemeralState {
@@ -390,6 +391,7 @@ function createChatEphemeralState(): ChatEphemeralState {
     searchOpen: false,
     searchQuery: "",
     pinnedExpanded: false,
+    composerComposing: false,
   };
 }
 
@@ -1400,11 +1402,25 @@ export function renderChat(props: ChatProps) {
     }
   };
 
-  const handleInput = (e: Event) => {
-    const target = e.target as HTMLTextAreaElement;
+  const syncComposerValue = (target: HTMLTextAreaElement) => {
     adjustTextareaHeight(target);
     updateSlashMenu(target.value, requestUpdate);
     props.onDraftChange(target.value);
+  };
+
+  const handleInput = (e: InputEvent) => {
+    const target = e.target as HTMLTextAreaElement;
+    adjustTextareaHeight(target);
+    updateSlashMenu(target.value, requestUpdate);
+    if (vs.composerComposing || e.isComposing) {
+      return;
+    }
+    props.onDraftChange(target.value);
+  };
+
+  const handleCompositionEnd = (e: CompositionEvent) => {
+    vs.composerComposing = false;
+    syncComposerValue(e.target as HTMLTextAreaElement);
   };
   const slashMenuVisible = isSlashMenuVisible();
   const activeSlashMenuOptionId = getActiveSlashMenuOptionId();
@@ -1556,6 +1572,10 @@ export function renderChat(props: ChatProps) {
             aria-describedby=${SLASH_MENU_ACTIVE_ANNOUNCEMENT_ID}
             @keydown=${handleKeyDown}
             @input=${handleInput}
+            @compositionstart=${() => {
+              vs.composerComposing = true;
+            }}
+            @compositionend=${handleCompositionEnd}
             @paste=${(e: ClipboardEvent) => handlePaste(e, props)}
             placeholder=${placeholder}
             rows="1"
