@@ -2991,6 +2991,9 @@ main() {
                 doctor_args+=("--non-interactive")
             fi
             ui_info "Running openclaw doctor"
+            # Reset the flag so a failed final doctor does not inherit an
+            # earlier migration doctor success.
+            should_open_dashboard=false
             local doctor_ok=0
             local doctor_exit=0
             if (( ${#doctor_args[@]} )); then
@@ -3025,8 +3028,9 @@ main() {
             local config_path="${OPENCLAW_CONFIG_PATH:-$HOME/.openclaw/openclaw.json}"
             if [[ -f "${config_path}" || -f "$HOME/.clawdbot/clawdbot.json" ]]; then
                 ui_info "Config already present; running doctor"
-                run_doctor
-                should_open_dashboard=true
+                if run_doctor; then
+                    should_open_dashboard=true
+                fi
                 ui_info "Config already present; skipping onboarding"
                 skip_onboard=true
             fi
