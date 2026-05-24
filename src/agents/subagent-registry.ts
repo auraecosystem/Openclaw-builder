@@ -348,11 +348,7 @@ const LIFECYCLE_CATCH_RECOVERY_DELAY_MS = 1_000;
  *   which is idempotent for already-mutated fields and includes the full cleanup
  *   tail (browser sessions, MCP runtime retirement, announce flow).
  */
-function scheduleLifecycleCatchRecovery(
-  runId: string,
-  expectedOutcomeStatus: string,
-  retryCompletion: () => Promise<void>,
-) {
+function scheduleLifecycleCatchRecovery(runId: string, expectedOutcomeStatus: string) {
   const timer = setTimeout(() => {
     const entry = subagentRuns.get(runId);
     if (!entry || typeof entry.endedAt !== "number") {
@@ -382,7 +378,18 @@ function scheduleLifecycleCatchRecovery(
       }
       return;
     }
-    void retryCompletion().catch((retryErr) => {
+    // Re-derive completion params from the current entry state instead of
+    // relying on a stale closure, so the retry reflects any state changes
+    // that occurred between the original failure and this recovery.
+    void completeSubagentRun({
+      runId,
+      endedAt: entry.endedAt,
+      outcome: entry.outcome ?? { status: expectedOutcomeStatus as "ok" | "error" },
+      reason: entry.endedReason ?? SUBAGENT_ENDED_REASON_COMPLETE,
+      sendFarewell: true,
+      accountId: entry.requesterOrigin?.accountId,
+      triggerCleanup: true,
+    }).catch((retryErr) => {
       log.warn("lifecycle catch recovery retry also failed; deferring to session resume", {
         err: retryErr,
         runId,
@@ -422,9 +429,7 @@ function schedulePendingLifecycleError(params: { runId: string; endedAt: number;
     };
     void completeSubagentRun(completionParams).catch((err) => {
       log.warn("lifecycle error completion failed", { err, runId: params.runId });
-      scheduleLifecycleCatchRecovery(params.runId, "error", () =>
-        completeSubagentRun(completionParams),
-      );
+      scheduleLifecycleCatchRecovery(params.runId, "error");
     });
   }, LIFECYCLE_ERROR_RETRY_GRACE_MS);
   timer.unref?.();
@@ -464,9 +469,7 @@ function schedulePendingLifecycleTimeout(params: { runId: string; endedAt: numbe
     };
     void completeSubagentRun(completionParams).catch((err) => {
       log.warn("lifecycle timeout completion failed", { err, runId: params.runId });
-      scheduleLifecycleCatchRecovery(params.runId, "timeout", () =>
-        completeSubagentRun(completionParams),
-      );
+      scheduleLifecycleCatchRecovery(params.runId, "error");
     });
   }, LIFECYCLE_TIMEOUT_RETRY_GRACE_MS);
   timer.unref?.();
@@ -1102,9 +1105,7 @@ function ensureListener() {
         };
         await completeSubagentRun(blockedParams).catch((err) => {
           log.warn("lifecycle blocked completion failed", { err, runId: evt.runId });
-          scheduleLifecycleCatchRecovery(evt.runId, "error", () =>
-            completeSubagentRun(blockedParams),
-          );
+          scheduleLifecycleCatchRecovery(evt.runId, "error");
         });
         return;
       }
@@ -1141,9 +1142,7 @@ function ensureListener() {
       };
       await completeSubagentRun(completionParams).catch((err) => {
         log.warn("lifecycle ok completion failed", { err, runId: evt.runId });
-        scheduleLifecycleCatchRecovery(evt.runId, "ok", () =>
-          completeSubagentRun(completionParams),
-        );
+        scheduleLifecycleCatchRecovery(evt.runId, "ok");
       });
     })().catch((err) => {
       log.warn("lifecycle event handler failed", { err, runId: evt.runId });
