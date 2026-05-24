@@ -272,6 +272,7 @@ type CodexWorkspaceBootstrapContext = CodexBootstrapContext & {
 };
 
 let openClawCodingToolsFactoryForTests: OpenClawCodingToolsFactory | undefined;
+const ensuredCodexWorkspaceDirs = new Set<string>();
 
 type PendingCodexNativeHookRelayUnregister = {
   timeout: ReturnType<typeof setTimeout>;
@@ -332,6 +333,15 @@ function clearPendingCodexNativeHookRelayUnregistersForTests(): void {
     clearTimeout(pending.timeout);
   }
   pendingCodexNativeHookRelayUnregisters.clear();
+}
+
+async function ensureCodexWorkspaceDirOnce(workspaceDir: string): Promise<void> {
+  const normalized = path.resolve(workspaceDir);
+  if (ensuredCodexWorkspaceDirs.has(normalized)) {
+    return;
+  }
+  await fs.mkdir(normalized, { recursive: true });
+  ensuredCodexWorkspaceDirs.add(normalized);
 }
 
 function emitCodexAppServerEvent(
@@ -945,7 +955,7 @@ export async function runCodexAppServerAttempt(
   const beforeToolCallPolicy = getBeforeToolCallPolicyDiagnosticState();
   preDynamicStartupStages.mark("config");
   const resolvedWorkspace = resolveUserPath(params.workspaceDir);
-  await fs.mkdir(resolvedWorkspace, { recursive: true });
+  await ensureCodexWorkspaceDirOnce(resolvedWorkspace);
   preDynamicStartupStages.mark("workspace");
   const sandboxSessionKey =
     params.sandboxSessionKey?.trim() || params.sessionKey?.trim() || params.sessionId;
@@ -961,7 +971,7 @@ export async function runCodexAppServerAttempt(
       ? resolvedWorkspace
       : sandbox.workspaceDir
     : resolvedWorkspace;
-  await fs.mkdir(effectiveWorkspace, { recursive: true });
+  await ensureCodexWorkspaceDirOnce(effectiveWorkspace);
   preDynamicStartupStages.mark("effective-workspace");
   const appServer = resolveCodexAppServerForOpenClawToolPolicy({
     appServer: configuredAppServer,

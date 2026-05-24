@@ -144,6 +144,12 @@ function createAgentTurnTimingTracker(): {
     outcome: "completed" | "error";
     error?: string;
   }) => void;
+  logMilestoneIfSlow: (params: {
+    runId: string;
+    sessionId?: string;
+    sessionKey?: string;
+    milestone: string;
+  }) => void;
 } {
   const startedAt = Date.now();
   let didLog = false;
@@ -207,6 +213,27 @@ function createAgentTurnTimingTracker(): {
           sessionKey: params.sessionKey,
           outcome: params.outcome,
           error: params.error,
+          totalMs: summary.totalMs,
+          spans: summary.spans,
+        },
+      );
+    },
+    logMilestoneIfSlow(params) {
+      const summary = snapshot();
+      if (!shouldLog(summary)) {
+        return;
+      }
+      agentTurnTimingLog.warn(
+        `agent turn milestone runId=${params.runId} sessionId=${
+          params.sessionId ?? "unknown"
+        } sessionKey=${params.sessionKey ?? "unknown"} milestone=${params.milestone} totalMs=${
+          summary.totalMs
+        } stages=${formatSpans(summary)}`,
+        {
+          runId: params.runId,
+          sessionId: params.sessionId,
+          sessionKey: params.sessionKey,
+          milestone: params.milestone,
           totalMs: summary.totalMs,
           spans: summary.spans,
         },
@@ -1716,6 +1743,12 @@ export async function runAgentTurnWithFallback(params: {
       const runLane = CommandLane.Main;
       let queuedUserMessagePersistedAcrossFallback = false;
       let assistantErrorPersistedAcrossFallback = false;
+      agentTurnTiming.logMilestoneIfSlow({
+        runId,
+        sessionId: params.followupRun.run.sessionId,
+        sessionKey: params.sessionKey,
+        milestone: "before_model_fallback",
+      });
       const fallbackResult = await agentTurnTiming.measure("model_fallback", () =>
         runWithModelFallback<EmbeddedAgentRunResult>({
           ...resolveModelFallbackOptions(effectiveRun, runtimeConfig),
@@ -1981,6 +2014,12 @@ export async function runAgentTurnWithFallback(params: {
                 sessionKey: params.sessionKey,
               });
               try {
+                agentTurnTiming.logMilestoneIfSlow({
+                  runId,
+                  sessionId: params.followupRun.run.sessionId,
+                  sessionKey: params.sessionKey,
+                  milestone: "before_embedded_run",
+                });
                 const result = await agentTurnTiming.measure("embedded_run", () =>
                   runEmbeddedPiAgent({
                     ...embeddedContext,

@@ -213,34 +213,50 @@ export async function getReplyFromConfig(
   configOverride?: OpenClawConfig,
 ): Promise<ReplyPayload | ReplyPayload[] | undefined> {
   const isFastTestEnv = process.env.OPENCLAW_TEST_FAST === "1";
-  const cfg = resolveGetReplyConfig({
-    getRuntimeConfig,
-    isFastTestEnv,
-    configOverride,
-  });
-  const useFastTestBootstrap = shouldUseReplyFastTestBootstrap({
-    isFastTestEnv,
-    configOverride,
-  });
-  const useFastTestRuntime = shouldUseReplyFastTestRuntime({
-    cfg,
-    isFastTestEnv,
-  });
-  const finalized = finalizeInboundContext(ctx);
-  const targetSessionKey = resolveCommandTurnTargetSessionKey(finalized);
-  const agentSessionKey = targetSessionKey || finalized.SessionKey;
-  const agentId = resolveSessionAgentId({
-    sessionKey: agentSessionKey,
-    config: cfg,
-  });
-  const traceAttributes = {
+  const resolverTiming = createReplyTimingTracker({ log: replyResolverTimingLog });
+  const cfg = resolverTiming.measureSync("reply.resolve_config", () =>
+    resolveGetReplyConfig({
+      getRuntimeConfig,
+      isFastTestEnv,
+      configOverride,
+    }),
+  );
+  const useFastTestBootstrap = resolverTiming.measureSync("reply.resolve_fast_test_bootstrap", () =>
+    shouldUseReplyFastTestBootstrap({
+      isFastTestEnv,
+      configOverride,
+    }),
+  );
+  const useFastTestRuntime = resolverTiming.measureSync("reply.resolve_fast_test_runtime", () =>
+    shouldUseReplyFastTestRuntime({
+      cfg,
+      isFastTestEnv,
+    }),
+  );
+  const finalized = resolverTiming.measureSync("reply.finalize_context", () =>
+    finalizeInboundContext(ctx),
+  );
+  const { agentSessionKey, agentId } = resolverTiming.measureSync(
+    "reply.resolve_agent_scope",
+    () => {
+      const targetSessionKey = resolveCommandTurnTargetSessionKey(finalized);
+      const resolvedAgentSessionKey = targetSessionKey || finalized.SessionKey;
+      return {
+        agentSessionKey: resolvedAgentSessionKey,
+        agentId: resolveSessionAgentId({
+          sessionKey: resolvedAgentSessionKey,
+          config: cfg,
+        }),
+      };
+    },
+  );
+  const traceAttributes = resolverTiming.measureSync("reply.resolve_trace_context", () => ({
     surface: normalizeOptionalString(finalized.Surface ?? finalized.Provider) ?? "unknown",
     hasSessionKey: Boolean(agentSessionKey),
     isHeartbeat: opts?.isHeartbeat === true,
     hasMedia: hasInboundMedia(finalized),
-  };
+  }));
   const messageId = finalized.MessageSid ?? finalized.MessageSidFirst ?? finalized.MessageSidLast;
-  const resolverTiming = createReplyTimingTracker({ log: replyResolverTimingLog });
   let resolverTimingSessionKey = agentSessionKey;
   const logResolverTiming = (outcome: string, reason?: string, error?: string) =>
     resolverTiming.logIfSlow({
@@ -265,18 +281,21 @@ export async function getReplyFromConfig(
         attributes: traceAttributes,
       }),
     );
-  const mergedSkillFilter = mergeSkillFilters(
-    opts?.skillFilter,
-    resolveAgentSkillsFilter(cfg, agentId),
+  const mergedSkillFilter = resolverTiming.measureSync("reply.resolve_skill_filter", () =>
+    mergeSkillFilters(opts?.skillFilter, resolveAgentSkillsFilter(cfg, agentId)),
   );
   const resolvedOpts =
     mergedSkillFilter !== undefined ? { ...opts, skillFilter: mergedSkillFilter } : opts;
   const agentCfg = cfg.agents?.defaults;
   const sessionCfg = cfg.session;
-  const { defaultProvider, defaultModel, aliasIndex } = resolveDefaultModel({
-    cfg,
-    agentId,
-  });
+  const { defaultProvider, defaultModel, aliasIndex } = resolverTiming.measureSync(
+    "reply.resolve_default_model",
+    () =>
+      resolveDefaultModel({
+        cfg,
+        agentId,
+      }),
+  );
   let provider = defaultProvider;
   let model = defaultModel;
   let hasResolvedHeartbeatModelOverride = false;
@@ -301,22 +320,34 @@ export async function getReplyFromConfig(
     }
   }
 
-  const workspaceDirRaw = resolveAgentWorkspaceDir(cfg, agentId) ?? DEFAULT_AGENT_WORKSPACE_DIR;
-  const workspaceDirForNativeCommand = workspaceDirRaw;
-  const agentDir = resolveAgentDir(cfg, agentId);
-  const timeoutMs = resolveAgentTimeoutMs({ cfg, overrideSeconds: opts?.timeoutOverrideSeconds });
-  const configuredTypingSeconds =
-    agentCfg?.typingIntervalSeconds ?? sessionCfg?.typingIntervalSeconds;
-  const typingIntervalSeconds =
-    typeof configuredTypingSeconds === "number" ? configuredTypingSeconds : 6;
-  const typing = createTypingController({
-    onReplyStart: opts?.onReplyStart,
-    onCleanup: opts?.onTypingCleanup,
-    typingIntervalSeconds,
-    silentToken: SILENT_REPLY_TOKEN,
-    log: defaultRuntime.log,
+  const { workspaceDirRaw, workspaceDirForNativeCommand, agentDir, timeoutMs } =
+    resolverTiming.measureSync("reply.resolve_workspace_agent_dir", () => {
+      const workspaceDirRaw = resolveAgentWorkspaceDir(cfg, agentId) ?? DEFAULT_AGENT_WORKSPACE_DIR;
+      return {
+        workspaceDirRaw,
+        workspaceDirForNativeCommand: workspaceDirRaw,
+        agentDir: resolveAgentDir(cfg, agentId),
+        timeoutMs: resolveAgentTimeoutMs({
+          cfg,
+          overrideSeconds: opts?.timeoutOverrideSeconds,
+        }),
+      };
+    });
+  const typing = resolverTiming.measureSync("reply.create_typing_controller", () => {
+    const configuredTypingSeconds =
+      agentCfg?.typingIntervalSeconds ?? sessionCfg?.typingIntervalSeconds;
+    const typingIntervalSeconds =
+      typeof configuredTypingSeconds === "number" ? configuredTypingSeconds : 6;
+    const controller = createTypingController({
+      onReplyStart: opts?.onReplyStart,
+      onCleanup: opts?.onTypingCleanup,
+      typingIntervalSeconds,
+      silentToken: SILENT_REPLY_TOKEN,
+      log: defaultRuntime.log,
+    });
+    opts?.onTypingController?.(controller);
+    return controller;
   });
-  opts?.onTypingController?.(typing);
 
   const nativeSlashCommandFastReply = await traceGetReplyPhase(
     "reply.native_slash_command_fast_path",
