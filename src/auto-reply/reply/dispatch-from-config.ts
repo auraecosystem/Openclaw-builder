@@ -132,6 +132,7 @@ import { resolveOriginMessageProvider } from "./origin-routing.js";
 import { waitForReplyDispatcherIdle } from "./reply-dispatcher.js";
 import type { ReplyDispatcher } from "./reply-dispatcher.types.js";
 import type { ReplyOperation } from "./reply-run-registry.js";
+import { isReplyProfilerEnabled } from "./reply-timing-tracker.js";
 import { admitReplyTurn, resolveReplyTurnKind } from "./reply-turn-admission.js";
 import { resolveRoutedDeliveryThreadId } from "./routed-delivery-thread.js";
 import { resolveReplyRoutingDecision } from "./routing-policy.js";
@@ -795,7 +796,7 @@ const replyHotPathTimingLog = createSubsystemLogger("auto-reply/reply-timing");
 const REPLY_HOT_PATH_TIMING_WARN_TOTAL_MS = 1_000;
 const REPLY_HOT_PATH_TIMING_WARN_STAGE_MS = 500;
 
-function createReplyHotPathTimingTracker(): {
+function createReplyHotPathTimingTracker(options: { profilerEnabled?: boolean } = {}): {
   measure: <T>(name: string, run: () => Promise<T> | T) => Promise<T>;
   logIfSlow: (params: {
     channel: string;
@@ -805,6 +806,18 @@ function createReplyHotPathTimingTracker(): {
     reason?: string;
   }) => void;
 } {
+  if (!options.profilerEnabled) {
+    // This slow-path splitter was added for latency investigation. Keep it
+    // inert in normal production dispatches so only explicit profiler runs pay
+    // the Date.now/span allocation cost.
+    return {
+      async measure(_name, run) {
+        return await run();
+      },
+      logIfSlow() {},
+    };
+  }
+
   const startedAt = Date.now();
   let didLog = false;
   const spans: ReplyHotPathTimingSpan[] = [];
@@ -897,7 +910,9 @@ export async function dispatchReplyFromConfig(
     hasSessionKey: Boolean(sessionKey),
     hasRunId: typeof params.replyOptions?.runId === "string",
   };
-  const replyHotPathTiming = createReplyHotPathTimingTracker();
+  const replyHotPathTiming = createReplyHotPathTimingTracker({
+    profilerEnabled: isReplyProfilerEnabled({ config: cfg }),
+  });
   const traceReplyPhase = <T>(name: string, run: () => Promise<T> | T): Promise<T> =>
     replyHotPathTiming.measure(name, () =>
       measureDiagnosticsTimelineSpan(name, run, {
