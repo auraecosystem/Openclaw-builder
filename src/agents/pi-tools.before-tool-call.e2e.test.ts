@@ -8,6 +8,10 @@ import {
   type DiagnosticEventPayload,
   type DiagnosticToolLoopEvent,
 } from "../infra/diagnostic-events.js";
+import {
+  getActiveDiagnosticTraceContext,
+  resetDiagnosticTraceContextForTest,
+} from "../infra/diagnostic-trace-context.js";
 import { resetDiagnosticSessionStateForTest } from "../logging/diagnostic-session-state.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
@@ -57,6 +61,7 @@ describe("before_tool_call loop detection behavior", () => {
   beforeEach(() => {
     resetDiagnosticSessionStateForTest();
     resetDiagnosticEventsForTest();
+    resetDiagnosticTraceContextForTest();
     hookRunner = {
       hasHooks: vi.fn(),
       runBeforeToolCall: vi.fn(),
@@ -444,8 +449,15 @@ describe("before_tool_call loop detection behavior", () => {
       spanId: "00f067aa0ba902b7",
       traceFlags: "01",
     };
-    const execute = vi.fn().mockResolvedValue({
-      content: [{ type: "text", text: "ok" }],
+    let activeTraceDuringExecute: unknown;
+    let activeTraceAfterAwait: unknown;
+    const execute = vi.fn().mockImplementation(async () => {
+      activeTraceDuringExecute = getActiveDiagnosticTraceContext();
+      await Promise.resolve();
+      activeTraceAfterAwait = getActiveDiagnosticTraceContext();
+      return {
+        content: [{ type: "text", text: "ok" }],
+      };
     });
     const tool = wrapToolWithBeforeToolCallHook({ name: "bash", execute } as any, {
       agentId: "main",
@@ -487,6 +499,8 @@ describe("before_tool_call loop detection behavior", () => {
       expect(startedTrace.traceFlags).toBe(trace.traceFlags);
       expect(emitted[0]?.trace).not.toBe(trace);
       expect(Object.isFrozen(emitted[0]?.trace)).toBe(true);
+      expect(activeTraceDuringExecute).toEqual(startedTrace);
+      expect(activeTraceAfterAwait).toEqual(startedTrace);
       const completed = expectEventFields(emitted[1], {
         type: "tool.execution.completed",
       });

@@ -163,7 +163,7 @@ describe("restartGatewayProcessWithFreshPid", () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
-  it("uses in-process restart on unmanaged Unix so custom supervisors keep the tracked PID", () => {
+  it("spawns detached child with current exec argv", () => {
     delete process.env.OPENCLAW_NO_RESPAWN;
     clearSupervisorHints();
     setPlatform("linux");
@@ -173,11 +173,16 @@ describe("restartGatewayProcessWithFreshPid", () => {
 
     const result = restartGatewayProcessWithFreshPid();
 
-    expect(result).toEqual({
-      mode: "disabled",
-      detail: "unmanaged: use in-process restart to keep custom supervisor PID tracking stable",
-    });
-    expect(spawnMock).not.toHaveBeenCalled();
+    expect(result).toEqual({ mode: "spawned", pid: 4242 });
+    expect(spawnMock).toHaveBeenCalledWith(
+      process.execPath,
+      ["--import", "tsx", "/repo/dist/index.js", "gateway", "run"],
+      {
+        detached: true,
+        env: process.env,
+        stdio: "inherit",
+      },
+    );
   });
 
   it("returns supervised when OPENCLAW_LAUNCHD_LABEL is set (stock launchd plist)", () => {
@@ -211,15 +216,12 @@ describe("restartGatewayProcessWithFreshPid", () => {
     setPlatform("linux");
     process.env.OPENCLAW_SERVICE_MARKER = "openclaw";
     process.env.OPENCLAW_SERVICE_KIND = "gateway";
+    spawnMock.mockReturnValue({ pid: 4242, unref: vi.fn() });
 
     const result = restartGatewayProcessWithFreshPid();
 
-    expect(result).toEqual({
-      mode: "disabled",
-      detail: "unmanaged: use in-process restart to keep custom supervisor PID tracking stable",
-    });
+    expect(result).toEqual({ mode: "spawned", pid: 4242 });
     expect(triggerOpenClawRestartMock).not.toHaveBeenCalled();
-    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it("returns disabled on Windows without Scheduled Task markers", () => {
@@ -263,7 +265,7 @@ describe("restartGatewayProcessWithFreshPid", () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
-  it("does not attempt detached spawn on unmanaged Unix even if spawn would throw", () => {
+  it("returns failed when spawn throws", () => {
     delete process.env.OPENCLAW_NO_RESPAWN;
     clearSupervisorHints();
     setPlatform("linux");
@@ -272,11 +274,8 @@ describe("restartGatewayProcessWithFreshPid", () => {
       throw new Error("spawn failed");
     });
     const result = restartGatewayProcessWithFreshPid();
-    expect(result).toEqual({
-      mode: "disabled",
-      detail: "unmanaged: use in-process restart to keep custom supervisor PID tracking stable",
-    });
-    expect(spawnMock).not.toHaveBeenCalled();
+    expect(result.mode).toBe("failed");
+    expect(result.detail).toContain("spawn failed");
   });
 });
 

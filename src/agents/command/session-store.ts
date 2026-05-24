@@ -4,6 +4,7 @@ import {
   mergeSessionEntry,
   resolveSessionFilePath,
   resolveSessionFilePathOptions,
+  resolveSessionStoreEntry,
   setSessionRuntimeModel,
   type SessionEntry,
   updateSessionStore,
@@ -71,7 +72,6 @@ export async function updateSessionStoreAfterAgentRun(params: {
    * heartbeat model does not "bleed" into the main session's perceived state.
    */
   preserveRuntimeModel?: boolean;
-  preserveUserFacingSessionModelState?: boolean;
 }) {
   const {
     cfg,
@@ -102,7 +102,6 @@ export async function updateSessionStoreAfterAgentRun(params: {
   const providerUsed = result.meta.agentMeta?.provider ?? fallbackProvider ?? defaultProvider;
   const agentHarnessId = normalizeOptionalString(result.meta.agentMeta?.agentHarnessId);
   const runtimeContextTokens = resolvePositiveInteger(result.meta.agentMeta?.contextTokens);
-  const contextBudgetStatus = result.meta.agentMeta?.contextBudgetStatus;
   const contextTokens =
     runtimeContextTokens !== undefined
       ? runtimeContextTokens
@@ -116,9 +115,9 @@ export async function updateSessionStoreAfterAgentRun(params: {
             allowAsyncLoad: false,
           }) ?? DEFAULT_CONTEXT_TOKENS);
 
-  const preserveUserFacingRunState = params.preserveUserFacingSessionModelState === true;
-  const preserveRuntimeModel = params.preserveRuntimeModel === true || preserveUserFacingRunState;
-  const entry = sessionStore[sessionKey] ?? {
+  const memResolved = resolveSessionStoreEntry({ store: sessionStore, sessionKey });
+  const preserveRuntimeModel = params.preserveRuntimeModel === true;
+  const entry = memResolved.existing ?? {
     sessionId,
     updatedAt: now,
     sessionStartedAt: now,
@@ -163,32 +162,27 @@ export async function updateSessionStoreAfterAgentRun(params: {
       model: modelUsed,
     });
   }
-  if (!preserveUserFacingRunState) {
-    if (agentHarnessId) {
-      next.agentHarnessId = agentHarnessId;
-    } else if (result.meta.executionTrace?.runner === "cli") {
-      next.agentHarnessId = undefined;
-    }
-    if (isCliProvider(providerUsed, cfg)) {
-      const cliSessionBinding = result.meta.agentMeta?.cliSessionBinding;
-      if (cliSessionBinding?.sessionId?.trim()) {
-        setCliSessionBinding(next, providerUsed, cliSessionBinding);
-      } else {
-        const cliSessionId = result.meta.agentMeta?.sessionId?.trim();
-        if (cliSessionId) {
-          setCliSessionId(next, providerUsed, cliSessionId);
-        }
+  if (agentHarnessId) {
+    next.agentHarnessId = agentHarnessId;
+  } else if (result.meta.executionTrace?.runner === "cli") {
+    next.agentHarnessId = undefined;
+  }
+  if (isCliProvider(providerUsed, cfg)) {
+    const cliSessionBinding = result.meta.agentMeta?.cliSessionBinding;
+    if (cliSessionBinding?.sessionId?.trim()) {
+      setCliSessionBinding(next, providerUsed, cliSessionBinding);
+    } else {
+      const cliSessionId = result.meta.agentMeta?.sessionId?.trim();
+      if (cliSessionId) {
+        setCliSessionId(next, providerUsed, cliSessionId);
       }
     }
-    next.abortedLastRun = result.meta.aborted ?? false;
-    if (result.meta.systemPromptReport) {
-      next.systemPromptReport = result.meta.systemPromptReport;
-    }
-    if (!preserveRuntimeModel) {
-      next.contextBudgetStatus = contextBudgetStatus;
-    }
   }
-  if (hasNonzeroUsage(usage) && !preserveUserFacingRunState) {
+  next.abortedLastRun = result.meta.aborted ?? false;
+  if (result.meta.systemPromptReport) {
+    next.systemPromptReport = result.meta.systemPromptReport;
+  }
+  if (hasNonzeroUsage(usage)) {
     const { estimateUsageCost, resolveModelCostConfig } = await getUsageFormatModule();
     const input = usage.input ?? 0;
     const output = usage.output ?? 0;
@@ -232,11 +226,10 @@ export async function updateSessionStoreAfterAgentRun(params: {
     if (runEstimatedCostUsd !== undefined) {
       next.estimatedCostUsd = runEstimatedCostUsd;
     }
-  } else if (compactionTokensAfter !== undefined && !preserveUserFacingRunState) {
+  } else if (compactionTokensAfter !== undefined) {
     next.totalTokens = compactionTokensAfter;
     next.totalTokensFresh = true;
   } else if (
-    !preserveUserFacingRunState &&
     typeof entry.totalTokens === "number" &&
     Number.isFinite(entry.totalTokens) &&
     entry.totalTokens > 0
@@ -244,25 +237,22 @@ export async function updateSessionStoreAfterAgentRun(params: {
     next.totalTokens = entry.totalTokens;
     next.totalTokensFresh = false;
   }
-  if (compactionsThisRun > 0 && !preserveUserFacingRunState) {
+  if (compactionsThisRun > 0) {
     next.compactionCount = (entry.compactionCount ?? 0) + compactionsThisRun;
   }
-  const metadataPatch = preserveUserFacingRunState
-    ? {
-        updatedAt: next.updatedAt,
-        ...(touchInteraction ? { lastInteractionAt: next.lastInteractionAt } : {}),
-      }
-    : removeLifecycleStateFromMetadataPatch(next);
+  const metadataPatch = removeLifecycleStateFromMetadataPatch(next);
   const persisted = await updateSessionStore(storePath, (store) => {
-    if (preserveUserFacingRunState && !store[sessionKey]) {
-      return undefined;
+    const resolved = resolveSessionStoreEntry({ store, sessionKey });
+    const merged = mergeSessionEntry(resolved.existing, metadataPatch);
+    store[resolved.normalizedKey] = merged;
+    for (const legacyKey of resolved.legacyKeys) {
+      delete store[legacyKey];
     }
-    const merged = mergeSessionEntry(store[sessionKey], metadataPatch);
-    store[sessionKey] = merged;
     return merged;
   });
-  if (persisted) {
-    sessionStore[sessionKey] = persisted;
+  sessionStore[memResolved.normalizedKey] = persisted;
+  for (const legacyKey of memResolved.legacyKeys) {
+    delete sessionStore[legacyKey];
   }
 }
 
@@ -334,7 +324,6 @@ export async function recordCliCompactionInStore(params: {
     next.sessionFile = explicitNewSessionFile;
   }
   const tokensAfterCompaction = resolveNonNegativeNumber(params.tokensAfter);
-  next.contextBudgetStatus = undefined;
   if (tokensAfterCompaction !== undefined) {
     next.totalTokens = Math.floor(tokensAfterCompaction);
     next.totalTokensFresh = true;

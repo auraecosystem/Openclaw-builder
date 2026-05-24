@@ -24,10 +24,17 @@ import type { TypingMode } from "../../config/types.js";
 import { logVerbose } from "../../globals.js";
 import { emitAgentEvent, registerAgentRunContext } from "../../infra/agent-events.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { requestHeartbeatNow } from "../../infra/heartbeat-wake.js";
+import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { defaultRuntime } from "../../runtime.js";
-import { shouldPreserveUserFacingSessionStateForInputProvenance } from "../../sessions/input-provenance.js";
 import { readStringValue } from "../../shared/string-coerce.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
+import {
+  registerContinuationTimerHandle,
+  retainContinuationTimerRef,
+  unregisterContinuationTimerHandle,
+} from "../continuation/state.js";
+import type { ContinueWorkRequest } from "../continuation/types.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { runCliAgentWithLifecycle } from "./agent-runner-cli-dispatch.js";
 import {
@@ -53,6 +60,7 @@ import {
 import type { ReplyOperation } from "./reply-run-registry.js";
 import { admitReplyTurn } from "./reply-turn-admission.js";
 import { isRoutableChannel, routeReply } from "./route-reply.js";
+import { resolveReplyRunFireReason } from "./run-provenance.js";
 import { incrementRunCompactionCount, persistRunSessionUsage } from "./session-run-accounting.js";
 import { createTypingSignaler } from "./typing-mode.js";
 import type { TypingController } from "./typing.js";
@@ -69,36 +77,6 @@ function filterStringArray(value: unknown): string[] | undefined {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string")
     : undefined;
-}
-
-function hasFailedFollowupProgressEvent(evt: FollowupAgentEvent): boolean {
-  if (evt.stream !== "item" && evt.stream !== "command_output") {
-    return false;
-  }
-  const phase = readStringValue(evt.data.phase);
-  const status = readStringValue(evt.data.status);
-  return (
-    phase === "error" ||
-    status === "failed" ||
-    status === "error" ||
-    (typeof evt.data.exitCode === "number" && evt.data.exitCode !== 0)
-  );
-}
-
-function canForwardFailedFollowupProgressEvent(
-  evt: FollowupAgentEvent,
-  opts?: GetReplyOptions,
-): boolean {
-  if (evt.stream === "command_output") {
-    return typeof opts?.onCommandOutput === "function";
-  }
-  if (evt.stream !== "item") {
-    return false;
-  }
-  if (evt.data.suppressChannelProgress === true && Boolean(opts?.onToolStart)) {
-    return false;
-  }
-  return typeof opts?.onItemEvent === "function";
 }
 
 async function forwardFollowupProgressEvent(params: {
@@ -212,14 +190,12 @@ async function forwardFollowupProgressEvent(params: {
 
   if (evt.stream === "compaction") {
     const phase = readStringValue(evt.data.phase) ?? "";
-    if (phase === "start" && emitChannelProgress) {
+    if (phase === "start") {
       await opts?.onCompactionStart?.();
     }
     if (phase === "end" && evt.data?.completed === true) {
       params.onCompactionComplete?.();
-      if (emitChannelProgress) {
-        await opts?.onCompactionEnd?.();
-      }
+      await opts?.onCompactionEnd?.();
     }
   }
 }
@@ -428,46 +404,13 @@ export function createFollowupRunner(params: {
       if (run !== effectiveQueued.run) {
         effectiveQueued = { ...effectiveQueued, run };
       }
-      const resolveCurrentVerboseLevel = () => {
-        if (replySessionKey && storePath) {
-          try {
-            const level = readSessionEntry(storePath, replySessionKey)?.verboseLevel;
-            if (typeof level === "string" && level.trim()) {
-              return level;
-            }
-          } catch {
-            // Keep queued delivery resilient to transient session-store reads.
-          }
-        }
-        const liveEntryLevel = replySessionKey
-          ? sessionStore?.[replySessionKey]?.verboseLevel
-          : undefined;
-        return liveEntryLevel ?? activeSessionEntry?.verboseLevel ?? run.verboseLevel;
-      };
-      const shouldEmitVerboseProgress = () => {
-        const verboseLevel = resolveCurrentVerboseLevel();
-        return verboseLevel === "on" || verboseLevel === "full";
-      };
-      const shouldSuppressDefaultToolProgressMessages = () => !shouldEmitVerboseProgress();
+      const shouldEmitVerboseProgress = () => run.verboseLevel !== "off";
+      const shouldSuppressDefaultToolProgressMessages = () =>
+        opts?.suppressDefaultToolProgressMessages === true && !shouldEmitVerboseProgress();
       const shouldEmitToolResultProgress = () =>
         shouldEmitVerboseProgress() && !shouldSuppressDefaultToolProgressMessages();
       const shouldEmitToolOutputProgress = () =>
-        resolveCurrentVerboseLevel() === "full" && !shouldSuppressDefaultToolProgressMessages();
-      let observedVisibleToolErrorProgress = false;
-      const markVisibleToolErrorProgress = () => {
-        if (resolveCurrentVerboseLevel() === "on" && shouldEmitToolResultProgress()) {
-          observedVisibleToolErrorProgress = true;
-        }
-      };
-      const shouldSuppressToolErrorWarnings = () => {
-        if (opts?.suppressToolErrorWarnings !== undefined) {
-          return opts.suppressToolErrorWarnings;
-        }
-        if (!shouldEmitVerboseProgress()) {
-          return false;
-        }
-        return observedVisibleToolErrorProgress ? true : undefined;
-      };
+        run.verboseLevel === "full" && !shouldSuppressDefaultToolProgressMessages();
       let progressDeliveryChain: Promise<void> = Promise.resolve();
       const pendingProgressDeliveries = new Set<Promise<void>>();
       const enqueueProgressDelivery = (deliver: () => Promise<void>) => {
@@ -551,9 +494,6 @@ export function createFollowupRunner(params: {
       let bootstrapPromptWarningSignaturesSeen = resolveBootstrapWarningSignaturesSeen(
         activeSessionEntry?.systemPromptReport,
       );
-      const preserveUserFacingSessionState = shouldPreserveUserFacingSessionStateForInputProvenance(
-        queued.run.inputProvenance,
-      );
       const resolveRunForFallbackCandidate = (
         provider: string,
         model: string,
@@ -586,9 +526,6 @@ export function createFollowupRunner(params: {
         provider: string;
         model: string;
       }): Promise<void> => {
-        if (preserveUserFacingSessionState) {
-          return;
-        }
         const probe = run.autoFallbackPrimaryProbe;
         if (!probe) {
           return;
@@ -633,6 +570,7 @@ export function createFollowupRunner(params: {
         | undefined;
       let queuedUserMessagePersistedAcrossFallback = false;
       let assistantErrorPersistedAcrossFallback = false;
+      let attemptContinueWorkRequest: ContinueWorkRequest | undefined;
       try {
         const outcomePlan = buildAgentRuntimeOutcomePlan();
         const fallbackResult = await runWithModelFallback<EmbeddedAgentRunResult>({
@@ -789,6 +727,11 @@ export function createFollowupRunner(params: {
                 sessionKey: run.sessionKey,
                 agentId: run.agentId,
                 trigger: "user",
+                fireReason: resolveReplyRunFireReason({
+                  opts,
+                  drainsContinuationDelegateQueue: run.drainsContinuationDelegateQueue === true,
+                }),
+                parentRunId: opts?.parentRunId,
                 messageChannel: queued.originatingChannel ?? undefined,
                 messageProvider: run.messageProvider,
                 agentAccountId: run.agentAccountId,
@@ -838,7 +781,7 @@ export function createFollowupRunner(params: {
                 thinkLevel: run.thinkLevel,
                 verboseLevel: run.verboseLevel,
                 reasoningLevel: run.reasoningLevel,
-                suppressToolErrorWarnings: shouldSuppressToolErrorWarnings,
+                suppressToolErrorWarnings: opts?.suppressToolErrorWarnings,
                 execOverrides: run.execOverrides,
                 bashElevated: run.bashElevated,
                 timeoutMs: run.timeoutMs,
@@ -853,6 +796,84 @@ export function createFollowupRunner(params: {
                   bootstrapPromptWarningSignaturesSeen[
                     bootstrapPromptWarningSignaturesSeen.length - 1
                   ],
+                // Continuation: thread continueWorkOpts so continue_work is
+                // callable on queued followup turns (subagent sessions, continuation-
+                // triggered heartbeats). Without this, the tool never registers and
+                // subagents cannot self-elect another turn. (#746)
+                continueWorkOpts:
+                  runtimeConfig?.agents?.defaults?.continuation?.enabled === true
+                    ? {
+                        requestContinuation: (request: ContinueWorkRequest) => {
+                          attemptContinueWorkRequest = request;
+                        },
+                      }
+                    : undefined,
+                // Continuation: thread requestCompactionOpts so request_compaction
+                // is callable on queued followup turns, not just the first turn.
+                requestCompactionOpts:
+                  runtimeConfig?.agents?.defaults?.continuation?.enabled === true
+                    ? {
+                        sessionId: run.sessionId,
+                        getContextUsage: () => {
+                          // Followup path doesn't have a live token count;
+                          // returning null makes request_compaction reply
+                          // with guard "context_unknown" instead of pretending
+                          // usage is 0% and tripping the 70% floor with a
+                          // misleading reason. Main-session callers (see
+                          // agent-runner-execution.ts) supply the real ratio
+                          // from sessionTokenInfo.
+                          return null;
+                        },
+                        triggerCompaction: async (request) => {
+                          try {
+                            const { compactEmbeddedPiSession } =
+                              await import("../../agents/pi-embedded-runner/compact.queued.js");
+                            // Thread the session's active provider/model through so
+                            // volitional compaction doesn't fall back to DEFAULT_PROVIDER/MODEL.
+                            // Use inner-scope provider/model from the fallback
+                            // dispatcher (line 207) so a fallback-selected model
+                            // gets the compaction request, not the persisted primary
+                            // (which may be in cooldown — would re-fail immediately).
+                            // Thread authProfileId only when the inner-scope
+                            // provider matches the persisted primary
+                            // (the persisted profile is keyed to the primary). On fallback
+                            // to a different provider, leave undefined so resolveEmbedded-
+                            // CompactionTarget picks the default profile for that provider.
+                            const compactionAuthProfileId =
+                              provider === run.provider ? run.authProfileId : undefined;
+                            const result = await compactEmbeddedPiSession({
+                              sessionId: run.sessionId ?? "",
+                              runId: request.runId ?? runId,
+                              sessionKey: run.sessionKey,
+                              sessionFile: run.sessionFile ?? "",
+                              workspaceDir: run.workspaceDir ?? process.cwd(),
+                              config: run.config,
+                              messageProvider: run.messageProvider,
+                              provider,
+                              model,
+                              authProfileId: compactionAuthProfileId,
+                              trigger: request.trigger,
+                              diagId: request.diagId,
+                              traceparent: request.traceparent,
+                            });
+                            // Honor the real result instead of unconditionally
+                            // claiming success; otherwise compaction telemetry lies
+                            // and the failure is invisible to the caller.
+                            return {
+                              ok: result.ok,
+                              compacted: result.compacted,
+                              reason: result.reason,
+                            };
+                          } catch (err) {
+                            return {
+                              ok: false,
+                              compacted: false,
+                              reason: err instanceof Error ? err.message : String(err),
+                            };
+                          }
+                        },
+                      }
+                    : undefined,
                 toolProgressDetail,
                 shouldEmitToolResult: shouldEmitToolResultProgress,
                 shouldEmitToolOutput: shouldEmitToolOutputProgress,
@@ -860,7 +881,7 @@ export function createFollowupRunner(params: {
                   enqueueProgressDelivery(async () => {
                     if (
                       run.sourceReplyDeliveryMode === "message_tool_only" &&
-                      !shouldEmitToolResultProgress()
+                      run.verboseLevel === "off"
                     ) {
                       return;
                     }
@@ -873,9 +894,6 @@ export function createFollowupRunner(params: {
                       },
                       { mirror: false },
                     );
-                    if (payload.isError === true) {
-                      markVisibleToolErrorProgress();
-                    }
                   }),
                 onAgentEvent: (evt) =>
                   enqueueProgressDelivery(async () => {
@@ -888,12 +906,6 @@ export function createFollowupRunner(params: {
                         attemptCompactionCount += 1;
                       },
                     });
-                    if (
-                      hasFailedFollowupProgressEvent(evt) &&
-                      canForwardFailedFollowupProgressEvent(evt, opts)
-                    ) {
-                      markVisibleToolErrorProgress();
-                    }
                   }),
               });
               bootstrapPromptWarningSignaturesSeen = resolveBootstrapWarningSignaturesSeen(
@@ -956,6 +968,171 @@ export function createFollowupRunner(params: {
 
       await drainProgressDeliveries();
 
+      // Consume and dispatch continue_delegate queue enqueued during this
+      // followup turn. Parallels the main-session dispatch in agent-runner.ts:
+      // without this, delegates queued by continue_work-triggered heartbeats
+      // (or any followup turn) stay in the queue until the NEXT inbound
+      // message arrives to trigger the main-session dispatch. RFC §3.2.
+      if (runtimeConfig?.agents?.defaults?.continuation?.enabled === true && sessionKey) {
+        const [
+          { dispatchToolDelegates },
+          { resolveLiveContinuationRuntimeConfig },
+          { loadContinuationChainState, persistContinuationChainState },
+          { updateSessionStore, resolveSessionStoreEntry },
+        ] = await Promise.all([
+          import("../continuation/delegate-dispatch.js"),
+          import("../continuation/config.js"),
+          import("../continuation/state.js"),
+          import("../../config/sessions/store.js"),
+        ]);
+        const tailUsage = runResult.meta?.agentMeta?.usage;
+        const turnTokens = (tailUsage?.input ?? 0) + (tailUsage?.output ?? 0);
+        const tailEntry = (sessionKey ? sessionStore?.[sessionKey] : undefined) ?? sessionEntry;
+        const chainState = loadContinuationChainState(tailEntry, turnTokens);
+        const dispatchResult = await dispatchToolDelegates({
+          sessionKey,
+          chainState,
+          ctx: {
+            sessionKey,
+            agentChannel: queued.originatingChannel ?? undefined,
+            agentAccountId: queued.originatingAccountId ?? undefined,
+            agentTo: queued.originatingTo ?? undefined,
+            agentThreadId: queued.originatingThreadId ?? undefined,
+          },
+          maxChainLength: resolveLiveContinuationRuntimeConfig(runtimeConfig).maxChainLength,
+          // Hedge re-arm must see fresh chain state.
+          loadFreshChainState: () => loadContinuationChainState(tailEntry, 0),
+        });
+        // Persist the advanced chain state back to the session
+        // entry after dispatch. Without this the followup-path counter never
+        // advances and `maxChainLength` enforcement breaks across hops.
+        //
+        // Persist even when `dispatched === 0`. The chainState
+        // returned from `dispatchToolDelegates` carries the fresh
+        // `accumulatedChainTokens` from `loadContinuationChainState(tailEntry,
+        // turnTokens)` regardless of whether any delegate spawned. Guarding on
+        // `dispatched > 0` drops the token total on followup-only chains
+        // (delayed-only delegates, all-deferred dispatches, or pure
+        // continue_work turns), causing token-budget drift across hops.
+        if (dispatchResult && tailEntry) {
+          persistContinuationChainState({
+            sessionEntry: tailEntry,
+            count: dispatchResult.chainState.currentChainCount,
+            startedAt: dispatchResult.chainState.chainStartedAt,
+            tokens: dispatchResult.chainState.accumulatedChainTokens,
+          });
+          // The in-memory mutation above is orphaned for disk. The followup
+          // path's only durable writer is `persistRunSessionUsage`
+          // → `updateSessionStoreEntry`, which `loadSessionStore(...,
+          // skipCache: true)` and patches usage fields only —
+          // `continuationChain*` is not in that patch shape. Without an
+          // explicit `updateSessionStore` call the followup-only token chain
+          // never reaches disk; cost-cap and `maxChainLength` enforcement
+          // see stale values across cache eviction or gateway restart.
+          //
+          // Mirror agent-runner's explicit `updateSessionStore` with
+          // `resolveSessionStoreEntry`
+          // legacy-key cleanup so the chain fields land alongside the
+          // disk-canonical entry.
+          if (storePath && sessionKey) {
+            try {
+              await updateSessionStore(storePath, (store) => {
+                const resolved = resolveSessionStoreEntry({ store, sessionKey });
+                if (resolved.existing) {
+                  store[resolved.normalizedKey] = {
+                    ...resolved.existing,
+                    continuationChainCount: dispatchResult.chainState.currentChainCount,
+                    continuationChainStartedAt: dispatchResult.chainState.chainStartedAt,
+                    continuationChainTokens: dispatchResult.chainState.accumulatedChainTokens,
+                  };
+                  for (const legacyKey of resolved.legacyKeys) {
+                    delete store[legacyKey];
+                  }
+                }
+              });
+            } catch (err) {
+              // Mirror agent-runner.ts's defensive log: persistence failure
+              // must not break the followup reply itself.
+              defaultRuntime.error?.(
+                `[followup-runner] failed to persist continuation chain state for ${sessionKey}: ${String(err)}`,
+              );
+            }
+          }
+        }
+      }
+
+      // --- continue_work processing (#746) ---
+      // When the agent calls continue_work during this followup turn, schedule
+      // a delayed heartbeat for the session (same mechanism as agent-runner.ts).
+      // This enables subagent/organ sessions to self-elect another turn.
+      if (
+        attemptContinueWorkRequest &&
+        runtimeConfig?.agents?.defaults?.continuation?.enabled === true &&
+        sessionKey
+      ) {
+        const { resolveLiveContinuationRuntimeConfig } = await import("../continuation/config.js");
+        const continuationConfig = resolveLiveContinuationRuntimeConfig(runtimeConfig);
+        const { maxChainLength, minDelayMs, maxDelayMs, defaultDelayMs } = continuationConfig;
+
+        // Load chain state to check cap.
+        const { loadContinuationChainState, persistContinuationChainState } =
+          await import("../continuation/state.js");
+        const tailUsage = runResult.meta?.agentMeta?.usage;
+        const turnTokens = (tailUsage?.input ?? 0) + (tailUsage?.output ?? 0);
+        const tailEntry = (sessionKey ? sessionStore?.[sessionKey] : undefined) ?? sessionEntry;
+        const chainState = loadContinuationChainState(tailEntry, turnTokens);
+        const currentChainCount = chainState.currentChainCount;
+
+        if (currentChainCount >= maxChainLength) {
+          defaultRuntime.log(
+            `[followup-runner] continue_work cap reached for ${sessionKey}: ` +
+              `${currentChainCount}/${maxChainLength}`,
+          );
+        } else {
+          const nextChainCount = currentChainCount + 1;
+          const requestedDelayMs = attemptContinueWorkRequest.delaySeconds * 1000;
+          const clampedDelay = Math.max(
+            minDelayMs,
+            Math.min(maxDelayMs, requestedDelayMs || defaultDelayMs),
+          );
+
+          // Persist advanced chain state.
+          persistContinuationChainState({
+            sessionEntry: tailEntry,
+            count: nextChainCount,
+            startedAt: chainState.chainStartedAt,
+            tokens: chainState.accumulatedChainTokens,
+          });
+
+          // Schedule the continuation timer.
+          retainContinuationTimerRef(sessionKey);
+          const timerHandle = setTimeout(() => {
+            try {
+              defaultRuntime.log(
+                `[followup-runner] continue_work timer fired for session ${sessionKey}`,
+              );
+              enqueueSystemEvent(
+                `[continuation:wake] Turn ${nextChainCount}/${maxChainLength}. ` +
+                  `The agent elected to continue working.` +
+                  (attemptContinueWorkRequest!.reason
+                    ? ` Reason: ${attemptContinueWorkRequest!.reason}`
+                    : ""),
+                { sessionKey, trusted: true },
+              );
+              requestHeartbeatNow({
+                sessionKey,
+                reason: "continuation",
+                parentRunId: runId,
+              });
+            } finally {
+              unregisterContinuationTimerHandle(sessionKey, timerHandle);
+            }
+          }, clampedDelay);
+          registerContinuationTimerHandle(sessionKey, timerHandle);
+          timerHandle.unref();
+        }
+      }
+
       const usage = runResult.meta?.agentMeta?.usage;
       const promptTokens = runResult.meta?.agentMeta?.promptTokens;
       const modelUsed = runResult.meta?.agentMeta?.model ?? fallbackModel ?? defaultModel;
@@ -980,7 +1157,6 @@ export function createFollowupRunner(params: {
           lastCallUsage: runResult.meta?.agentMeta?.lastCallUsage,
           promptTokens,
           isHeartbeat: opts?.isHeartbeat === true,
-          preserveUserFacingSessionModelState: preserveUserFacingSessionState,
           modelUsed,
           providerUsed,
           contextTokensUsed,
@@ -1040,7 +1216,7 @@ export function createFollowupRunner(params: {
             });
           }
         }
-        if (shouldEmitVerboseProgress()) {
+        if (run.verboseLevel && run.verboseLevel !== "off") {
           const suffix = typeof count === "number" ? ` (count ${count})` : "";
           deliveryPayloads = [
             {

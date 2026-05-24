@@ -127,6 +127,8 @@ export type FollowupRun = {
     allowEmptyAssistantReplyAsSilent?: boolean;
     suppressNextUserMessagePersistence?: boolean;
     suppressTranscriptOnlyAssistantPersistence?: boolean;
+    drainsContinuationDelegateQueue?: boolean;
+    traceparent?: string;
   };
 };
 

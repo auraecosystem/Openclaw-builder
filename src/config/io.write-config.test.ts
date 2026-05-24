@@ -1,7 +1,7 @@
 import fsNode from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPersistedInstalledPluginIndex } from "../plugins/installed-plugin-index-store.js";
 import type { PluginManifestRegistry } from "../plugins/manifest-registry.js";
 import { clearLoadPluginMetadataSnapshotMemo } from "../plugins/plugin-metadata-snapshot.js";
@@ -69,6 +69,10 @@ describe("config io write", () => {
     warn: () => {},
     error: () => {},
   };
+  const emptyPluginManifestRegistry = (): PluginManifestRegistry => ({
+    diagnostics: [],
+    plugins: [],
+  });
 
   async function withSuiteHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
     const home = await suiteRootTracker.make("case");
@@ -80,17 +84,23 @@ describe("config io write", () => {
 
     // Default: return an empty plugin list so existing tests that don't need
     // plugin-owned channel schemas keep working unchanged.
-    mockLoadPluginManifestRegistry.mockReturnValue({
-      diagnostics: [],
-      plugins: [],
-    } satisfies PluginManifestRegistry);
+    mockLoadPluginManifestRegistry.mockReturnValue(emptyPluginManifestRegistry());
+  });
+
+  beforeEach(() => {
+    clearLoadPluginMetadataSnapshotMemo();
+    mockLoadPluginManifestRegistry.mockReset();
+    mockLoadPluginManifestRegistry.mockReturnValue(emptyPluginManifestRegistry());
   });
 
   afterEach(() => {
+    clearLoadPluginMetadataSnapshotMemo();
     resetConfigRuntimeState();
     clearLoadPluginMetadataSnapshotMemo();
     mockMaintainConfigBackups.mockReset();
     mockMaintainConfigBackups.mockResolvedValue(undefined);
+    mockLoadPluginManifestRegistry.mockReset();
+    mockLoadPluginManifestRegistry.mockReturnValue(emptyPluginManifestRegistry());
   });
 
   afterAll(async () => {
