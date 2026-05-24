@@ -937,13 +937,16 @@ export async function runCodexAppServerAttempt(
   } = {},
 ): Promise<EmbeddedRunAttemptResult> {
   const attemptStartedAt = Date.now();
+  const preDynamicStartupStages = createCodexDynamicToolBuildStageTracker();
   const attemptClientFactory = options.clientFactory ?? defaultCodexAppServerClientFactory;
   const pluginConfig = readCodexPluginConfig(options.pluginConfig);
   const computerUseConfig = resolveCodexComputerUseConfig({ pluginConfig });
   const configuredAppServer = resolveCodexAppServerRuntimeOptions({ pluginConfig });
   const beforeToolCallPolicy = getBeforeToolCallPolicyDiagnosticState();
+  preDynamicStartupStages.mark("config");
   const resolvedWorkspace = resolveUserPath(params.workspaceDir);
   await fs.mkdir(resolvedWorkspace, { recursive: true });
+  preDynamicStartupStages.mark("workspace");
   const sandboxSessionKey =
     params.sandboxSessionKey?.trim() || params.sessionKey?.trim() || params.sessionId;
   const contextSessionKey = params.sessionKey?.trim() || sandboxSessionKey;
@@ -952,12 +955,14 @@ export async function runCodexAppServerAttempt(
     sessionKey: sandboxSessionKey,
     workspaceDir: resolvedWorkspace,
   });
+  preDynamicStartupStages.mark("sandbox");
   const effectiveWorkspace = sandbox?.enabled
     ? sandbox.workspaceAccess === "rw"
       ? resolvedWorkspace
       : sandbox.workspaceDir
     : resolvedWorkspace;
   await fs.mkdir(effectiveWorkspace, { recursive: true });
+  preDynamicStartupStages.mark("effective-workspace");
   const appServer = resolveCodexAppServerForOpenClawToolPolicy({
     appServer: configuredAppServer,
     pluginConfig,
@@ -977,11 +982,13 @@ export async function runCodexAppServerAttempt(
       trustedToolPolicies: beforeToolCallPolicy.trustedToolPolicies,
     });
   }
+  preDynamicStartupStages.mark("app-server-policy");
   let pluginAppServer: CodexAppServerRuntimeOptions = appServer;
   const nativeHookRelayEvents = resolveCodexNativeHookRelayEvents({
     configuredEvents: options.nativeHookRelay?.events,
     appServer,
   });
+  preDynamicStartupStages.mark("native-hook-relay");
 
   const runAbortController = new AbortController();
   const abortFromUpstream = () => {
@@ -999,7 +1006,9 @@ export async function runCodexAppServerAttempt(
     agentId: params.agentId,
   });
   const agentDir = params.agentDir ?? resolveAgentDir(params.config ?? {}, sessionAgentId);
+  preDynamicStartupStages.mark("session-agent");
   let startupBinding = await readCodexAppServerBinding(params.sessionFile);
+  preDynamicStartupStages.mark("read-binding");
   const startupBindingAuthProfileId = startupBinding?.authProfileId;
   startupBinding = await rotateOversizedCodexAppServerStartupBinding({
     binding: startupBinding,
@@ -1008,6 +1017,7 @@ export async function runCodexAppServerAttempt(
     codexHome: appServer.start.env?.CODEX_HOME,
     config: params.config,
   });
+  preDynamicStartupStages.mark("rotate-binding");
   const startupAuthProfileCandidate =
     params.runtimePlan?.auth.forwardedAuthProfileId ??
     params.authProfileId ??
@@ -1024,6 +1034,7 @@ export async function runCodexAppServerAttempt(
         agentDir,
         config: params.config,
       });
+  preDynamicStartupStages.mark("auth-profile");
   const runtimeParams = {
     ...params,
     sessionKey: contextSessionKey,
@@ -1047,11 +1058,13 @@ export async function runCodexAppServerAttempt(
     : resolveCodexAppServerEnvApiKeyCacheKey({
         startOptions: appServer.start,
       });
+  preDynamicStartupStages.mark("auth-cache");
   const nodeExecBlocksNativeExecution = isCodexNativeExecutionBlockedByNodeExecHost(params, {
     agentId: sessionAgentId,
     runtimeSessionKey: sandboxSessionKey,
     sandbox,
   });
+  preDynamicStartupStages.mark("native-exec-policy");
   const bundleMcpThreadConfig = await loadCodexBundleMcpThreadConfig({
     workspaceDir: effectiveWorkspace,
     cfg: params.config,
@@ -1059,12 +1072,14 @@ export async function runCodexAppServerAttempt(
     disableTools: params.disableTools,
     toolsAllow: nodeExecBlocksNativeExecution ? [] : params.toolsAllow,
   });
+  preDynamicStartupStages.mark("bundle-mcp");
   const sandboxExecServerEnabled = isCodexSandboxExecServerEnabled(pluginConfig);
   const nativeToolSurfaceEnabled = shouldEnableCodexAppServerNativeToolSurface(params, sandbox, {
     agentId: sessionAgentId,
     runtimeSessionKey: sandboxSessionKey,
     sandboxExecServerEnabled,
   });
+  preDynamicStartupStages.mark("native-tool-surface");
   for (const diagnostic of bundleMcpThreadConfig.diagnostics) {
     embeddedAgentLog.warn(`bundle-mcp: ${diagnostic.pluginId}: ${diagnostic.message}`);
   }
@@ -1079,6 +1094,23 @@ export async function runCodexAppServerAttempt(
     });
   }
   const hookChannelId = resolveCodexAppServerHookChannelId(params, sandboxSessionKey);
+  preDynamicStartupStages.mark("context-engine-support");
+  const preDynamicSummary = preDynamicStartupStages.snapshot();
+  if (shouldWarnCodexDynamicToolBuildStageSummary(preDynamicSummary)) {
+    embeddedAgentLog.warn(
+      `codex app-server pre-dynamic startup timings runId=${params.runId} sessionId=${params.sessionId} totalMs=${preDynamicSummary.totalMs} stages=${formatCodexDynamicToolBuildStageSummary(preDynamicSummary)}`,
+      {
+        runId: params.runId,
+        sessionId: params.sessionId,
+        totalMs: preDynamicSummary.totalMs,
+        stages: preDynamicSummary.stages,
+        hasStartupBinding: startupBinding?.threadId ? true : false,
+        startupAuthProfileId: startupAuthProfileId ?? null,
+        bundleMcpDiagnosticCount: bundleMcpThreadConfig.diagnostics.length,
+        nativeToolSurfaceEnabled,
+      },
+    );
+  }
   let yieldDetected = false;
   const tools = await buildDynamicTools({
     params,
@@ -3874,6 +3906,16 @@ function shouldWarnCodexDynamicToolBuildStageSummary(
   );
 }
 
+function formatCodexDynamicToolBuildStageSummary(
+  summary: CodexDynamicToolBuildStageSummary,
+): string {
+  return summary.stages.length > 0
+    ? summary.stages
+        .map((stage) => `${stage.name}:${stage.durationMs}ms@${stage.elapsedMs}ms`)
+        .join(",")
+    : "none";
+}
+
 async function buildDynamicTools(input: DynamicToolBuildParams) {
   const { params } = input;
   if (params.disableTools || !supportsModelTools(params.model)) {
@@ -3994,21 +4036,25 @@ async function buildDynamicTools(input: DynamicToolBuildParams) {
   toolBuildStages.mark("runtime-normalization");
   const summary = toolBuildStages.snapshot();
   if (shouldWarnCodexDynamicToolBuildStageSummary(summary)) {
-    embeddedAgentLog.warn("codex app-server dynamic tool build timings", {
-      runId: params.runId,
-      sessionId: params.sessionId,
-      phase: input.forceHeartbeatTool ? "registered-tools" : "runtime-tools",
-      totalMs: summary.totalMs,
-      stages: summary.stages,
-      allToolCount: allTools.length,
-      codexFilteredToolCount: codexFilteredTools.length,
-      visionFilteredToolCount: visionFilteredTools.length,
-      filteredToolCount: filteredTools.length,
-      normalizedToolCount: normalizedTools.length,
-      forceHeartbeatTool: input.forceHeartbeatTool === true,
-      ignoreRuntimePlan: input.ignoreRuntimePlan === true,
-      nativeToolSurfaceEnabled: input.nativeToolSurfaceEnabled === true,
-    });
+    const phase = input.forceHeartbeatTool ? "registered-tools" : "runtime-tools";
+    embeddedAgentLog.warn(
+      `codex app-server dynamic tool build timings runId=${params.runId} sessionId=${params.sessionId} phase=${phase} totalMs=${summary.totalMs} stages=${formatCodexDynamicToolBuildStageSummary(summary)}`,
+      {
+        runId: params.runId,
+        sessionId: params.sessionId,
+        phase,
+        totalMs: summary.totalMs,
+        stages: summary.stages,
+        allToolCount: allTools.length,
+        codexFilteredToolCount: codexFilteredTools.length,
+        visionFilteredToolCount: visionFilteredTools.length,
+        filteredToolCount: filteredTools.length,
+        normalizedToolCount: normalizedTools.length,
+        forceHeartbeatTool: input.forceHeartbeatTool === true,
+        ignoreRuntimePlan: input.ignoreRuntimePlan === true,
+        nativeToolSurfaceEnabled: input.nativeToolSurfaceEnabled === true,
+      },
+    );
   }
   return normalizedTools;
 }
