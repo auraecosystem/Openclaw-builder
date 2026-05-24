@@ -528,9 +528,7 @@ describe("gateway hot reload", () => {
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("discord", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord", undefined, {
-        includeKnownAccounts: true,
-      });
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord");
     });
   });
 
@@ -576,9 +574,7 @@ describe("gateway hot reload", () => {
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("discord", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord", undefined, {
-        includeKnownAccounts: true,
-      });
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord");
     });
   });
 
@@ -631,9 +627,7 @@ describe("gateway hot reload", () => {
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("discord", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord", undefined, {
-        includeKnownAccounts: true,
-      });
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord");
     });
   });
 
@@ -683,9 +677,7 @@ describe("gateway hot reload", () => {
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("telegram", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("telegram", undefined, {
-        includeKnownAccounts: true,
-      });
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("telegram");
     });
   });
 
@@ -769,33 +761,23 @@ describe("gateway hot reload", () => {
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("whatsapp", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("whatsapp", undefined, {
-        includeKnownAccounts: true,
-      });
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("whatsapp");
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("telegram", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("telegram", undefined, {
-        includeKnownAccounts: true,
-      });
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("telegram");
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("discord", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord", undefined, {
-        includeKnownAccounts: true,
-      });
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord");
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("signal", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("signal", undefined, {
-        includeKnownAccounts: true,
-      });
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("signal");
       expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("imessage", undefined, {
         manual: false,
       });
-      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("imessage", undefined, {
-        includeKnownAccounts: true,
-      });
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("imessage");
 
       const onRestart = hoisted.getOnRestart();
       expect(onRestart).toBeTypeOf("function");
