@@ -7,6 +7,7 @@ import type {
   ReplyToMode,
   TelegramAccountConfig,
 } from "openclaw/plugin-sdk/config-contracts";
+import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { buildAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import { createSubsystemLogger, danger, logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
@@ -29,6 +30,7 @@ import { resolveMarkdownTableMode } from "./send.runtime.js";
 
 const DEFAULT_GUEST_FALLBACK_TEXT = "I could not produce a visible answer. Please try again.";
 const TELEGRAM_GUEST_MESSAGE_TEXT_LIMIT = 4096;
+const TELEGRAM_HTML_PARSE_ERR_RE = /can't parse entities|parse entities|find end of the entity/i;
 const GUEST_PROMPT_PREFIX =
   "Telegram Guest Mode query. Return exactly one visible final answer. " +
   "Do not use message(action=send), Telegram send tools, or source-channel delivery tools. " +
@@ -133,13 +135,14 @@ function buildGuestSessionKey(params: {
 function buildGuestAnswerPayload(
   guestQueryId: string,
   text: string,
-  options: { tableMode?: MarkdownTableMode } = {},
+  options: { parseMode?: "HTML"; tableMode?: MarkdownTableMode } = {},
 ): TelegramAnswerGuestQueryPayload {
   const trimmed = text.trim();
   const chunk = markdownToTelegramChunks(trimmed, TELEGRAM_GUEST_MESSAGE_TEXT_LIMIT, {
     tableMode: options.tableMode,
   })[0];
-  const messageText = chunk?.html ?? trimmed.slice(0, TELEGRAM_GUEST_MESSAGE_TEXT_LIMIT);
+  const plainText = trimmed.slice(0, TELEGRAM_GUEST_MESSAGE_TEXT_LIMIT);
+  const messageText = options.parseMode === "HTML" ? (chunk?.html ?? plainText) : plainText;
   const description = chunk?.text ?? trimmed;
   return {
     guest_query_id: guestQueryId,
@@ -149,7 +152,7 @@ function buildGuestAnswerPayload(
       title: GUEST_RESULT_TITLE,
       input_message_content: {
         message_text: messageText,
-        parse_mode: "HTML",
+        ...(options.parseMode ? { parse_mode: options.parseMode } : {}),
       },
       ...(description ? { description: description.slice(0, 120) } : {}),
     },
@@ -159,6 +162,7 @@ function buildGuestAnswerPayload(
 async function answerGuestQuery(params: {
   bot: Bot;
   guestQueryId: string;
+  runtime: RuntimeEnv;
   text: string;
   tableMode?: MarkdownTableMode;
 }): Promise<boolean> {
@@ -167,11 +171,22 @@ async function answerGuestQuery(params: {
   if (typeof answer !== "function") {
     throw new Error("Telegram API client does not expose raw.answerGuestQuery");
   }
-  await answer(
-    buildGuestAnswerPayload(params.guestQueryId, params.text, {
-      tableMode: params.tableMode,
-    }),
-  );
+  const htmlPayload = buildGuestAnswerPayload(params.guestQueryId, params.text, {
+    parseMode: "HTML",
+    tableMode: params.tableMode,
+  });
+  try {
+    await answer(htmlPayload);
+  } catch (err) {
+    const errorText = formatErrorMessage(err);
+    if (!TELEGRAM_HTML_PARSE_ERR_RE.test(errorText)) {
+      throw err;
+    }
+    params.runtime.log?.(
+      `telegram guest answer failed with HTML parse error; retrying plain: ${errorText}`,
+    );
+    await answer(buildGuestAnswerPayload(params.guestQueryId, params.text));
+  }
   return true;
 }
 
@@ -242,6 +257,7 @@ export function registerTelegramGuestHandlers(params: RegisterTelegramGuestHandl
       answered = await answerGuestQuery({
         bot: params.bot,
         guestQueryId,
+        runtime: params.runtime,
         text,
         tableMode: resolveMarkdownTableMode({
           cfg: freshCfg,

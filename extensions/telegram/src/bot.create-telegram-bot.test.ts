@@ -225,7 +225,7 @@ function expectNoGuestDelivery(): void {
 }
 
 function getGuestAnswerText(): unknown {
-  return answerGuestQuerySpy.mock.calls.at(0)?.[0]?.result.input_message_content.message_text;
+  return answerGuestQuerySpy.mock.calls.at(-1)?.[0]?.result.input_message_content.message_text;
 }
 
 function mockTelegramConfigWrites() {
@@ -678,6 +678,18 @@ describe("createTelegramBot", () => {
         setup: () => replySpy.mockRejectedValue(new Error("reply failed")),
         expected: "Something went wrong while processing your request. Please try again.",
       },
+      {
+        name: "falls back to plain text after html parse error",
+        setup: () => {
+          replySpy.mockResolvedValue({ text: "Das ist ja **super**" });
+          answerGuestQuerySpy
+            .mockRejectedValueOnce(new Error("400: Bad Request: can't parse entities"))
+            .mockResolvedValueOnce(true);
+        },
+        expected: "Das ist ja **super**",
+        expectedCalls: 2,
+        expectedParseMode: undefined,
+      },
     ];
 
     for (const testCase of cases) {
@@ -687,12 +699,12 @@ describe("createTelegramBot", () => {
 
       await runGuestMessage({ guestQueryId: `guest-query-${testCase.name}`, ...testCase.ctx });
 
-      expect(answerGuestQuerySpy, testCase.name).toHaveBeenCalledTimes(1);
+      expect(answerGuestQuerySpy, testCase.name).toHaveBeenCalledTimes(testCase.expectedCalls ?? 1);
       expect(getGuestAnswerText(), testCase.name).toBe(testCase.expected);
       expect(
-        answerGuestQuerySpy.mock.calls.at(0)?.[0]?.result.input_message_content.parse_mode,
+        answerGuestQuerySpy.mock.calls.at(-1)?.[0]?.result.input_message_content.parse_mode,
         testCase.name,
-      ).toBe("HTML");
+      ).toBe("expectedParseMode" in testCase ? testCase.expectedParseMode : "HTML");
       expect(sendMessageSpy, testCase.name).not.toHaveBeenCalled();
     }
   });

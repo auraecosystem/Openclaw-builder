@@ -3,7 +3,7 @@ import { API_CONSTANTS } from "grammy";
 export type TelegramUpdateType = (typeof API_CONSTANTS.ALL_UPDATE_TYPES)[number] | "guest_message";
 
 export const DEFAULT_TELEGRAM_UPDATE_TYPES: ReadonlyArray<TelegramUpdateType> =
-  API_CONSTANTS.DEFAULT_UPDATE_TYPES;
+  API_CONSTANTS.DEFAULT_UPDATE_TYPES.filter((type) => type !== "guest_message");
 
 export type TelegramGuestModeConfig = {
   enabled?: boolean;
