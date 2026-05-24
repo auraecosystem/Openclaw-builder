@@ -185,7 +185,8 @@ function isPreflightCompactionSkipReason(reason?: string): boolean {
   return (
     classification === "below_threshold" ||
     classification === "no_compactable_entries" ||
-    classification === "already_compacted_recently"
+    classification === "already_compacted_recently" ||
+    classification === "deferred_background"
   );
 }
 
@@ -826,6 +827,7 @@ export async function runPreflightCompactionIfNeeded(params: {
     thinkLevel: params.followupRun.run.thinkLevel,
     bashElevated: params.followupRun.run.bashElevated,
     trigger: "budget",
+    deferOwningContextEngineCompaction: true,
     currentTokenCount: tokenCountForCompaction ?? freshPersistedTokens,
     ownerNumbers: params.followupRun.run.ownerNumbers,
     abortSignal: params.replyOperation.abortSignal,

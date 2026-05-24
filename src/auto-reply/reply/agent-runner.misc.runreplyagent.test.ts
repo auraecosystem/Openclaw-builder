@@ -441,6 +441,7 @@ describe("runReplyAgent auto-compaction token update", () => {
       sessionId: "session",
       sessionKey,
       trigger: "budget",
+      deferOwningContextEngineCompaction: true,
       currentTokenCount: 1_000_000,
     });
     expect(runEmbeddedPiAgentMock).toHaveBeenCalledTimes(1);

@@ -34,6 +34,9 @@ export function classifyCompactionReason(reason?: string): string {
   if (text.includes("already compacted")) {
     return "already_compacted_recently";
   }
+  if (text.includes("deferred to background")) {
+    return "deferred_background";
+  }
   if (text.includes("still exceeds target")) {
     return "live_context_still_exceeds_target";
   }

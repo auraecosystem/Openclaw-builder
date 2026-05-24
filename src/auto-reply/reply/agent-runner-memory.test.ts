@@ -698,6 +698,59 @@ describe("runMemoryFlushIfNeeded", () => {
 
     expect(entry).toBe(sessionEntry);
     expect(compactEmbeddedPiSessionMock).toHaveBeenCalledTimes(1);
+    expect(requireCompactEmbeddedPiSessionCall()).toMatchObject({
+      trigger: "budget",
+      deferOwningContextEngineCompaction: true,
+    });
+    expect(incrementCompactionCountMock).not.toHaveBeenCalled();
+  });
+
+  it("continues when preflight context-engine compaction is deferred to background maintenance", async () => {
+    const sessionFile = path.join(rootDir, "session.jsonl");
+    await fs.writeFile(
+      sessionFile,
+      `${JSON.stringify({ message: { role: "user", content: "x".repeat(5_000) } })}\n`,
+      "utf8",
+    );
+    registerMemoryFlushPlanResolverForTest(() => ({
+      softThresholdTokens: 1,
+      forceFlushTranscriptBytes: 1_000_000_000,
+      reserveTokensFloor: 0,
+      prompt: "Pre-compaction memory flush.\nNO_REPLY",
+      systemPrompt: "Write memory to memory/YYYY-MM-DD.md.",
+      relativePath: "memory/2023-11-14.md",
+    }));
+    compactEmbeddedPiSessionMock.mockResolvedValueOnce({
+      ok: true,
+      compacted: false,
+      reason: "deferred to background context-engine maintenance",
+    });
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      sessionFile,
+      updatedAt: Date.now(),
+      totalTokensFresh: false,
+    };
+
+    const entry = await runPreflightCompactionIfNeeded({
+      cfg: { agents: { defaults: { compaction: { memoryFlush: {} } } } },
+      followupRun: createTestFollowupRun({
+        sessionId: "session",
+        sessionFile,
+        sessionKey: "agent:main:main",
+      }),
+      defaultModel: "anthropic/claude-opus-4-6",
+      agentCfgContextTokens: 100,
+      sessionEntry,
+      sessionStore: { "agent:main:main": sessionEntry },
+      sessionKey: "agent:main:main",
+      storePath: path.join(rootDir, "sessions.json"),
+      isHeartbeat: false,
+      replyOperation: createReplyOperation(),
+    });
+
+    expect(entry).toBe(sessionEntry);
+    expect(compactEmbeddedPiSessionMock).toHaveBeenCalledTimes(1);
     expect(incrementCompactionCountMock).not.toHaveBeenCalled();
   });
 

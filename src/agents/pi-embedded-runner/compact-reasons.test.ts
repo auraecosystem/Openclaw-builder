@@ -38,6 +38,12 @@ describe("classifyCompactionReason", () => {
     expect(classifyCompactionReason("already under target")).toBe("below_threshold");
   });
 
+  it("classifies deferred background maintenance as a skip-like reason", () => {
+    expect(classifyCompactionReason("deferred to background context-engine maintenance")).toBe(
+      "deferred_background",
+    );
+  });
+
   it("classifies safeguard messages as guard-blocked", () => {
     expect(
       classifyCompactionReason(

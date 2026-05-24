@@ -3,7 +3,7 @@ import {
   resolveContextEngine,
   resolveContextEngineOwnerPluginId,
 } from "../../context-engine/registry.js";
-import type { ContextEngineRuntimeContext } from "../../context-engine/types.js";
+import type { ContextEngine, ContextEngineRuntimeContext } from "../../context-engine/types.js";
 import {
   captureCompactionCheckpointSnapshotAsync,
   cleanupCompactionCheckpointSnapshot,
@@ -61,6 +61,74 @@ function shouldFallbackAfterHarnessCompaction(
     (result.failure?.reason === "missing_thread_binding" ||
       result.failure?.reason === "stale_thread_binding")
   );
+}
+
+const DEFERRED_CONTEXT_ENGINE_COMPACTION_REASON =
+  "deferred to background context-engine maintenance";
+
+function shouldDeferOwningContextEngineBudgetCompaction(params: {
+  compactParams: CompactEmbeddedPiSessionParams;
+  contextEngine: ContextEngine;
+}): boolean {
+  return (
+    params.compactParams.deferOwningContextEngineCompaction === true &&
+    params.compactParams.trigger === "budget" &&
+    params.contextEngine.info.ownsCompaction === true &&
+    params.contextEngine.info.turnMaintenanceMode === "background" &&
+    typeof params.contextEngine.maintain === "function"
+  );
+}
+
+async function disposeContextEngine(contextEngine: ContextEngine): Promise<void> {
+  try {
+    await contextEngine.dispose?.();
+  } catch (err) {
+    log.warn("context engine dispose failed after deferred maintenance", {
+      errorMessage: formatErrorMessage(err),
+    });
+  }
+}
+
+async function deferOwningContextEngineBudgetCompaction(params: {
+  compactParams: CompactEmbeddedPiSessionParams;
+  contextEngine: ContextEngine;
+  contextEngineRuntimeContext: ContextEngineRuntimeContext;
+}): Promise<EmbeddedPiCompactResult> {
+  let deferredScheduled = false;
+  try {
+    await runContextEngineMaintenance({
+      contextEngine: params.contextEngine,
+      sessionId: params.compactParams.sessionId,
+      sessionKey: params.compactParams.sessionKey,
+      sessionFile: params.compactParams.sessionFile,
+      reason: "turn",
+      runtimeContext: params.contextEngineRuntimeContext,
+      config: params.compactParams.config,
+      onDeferredMaintenance: (promise) => {
+        deferredScheduled = true;
+        void promise.finally(() => disposeContextEngine(params.contextEngine));
+      },
+    });
+  } catch (err) {
+    log.warn("failed to defer context-engine budget compaction", {
+      errorMessage: formatErrorMessage(err),
+    });
+  }
+
+  if (!deferredScheduled) {
+    await disposeContextEngine(params.contextEngine);
+  }
+
+  log.info(
+    `[compaction] deferred context-engine-owned budget compaction to background maintenance ` +
+      `(sessionKey=${params.compactParams.sessionKey ?? params.compactParams.sessionId} ` +
+      `scheduled=${deferredScheduled})`,
+  );
+  return {
+    ok: true,
+    compacted: false,
+    reason: DEFERRED_CONTEXT_ENGINE_COMPACTION_REASON,
+  };
 }
 
 /**
@@ -158,6 +226,18 @@ export async function compactEmbeddedPiSession(
     log.warn(
       `native harness compaction could not use its session binding; falling back to context engine: ${harnessResult.reason ?? "unknown"}`,
     );
+  }
+  if (
+    shouldDeferOwningContextEngineBudgetCompaction({
+      compactParams: params,
+      contextEngine,
+    })
+  ) {
+    return await deferOwningContextEngineBudgetCompaction({
+      compactParams: params,
+      contextEngine,
+      contextEngineRuntimeContext,
+    });
   }
   const sessionLane = resolveSessionLane(params.sessionKey?.trim() || params.sessionId);
   const globalLane = resolveGlobalLane(params.lane);
