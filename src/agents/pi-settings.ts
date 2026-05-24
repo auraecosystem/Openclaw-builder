@@ -1,7 +1,7 @@
 import type { AgentCompactionMode } from "../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { ContextEngineInfo } from "../context-engine/types.js";
-import { resolveAgentCompactionConfig } from "./agent-scope-config.js";
+import { resolveAgentConfig } from "./agent-scope-config.js";
 import { MIN_PROMPT_BUDGET_RATIO, MIN_PROMPT_BUDGET_TOKENS } from "./pi-compaction-constants.js";
 import { resolveProviderEndpoint } from "./provider-attribution.js";
 import { normalizeProviderId } from "./provider-id.js";
@@ -48,7 +48,11 @@ export function resolveCompactionReserveTokensFloor(
   cfg?: OpenClawConfig,
   agentId?: string | null,
 ): number {
-  const raw = resolveAgentCompactionConfig(cfg, agentId)?.reserveTokensFloor;
+  const raw = (
+    cfg && agentId
+      ? (resolveAgentConfig(cfg, agentId)?.compaction ?? cfg.agents?.defaults?.compaction)
+      : cfg?.agents?.defaults?.compaction
+  )?.reserveTokensFloor;
   if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) {
     return Math.floor(raw);
   }
@@ -81,7 +85,11 @@ export function applyPiCompactionSettingsFromConfig(params: {
 } {
   const currentReserveTokens = params.settingsManager.getCompactionReserveTokens();
   const currentKeepRecentTokens = params.settingsManager.getCompactionKeepRecentTokens();
-  const compactionCfg = resolveAgentCompactionConfig(params.cfg, params.agentId);
+  const compactionCfg =
+    params.cfg && params.agentId
+      ? (resolveAgentConfig(params.cfg, params.agentId)?.compaction ??
+        params.cfg.agents?.defaults?.compaction)
+      : params.cfg?.agents?.defaults?.compaction;
 
   const configuredReserveTokens = toNonNegativeInt(compactionCfg?.reserveTokens);
   const configuredKeepRecentTokens = toPositiveInt(compactionCfg?.keepRecentTokens);
@@ -135,7 +143,10 @@ export function resolveEffectiveCompactionMode(
   cfg?: OpenClawConfig,
   agentId?: string | null,
 ): AgentCompactionMode {
-  const compaction = resolveAgentCompactionConfig(cfg, agentId);
+  const compaction =
+    cfg && agentId
+      ? (resolveAgentConfig(cfg, agentId)?.compaction ?? cfg.agents?.defaults?.compaction)
+      : cfg?.agents?.defaults?.compaction;
   if (compaction?.provider) {
     return "safeguard";
   }

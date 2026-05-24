@@ -214,19 +214,6 @@ export function resolveAgentConfig(
   };
 }
 
-export function resolveAgentCompactionConfig(
-  cfg: OpenClawConfig | undefined,
-  agentId?: string | null,
-): AgentEntry["compaction"] | undefined {
-  if (!cfg) {
-    return undefined;
-  }
-  if (agentId) {
-    return resolveAgentConfig(cfg, agentId)?.compaction ?? cfg.agents?.defaults?.compaction;
-  }
-  return cfg.agents?.defaults?.compaction;
-}
-
 export function resolveAgentContextPruningConfig(
   cfg: OpenClawConfig | undefined,
   agentId?: string | null,

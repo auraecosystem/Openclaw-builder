@@ -5,7 +5,7 @@ import {
   type ThinkLevel,
 } from "../../auto-reply/thinking.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { resolveAgentCompactionConfig } from "../agent-scope-config.js";
+import { resolveAgentConfig } from "../agent-scope-config.js";
 import {
   listActiveProcessSessionReferences,
   type ActiveProcessSessionReference,
@@ -53,7 +53,11 @@ export function resolveEmbeddedCompactionTarget(params: {
   defaultProvider?: string;
   defaultModel?: string;
 }): { provider: string | undefined; model: string | undefined; authProfileId: string | undefined } {
-  const compaction = resolveAgentCompactionConfig(params.config, params.agentId);
+  const compaction =
+    params.config && params.agentId
+      ? (resolveAgentConfig(params.config, params.agentId)?.compaction ??
+        params.config.agents?.defaults?.compaction)
+      : params.config?.agents?.defaults?.compaction;
   const provider = params.provider?.trim() || params.defaultProvider;
   const model = params.modelId?.trim() || params.defaultModel;
   const override = compaction?.model?.trim();
@@ -89,7 +93,11 @@ export function resolveEmbeddedCompactionThinkingLevel(params: {
   thinkLevel?: ThinkLevel | null;
 }): ThinkLevel {
   const configured = normalizeThinkLevel(
-    resolveAgentCompactionConfig(params.config, params.agentId)?.thinkingLevel,
+    (params.config && params.agentId
+      ? (resolveAgentConfig(params.config, params.agentId)?.compaction ??
+        params.config.agents?.defaults?.compaction)
+      : params.config?.agents?.defaults?.compaction
+    )?.thinkingLevel,
   );
   return configured ?? normalizeThinkLevel(params.thinkLevel) ?? "off";
 }

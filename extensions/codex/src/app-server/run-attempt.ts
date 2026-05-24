@@ -54,7 +54,7 @@ import {
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import {
   markAuthProfileBlockedUntil,
-  resolveAgentCompactionConfig,
+  resolveAgentConfig,
   resolveAgentDir,
 } from "openclaw/plugin-sdk/agent-runtime";
 import {
@@ -854,7 +854,11 @@ async function rotateOversizedCodexAppServerStartupBinding(params: {
   if (!binding?.threadId) {
     return binding;
   }
-  const compactionConfig = resolveAgentCompactionConfig(params.config, params.sessionAgentId);
+  const compactionConfig =
+    params.config && params.sessionAgentId
+      ? (resolveAgentConfig(params.config, params.sessionAgentId)?.compaction ??
+        params.config?.agents?.defaults?.compaction)
+      : params.config?.agents?.defaults?.compaction;
   if (compactionConfig?.truncateAfterCompaction !== true) {
     return binding;
   }

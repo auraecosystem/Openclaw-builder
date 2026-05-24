@@ -8,10 +8,7 @@ import type {
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { ProviderRuntimeModel } from "../../plugins/provider-runtime-model.types.js";
 import { normalizeOptionalLowercaseString } from "../../shared/string-coerce.js";
-import {
-  resolveAgentCompactionConfig,
-  resolveAgentContextPruningConfig,
-} from "../agent-scope-config.js";
+import { resolveAgentConfig, resolveAgentContextPruningConfig } from "../agent-scope-config.js";
 import { resolveContextWindowInfo } from "../context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../defaults.js";
 import { createAgentToolResultMiddlewareRunner } from "../harness/tool-result-middleware.js";
@@ -188,7 +185,11 @@ export function buildEmbeddedExtensionFactories(params: {
   modelRegistry?: ModelRegistry;
 }): ExtensionFactory[] {
   const factories: ExtensionFactory[] = [];
-  const compactionCfg = resolveAgentCompactionConfig(params.cfg, params.agentId);
+  const compactionCfg =
+    params.cfg && params.agentId
+      ? (resolveAgentConfig(params.cfg, params.agentId)?.compaction ??
+        params.cfg.agents?.defaults?.compaction)
+      : params.cfg?.agents?.defaults?.compaction;
   if (resolveEffectiveCompactionMode(params.cfg, params.agentId) === "safeguard") {
     const qualityGuardCfg = compactionCfg?.qualityGuard;
     const runtimeModel = resolveSafeguardRuntimeModel(params);
