@@ -21,11 +21,13 @@ import { loadSkillsFromDirSafe, readSkillFrontmatterSafe } from "./local-loader.
 import { resolvePluginSkillDirs } from "./plugin-skills.js";
 import { serializeByKey } from "./serialize.js";
 import { formatSkillsForPrompt, type Skill } from "./skill-contract.js";
-import type {
-  ParsedSkillFrontmatter,
-  SkillEligibilityContext,
-  SkillEntry,
-  SkillSnapshot,
+import { resolveSkillSource } from "./source.js";
+import {
+  SKILL_SNAPSHOT_SCHEMA_VERSION,
+  type ParsedSkillFrontmatter,
+  type SkillEligibilityContext,
+  type SkillEntry,
+  type SkillSnapshot,
 } from "./types.js";
 
 const fsp = fs.promises;
@@ -1043,10 +1045,21 @@ export function buildWorkspaceSkillSnapshot(
   workspaceDir: string,
   opts?: WorkspaceSkillBuildOptions & { snapshotVersion?: number },
 ): SkillSnapshot {
-  const { eligible, prompt, resolvedSkills } = resolveWorkspaceSkillPromptState(workspaceDir, opts);
+  const {
+    eligible,
+    prompt,
+    trustedDeveloperPrompt,
+    untrustedReferencePrompt,
+    remoteNote,
+    resolvedSkills,
+  } = resolveWorkspaceSkillPromptState(workspaceDir, opts);
   const skillFilter = resolveEffectiveWorkspaceSkillFilter(opts);
   return {
     prompt,
+    ...(trustedDeveloperPrompt ? { trustedDeveloperPrompt } : {}),
+    ...(untrustedReferencePrompt ? { untrustedReferencePrompt } : {}),
+    ...(remoteNote ? { remoteNote } : {}),
+    schemaVersion: SKILL_SNAPSHOT_SCHEMA_VERSION,
     skills: eligible.map((entry) => ({
       name: entry.skill.name,
       primaryEnv: entry.metadata?.primaryEnv,
@@ -1098,6 +1111,9 @@ function resolveWorkspaceSkillPromptState(
 ): {
   eligible: SkillEntry[];
   prompt: string;
+  trustedDeveloperPrompt?: string;
+  untrustedReferencePrompt?: string;
+  remoteNote?: string;
   resolvedSkills: Skill[];
 } {
   const skillEntries = opts?.entries ?? loadSkillEntries(workspaceDir, opts);
@@ -1135,7 +1151,84 @@ function resolveWorkspaceSkillPromptState(
   ]
     .filter(Boolean)
     .join("\n");
-  return { eligible, prompt, resolvedSkills };
+  // Partition the already-budgeted `skillsForPrompt` set into the two
+  // authority lanes instead of re-applying `applySkillsPromptLimits` per
+  // lane. Both lanes share the user's configured `maxSkillsPromptChars` /
+  // `maxSkillsInPrompt` budget — applying each lane independently would
+  // let trusted+untrusted exceed the combined budget that legacy single-
+  // lane builds respected.
+  const trustedNames = new Set(
+    promptEntries
+      .filter((entry) => isTrustedDeveloperSkillEntry(entry))
+      .map((entry) => entry.skill.name),
+  );
+  const trustedDeveloperPrompt = buildLaneSkillsPrompt({
+    skills: skillsForPrompt.filter((skill) => trustedNames.has(skill.name)),
+    totalLaneCount: trustedNames.size,
+    compact,
+    truncationLabel: "Trusted skills",
+  });
+  const untrustedReferencePrompt = buildLaneSkillsPrompt({
+    skills: skillsForPrompt.filter((skill) => !trustedNames.has(skill.name)),
+    totalLaneCount: promptEntries.length - trustedNames.size,
+    compact,
+    truncationLabel: "User-installed skills",
+  });
+  return {
+    eligible,
+    prompt,
+    trustedDeveloperPrompt,
+    untrustedReferencePrompt,
+    ...(remoteNote ? { remoteNote } : {}),
+    resolvedSkills,
+  };
+}
+
+function isTrustedDeveloperSkillEntry(entry: SkillEntry): boolean {
+  return resolveSkillSource(entry.skill) === "openclaw-bundled";
+}
+
+/**
+ * Render one authority lane (trusted-developer or untrusted-reference) from
+ * a pre-budgeted, pre-sorted subset of `skillsForPrompt`. The combined
+ * budget (`maxSkillsPromptChars` / `maxSkillsInPrompt`) was applied once
+ * upstream in `resolveWorkspaceSkillPromptState`, so this function never
+ * re-applies it — that is the only way to keep trusted + untrusted
+ * combined within the user's configured cap.
+ *
+ * - `skills`: this lane's already-budgeted subset.
+ * - `totalLaneCount`: how many of this lane's entries were eligible
+ *   before the budget cut (used in the truncation notice so reviewers can
+ *   see "X of Y" per lane).
+ * - `compact`: the shared format decision from the budget pass.
+ * - `truncationLabel`: human-readable lane name for the warning line.
+ *
+ * Returns `undefined` when no skills survive the budget cut for this lane.
+ * The render shape (XML or compact) mirrors the full prompt builder so
+ * reviewers see the same byte shape as `prompt`, just restricted to the
+ * lane subset.
+ */
+function buildLaneSkillsPrompt(params: {
+  skills: Skill[];
+  totalLaneCount: number;
+  compact: boolean;
+  truncationLabel: string;
+}): string | undefined {
+  if (params.skills.length === 0) {
+    return undefined;
+  }
+  const truncated = params.skills.length < params.totalLaneCount;
+  const truncationNote = truncated
+    ? `⚠️ ${params.truncationLabel} truncated: included ${params.skills.length} of ${params.totalLaneCount}${params.compact ? " (compact format, descriptions omitted)" : ""}. Run \`openclaw skills check\` to audit.`
+    : params.compact
+      ? `⚠️ ${params.truncationLabel} catalog using compact format (descriptions omitted). Run \`openclaw skills check\` to audit.`
+      : "";
+  return [
+    truncationNote,
+    params.compact ? formatSkillsCompact(params.skills) : formatSkillsForPrompt(params.skills),
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function resolveSkillsPromptForRun(params: {
