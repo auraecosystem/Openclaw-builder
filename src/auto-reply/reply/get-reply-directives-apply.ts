@@ -1,3 +1,4 @@
+import { resolvePersistedOverrideModelRef } from "../../agents/model-selection.js";
 import type { SessionEntry, SessionScope } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
@@ -349,6 +350,15 @@ export async function applyInlineDirectiveOverrides(params: {
     if (directives.hasStatusDirective && allowTextCommands && command.isAuthorizedSender) {
       const { buildStatusReply } = await loadCommandsStatus();
       const targetSessionEntry = sessionStore[sessionKey] ?? sessionEntry;
+      const statusStoredModel = resolvePersistedOverrideModelRef({
+        defaultProvider,
+        overrideProvider: targetSessionEntry?.providerOverride,
+        overrideModel: targetSessionEntry?.modelOverride,
+      });
+      const statusFallbackProvider = directives.hasModelDirective ? defaultProvider : provider;
+      const statusFallbackModel = directives.hasModelDirective ? defaultModel : model;
+      const statusProvider = statusStoredModel?.provider ?? statusFallbackProvider;
+      const statusModel = statusStoredModel?.model ?? statusFallbackModel;
       statusReply = await buildStatusReply({
         cfg,
         command,
@@ -357,8 +367,10 @@ export async function applyInlineDirectiveOverrides(params: {
         parentSessionKey: targetSessionEntry?.parentSessionKey ?? ctx.ParentSessionKey,
         sessionScope,
         storePath,
-        provider,
-        model,
+        provider: statusProvider,
+        model: statusModel,
+        activeModelProvider: statusProvider,
+        activeModel: statusModel,
         contextTokens,
         workspaceDir,
         resolvedThinkLevel: resolvedDefaultThinkLevel,
