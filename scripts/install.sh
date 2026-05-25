@@ -32,6 +32,21 @@ cleanup_tmpfiles() {
 }
 trap cleanup_tmpfiles EXIT
 
+abort_install_int() {
+    cleanup_tmpfiles
+    echo ""
+    ui_warn "Installation interrupted"
+    exit 130
+}
+abort_install_term() {
+    cleanup_tmpfiles
+    echo ""
+    ui_warn "Installation terminated"
+    exit 143
+}
+trap abort_install_int INT
+trap abort_install_term TERM
+
 mktempfile() {
     local f
     f="$(mktemp)"
@@ -2690,10 +2705,19 @@ run_doctor() {
     if [[ -z "$claw" ]]; then
         ui_info "Skipping doctor (openclaw not on PATH yet)"
         warn_openclaw_not_found
-        return 0
+        return 1
     fi
-    run_quiet_step "Running doctor" "$claw" doctor --non-interactive || true
+    local doctor_exit=0
+    run_quiet_step "Running doctor" "$claw" doctor --non-interactive || doctor_exit=$?
+    if (( doctor_exit == 130 )); then
+        abort_install_int
+    fi
+    if (( doctor_exit != 0 )); then
+        ui_warn "Doctor exited with status $doctor_exit"
+        return 1
+    fi
     ui_success "Doctor complete"
+    return 0
 }
 
 maybe_open_dashboard() {
@@ -3064,8 +3088,9 @@ main() {
         run_doctor_after=true
     fi
     if [[ "$run_doctor_after" == "true" ]]; then
-        run_doctor
-        should_open_dashboard=true
+        if run_doctor; then
+            should_open_dashboard=true
+        fi
     fi
 
     # Step 7: If BOOTSTRAP.md is still present in the workspace, resume onboarding
@@ -3148,13 +3173,24 @@ main() {
                 doctor_args+=("--non-interactive")
             fi
             ui_info "Running openclaw doctor"
+            # Reset the flag so a failed final doctor does not inherit an
+            # earlier migration doctor success.
+            should_open_dashboard=false
             local doctor_ok=0
+            local doctor_exit=0
             if (( ${#doctor_args[@]} )); then
-                OPENCLAW_UPDATE_IN_PROGRESS=1 "$claw" doctor "${doctor_args[@]}" </dev/null && doctor_ok=1
+                OPENCLAW_UPDATE_IN_PROGRESS=1 "$claw" doctor "${doctor_args[@]}" </dev/null || doctor_exit=$?
             else
-                OPENCLAW_UPDATE_IN_PROGRESS=1 "$claw" doctor </dev/tty && doctor_ok=1
+                OPENCLAW_UPDATE_IN_PROGRESS=1 "$claw" doctor </dev/tty || doctor_exit=$?
+            fi
+            if (( doctor_exit == 130 )); then
+                abort_install_int
+            fi
+            if (( doctor_exit == 0 )); then
+                doctor_ok=1
             fi
             if (( doctor_ok )); then
+                should_open_dashboard=true
                 ui_info "Updating plugins"
                 OPENCLAW_UPDATE_IN_PROGRESS=1 "$claw" plugins update --all || true
             else
@@ -3176,8 +3212,9 @@ main() {
             local config_path="${OPENCLAW_CONFIG_PATH:-$effective_home/.openclaw/openclaw.json}"
             if [[ -f "${config_path}" || -f "$effective_home/.clawdbot/clawdbot.json" ]]; then
                 ui_info "Config already present; running doctor"
-                run_doctor
-                should_open_dashboard=true
+                if run_doctor; then
+                    should_open_dashboard=true
+                fi
                 ui_info "Config already present; skipping onboarding"
                 skip_onboard=true
             fi
