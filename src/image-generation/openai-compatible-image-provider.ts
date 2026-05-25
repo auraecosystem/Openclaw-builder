@@ -11,7 +11,10 @@ import {
   sanitizeConfiguredModelProviderRequest,
 } from "openclaw/plugin-sdk/provider-http";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { parseOpenAiCompatibleImageResponse } from "./image-assets.js";
+import {
+  parseOpenAiCompatibleImageResponseAsync,
+  type OpenAiCompatibleImageResponsePayload,
+} from "./image-assets.js";
 import type {
   ImageGenerationProvider,
   ImageGenerationProviderCapabilities,
@@ -260,13 +263,21 @@ export function createOpenAiCompatibleImageGenerationProvider(
             ? (options.failureLabels?.edit ?? `${options.label} image edit failed`)
             : (options.failureLabels?.generate ?? `${options.label} image generation failed`),
         );
-        const images = parseOpenAiCompatibleImageResponse(await response.json(), {
-          ...options.response,
-          malformedResponseError:
-            mode === "edit"
-              ? `${options.label} image edit response malformed`
-              : `${options.label} image generation response malformed`,
-        });
+        const images = await parseOpenAiCompatibleImageResponseAsync(
+          (await response.json()) as OpenAiCompatibleImageResponsePayload,
+          {
+            ...options.response,
+            malformedResponseError:
+              mode === "edit"
+                ? `${options.label} image edit response malformed`
+                : `${options.label} image generation response malformed`,
+            timeoutMs,
+            ssrfPolicy: req.ssrfPolicy,
+            allowPrivateNetwork: resolvedAllowPrivateNetwork,
+            dispatcherPolicy,
+            auditContext: `${options.id}.image-url-download`,
+          },
+        );
         if (images.length === 0) {
           throw new Error(
             options.emptyResponseError ??
