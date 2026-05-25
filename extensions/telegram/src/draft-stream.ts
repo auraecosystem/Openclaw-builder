@@ -5,7 +5,12 @@ import {
 } from "openclaw/plugin-sdk/channel-lifecycle";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { buildTelegramThreadParams, type TelegramThreadSpec } from "./bot/helpers.js";
-import { isSafeToRetrySendError, isTelegramClientRejection } from "./network-errors.js";
+import {
+  isSafeToRetrySendError,
+  isTelegramClientRejection,
+  isTelegramRateLimitError,
+  isTelegramServerError,
+} from "./network-errors.js";
 import { normalizeTelegramReplyToMessageId } from "./outbound-params.js";
 
 const TELEGRAM_STREAM_MAX_CHARS = 4096;
@@ -263,6 +268,24 @@ export function createTelegramDraftStream(params: {
       }
       return sent;
     } catch (err) {
+      // Don't permanently kill the stream on transient Telegram errors —
+      // 429 rate limits, 5xx server hiccups, and pre-connect / safe-to-retry
+      // network blips would otherwise stop ALL future updates on the lane
+      // (sendOrEditStreamMessage early-returns false when stopped=true),
+      // freezing the in-flight interleaved render mid-turn. The send-loop
+      // already throttles retries via the next update cycle. Only set
+      // stopped=true for genuine non-retryable failures (4xx client rejections,
+      // unknown errors) where another attempt would just fail the same way.
+      const isTransient =
+        isSafeToRetrySendError(err) ||
+        isTelegramRateLimitError(err) ||
+        isTelegramServerError(err);
+      if (isTransient) {
+        params.warn?.(
+          `telegram stream preview transient error (continuing): ${formatErrorMessage(err)}`,
+        );
+        return false;
+      }
       streamState.stopped = true;
       params.warn?.(`telegram stream preview failed: ${formatErrorMessage(err)}`);
       return false;
