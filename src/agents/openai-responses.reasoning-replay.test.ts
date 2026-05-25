@@ -2,6 +2,7 @@ import type { AssistantMessage, Model, ToolResultMessage } from "@earendil-works
 import { streamOpenAIResponses } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
+import { resolveReplayableResponsesMessageId } from "./openai-responses-replay.js";
 
 function buildModel(): Model<"openai-responses"> {
   return {
@@ -190,6 +191,34 @@ describe("openai-responses reasoning replay", () => {
 
     expect(types).toContain("reasoning");
     expect(types).toContain("message");
+  });
+
+  it("does not replay a signed assistant message id after its reasoning item was pruned", async () => {
+    expect(
+      resolveReplayableResponsesMessageId({
+        replayResponsesItemIds: true,
+        textSignatureId: "msg_real_response_item_requiring_reasoning",
+        fallbackId: "msg_0",
+        previousReplayItemWasReasoning: false,
+      }),
+    ).toBeUndefined();
+
+    expect(
+      resolveReplayableResponsesMessageId({
+        replayResponsesItemIds: true,
+        textSignatureId: "msg_real_response_item_requiring_reasoning",
+        fallbackId: "msg_0",
+        previousReplayItemWasReasoning: true,
+      }),
+    ).toBe("msg_real_response_item_requiring_reasoning");
+
+    expect(
+      resolveReplayableResponsesMessageId({
+        replayResponsesItemIds: true,
+        fallbackId: "msg_0",
+        previousReplayItemWasReasoning: false,
+      }),
+    ).toBe("msg_0");
   });
 
   it.each(["commentary", "final_answer"] as const)(
