@@ -770,10 +770,12 @@ export function createImageGenerateTool(options?: {
   sandbox?: ImageGenerateSandboxConfig;
   fsPolicy?: ToolFsPolicy;
   scheduleBackgroundWork?: MediaGenerateBackgroundScheduler;
+  availabilityResolved?: boolean;
   onAsyncTaskStarted?: MediaGenerateAsyncStartCallback;
 }): AnyAgentTool | null {
   const cfg = options?.config ?? getRuntimeConfig();
   if (
+    options?.availabilityResolved !== true &&
     !hasGenerationToolAvailability({
       cfg,
       agentDir: options?.agentDir,
