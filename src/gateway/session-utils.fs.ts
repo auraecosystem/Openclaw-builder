@@ -272,8 +272,32 @@ function isOversizedTranscriptLine(line: string): boolean {
   return Buffer.byteLength(line, "utf8") > MAX_TRANSCRIPT_PARSE_LINE_BYTES;
 }
 
+// Cache compiled regexes per field name. The transcript-tail oversized path
+// calls these helpers 4-5x per record (id / parentId / type / role); without
+// the cache each call recompiles RegExp objects, which dominates the cost on
+// the gateway hot path that ingests many oversized records.
+const TRANSCRIPT_FIELD_REGEX_CACHE = new Map<
+  string,
+  { stringRe: RegExp; nullRe: RegExp }
+>();
+
+function getTranscriptFieldRegexes(field: string): {
+  stringRe: RegExp;
+  nullRe: RegExp;
+} {
+  let cached = TRANSCRIPT_FIELD_REGEX_CACHE.get(field);
+  if (!cached) {
+    cached = {
+      stringRe: new RegExp(`"${field}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`),
+      nullRe: new RegExp(`"${field}"\\s*:\\s*null`),
+    };
+    TRANSCRIPT_FIELD_REGEX_CACHE.set(field, cached);
+  }
+  return cached;
+}
+
 function extractJsonStringFieldPrefix(prefix: string, field: string): string | undefined {
-  const match = new RegExp(`"${field}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`).exec(prefix);
+  const match = getTranscriptFieldRegexes(field).stringRe.exec(prefix);
   if (!match) {
     return undefined;
   }
@@ -289,7 +313,7 @@ function extractJsonNullableStringFieldPrefix(
   prefix: string,
   field: string,
 ): string | null | undefined {
-  if (new RegExp(`"${field}"\\s*:\\s*null`).test(prefix)) {
+  if (getTranscriptFieldRegexes(field).nullRe.test(prefix)) {
     return null;
   }
   return extractJsonStringFieldPrefix(prefix, field);
