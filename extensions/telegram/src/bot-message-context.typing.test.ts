@@ -1,11 +1,22 @@
 import { buildChannelInboundEventContext } from "openclaw/plugin-sdk/channel-inbound";
 import { describe, expect, it, vi } from "vitest";
 import { buildTelegramMessageContextForTest } from "./bot-message-context.test-harness.js";
+import type { TelegramSendChatActionHandler } from "./sendchataction-401-backoff.js";
+
+function createSendChatActionHandler(
+  sendChatAction = vi.fn(async () => undefined),
+): TelegramSendChatActionHandler & { sendChatAction: typeof sendChatAction } {
+  return {
+    sendChatAction,
+    isSuspended: () => false,
+    reset: () => undefined,
+  };
+}
 
 describe("buildTelegramMessageContext typing", () => {
-  it("sends direct typing before session context construction", async () => {
+  it("sends direct typing after body resolution and before session context construction", async () => {
     const buildInboundContext = vi.fn(buildChannelInboundEventContext);
-    const sendChatAction = vi.fn(async () => undefined);
+    const sendChatActionHandler = createSendChatActionHandler();
 
     await expect(
       buildTelegramMessageContextForTest({
@@ -14,21 +25,38 @@ describe("buildTelegramMessageContext typing", () => {
           from: { id: 42, first_name: "Pat" },
           text: "hello",
         },
-        sendChatActionHandler: { sendChatAction },
+        sendChatActionHandler,
         sessionRuntime: {
           buildChannelInboundEventContext: buildInboundContext,
         },
       }),
     ).resolves.not.toBeNull();
 
-    expect(sendChatAction).toHaveBeenCalledWith(42, "typing", undefined);
-    expect(sendChatAction.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(sendChatActionHandler.sendChatAction).toHaveBeenCalledWith(42, "typing", undefined);
+    expect(sendChatActionHandler.sendChatAction.mock.invocationCallOrder[0]).toBeLessThan(
       buildInboundContext.mock.invocationCallOrder[0],
     );
   });
 
+  it("does not send direct typing when there is no replyable body", async () => {
+    const sendChatActionHandler = createSendChatActionHandler();
+
+    await expect(
+      buildTelegramMessageContextForTest({
+        message: {
+          chat: { id: 42, type: "private", first_name: "Pat" },
+          from: { id: 42, first_name: "Pat" },
+          text: undefined,
+        },
+        sendChatActionHandler,
+      }),
+    ).resolves.toBeNull();
+
+    expect(sendChatActionHandler.sendChatAction).not.toHaveBeenCalled();
+  });
+
   it("does not send early direct typing before DM access passes", async () => {
-    const sendChatAction = vi.fn(async () => undefined);
+    const sendChatActionHandler = createSendChatActionHandler();
 
     await expect(
       buildTelegramMessageContextForTest({
@@ -43,10 +71,10 @@ describe("buildTelegramMessageContext typing", () => {
           messages: { groupChat: { mentionPatterns: [] } },
         },
         dmPolicy: "disabled",
-        sendChatActionHandler: { sendChatAction },
+        sendChatActionHandler,
       }),
     ).resolves.toBeNull();
 
-    expect(sendChatAction).not.toHaveBeenCalled();
+    expect(sendChatActionHandler.sendChatAction).not.toHaveBeenCalled();
   });
 });

@@ -199,6 +199,13 @@ function deliveryCall(index = 0): Record<string, any> | undefined {
   return calls[index]?.[0];
 }
 
+function appendTranscriptCall(index = 0): Record<string, any> | undefined {
+  const calls = mocks.appendAssistantMessageToSessionTranscript.mock.calls as unknown as Array<
+    [Record<string, any>]
+  >;
+  return calls[index]?.[0];
+}
+
 function firstRespondCall(respond: ReturnType<typeof vi.fn>) {
   const calls = respond.mock.calls as unknown as Array<
     [
@@ -1580,7 +1587,7 @@ describe("gateway send mirroring", () => {
     expect(firstRespondCall(first.respond)[0]).toBe(true);
     expect(firstRespondCall(second.respond)[0]).toBe(true);
     expect(mocks.appendAssistantMessageToSessionTranscript).toHaveBeenCalledTimes(1);
-    expect(mocks.appendAssistantMessageToSessionTranscript.mock.calls[0]?.[0]).toEqual(
+    expect(appendTranscriptCall(0)).toEqual(
       expect.objectContaining({ text: "first visible reply" }),
     );
 
@@ -1589,7 +1596,7 @@ describe("gateway send mirroring", () => {
       expect(mocks.appendAssistantMessageToSessionTranscript).toHaveBeenCalledTimes(2);
     });
 
-    expect(mocks.appendAssistantMessageToSessionTranscript.mock.calls[1]?.[0]).toEqual(
+    expect(appendTranscriptCall(1)).toEqual(
       expect.objectContaining({ text: "second visible reply" }),
     );
   });

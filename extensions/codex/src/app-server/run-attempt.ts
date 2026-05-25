@@ -1123,7 +1123,7 @@ export async function runCodexAppServerAttempt(
         sessionId: params.sessionId,
         totalMs: preDynamicSummary.totalMs,
         stages: preDynamicSummary.stages,
-        hasStartupBinding: startupBinding?.threadId ? true : false,
+        hasStartupBinding: Boolean(startupBinding?.threadId),
         startupAuthProfileId: startupAuthProfileId ?? null,
         bundleMcpDiagnosticCount: bundleMcpThreadConfig.diagnostics.length,
         nativeToolSurfaceEnabled,

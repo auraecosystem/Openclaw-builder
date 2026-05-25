@@ -129,7 +129,7 @@ export function createReplyTimingTracker(params: {
         .filter(Boolean)
         .join(" ");
       params.log.warn(`${logParams.message} ${suffix}`, {
-        ...(logParams.details ?? {}),
+        ...logParams.details,
         outcome: logParams.outcome,
         reason: logParams.reason,
         error: logParams.error,
