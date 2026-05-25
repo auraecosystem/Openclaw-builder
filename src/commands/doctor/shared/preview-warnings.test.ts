@@ -13,6 +13,7 @@ import {
 type TestManifestRecord = {
   id: string;
   channels: string[];
+  requiresExplicitTrust?: boolean;
 };
 
 const manifestState = vi.hoisted(
@@ -74,13 +75,23 @@ vi.mock("./channel-doctor.js", () => ({
 vi.mock("./channel-plugin-blockers.js", () => ({
   scanConfiguredChannelPluginBlockers: (cfg: {
     channels?: Record<string, unknown>;
-    plugins?: { enabled?: boolean; entries?: Record<string, { enabled?: boolean }> };
+    plugins?: {
+      allow?: string[];
+      enabled?: boolean;
+      entries?: Record<string, { enabled?: boolean }>;
+    };
   }) => {
     const configuredChannels = new Set(Object.keys(cfg.channels ?? {}));
     return manifestState.plugins.flatMap((plugin) => {
       const disabledByEntry = cfg.plugins?.entries?.[plugin.id]?.enabled === false;
       const pluginsDisabled = cfg.plugins?.enabled === false;
-      if (!disabledByEntry && !pluginsDisabled) {
+      const omittedFromAllowlist =
+        (cfg.plugins?.allow ?? []).length > 0 && !(cfg.plugins?.allow ?? []).includes(plugin.id);
+      const missingExplicitTrust =
+        plugin.requiresExplicitTrust === true &&
+        cfg.plugins?.entries?.[plugin.id]?.enabled !== true &&
+        !(cfg.plugins?.allow ?? []).includes(plugin.id);
+      if (!disabledByEntry && !pluginsDisabled && !omittedFromAllowlist && !missingExplicitTrust) {
         return [];
       }
       return plugin.channels
@@ -88,7 +99,13 @@ vi.mock("./channel-plugin-blockers.js", () => ({
         .map((channelId) => ({
           channelId,
           pluginId: plugin.id,
-          reason: disabledByEntry ? "disabled in config" : "plugins disabled",
+          reason: disabledByEntry
+            ? "disabled in config"
+            : pluginsDisabled
+              ? "plugins disabled"
+              : omittedFromAllowlist
+                ? "not in allowlist"
+                : "missing explicit enablement",
         }));
     });
   },
@@ -99,7 +116,11 @@ vi.mock("./channel-plugin-blockers.js", () => ({
       const reason =
         hit.reason === "disabled in config"
           ? `plugin "${hit.pluginId}" is disabled by plugins.entries.${hit.pluginId}.enabled=false.`
-          : "plugins.enabled=false blocks channel plugins globally.";
+          : hit.reason === "plugins disabled"
+            ? "plugins.enabled=false blocks channel plugins globally."
+            : hit.reason === "not in allowlist"
+              ? `external plugin "${hit.pluginId}" is installed but omitted from plugins.allow. Include "${hit.pluginId}" in plugins.allow or remove the restrictive allowlist.`
+              : `external plugin "${hit.pluginId}" is installed without explicit trust. Add plugins.entries.${hit.pluginId}.enabled=true or include "${hit.pluginId}" in plugins.allow.`;
       return `- channels.${hit.channelId}: channel is configured, but ${reason}`;
     }),
   isWarningBlockedByChannelPlugin: (warning: string, hits: Array<{ channelId: string }>) =>
@@ -184,6 +205,13 @@ function channelManifest(id: string, channelId: string): TestManifestRecord {
   return {
     ...manifest(id),
     channels: [channelId],
+  };
+}
+
+function externalChannelManifest(id: string, channelId: string): TestManifestRecord {
+  return {
+    ...channelManifest(id, channelId),
+    requiresExplicitTrust: true,
   };
 }
 
@@ -421,6 +449,67 @@ describe("doctor preview warnings", () => {
       warnings,
       'channels.telegram: channel is configured, but plugin "telegram" is disabled by plugins.entries.telegram.enabled=false.',
     );
+    expect(warning).not.toContain("first-time setup mode");
+  });
+
+  it("warns when a configured external channel plugin lacks explicit enablement", async () => {
+    manifestState.plugins = [externalChannelManifest("discord", "discord")];
+
+    const warnings = await collectDoctorPreviewWarnings({
+      cfg: {
+        channels: {
+          discord: {
+            enabled: true,
+            token: {
+              source: "env",
+              provider: "default",
+              id: "DISCORD_BOT_TOKEN",
+            },
+          },
+        },
+      },
+      doctorFixCommand: "openclaw doctor --fix",
+    });
+
+    const warning = expectSingleWarningContaining(
+      warnings,
+      'channels.discord: channel is configured, but external plugin "discord" is installed without explicit trust.',
+    );
+    expect(warning).toContain("plugins.entries.discord.enabled=true");
+    expect(warning).toContain('"discord" in plugins.allow');
+    expect(warning).not.toContain("first-time setup mode");
+  });
+
+  it("warns when a configured external channel plugin is omitted from plugins.allow", async () => {
+    manifestState.plugins = [
+      externalChannelManifest("discord", "discord"),
+      channelManifest("brave", "brave"),
+    ];
+
+    const warnings = await collectDoctorPreviewWarnings({
+      cfg: {
+        plugins: {
+          allow: ["brave"],
+        },
+        channels: {
+          discord: {
+            enabled: true,
+            token: {
+              source: "env",
+              provider: "default",
+              id: "DISCORD_BOT_TOKEN",
+            },
+          },
+        },
+      },
+      doctorFixCommand: "openclaw doctor --fix",
+    });
+
+    const warning = expectSingleWarningContaining(
+      warnings,
+      'channels.discord: channel is configured, but external plugin "discord" is installed but omitted from plugins.allow.',
+    );
+    expect(warning).toContain('Include "discord" in plugins.allow');
     expect(warning).not.toContain("first-time setup mode");
   });
 
