@@ -1355,6 +1355,7 @@ describe("connectGateway", () => {
           pluginId: "sage",
           agentId: "agent-1",
           sessionKey: "main",
+          allowedDecisions: ["allow-once", "deny"],
         },
       },
     });
@@ -1362,6 +1363,7 @@ describe("connectGateway", () => {
     expect(host.execApprovalQueue).toHaveLength(1);
     expect(host.execApprovalQueue[0]?.id).toBe("plugin-approval-1");
     expect((host.execApprovalQueue[0] as { kind: string }).kind).toBe("plugin");
+    expect(host.execApprovalQueue[0]?.request.allowedDecisions).toEqual(["allow-once", "deny"]);
   });
 
   it("routes plugin.approval.resolved to remove from execApprovalQueue", () => {
