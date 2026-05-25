@@ -124,6 +124,136 @@ const memoryDeps = {
   now: () => Date.now(),
 };
 
+// Pending memory-flush registry, keyed by sessionKey. Used so that a
+// near-threshold flush dispatched after the reply path can be awaited by
+// the next turn's preflight compaction before it mutates session state.
+//
+// The entry stores both the flush promise and an `abort` callback so the
+// barrier can make a timeout terminal: when the barrier's wait-cap fires,
+// it triggers the abort callback (which cancels the flush's
+// AbortController + maintenance ReplyOperation) and then awaits the
+// flush promise's settlement. This preserves session serialization: the
+// barrier never returns while the previous turn's flush might still go
+// on to mutate session state after the next compaction has already
+// proceeded.
+type PendingMemoryFlush = {
+  promise: Promise<void>;
+  abort: () => void;
+};
+
+const pendingMemoryFlushes = new Map<string, PendingMemoryFlush>();
+
+const DEFAULT_PENDING_MEMORY_FLUSH_BARRIER_TIMEOUT_MS = 30_000;
+// Bounded grace period after the barrier invokes the registered abort
+// callback. If the flush promise still has not settled within this
+// window (e.g. the abort callback throws, or the embedded runner does
+// not honour its AbortSignal), the barrier abandons the pending entry
+// and returns so the next preflight is not blocked indefinitely. The
+// abandoned flush may still complete later and mutate session state;
+// that risk is bounded and explicitly preferred over an unbounded
+// availability hang.
+const POST_ABORT_GRACE_MS = 5_000;
+
+export function registerPendingMemoryFlush(
+  sessionKey: string,
+  promise: Promise<unknown>,
+  abort?: () => void,
+): void {
+  const wrapped: Promise<void> = promise.then(
+    () => undefined,
+    () => undefined,
+  );
+  const entry: PendingMemoryFlush = {
+    promise: wrapped,
+    abort: abort ?? (() => undefined),
+  };
+  pendingMemoryFlushes.set(sessionKey, entry);
+  void wrapped.finally(() => {
+    if (pendingMemoryFlushes.get(sessionKey) === entry) {
+      pendingMemoryFlushes.delete(sessionKey);
+    }
+  });
+}
+
+export async function awaitPendingMemoryFlush(
+  sessionKey: string | undefined,
+  options?: { timeoutMs?: number; postAbortGraceMs?: number },
+): Promise<void> {
+  if (!sessionKey) {
+    return;
+  }
+  const pending = pendingMemoryFlushes.get(sessionKey);
+  if (!pending) {
+    return;
+  }
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_PENDING_MEMORY_FLUSH_BARRIER_TIMEOUT_MS;
+  const postAbortGraceMs = options?.postAbortGraceMs ?? POST_ABORT_GRACE_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), timeoutMs);
+  });
+  try {
+    const outcome = await Promise.race([
+      pending.promise.then(() => "done" as const),
+      timeoutPromise,
+    ]);
+    if (outcome === "timeout") {
+      logVerbose(
+        `pending memory flush barrier timed out after ${timeoutMs}ms for sessionKey=${sessionKey}; aborting pending flush so session state is not mutated concurrently with the next compaction`,
+      );
+      try {
+        pending.abort();
+      } catch (err) {
+        logVerbose(`pending memory flush abort callback threw: ${String(err)}`);
+      }
+      // Bounded wait for the now-aborting flush to fully settle so the
+      // barrier cannot return while the flush is still racing the next
+      // compaction's session-state mutations. If the abort callback
+      // does not make the flush settle within POST_ABORT_GRACE_MS
+      // (e.g. the embedded runner ignores its AbortSignal), abandon
+      // the pending entry so subsequent turns are not blocked
+      // indefinitely. The flush's runWithModelFallback /
+      // runEmbeddedPiAgent normally see the maintenance op's aborted
+      // abortSignal and short-circuit well inside this window; the
+      // wrapped promise always resolves (never throws) by construction.
+      let graceTimer: ReturnType<typeof setTimeout> | undefined;
+      const gracePromise = new Promise<"graced">((resolve) => {
+        graceTimer = setTimeout(() => resolve("graced"), postAbortGraceMs);
+      });
+      try {
+        const graceOutcome = await Promise.race([
+          pending.promise.then(() => "settled" as const),
+          gracePromise,
+        ]);
+        if (graceOutcome === "graced") {
+          logVerbose(
+            `pending memory flush did not settle within ${postAbortGraceMs}ms after abort for sessionKey=${sessionKey}; abandoning entry so further turns are not blocked`,
+          );
+          if (pendingMemoryFlushes.get(sessionKey) === pending) {
+            pendingMemoryFlushes.delete(sessionKey);
+          }
+        }
+      } finally {
+        if (graceTimer !== undefined) {
+          clearTimeout(graceTimer);
+        }
+      }
+    }
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+export function hasPendingMemoryFlushForTest(sessionKey: string): boolean {
+  return pendingMemoryFlushes.has(sessionKey);
+}
+
+export function clearPendingMemoryFlushesForTest(): void {
+  pendingMemoryFlushes.clear();
+}
+
 export function setAgentRunnerMemoryTestDeps(overrides?: Partial<typeof memoryDeps>): void {
   Object.assign(memoryDeps, {
     runWithModelFallback,
@@ -648,6 +778,44 @@ export async function runPreflightCompactionIfNeeded(params: {
     return entry ?? params.sessionEntry;
   }
 
+  // Pre-compaction barrier: if the previous turn dispatched a near-threshold
+  // memory flush that has not yet completed, await it before evaluating any
+  // compaction state for the current preflight. The flush's embedded run can
+  // itself trigger a compaction that mutates sessionId; allowing this
+  // preflight's compaction to interleave would split session writes across
+  // two sessionIds. Best-effort: a hung flush is bounded by the timeout in
+  // awaitPendingMemoryFlush so compaction is not permanently blocked.
+  await awaitPendingMemoryFlush(params.sessionKey);
+  const refreshedEntryAfterBarrier = params.sessionStore?.[params.sessionKey];
+  if (refreshedEntryAfterBarrier) {
+    entry = refreshedEntryAfterBarrier;
+  }
+  if (!entry?.sessionId) {
+    return entry ?? params.sessionEntry;
+  }
+  // If the prior flush's internal compaction rotated the active sessionId
+  // and the active run still references the pre-flush id, rebind here so
+  // downstream callers in the orchestrator (and the reply turn that follows
+  // this preflight on the current turn) see the post-flush sessionId even
+  // when the current preflight does not itself compact.
+  if (params.followupRun.run.sessionId && entry.sessionId !== params.followupRun.run.sessionId) {
+    const previousSessionId = params.followupRun.run.sessionId;
+    params.followupRun.run.sessionId = entry.sessionId;
+    params.replyOperation.updateSessionId(entry.sessionId);
+    if (entry.sessionFile) {
+      params.followupRun.run.sessionFile = entry.sessionFile;
+    }
+    const queueKey = params.followupRun.run.sessionKey ?? params.sessionKey;
+    if (queueKey) {
+      memoryDeps.refreshQueuedFollowupSession({
+        key: queueKey,
+        previousSessionId,
+        nextSessionId: entry.sessionId,
+        nextSessionFile: entry.sessionFile,
+      });
+    }
+  }
+
   const contextWindowTokens = resolveMemoryFlushContextWindowTokens({
     cfg: params.cfg,
     provider: resolveFollowupContextConfigProvider({
@@ -1153,7 +1321,19 @@ export async function runMemoryFlushIfNeeded(params: {
         });
         const visibleErrorPayloads = resolveVisibleMemoryFlushErrorPayloads(result.payloads);
         if (visibleErrorPayloads.length > 0) {
-          params.onVisibleErrorPayloads?.(visibleErrorPayloads);
+          if (params.onVisibleErrorPayloads) {
+            params.onVisibleErrorPayloads(visibleErrorPayloads);
+          } else {
+            // No caller-supplied surface for visible flush error payloads
+            // (e.g. the post-reply dispatch from the reply orchestrator).
+            // Record them so they are not silently dropped.
+            for (const payload of visibleErrorPayloads) {
+              const text = normalizeOptionalString(payload.text);
+              if (text) {
+                logVerbose(`memory flush visible error payload (dropped): ${text}`);
+              }
+            }
+          }
         }
         if (result.meta?.agentMeta?.sessionId) {
           postCompactionSessionId = result.meta.agentMeta.sessionId;
@@ -1167,6 +1347,21 @@ export async function runMemoryFlushIfNeeded(params: {
         return result;
       },
     });
+    // Invariant: an aborted maintenance flush must NOT mutate session state.
+    // If the maintenance ReplyOperation was aborted (e.g. by the next turn's
+    // pre-compaction barrier wait-cap + post-abort grace, after which the
+    // pending-flush registry entry is abandoned) but the embedded run still
+    // returned (e.g. it ignored or completed concurrently with its
+    // AbortSignal), do not persist compactionCount / sessionId rebinds /
+    // memoryFlushAt / memoryFlushCompactionCount: those would race the next
+    // turn's preflight compaction. Returning early here keeps abandoned
+    // flushes write-quiet against the live session store.
+    if (params.replyOperation.abortSignal.aborted) {
+      logVerbose(
+        `post-reply memory flush aborted for sessionKey=${params.sessionKey}; skipping session-state writes so an abandoned flush does not race the next compaction`,
+      );
+      return activeSessionEntry;
+    }
     const flushedCompactionCount =
       activeSessionEntry?.compactionCount ??
       (params.sessionKey ? activeSessionStore?.[params.sessionKey]?.compactionCount : 0) ??

@@ -406,6 +406,168 @@ export function createReplyOperation(params: {
   return operation;
 }
 
+/**
+ * Build a flush-safe ReplyOperation for background maintenance work
+ * (e.g. the deferred memory-flush dispatched after the user-visible reply
+ * has already finalized). The returned operation has its own
+ * AbortController and local lifecycle state, and is **not** registered in
+ * `replyRunState`, so it does not conflict with the active reply
+ * operation for the same `sessionKey` and does not race
+ * `clearReplyRunState` / `markReplyRunDiagnosticWorkEnded`.
+ *
+ * Use this instead of passing a completed reply operation into
+ * `runEmbeddedPiAgent`: the embedded runner calls `attachBackend(...)`
+ * which cancels any handle attached to a completed reply operation, so
+ * the deferred work would never reach its LLM call.
+ *
+ * If `upstreamAbortSignal` is supplied (e.g. the original reply's
+ * `abortSignal`), abort is propagated one-way into the maintenance
+ * operation so an explicit user-abort still stops the background work.
+ */
+export function createMaintenanceReplyOperation(params: {
+  sessionKey: string;
+  sessionId: string;
+  upstreamAbortSignal?: AbortSignal;
+}): ReplyOperation {
+  const sessionKey = normalizeOptionalString(params.sessionKey);
+  const sessionId = normalizeOptionalString(params.sessionId);
+  if (!sessionKey) {
+    throw new Error("Maintenance reply operations require a canonical sessionKey");
+  }
+  if (!sessionId) {
+    throw new Error("Maintenance reply operations require a sessionId");
+  }
+
+  const controller = new AbortController();
+  let currentSessionId = sessionId;
+  let phase: ReplyOperationPhase = "queued";
+  let result: ReplyOperationResult | null = null;
+  let attachedHandle: ReplyBackendHandle | undefined;
+
+  const abortInternally = (reason?: unknown) => {
+    if (!controller.signal.aborted) {
+      controller.abort(reason);
+    }
+  };
+
+  const upstreamSignal = params.upstreamAbortSignal;
+  let upstreamAbortListener: (() => void) | undefined;
+  const detachUpstreamListener = (): void => {
+    if (upstreamSignal && upstreamAbortListener) {
+      upstreamSignal.removeEventListener("abort", upstreamAbortListener);
+      upstreamAbortListener = undefined;
+    }
+  };
+
+  if (upstreamSignal) {
+    if (upstreamSignal.aborted) {
+      abortInternally(upstreamSignal.reason);
+    } else {
+      upstreamAbortListener = () => {
+        abortInternally(upstreamSignal.reason);
+        upstreamAbortListener = undefined;
+      };
+      upstreamSignal.addEventListener("abort", upstreamAbortListener, { once: true });
+    }
+  }
+
+  const operation: ReplyOperation = {
+    get key() {
+      return sessionKey;
+    },
+    get sessionId() {
+      return currentSessionId;
+    },
+    get abortSignal() {
+      return controller.signal;
+    },
+    get resetTriggered() {
+      return false;
+    },
+    get phase() {
+      return phase;
+    },
+    get result() {
+      return result;
+    },
+    setPhase(next) {
+      if (result) {
+        return;
+      }
+      phase = next;
+    },
+    updateSessionId(nextSessionId) {
+      if (result) {
+        return;
+      }
+      const normalized = normalizeOptionalString(nextSessionId);
+      if (!normalized || normalized === currentSessionId) {
+        return;
+      }
+      currentSessionId = normalized;
+    },
+    attachBackend(handle) {
+      if (result) {
+        handle.cancel(
+          result.kind === "aborted"
+            ? result.code === "aborted_for_restart"
+              ? "restart"
+              : "user_abort"
+            : "superseded",
+        );
+        return;
+      }
+      attachedHandle = handle;
+      if (controller.signal.aborted) {
+        handle.cancel("superseded");
+      }
+    },
+    detachBackend(handle) {
+      if (attachedHandle === handle) {
+        attachedHandle = undefined;
+      }
+    },
+    complete() {
+      if (!result) {
+        result = { kind: "completed" };
+        phase = "completed";
+      }
+      detachUpstreamListener();
+    },
+    completeThen(afterClear) {
+      operation.complete();
+      afterClear();
+    },
+    fail(code, cause) {
+      if (!result) {
+        result = { kind: "failed", code, cause };
+        phase = "failed";
+      }
+      detachUpstreamListener();
+    },
+    abortByUser() {
+      if (!result) {
+        result = { kind: "aborted", code: "aborted_by_user" };
+        phase = "aborted";
+      }
+      abortInternally(createUserAbortError());
+      attachedHandle?.cancel("user_abort");
+      detachUpstreamListener();
+    },
+    abortForRestart() {
+      if (!result) {
+        result = { kind: "aborted", code: "aborted_for_restart" };
+        phase = "aborted";
+      }
+      abortInternally(new Error("Maintenance reply operation aborted for restart"));
+      attachedHandle?.cancel("restart");
+      detachUpstreamListener();
+    },
+  };
+
+  return operation;
+}
+
 export const replyRunRegistry: ReplyRunRegistry = {
   begin(params) {
     return createReplyOperation(params);

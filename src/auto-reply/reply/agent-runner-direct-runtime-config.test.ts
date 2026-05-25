@@ -59,11 +59,26 @@ vi.mock("./reply-media-paths.js", () => ({
     createReplyMediaPathNormalizerMock(...args),
 }));
 
+const registerPendingMemoryFlushMock = vi.fn();
+
 vi.mock("./agent-runner-memory.js", () => ({
   runPreflightCompactionIfNeeded: (...args: unknown[]) =>
     runPreflightCompactionIfNeededMock(...args),
   runMemoryFlushIfNeeded: (...args: unknown[]) => runMemoryFlushIfNeededMock(...args),
+  registerPendingMemoryFlush: (...args: unknown[]) => registerPendingMemoryFlushMock(...args),
 }));
+
+const runAgentTurnWithFallbackMock = vi.fn();
+
+vi.mock("./agent-runner-execution.js", async () => {
+  const actual = await vi.importActual<typeof import("./agent-runner-execution.js")>(
+    "./agent-runner-execution.js",
+  );
+  return {
+    ...actual,
+    runAgentTurnWithFallback: (...args: unknown[]) => runAgentTurnWithFallbackMock(...args),
+  };
+});
 
 vi.mock("./queue.js", async () => {
   const actual = await vi.importActual<typeof import("./queue.js")>("./queue.js");
@@ -171,6 +186,8 @@ describe("runReplyAgent runtime config", () => {
     createReplyMediaPathNormalizerMock.mockReset();
     runPreflightCompactionIfNeededMock.mockReset();
     runMemoryFlushIfNeededMock.mockReset();
+    registerPendingMemoryFlushMock.mockReset();
+    runAgentTurnWithFallbackMock.mockReset();
     enqueueFollowupRunMock.mockReset();
 
     resolveQueuedReplyExecutionConfigMock.mockResolvedValue(freshCfg);
@@ -219,7 +236,33 @@ describe("runReplyAgent runtime config", () => {
     expect(preflightCall.followupRun).toBe(followupRun);
   });
 
-  it("passes the derived runtime-policy key to pre-run maintenance", async () => {
+  it("passes the derived runtime-policy key to preflight compaction", async () => {
+    const { followupRun, replyParams } = createDirectRuntimeReplyParams({
+      shouldFollowup: false,
+      isActive: false,
+    });
+    const runtimePolicySessionKey = "agent:main:telegram:default:direct:test";
+    followupRun.run.sessionKey = "agent:main:main";
+    followupRun.run.runtimePolicySessionKey = runtimePolicySessionKey;
+    replyParams.sessionKey = "agent:main:main";
+    replyParams.runtimePolicySessionKey = runtimePolicySessionKey;
+    runPreflightCompactionIfNeededMock.mockRejectedValue(sentinelError);
+
+    await expect(runReplyAgent(replyParams)).rejects.toBe(sentinelError);
+
+    const preflightCall = requireMaintenanceCall(
+      runPreflightCompactionIfNeededMock,
+      "runPreflightCompactionIfNeeded",
+    );
+    expect(preflightCall.sessionKey).toBe("agent:main:main");
+    expect(preflightCall.runtimePolicySessionKey).toBe(runtimePolicySessionKey);
+    // The near-threshold memory flush is now dispatched after the user-visible
+    // reply path; if preflight throws, the reply never runs and the flush is
+    // not dispatched this turn.
+    expect(runMemoryFlushIfNeededMock).not.toHaveBeenCalled();
+  });
+
+  it("dispatches the post-reply memory flush after the user-visible reply path returns", async () => {
     const { followupRun, replyParams } = createDirectRuntimeReplyParams({
       shouldFollowup: false,
       isActive: false,
@@ -230,60 +273,220 @@ describe("runReplyAgent runtime config", () => {
     replyParams.sessionKey = "agent:main:main";
     replyParams.runtimePolicySessionKey = runtimePolicySessionKey;
     runPreflightCompactionIfNeededMock.mockResolvedValue(undefined);
-    runMemoryFlushIfNeededMock.mockRejectedValue(sentinelError);
+    runAgentTurnWithFallbackMock.mockResolvedValue({
+      kind: "final",
+      payload: { text: "ok" },
+    });
 
-    await expect(runReplyAgent(replyParams)).rejects.toBe(sentinelError);
+    await runReplyAgent(replyParams);
 
-    const preflightCall = requireMaintenanceCall(
-      runPreflightCompactionIfNeededMock,
-      "runPreflightCompactionIfNeeded",
+    expect(runAgentTurnWithFallbackMock).toHaveBeenCalledTimes(1);
+    expect(runMemoryFlushIfNeededMock).toHaveBeenCalledTimes(1);
+    const memoryCall = runMemoryFlushIfNeededMock.mock.calls[0]?.[0] as
+      | { sessionKey?: string; runtimePolicySessionKey?: string }
+      | undefined;
+    expect(memoryCall?.sessionKey).toBe("agent:main:main");
+    expect(memoryCall?.runtimePolicySessionKey).toBe(runtimePolicySessionKey);
+    expect(registerPendingMemoryFlushMock).toHaveBeenCalledTimes(1);
+    expect(registerPendingMemoryFlushMock.mock.calls[0]?.[0]).toBe("agent:main:main");
+    // Reply path's runAgentTurnWithFallback completed before the flush dispatch.
+    expect(runAgentTurnWithFallbackMock.mock.invocationCallOrder[0]).toBeLessThan(
+      runMemoryFlushIfNeededMock.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
     );
-    expect(preflightCall.sessionKey).toBe("agent:main:main");
-    expect(preflightCall.runtimePolicySessionKey).toBe(runtimePolicySessionKey);
-    const memoryCall = requireMaintenanceCall(runMemoryFlushIfNeededMock, "runMemoryFlushIfNeeded");
-    expect(memoryCall.sessionKey).toBe("agent:main:main");
-    expect(memoryCall.runtimePolicySessionKey).toBe(runtimePolicySessionKey);
   });
 
-  it("returns source-suppression-safe memory-flush error payloads before the main reply run", async () => {
-    const { replyParams } = createDirectRuntimeReplyParams({
+  it("dispatches the post-reply memory flush from the reply path's finally block even when the agent turn throws", async () => {
+    const { followupRun, replyParams } = createDirectRuntimeReplyParams({
       shouldFollowup: false,
       isActive: false,
     });
-    replyParams.opts = { sourceReplyDeliveryMode: "message_tool_only" };
+    followupRun.run.sessionKey = "agent:main:main";
+    replyParams.sessionKey = "agent:main:main";
     runPreflightCompactionIfNeededMock.mockResolvedValue(undefined);
-    runMemoryFlushIfNeededMock.mockImplementation(
-      async (params: {
-        onVisibleErrorPayloads?: (payloads: Array<{ text?: string; isError?: boolean }>) => void;
-      }) => {
-        params.onVisibleErrorPayloads?.([
-          {
-            text: "⚠️ write failed: Memory flush writes are restricted to memory/2023-11-14.md; use that path only.",
-            isError: true,
-          },
-        ]);
-        return undefined;
-      },
+    const turnError = new Error("agent turn exploded");
+    runAgentTurnWithFallbackMock.mockRejectedValue(turnError);
+
+    await runReplyAgent(replyParams).catch(() => undefined);
+
+    expect(runAgentTurnWithFallbackMock).toHaveBeenCalledTimes(1);
+    // Flush is still dispatched because the reply path was reached
+    // (set right before runAgentTurnWithFallback was invoked).
+    expect(runMemoryFlushIfNeededMock).toHaveBeenCalledTimes(1);
+    expect(registerPendingMemoryFlushMock).toHaveBeenCalledTimes(1);
+    expect(runAgentTurnWithFallbackMock.mock.invocationCallOrder[0]).toBeLessThan(
+      runMemoryFlushIfNeededMock.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
     );
+  });
+
+  it("passes a maintenance ReplyOperation (NOT the completed reply's operation) into the post-reply memory flush", async () => {
+    // ClawSweeper P1 regression guard: the deferred flush dispatched in the
+    // reply orchestrator's finally block must not forward the (already
+    // completed) reply ReplyOperation into runMemoryFlushIfNeeded. The
+    // embedded runner calls attachBackend(...) on whatever ReplyOperation
+    // it receives, and a completed operation cancels the attached handle
+    // with "superseded", so the deferred flush would never reach its LLM
+    // call.
+    const { followupRun, replyParams } = createDirectRuntimeReplyParams({
+      shouldFollowup: false,
+      isActive: false,
+    });
+    followupRun.run.sessionKey = "agent:main:main";
+    replyParams.sessionKey = "agent:main:main";
+
+    // Provide an external ReplyOperation so the test owns the reference
+    // for identity comparison and can observe its result transitions.
+    const externalReplyOperation = (await import("./reply-run-registry.js")).createReplyOperation({
+      sessionId: followupRun.run.sessionId,
+      sessionKey: "agent:main:main",
+      resetTriggered: false,
+    });
+    replyParams.replyOperation = externalReplyOperation;
+
+    runPreflightCompactionIfNeededMock.mockResolvedValue(undefined);
+    runAgentTurnWithFallbackMock.mockResolvedValue({
+      kind: "final",
+      payload: { text: "ok" },
+    });
+
+    await runReplyAgent(replyParams);
+
+    // Confirm the reply operation has been terminated (completed or
+    // failed) by the orchestrator before the post-reply flush runs.
+    // Either terminal state engages the attachBackend cancellation
+    // contract, which is exactly the path the maintenance op must not
+    // share.
+    expect(["completed", "failed"]).toContain(externalReplyOperation.result?.kind);
+
+    expect(runMemoryFlushIfNeededMock).toHaveBeenCalledTimes(1);
+    const memoryCall = runMemoryFlushIfNeededMock.mock.calls[0]?.[0] as {
+      replyOperation: {
+        result: { kind: string } | null;
+        attachBackend: (handle: { cancel: (reason: string) => void }) => void;
+        complete: () => void;
+        sessionId: string;
+        key: string;
+      };
+    };
+    expect(memoryCall.replyOperation).not.toBe(externalReplyOperation);
+    // The maintenance op is not yet completed at the moment of dispatch:
+    // it accepts a backend handle without immediately cancelling it.
+    expect(memoryCall.replyOperation.result).toBe(null);
+
+    const cancelMock = vi.fn();
+    memoryCall.replyOperation.attachBackend({ cancel: cancelMock });
+    expect(cancelMock).not.toHaveBeenCalled();
+
+    // Compare: attaching to the (completed) reply operation would cancel.
+    const cancelMockOnCompleted = vi.fn();
+    externalReplyOperation.attachBackend({
+      cancel: cancelMockOnCompleted,
+      detach: vi.fn(),
+    } as never);
+    expect(cancelMockOnCompleted).toHaveBeenCalledWith("superseded");
+  });
+
+  it("registers the post-reply flush with an abort callback that aborts the maintenance ReplyOperation", async () => {
+    const { followupRun, replyParams } = createDirectRuntimeReplyParams({
+      shouldFollowup: false,
+      isActive: false,
+    });
+    followupRun.run.sessionKey = "agent:main:main";
+    replyParams.sessionKey = "agent:main:main";
+
+    runPreflightCompactionIfNeededMock.mockResolvedValue(undefined);
+    runAgentTurnWithFallbackMock.mockResolvedValue({
+      kind: "final",
+      payload: { text: "ok" },
+    });
+
+    await runReplyAgent(replyParams);
+
+    expect(registerPendingMemoryFlushMock).toHaveBeenCalledTimes(1);
+    const registerCall = registerPendingMemoryFlushMock.mock.calls[0] as [
+      string,
+      Promise<unknown>,
+      () => void,
+    ];
+    expect(registerCall[0]).toBe("agent:main:main");
+    expect(typeof registerCall[2]).toBe("function");
+
+    // The abort callback must put the maintenance ReplyOperation into a
+    // terminal aborted state so subsequent runEmbeddedPiAgent /
+    // runWithModelFallback calls see an aborted abortSignal and
+    // short-circuit. Pull the maintenance op out of the
+    // runMemoryFlushIfNeeded call args and verify.
+    const memoryCall = runMemoryFlushIfNeededMock.mock.calls[0]?.[0] as {
+      replyOperation: {
+        abortSignal: AbortSignal;
+        result: { kind: string } | null;
+      };
+    };
+    expect(memoryCall.replyOperation.abortSignal.aborted).toBe(false);
+    registerCall[2]();
+    expect(memoryCall.replyOperation.abortSignal.aborted).toBe(true);
+    expect(memoryCall.replyOperation.result?.kind).toBe("aborted");
+  });
+
+  it("aborts the maintenance ReplyOperation when the original reply operation aborts upstream", async () => {
+    const { followupRun, replyParams } = createDirectRuntimeReplyParams({
+      shouldFollowup: false,
+      isActive: false,
+    });
+    followupRun.run.sessionKey = "agent:main:main";
+    replyParams.sessionKey = "agent:main:main";
+
+    // Create a reply operation whose upstreamAbortSignal we control.
+    const upstreamController = new AbortController();
+    const externalReplyOperation = (await import("./reply-run-registry.js")).createReplyOperation({
+      sessionId: followupRun.run.sessionId,
+      sessionKey: "agent:main:main",
+      resetTriggered: false,
+      upstreamAbortSignal: upstreamController.signal,
+    });
+    replyParams.replyOperation = externalReplyOperation;
+
+    runPreflightCompactionIfNeededMock.mockResolvedValue(undefined);
+    runAgentTurnWithFallbackMock.mockResolvedValue({
+      kind: "final",
+      payload: { text: "ok" },
+    });
+
+    await runReplyAgent(replyParams);
+
+    const memoryCall = runMemoryFlushIfNeededMock.mock.calls[0]?.[0] as {
+      replyOperation: { abortSignal: AbortSignal };
+    };
+    expect(memoryCall.replyOperation.abortSignal.aborted).toBe(false);
+
+    // Aborting the original reply's upstream signal must propagate into
+    // the maintenance operation so a user cancel still stops the flush.
+    upstreamController.abort(new Error("user cancelled"));
+    expect(memoryCall.replyOperation.abortSignal.aborted).toBe(true);
+  });
+
+  it("does not block the start of the user-visible reply on a pending memory flush", async () => {
+    const { followupRun, replyParams } = createDirectRuntimeReplyParams({
+      shouldFollowup: false,
+      isActive: false,
+    });
+    followupRun.run.sessionKey = "agent:main:main";
+    replyParams.sessionKey = "agent:main:main";
+    runPreflightCompactionIfNeededMock.mockResolvedValue(undefined);
+    // Memory flush returns a promise that never resolves within the test.
+    runMemoryFlushIfNeededMock.mockImplementation(() => new Promise<undefined>(() => undefined));
+    runAgentTurnWithFallbackMock.mockResolvedValue({
+      kind: "final",
+      payload: { text: "ok" },
+    });
 
     const result = await runReplyAgent(replyParams);
 
-    if (!result || Array.isArray(result)) {
-      throw new Error("expected a single memory-flush error reply payload");
-    }
-    expect(result).toEqual({
-      text: "⚠️ write failed: Memory flush writes are restricted to memory/2023-11-14.md; use that path only.",
-      isError: true,
-      replyToId: "msg-1",
-      replyToCurrent: undefined,
-      replyToTag: false,
-      mediaUrl: undefined,
-      mediaUrls: undefined,
-      audioAsVoice: false,
-    });
-    expect(getReplyPayloadMetadata(result)).toEqual({
-      deliverDespiteSourceReplySuppression: true,
-    });
+    // Reply path completed even though the flush promise is still pending.
+    expect(runAgentTurnWithFallbackMock).toHaveBeenCalledTimes(1);
+    expect(result).toBeDefined();
+    // Flush was dispatched (fire-and-forget) but never resolved.
+    expect(runMemoryFlushIfNeededMock).toHaveBeenCalledTimes(1);
+    expect(registerPendingMemoryFlushMock).toHaveBeenCalledTimes(1);
   });
 
   it("surfaces known pre-run Codex usage-limit failures instead of dropping the reply", async () => {

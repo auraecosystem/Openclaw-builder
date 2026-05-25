@@ -10,6 +10,10 @@ import {
 } from "../../plugins/memory-state.js";
 import type { TemplateContext } from "../templating.js";
 import {
+  awaitPendingMemoryFlush,
+  clearPendingMemoryFlushesForTest,
+  hasPendingMemoryFlushForTest,
+  registerPendingMemoryFlush,
   runMemoryFlushIfNeeded,
   runPreflightCompactionIfNeeded,
   setAgentRunnerMemoryTestDeps,
@@ -272,6 +276,88 @@ describe("runMemoryFlushIfNeeded", () => {
     expect(persisted.main.memoryFlushAt).toBe(1_700_000_000_000);
   });
 
+  it("does not mutate session state when the maintenance ReplyOperation is aborted (no late write after abandonment)", async () => {
+    const storePath = path.join(rootDir, "sessions.json");
+    const sessionKey = "main";
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 80_000,
+      compactionCount: 1,
+    };
+    const sessionStore = { [sessionKey]: sessionEntry };
+    await writeTestSessionStore(storePath, sessionKey, sessionEntry);
+
+    // Simulate the maintenance ReplyOperation getting aborted while the
+    // embedded flush run is in flight (e.g. by the next turn's pre-compaction
+    // barrier wait-cap + post-abort grace). The embedded run still returns —
+    // an `end` compaction event and a rotated sessionId — modeling the case
+    // where the embedded runner ignored its AbortSignal or completed
+    // concurrently with the abort.
+    const replyOperationAbortController = new AbortController();
+    const replyOperation = {
+      abortSignal: replyOperationAbortController.signal,
+      setPhase: vi.fn(),
+      updateSessionId: vi.fn(),
+    } as never;
+
+    runEmbeddedPiAgentMock.mockImplementationOnce(
+      async (params: {
+        onAgentEvent?: (evt: { stream: string; data: { phase: string } }) => void;
+      }) => {
+        // Trigger the abort partway through the embedded run, then continue
+        // as if the runner ignored the signal and returned a normal result.
+        replyOperationAbortController.abort();
+        params.onAgentEvent?.({ stream: "compaction", data: { phase: "end" } });
+        return {
+          payloads: [],
+          meta: { agentMeta: { sessionId: "session-rotated-after-abort" } },
+        };
+      },
+    );
+
+    const followupRun = createTestFollowupRun();
+    const entry = await runMemoryFlushIfNeeded({
+      cfg: {
+        agents: {
+          defaults: {
+            compaction: {
+              memoryFlush: {},
+            },
+          },
+        },
+      },
+      followupRun,
+      sessionCtx: { Provider: "whatsapp" } as unknown as TemplateContext,
+      defaultModel: "anthropic/claude-opus-4-6",
+      agentCfgContextTokens: 100_000,
+      resolvedVerboseLevel: "off",
+      sessionEntry,
+      sessionStore,
+      sessionKey,
+      storePath,
+      isHeartbeat: false,
+      replyOperation,
+    });
+
+    // Invariant: aborted maintenance flush returns early without persisting
+    // any session-state writes. The next turn's preflight compaction is the
+    // sole writer.
+    expect(incrementCompactionCountMock).not.toHaveBeenCalled();
+    expect(refreshQueuedFollowupSessionMock).not.toHaveBeenCalled();
+    expect(replyOperation.updateSessionId).not.toHaveBeenCalled();
+    expect(followupRun.run.sessionId).toBe("session");
+    expect(entry?.sessionId).toBe("session");
+
+    const persisted = JSON.parse(await fs.readFile(storePath, "utf8")) as {
+      main: SessionEntry;
+    };
+    expect(persisted.main.sessionId).toBe("session");
+    expect(persisted.main.compactionCount).toBe(1);
+    expect(persisted.main.memoryFlushCompactionCount).toBeUndefined();
+    expect(persisted.main.memoryFlushAt).toBeUndefined();
+  });
+
   it("reports memory-flush error payloads for visible delivery", async () => {
     const sessionEntry: SessionEntry = {
       sessionId: "session",
@@ -428,6 +514,46 @@ describe("runMemoryFlushIfNeeded", () => {
     expect(payload?.text).not.toContain(token);
     expect(payload?.text?.length).toBeLessThanOrEqual(600);
     expect(payload?.text?.endsWith("…")).toBe(true);
+  });
+
+  it("completes the flush turn without throwing when an embedded run returns a visible error payload and no onVisibleErrorPayloads callback is supplied", async () => {
+    // Covers the post-reply dispatch site (agent-runner.ts) which calls
+    // runMemoryFlushIfNeeded without onVisibleErrorPayloads. Previously the
+    // visible error payload was silently dropped; the flush body now forwards
+    // it to logVerbose. We exercise the no-callback path to ensure the flush
+    // run still completes cleanly.
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 80_000,
+      compactionCount: 1,
+    };
+    runEmbeddedPiAgentMock.mockResolvedValueOnce({
+      payloads: [
+        {
+          text: "⚠️ write failed: Memory flush writes are restricted to memory/2023-11-14.md; use that path only.",
+          isError: true,
+        },
+      ],
+      meta: {},
+    });
+
+    await expect(
+      runMemoryFlushIfNeeded({
+        cfg: { agents: { defaults: { compaction: { memoryFlush: {} } } } },
+        followupRun: createTestFollowupRun(),
+        sessionCtx: { Provider: "whatsapp" } as unknown as TemplateContext,
+        defaultModel: "anthropic/claude-opus-4-6",
+        agentCfgContextTokens: 100_000,
+        resolvedVerboseLevel: "off",
+        sessionEntry,
+        sessionStore: { main: sessionEntry },
+        sessionKey: "main",
+        isHeartbeat: false,
+        replyOperation: createReplyOperation(),
+        // intentionally omit onVisibleErrorPayloads
+      }),
+    ).resolves.toBeDefined();
   });
 
   it("does not surface user-abort errors as visible payloads (regression: #80755)", async () => {
@@ -1450,5 +1576,423 @@ describe("runMemoryFlushIfNeeded", () => {
     expect(flushCall.silentExpected).toBe(true);
     expect(flushCall.bootstrapPromptWarningSignaturesSeen).toEqual(["sig-a", "sig-b"]);
     expect(flushCall.bootstrapPromptWarningSignature).toBe("sig-b");
+  });
+});
+
+describe("pending memory-flush registry", () => {
+  afterEach(() => {
+    clearPendingMemoryFlushesForTest();
+  });
+
+  it("registers and clears a pending flush after it resolves", async () => {
+    const sessionKey = "session-key-resolve";
+    let resolveFlush: () => void = () => {};
+    const flushPromise = new Promise<void>((resolve) => {
+      resolveFlush = resolve;
+    });
+
+    registerPendingMemoryFlush(sessionKey, flushPromise);
+    expect(hasPendingMemoryFlushForTest(sessionKey)).toBe(true);
+
+    resolveFlush();
+    // Allow microtask queue to flush so the registered finally callback fires.
+    await flushPromise;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(hasPendingMemoryFlushForTest(sessionKey)).toBe(false);
+  });
+
+  it("clears a pending flush even after it rejects", async () => {
+    const sessionKey = "session-key-reject";
+    let rejectFlush: (err: Error) => void = () => {};
+    const flushPromise = new Promise<void>((_resolve, reject) => {
+      rejectFlush = reject;
+    });
+
+    registerPendingMemoryFlush(sessionKey, flushPromise);
+    expect(hasPendingMemoryFlushForTest(sessionKey)).toBe(true);
+
+    rejectFlush(new Error("flush failed"));
+    await flushPromise.catch(() => undefined);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(hasPendingMemoryFlushForTest(sessionKey)).toBe(false);
+  });
+
+  it("awaitPendingMemoryFlush is a no-op when no flush is pending", async () => {
+    await expect(awaitPendingMemoryFlush(undefined)).resolves.toBeUndefined();
+    await expect(awaitPendingMemoryFlush("missing-key")).resolves.toBeUndefined();
+  });
+
+  it("awaitPendingMemoryFlush returns after the registered flush resolves", async () => {
+    const sessionKey = "session-key-await-resolve";
+    let resolveFlush: () => void = () => {};
+    const flushPromise = new Promise<void>((resolve) => {
+      resolveFlush = resolve;
+    });
+    registerPendingMemoryFlush(sessionKey, flushPromise);
+
+    let awaited = false;
+    const barrier = awaitPendingMemoryFlush(sessionKey, { timeoutMs: 5_000 }).then(() => {
+      awaited = true;
+    });
+
+    await Promise.resolve();
+    expect(awaited).toBe(false);
+
+    resolveFlush();
+    await barrier;
+    expect(awaited).toBe(true);
+  });
+
+  it("awaitPendingMemoryFlush makes the timeout terminal: on timeout it invokes the abort callback and awaits flush settlement before returning", async () => {
+    const sessionKey = "session-key-await-timeout";
+
+    let abortCalled = false;
+    let aborted = false;
+    const flushPromise = new Promise<void>((resolve) => {
+      // The flush only settles after `abort()` is called by the barrier.
+      // This mirrors how the real maintenance ReplyOperation propagates
+      // abort into runEmbeddedPiAgent / runWithModelFallback and makes
+      // them short-circuit.
+      const interval = setInterval(() => {
+        if (aborted) {
+          clearInterval(interval);
+          resolve();
+        }
+      }, 5);
+    });
+    registerPendingMemoryFlush(sessionKey, flushPromise, () => {
+      abortCalled = true;
+      aborted = true;
+    });
+
+    const start = Date.now();
+    await awaitPendingMemoryFlush(sessionKey, { timeoutMs: 30 });
+    const elapsed = Date.now() - start;
+
+    expect(abortCalled).toBe(true);
+    expect(elapsed).toBeGreaterThanOrEqual(20);
+    // After the barrier returns, the flush has truly settled so the
+    // pending map entry has self-cleaned. This is the key invariant:
+    // the barrier does not return while the previous-turn flush is
+    // still in-flight.
+    expect(hasPendingMemoryFlushForTest(sessionKey)).toBe(false);
+  });
+
+  it("awaitPendingMemoryFlush abandons the pending entry when the abort callback fails to make a truly hung flush settle within the post-abort grace window", async () => {
+    const sessionKey = "session-key-await-timeout-hung-after-abort";
+    // The flush promise never settles. The abort callback is invoked
+    // but the simulated embedded runner ignores it (mirrors the case
+    // where the LLM call has no abort cooperation or the runner
+    // process is stuck). The barrier must give up and abandon the
+    // pending entry within timeoutMs + postAbortGraceMs.
+    let abortCalled = false;
+    const hungFlushPromise = new Promise<void>(() => {
+      // never resolves
+    });
+    registerPendingMemoryFlush(sessionKey, hungFlushPromise, () => {
+      abortCalled = true;
+      // Does nothing further: the flush stays hung.
+    });
+
+    const start = Date.now();
+    await awaitPendingMemoryFlush(sessionKey, {
+      timeoutMs: 20,
+      postAbortGraceMs: 30,
+    });
+    const elapsed = Date.now() - start;
+
+    expect(abortCalled).toBe(true);
+    // The barrier returned within timeoutMs + postAbortGraceMs.
+    expect(elapsed).toBeGreaterThanOrEqual(40);
+    expect(elapsed).toBeLessThan(2_000);
+    // Pending entry was abandoned (removed from the registry) so the
+    // next preflight does not pay the timeout again.
+    expect(hasPendingMemoryFlushForTest(sessionKey)).toBe(false);
+  });
+
+  it("awaitPendingMemoryFlush stays bounded if the abort callback fails to settle the flush quickly", async () => {
+    const sessionKey = "session-key-await-timeout-abort-throws";
+    // Abort callback that throws synchronously: the barrier must still
+    // attempt to await the flush promise. The flush in this test
+    // resolves on its own after a short delay so we can verify the
+    // barrier eventually returns.
+    let abortAttempts = 0;
+    const flushPromise = new Promise<void>((resolve) => {
+      setTimeout(resolve, 80);
+    });
+    registerPendingMemoryFlush(sessionKey, flushPromise, () => {
+      abortAttempts += 1;
+      throw new Error("abort callback explodes");
+    });
+
+    await awaitPendingMemoryFlush(sessionKey, { timeoutMs: 30 });
+
+    expect(abortAttempts).toBe(1);
+    // Flush eventually settled and was cleaned up.
+    expect(hasPendingMemoryFlushForTest(sessionKey)).toBe(false);
+  });
+});
+
+describe("runPreflightCompactionIfNeeded pending-flush barrier", () => {
+  let rootDir = "";
+
+  beforeEach(async () => {
+    rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-barrier-"));
+    registerMemoryFlushPlanResolverForTest(() => ({
+      softThresholdTokens: 4_000,
+      forceFlushTranscriptBytes: 1_000_000_000,
+      reserveTokensFloor: 20_000,
+      prompt: "noop",
+      systemPrompt: "noop",
+      relativePath: "memory/2023-11-14.md",
+    }));
+    compactEmbeddedPiSessionMock.mockReset().mockResolvedValue({
+      ok: true,
+      compacted: true,
+      result: { tokensAfter: 42, sessionId: "session-after-compaction" },
+    });
+    incrementCompactionCountMock.mockReset().mockImplementation(async (params) => {
+      const sessionKey = String(params.sessionKey ?? "");
+      if (!sessionKey || !params.sessionStore?.[sessionKey]) {
+        return undefined;
+      }
+      const previous = params.sessionStore[sessionKey] as SessionEntry;
+      const nextEntry: SessionEntry = {
+        ...previous,
+        compactionCount: (previous.compactionCount ?? 0) + 1,
+      };
+      if (typeof params.newSessionId === "string" && params.newSessionId) {
+        nextEntry.sessionId = params.newSessionId;
+      }
+      params.sessionStore[sessionKey] = nextEntry;
+      return nextEntry.compactionCount;
+    });
+    setAgentRunnerMemoryTestDeps({
+      compactEmbeddedPiSession: compactEmbeddedPiSessionMock as never,
+      runWithModelFallback: vi.fn() as never,
+      runEmbeddedPiAgent: vi.fn() as never,
+      ensureMemoryFlushTargetFile: vi.fn().mockResolvedValue(undefined) as never,
+      refreshQueuedFollowupSession: vi.fn() as never,
+      incrementCompactionCount: incrementCompactionCountMock as never,
+      ensureSelectedAgentHarnessPlugin: vi.fn().mockResolvedValue(undefined) as never,
+      registerAgentRunContext: vi.fn() as never,
+      randomUUID: () => "00000000-0000-0000-0000-000000000002",
+      now: () => 1_700_000_000_000,
+    });
+  });
+
+  afterEach(async () => {
+    clearPendingMemoryFlushesForTest();
+    setAgentRunnerMemoryTestDeps();
+    clearMemoryPluginState();
+    await fs.rm(rootDir, { recursive: true, force: true });
+  });
+
+  it("awaits a pending flush before invoking compaction on the next turn", async () => {
+    const storePath = path.join(rootDir, "sessions.json");
+    const sessionKey = "main";
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 250_000,
+      totalTokensFresh: true,
+      compactionCount: 0,
+    };
+    const sessionStore = { [sessionKey]: sessionEntry };
+    await writeTestSessionStore(storePath, sessionKey, sessionEntry);
+
+    let resolveFlush: () => void = () => {};
+    const flushPromise = new Promise<void>((resolve) => {
+      resolveFlush = resolve;
+    });
+    registerPendingMemoryFlush(sessionKey, flushPromise);
+
+    const followupRun = createTestFollowupRun();
+    const replyOperation = createReplyOperation();
+    const preflightPromise = runPreflightCompactionIfNeeded({
+      cfg: {
+        agents: { defaults: { compaction: { memoryFlush: {} } } },
+      },
+      followupRun,
+      defaultModel: "anthropic/claude-opus-4-6",
+      agentCfgContextTokens: 100_000,
+      sessionEntry,
+      sessionStore,
+      sessionKey,
+      storePath,
+      isHeartbeat: false,
+      replyOperation,
+    });
+
+    // Give the preflight microtasks a chance to run and reach the barrier.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(compactEmbeddedPiSessionMock).not.toHaveBeenCalled();
+
+    resolveFlush();
+    await preflightPromise;
+
+    expect(compactEmbeddedPiSessionMock).toHaveBeenCalledTimes(1);
+  });
+
+  // The barrier inside runPreflightCompactionIfNeeded uses the default
+  // 30 s timeout baked into awaitPendingMemoryFlush. Exercising that real
+  // timeout from a unit test is impractical, so the timeout bound itself
+  // is covered at the helper level (see
+  // "awaitPendingMemoryFlush proceeds after timeout when the flush hangs"
+  // in the registry describe block above, which uses a configurable short
+  // timeoutMs). Here we assert only that the barrier blocks until the
+  // pending flush settles and then compaction proceeds — i.e., the
+  // barrier is correctly wired into the preflight function entry.
+  it("returns from the barrier once the pending flush settles, then runs compaction", async () => {
+    const storePath = path.join(rootDir, "sessions.json");
+    const sessionKey = "main";
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 250_000,
+      totalTokensFresh: true,
+      compactionCount: 0,
+    };
+    const sessionStore = { [sessionKey]: sessionEntry };
+    await writeTestSessionStore(storePath, sessionKey, sessionEntry);
+
+    let resolveFlush: () => void = () => {};
+    const flushPromise = new Promise<void>((resolve) => {
+      resolveFlush = resolve;
+    });
+    registerPendingMemoryFlush(sessionKey, flushPromise);
+
+    const followupRun = createTestFollowupRun();
+    const replyOperation = createReplyOperation();
+    const preflightPromise = runPreflightCompactionIfNeeded({
+      cfg: {
+        agents: { defaults: { compaction: { memoryFlush: {} } } },
+      },
+      followupRun,
+      defaultModel: "anthropic/claude-opus-4-6",
+      agentCfgContextTokens: 100_000,
+      sessionEntry,
+      sessionStore,
+      sessionKey,
+      storePath,
+      isHeartbeat: false,
+      replyOperation,
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(compactEmbeddedPiSessionMock).not.toHaveBeenCalled();
+
+    resolveFlush();
+    await preflightPromise;
+
+    expect(compactEmbeddedPiSessionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rebinds the active run sessionId after the barrier when the prior flush rotated it, even if no compaction runs this turn", async () => {
+    const storePath = path.join(rootDir, "sessions.json");
+    const sessionKey = "main";
+    // The session store reflects the post-flush state (sessionId rotated).
+    const rotatedSessionEntry: SessionEntry = {
+      sessionId: "session-rotated-by-prior-flush",
+      updatedAt: Date.now(),
+      // Low tokens: this turn will NOT trigger compaction. Verifies that the
+      // rebind happens even on the no-compaction path.
+      totalTokens: 1,
+      totalTokensFresh: true,
+      compactionCount: 1,
+    };
+    const sessionStore = { [sessionKey]: rotatedSessionEntry };
+    await writeTestSessionStore(storePath, sessionKey, rotatedSessionEntry);
+
+    // Caller still holds the pre-flush sessionId on the active followup run.
+    const followupRun = createTestFollowupRun();
+    followupRun.run.sessionId = "session-pre-flush";
+
+    // Register a pending flush that resolves immediately to keep the test fast.
+    registerPendingMemoryFlush(sessionKey, Promise.resolve());
+
+    const replyOperation = createReplyOperation();
+    const updateSessionIdMock = (
+      replyOperation as unknown as { updateSessionId: ReturnType<typeof vi.fn> }
+    ).updateSessionId;
+    const refreshQueuedFollowupSessionMock = vi.fn();
+    setAgentRunnerMemoryTestDeps({
+      compactEmbeddedPiSession: compactEmbeddedPiSessionMock as never,
+      refreshQueuedFollowupSession: refreshQueuedFollowupSessionMock as never,
+      incrementCompactionCount: incrementCompactionCountMock as never,
+      registerAgentRunContext: vi.fn() as never,
+      randomUUID: () => "00000000-0000-0000-0000-000000000003",
+      now: () => 1_700_000_000_000,
+    });
+
+    const returnedEntry = await runPreflightCompactionIfNeeded({
+      cfg: { agents: { defaults: { compaction: { memoryFlush: {} } } } },
+      followupRun,
+      defaultModel: "anthropic/claude-opus-4-6",
+      agentCfgContextTokens: 100_000,
+      sessionEntry: undefined,
+      sessionStore,
+      sessionKey,
+      storePath,
+      isHeartbeat: false,
+      replyOperation,
+    });
+
+    expect(returnedEntry?.sessionId).toBe("session-rotated-by-prior-flush");
+    expect(followupRun.run.sessionId).toBe("session-rotated-by-prior-flush");
+    expect(updateSessionIdMock).toHaveBeenCalledWith("session-rotated-by-prior-flush");
+    expect(refreshQueuedFollowupSessionMock).toHaveBeenCalledWith({
+      key: followupRun.run.sessionKey ?? sessionKey,
+      previousSessionId: "session-pre-flush",
+      nextSessionId: "session-rotated-by-prior-flush",
+      nextSessionFile: rotatedSessionEntry.sessionFile,
+    });
+    // No compaction was triggered this turn.
+    expect(compactEmbeddedPiSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("does not block heartbeat preflight on a pending flush", async () => {
+    const storePath = path.join(rootDir, "sessions.json");
+    const sessionKey = "main";
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 250_000,
+      totalTokensFresh: true,
+      compactionCount: 0,
+    };
+    const sessionStore = { [sessionKey]: sessionEntry };
+    await writeTestSessionStore(storePath, sessionKey, sessionEntry);
+
+    // Register a hung flush. A heartbeat preflight should short-circuit
+    // before reaching the barrier so it does not stall.
+    registerPendingMemoryFlush(sessionKey, new Promise<void>(() => {}));
+
+    const followupRun = createTestFollowupRun();
+    const replyOperation = createReplyOperation();
+    const result = await Promise.race([
+      runPreflightCompactionIfNeeded({
+        cfg: { agents: { defaults: { compaction: { memoryFlush: {} } } } },
+        followupRun,
+        defaultModel: "anthropic/claude-opus-4-6",
+        agentCfgContextTokens: 100_000,
+        sessionEntry,
+        sessionStore,
+        sessionKey,
+        storePath,
+        isHeartbeat: true,
+        replyOperation,
+      }),
+      new Promise<"timed-out">((resolve) => setTimeout(() => resolve("timed-out"), 200)),
+    ]);
+
+    expect(result).not.toBe("timed-out");
+    expect(compactEmbeddedPiSessionMock).not.toHaveBeenCalled();
   });
 });

@@ -68,7 +68,11 @@ import {
   isAudioPayload,
   signalTypingIfNeeded,
 } from "./agent-runner-helpers.js";
-import { runMemoryFlushIfNeeded, runPreflightCompactionIfNeeded } from "./agent-runner-memory.js";
+import {
+  registerPendingMemoryFlush,
+  runMemoryFlushIfNeeded,
+  runPreflightCompactionIfNeeded,
+} from "./agent-runner-memory.js";
 import { buildReplyPayloads } from "./agent-runner-payloads.js";
 import {
   appendUnscheduledReminderNote,
@@ -95,7 +99,11 @@ import {
   type QueueSettings,
 } from "./queue.js";
 import { createReplyMediaContext } from "./reply-media-paths.js";
-import { replyRunRegistry, type ReplyOperation } from "./reply-run-registry.js";
+import {
+  createMaintenanceReplyOperation,
+  replyRunRegistry,
+  type ReplyOperation,
+} from "./reply-run-registry.js";
 import { createReplyToModeFilterForChannel, resolveReplyToMode } from "./reply-threading.js";
 import { admitReplyTurn, resolveReplyTurnKind } from "./reply-turn-admission.js";
 import { incrementRunCompactionCount, persistRunSessionUsage } from "./session-run-accounting.js";
@@ -1325,6 +1333,84 @@ export async function runReplyAgent(params: {
   const prePreflightCompactionCount = activeSessionEntry?.compactionCount ?? 0;
   let preflightCompactionApplied = false;
 
+  // Near-threshold memory flush dispatch is deferred until after the reply
+  // path has fully unwound (after replyOperation.complete()). The flush's
+  // embedded run can internally trigger a compaction that mutates
+  // followupRun.run.sessionId, so it must not run concurrently with the
+  // post-reply orchestrator work (usage accounting, auto-compaction
+  // handling, payload delivery state). The flush is registered into a
+  // per-sessionKey pending map; the next turn's preflight compaction
+  // awaits it before mutating session state.
+  //
+  // The reply's ReplyOperation has already been `complete()`d by the
+  // outer finally block when this closure runs, so passing it into
+  // `runMemoryFlushIfNeeded` would cancel the embedded runner's
+  // `attachBackend(...)` call via the completed-operation contract in
+  // `reply-run-registry.ts:attachBackend`. Build a flush-scoped
+  // maintenance ReplyOperation per dispatch so the embedded runner sees
+  // a non-completed operation and can run its housekeeping work.
+  // Aborts on the original reply's signal propagate into the maintenance
+  // operation so a user abort still stops the flush.
+  let postReplyFlushDispatched = false;
+  let replyPathReached = false;
+  const ensureMemoryFlushDispatched = (): void => {
+    if (postReplyFlushDispatched) {
+      return;
+    }
+    postReplyFlushDispatched = true;
+    const flushSessionKey = sessionKey ?? followupRun.run.sessionKey;
+    const flushSessionId =
+      activeSessionEntry?.sessionId ?? followupRun.run.sessionId ?? replyOperation.sessionId;
+    if (!flushSessionKey || !flushSessionId) {
+      logVerbose(
+        "post-reply memory flush skipped: missing sessionKey or sessionId at dispatch time",
+      );
+      return;
+    }
+    const maintenanceReplyOperation = createMaintenanceReplyOperation({
+      sessionKey: flushSessionKey,
+      sessionId: flushSessionId,
+      upstreamAbortSignal: replyOperation.abortSignal,
+    });
+    const flushPromise = traceAgentPhase("reply.memory_flush", () =>
+      runMemoryFlushIfNeeded({
+        cfg,
+        followupRun,
+        promptForEstimate: followupRun.prompt,
+        sessionCtx,
+        opts,
+        defaultModel,
+        agentCfgContextTokens,
+        resolvedVerboseLevel,
+        sessionEntry: activeSessionEntry,
+        sessionStore: activeSessionStore,
+        sessionKey,
+        runtimePolicySessionKey,
+        storePath,
+        isHeartbeat,
+        replyOperation: maintenanceReplyOperation,
+      }),
+    );
+    if (sessionKey) {
+      // Pass an abort callback so the next turn's preflight barrier can
+      // make a wait-cap timeout terminal: on timeout the barrier aborts
+      // the maintenance ReplyOperation (which cancels the attached
+      // backend handle and aborts the embedded run's abortSignal) and
+      // then awaits the flush promise's settlement before proceeding to
+      // any new compaction state mutation.
+      registerPendingMemoryFlush(sessionKey, flushPromise, () => {
+        maintenanceReplyOperation.abortForRestart();
+      });
+    }
+    void flushPromise
+      .catch((err) => {
+        logVerbose(`post-reply memory flush failed: ${String(err)}`);
+      })
+      .finally(() => {
+        maintenanceReplyOperation.complete();
+      });
+  };
+
   try {
     await typingSignals.signalRunStart();
 
@@ -1346,67 +1432,6 @@ export async function runReplyAgent(params: {
     );
     preflightCompactionApplied =
       (activeSessionEntry?.compactionCount ?? 0) > prePreflightCompactionCount;
-
-    const visibleMemoryFlushErrorPayloads: ReplyPayload[] = [];
-    activeSessionEntry = await traceAgentPhase("reply.memory_flush", () =>
-      runMemoryFlushIfNeeded({
-        cfg,
-        followupRun,
-        promptForEstimate: followupRun.prompt,
-        sessionCtx,
-        opts,
-        defaultModel,
-        agentCfgContextTokens,
-        resolvedVerboseLevel,
-        sessionEntry: activeSessionEntry,
-        sessionStore: activeSessionStore,
-        sessionKey,
-        runtimePolicySessionKey,
-        storePath,
-        isHeartbeat,
-        replyOperation,
-        onVisibleErrorPayloads: (payloads) => {
-          visibleMemoryFlushErrorPayloads.push(...payloads);
-        },
-      }),
-    );
-
-    if (visibleMemoryFlushErrorPayloads.length > 0) {
-      const currentMessageId = sessionCtx.MessageSidFull ?? sessionCtx.MessageSid;
-      const payloadResult = await buildReplyPayloads({
-        payloads: visibleMemoryFlushErrorPayloads,
-        isHeartbeat,
-        didLogHeartbeatStrip: false,
-        silentExpected: true,
-        blockStreamingEnabled,
-        blockReplyPipeline,
-        replyToMode,
-        replyToChannel,
-        currentMessageId,
-        replyThreading: replyThreadingOverride ?? sessionCtx.ReplyThreading,
-        messageProvider: followupRun.run.messageProvider,
-        originatingChannel: sessionCtx.OriginatingChannel,
-        originatingTo: resolveOriginMessageTo({
-          originatingTo: sessionCtx.OriginatingTo,
-          to: sessionCtx.To,
-        }),
-        accountId: sessionCtx.AccountId,
-        normalizeMediaPaths: replyMediaContext.normalizePayload,
-      });
-      const replyPayloads = payloadResult.replyPayloads.map((payload) =>
-        markReplyPayloadForSourceSuppressionDelivery(payload),
-      );
-      if (replyPayloads.length > 0) {
-        replyOperation.fail(
-          "run_failed",
-          new Error("memory flush produced visible error payloads"),
-        );
-        await signalTypingIfNeeded(replyPayloads, typingSignals);
-        return returnWithQueuedFollowupDrain(
-          replyPayloads.length === 1 ? replyPayloads[0] : replyPayloads,
-        );
-      }
-    }
 
     runFollowupTurn = createFollowupRunner({
       opts,
@@ -1463,6 +1488,12 @@ export async function runReplyAgent(params: {
 
     replyOperation.setPhase("running");
     const runStartedAt = Date.now();
+    // Mark that the reply path has been reached. The finally block uses this
+    // flag to decide whether to dispatch the post-reply memory flush: if
+    // preflight compaction threw before the reply could start, no flush is
+    // dispatched for this turn (preserves the prior behavior where a
+    // preflight failure also skipped the flush).
+    replyPathReached = true;
     const runOutcome = await traceAgentPhase("reply.run_agent_turn", () =>
       runAgentTurnWithFallback({
         commandBody,
@@ -2226,6 +2257,20 @@ export async function runReplyAgent(params: {
       replyOperation.completeThen(drainQueuedFollowupsAfterClear);
     } else {
       replyOperation.complete();
+    }
+    // Near-threshold memory flush is dispatched after the reply operation has
+    // fully completed. Calls into ReplyOperation that the flush makes after
+    // this point (setPhase, updateSessionId) are no-ops by ReplyOperation's
+    // own contract once `result` is set, so the flush can drive its embedded
+    // run, mutate sessionStore, and persist memoryFlushAt /
+    // memoryFlushCompactionCount without racing the reply path. If the reply
+    // was aborted, replyOperation.abortSignal is in the aborted state and the
+    // flush's runWithModelFallback short-circuits before starting any
+    // embedded work. The dispatch is gated on replyPathReached so a preflight
+    // compaction failure that prevented the reply from starting also skips
+    // the flush (matches the prior behavior of the inline pre-reply flush).
+    if (replyPathReached) {
+      ensureMemoryFlushDispatched();
     }
     blockReplyPipeline?.stop();
     typing.markRunComplete();
