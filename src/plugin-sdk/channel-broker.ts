@@ -53,6 +53,24 @@ export type BrokerPlatformConstraints = Partial<
   >
 >;
 
+const BROKER_PLATFORM_CONSTRAINT_KEYS = new Set<keyof BrokerPlatformConstraints>([
+  "businessApi",
+  "cloudApi",
+  "providerHosted",
+  "deviceBound",
+  "linkedDevice",
+  "qrPairing",
+  "sessionFragile",
+  "selfHosted",
+  "phoneNumberRequired",
+  "signalCli",
+  "macHostRequired",
+  "messagesSignedIn",
+  "privateApiOptional",
+  "privateApiRequired",
+  "externalBridge",
+]);
+
 export type BrokerConversationRef = {
   id: string;
   type: BrokerConversationType;
@@ -350,13 +368,18 @@ function normalizeNativeIds(
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
-function normalizeBrokerBooleanRecord(
-  record: Record<string, boolean | undefined> | undefined,
+function normalizeBrokerBooleanRecord<Key extends string>(
+  record: Partial<Record<Key, boolean>> | undefined,
+  allowedKeys?: ReadonlySet<Key>,
+  label = "broker boolean flag",
 ): Record<string, boolean> | undefined {
   const normalized: Record<string, boolean> = {};
   for (const [key, value] of Object.entries(record ?? {})) {
     const normalizedKey = key.trim();
     if (normalizedKey) {
+      if (allowedKeys && !allowedKeys.has(normalizedKey as Key)) {
+        throw new Error(`unsupported ${label}: ${normalizedKey}`);
+      }
       normalized[normalizedKey] = value === true;
     }
   }
@@ -377,7 +400,11 @@ function mergeBrokerBadges(...badgeSets: Array<string[] | undefined>): string[] 
 function normalizeBrokerPlatformCapabilities(
   capabilities: BrokerPlatformCapabilities,
 ): BrokerPlatformCapabilities {
-  const constraints = normalizeBrokerBooleanRecord(capabilities.constraints);
+  const constraints = normalizeBrokerBooleanRecord(
+    capabilities.constraints,
+    BROKER_PLATFORM_CONSTRAINT_KEYS,
+    "broker platform constraint",
+  );
   const badges = normalizeBrokerBadges(capabilities.badges);
   return {
     platform: normalizeBrokerPlatformId(capabilities.platform),
@@ -393,7 +420,11 @@ function normalizeBrokerPlatformCapabilities(
 export function normalizeBrokerProviderCapabilities(
   capabilities: BrokerProviderCapabilities,
 ): BrokerProviderCapabilities {
-  const constraints = normalizeBrokerBooleanRecord(capabilities.constraints);
+  const constraints = normalizeBrokerBooleanRecord(
+    capabilities.constraints,
+    BROKER_PLATFORM_CONSTRAINT_KEYS,
+    "broker platform constraint",
+  );
   const badges = normalizeBrokerBadges(capabilities.badges);
   return {
     ...(normalizeOptionalBrokerString(capabilities.providerId)
