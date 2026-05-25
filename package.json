@@ -179,6 +179,10 @@
       "types": "./dist/plugin-sdk/channel-setup.d.ts",
       "default": "./dist/plugin-sdk/channel-setup.js"
     },
+    "./plugin-sdk/channel-broker": {
+      "types": "./dist/plugin-sdk/channel-broker.d.ts",
+      "default": "./dist/plugin-sdk/channel-broker.js"
+    },
     "./plugin-sdk/channel-streaming": {
       "types": "./dist/plugin-sdk/channel-streaming.d.ts",
       "default": "./dist/plugin-sdk/channel-streaming.js"
