@@ -6,7 +6,10 @@
  * yet ship a dedicated provider plugin hook surface.
  */
 
-import { resolveNodeRequireFromMeta } from "../../logging/node-require.js";
+import {
+  classifyProviderFailoverReasonWithPlugin,
+  matchesProviderContextOverflowWithPlugin,
+} from "../../plugins/provider-error-runtime.js";
 import type { FailoverReason } from "./types.js";
 
 type ProviderErrorPattern = {
@@ -75,49 +78,10 @@ export const PROVIDER_SPECIFIC_PATTERNS: readonly ProviderErrorPattern[] = [
   },
 ];
 
-type ProviderRuntimeHooks = {
-  classifyProviderFailoverReasonWithPlugin: (params: {
-    provider?: string;
-    context: ProviderSpecificErrorContext;
-  }) => FailoverReason | null;
-  matchesProviderContextOverflowWithPlugin: (params: {
-    context: { errorMessage: string };
-  }) => boolean;
-};
-
-const requireProviderRuntime = resolveNodeRequireFromMeta(import.meta.url);
-let cachedProviderRuntimeHooks: ProviderRuntimeHooks | null | undefined;
-
 const PROVIDER_CONTEXT_OVERFLOW_SIGNAL_RE =
   /\b(?:context|window|prompt|token|tokens|input|request|model)\b/i;
 const PROVIDER_CONTEXT_OVERFLOW_ACTION_RE =
   /\b(?:too\s+(?:large|long|many)|exceed(?:s|ed|ing)?|overflow|limit|maximum|max)\b/i;
-
-function resolveProviderRuntimeHooks(): ProviderRuntimeHooks | null {
-  if (cachedProviderRuntimeHooks !== undefined) {
-    return cachedProviderRuntimeHooks;
-  }
-  if (!requireProviderRuntime) {
-    cachedProviderRuntimeHooks = null;
-    return cachedProviderRuntimeHooks;
-  }
-  try {
-    const loaded = requireProviderRuntime(
-      "../../plugins/provider-runtime.js",
-    ) as unknown as ProviderRuntimeHooks;
-    cachedProviderRuntimeHooks = {
-      classifyProviderFailoverReasonWithPlugin: ({ context }) =>
-        loaded.classifyProviderFailoverReasonWithPlugin({
-          provider: context.provider,
-          context,
-        }) ?? null,
-      matchesProviderContextOverflowWithPlugin: loaded.matchesProviderContextOverflowWithPlugin,
-    };
-  } catch {
-    cachedProviderRuntimeHooks = null;
-  }
-  return cachedProviderRuntimeHooks ?? null;
-}
 
 function looksLikeProviderContextOverflowCandidate(errorMessage: string): boolean {
   return (
@@ -149,11 +113,10 @@ export function matchesProviderContextOverflow(errorMessage: string): boolean {
   if (!looksLikeProviderContextOverflowCandidate(errorMessage)) {
     return false;
   }
-  const runtimeHooks = resolveProviderRuntimeHooks();
   return (
-    runtimeHooks?.matchesProviderContextOverflowWithPlugin({
+    matchesProviderContextOverflowWithPlugin({
       context: { errorMessage },
-    }) === true || PROVIDER_CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(errorMessage))
+    }) || PROVIDER_CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(errorMessage))
   );
 }
 
@@ -165,9 +128,12 @@ export function classifyProviderPluginError(
   input: string | ProviderSpecificErrorContext,
 ): FailoverReason | null {
   const context = normalizeProviderSpecificErrorContext(input);
-  const runtimeHooks = resolveProviderRuntimeHooks();
+  if (!context.provider) {
+    return null;
+  }
   return (
-    runtimeHooks?.classifyProviderFailoverReasonWithPlugin({
+    classifyProviderFailoverReasonWithPlugin({
+      provider: context.provider,
       context,
     }) ?? null
   );

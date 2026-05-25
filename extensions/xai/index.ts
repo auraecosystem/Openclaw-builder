@@ -1,4 +1,5 @@
 import { defineSingleProviderPluginEntry } from "openclaw/plugin-sdk/provider-entry";
+import { defineProviderErrorMap } from "openclaw/plugin-sdk/provider-errors";
 import { OPENAI_COMPATIBLE_REPLAY_HOOKS } from "openclaw/plugin-sdk/provider-model-shared";
 import { defaultToolStreamExtraParams } from "openclaw/plugin-sdk/provider-stream-shared";
 import { jsonResult } from "openclaw/plugin-sdk/provider-web-search";
@@ -38,6 +39,18 @@ import {
 } from "./xai-oauth.js";
 
 const PROVIDER_ID = "xai";
+const classifyXaiProviderError = defineProviderErrorMap([
+  {
+    codes: ["SPENDING_LIMIT"],
+    reason: "billing",
+    userMessage: "Your xAI account has reached its spending limit.",
+    action: {
+      kind: "usage",
+      label: "Review xAI usage",
+      url: "https://grok.com/?_s=usage",
+    },
+  },
+]);
 type CodeExecutionModule = typeof import("./code-execution.js");
 type XSearchModule = typeof import("./x-search.js");
 
@@ -216,6 +229,7 @@ export default defineSingleProviderPluginEntry({
       shouldContributeXaiCompat({ modelId, model }) ? resolveXaiModelCompatPatch() : undefined,
     normalizeModelId: ({ modelId }) => normalizeXaiModelId(modelId),
     resolveDynamicModel: (ctx) => resolveXaiForwardCompatModel({ providerId: PROVIDER_ID, ctx }),
+    classifyProviderError: classifyXaiProviderError,
     refreshOAuth: refreshXaiOAuthCredential,
     resolveThinkingProfile,
     isModernModelRef: ({ modelId }) => isModernXaiModel(modelId),
