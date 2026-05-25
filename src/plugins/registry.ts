@@ -2858,6 +2858,8 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                     ...attachment,
                     config: runtimeConfig,
                     origin: record.origin,
+                    trustedOfficialInstall: record.trustedOfficialInstall,
+                    contracts: record.contracts,
                   });
                 } catch (error) {
                   return {
