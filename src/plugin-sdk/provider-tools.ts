@@ -6,6 +6,7 @@ import {
 import type {
   AnyAgentTool,
   ProviderNormalizeToolSchemasContext,
+  ProviderToolSchemaCacheKey,
   ProviderToolSchemaDiagnostic,
 } from "./plugin-entry.js";
 
@@ -505,9 +506,37 @@ export function inspectDeepSeekToolSchemas(
 
 export type ProviderToolCompatFamily = "deepseek" | "gemini" | "openai";
 
+function normalizeToolSchemaCacheString(value: string | null | undefined): string {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+export function resolveProviderToolCompatFamilyCacheKey(
+  family: ProviderToolCompatFamily,
+  ctx: ProviderNormalizeToolSchemasContext,
+): ProviderToolSchemaCacheKey {
+  switch (family) {
+    case "deepseek":
+      throw new Error("DeepSeek tool compatibility does not provide a schema cache key");
+    case "gemini":
+      return { family: "gemini" };
+    case "openai":
+      return {
+        family: "openai",
+        provider: normalizeToolSchemaCacheString(ctx.model?.provider ?? ctx.provider),
+        api: normalizeToolSchemaCacheString(ctx.model?.api ?? ctx.modelApi),
+        baseUrl: normalizeToolSchemaCacheString(ctx.model?.baseUrl),
+        applies: shouldApplyOpenAIToolCompat(ctx),
+      };
+  }
+  throw new Error("Unsupported provider tool compatibility family");
+}
+
 export function buildProviderToolCompatFamilyHooks(family: ProviderToolCompatFamily): {
   normalizeToolSchemas: (ctx: ProviderNormalizeToolSchemasContext) => AnyAgentTool[];
   inspectToolSchemas: (ctx: ProviderNormalizeToolSchemasContext) => ProviderToolSchemaDiagnostic[];
+  resolveToolSchemaCacheKey?: (
+    ctx: ProviderNormalizeToolSchemasContext,
+  ) => ProviderToolSchemaCacheKey;
 } {
   switch (family) {
     case "deepseek":
@@ -519,11 +548,13 @@ export function buildProviderToolCompatFamilyHooks(family: ProviderToolCompatFam
       return {
         normalizeToolSchemas: normalizeGeminiToolSchemas,
         inspectToolSchemas: inspectGeminiToolSchemas,
+        resolveToolSchemaCacheKey: (ctx) => resolveProviderToolCompatFamilyCacheKey(family, ctx),
       };
     case "openai":
       return {
         normalizeToolSchemas: normalizeOpenAIToolSchemas,
         inspectToolSchemas: inspectOpenAIToolSchemas,
+        resolveToolSchemaCacheKey: (ctx) => resolveProviderToolCompatFamilyCacheKey(family, ctx),
       };
   }
   throw new Error("Unsupported provider tool compatibility family");
