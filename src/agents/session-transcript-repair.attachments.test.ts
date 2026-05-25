@@ -250,4 +250,31 @@ describe("sanitizeToolCallInputs redacts sessions_spawn attachments", () => {
     ]);
     expect(JSON.stringify(out)).not.toContain(nestedResumeSessionId);
   });
+
+  it("re-sanitizing already-redacted ACP fields returns the original reference", () => {
+    // Regression guard for the replay-safety reference-equality check in
+    // isReplaySafeThinkingAssistantTurn: sanitizeToolCallBlock(block) !== block
+    // must be false for already-redacted blocks so the thinking+sessions_spawn
+    // turn is not incorrectly classified as unsafe and dropped from replay context.
+    const input = castAgentMessages([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "call_idempotency",
+            name: "sessions_spawn",
+            arguments: {
+              task: "do thing",
+              resumeSessionId: "__OPENCLAW_REDACTED__",
+              streamTo: "__OPENCLAW_REDACTED__",
+            },
+          },
+        ],
+      },
+    ]);
+
+    const out = sanitizeToolCallInputs(input);
+    expect(out).toBe(input);
+  });
 });

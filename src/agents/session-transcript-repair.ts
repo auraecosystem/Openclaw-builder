@@ -105,7 +105,7 @@ function redactSessionsSpawnAcpArgs(value: unknown): unknown {
   let changed = false;
 
   for (const key of ["resumeSessionId", "streamTo"] as const) {
-    if (Object.hasOwn(rec, key)) {
+    if (Object.hasOwn(rec, key) && rec[key] !== REDACTED_SESSIONS_SPAWN_ATTACHMENT_CONTENT) {
       next[key] = REDACTED_SESSIONS_SPAWN_ATTACHMENT_CONTENT;
       changed = true;
     }
