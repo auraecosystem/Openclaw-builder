@@ -313,10 +313,8 @@ function resolveTelegramFastCommandModelContext(params: {
     const storePath = resolveStorePath(params.cfg.session?.store, { agentId: params.agentId });
     const store = loadSessionStore(storePath);
     const entry = resolveSessionStoreEntry({ store, sessionKey: params.sessionKey }).existing;
-    const runtimeProvider = normalizeOptionalString(entry?.modelProvider);
-    const runtimeModel = normalizeOptionalString(entry?.model);
-    if (runtimeProvider && runtimeModel) {
-      return { provider: runtimeProvider, model: runtimeModel };
+    if (entry?.modelOverrideSource === "auto" && normalizeOptionalString(entry.modelOverride)) {
+      return fallback();
     }
     const override = resolveStoredModelOverride({
       sessionEntry: entry,

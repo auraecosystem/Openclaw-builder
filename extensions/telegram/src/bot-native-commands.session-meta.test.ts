@@ -737,16 +737,13 @@ describe("registerTelegramNativeCommands — session metadata", () => {
     expect(replyMocks.dispatchReplyWithBufferedBlockDispatcher).not.toHaveBeenCalled();
   });
 
-  it("uses the current runtime model metadata for the fast menu", async () => {
+  it("uses configured model defaults instead of runtime auth metadata for the fast menu", async () => {
     const cfg = {
       agents: {
         defaults: {
           model: { primary: "openai/gpt-5.5" },
           models: {
             "openai/gpt-5.5": {
-              params: { fastMode: "auto" },
-            },
-            "openai-codex/gpt-5.5": {
               params: { fastMode: "auto", fastAutoOnSeconds: 30 },
             },
           },
@@ -757,7 +754,6 @@ describe("registerTelegramNativeCommands — session metadata", () => {
       "agent:main:main": {
         modelProvider: "openai-codex",
         model: "gpt-5.5",
-        fastMode: "auto",
         updatedAt: 0,
       },
     });
@@ -777,14 +773,15 @@ describe("registerTelegramNativeCommands — session metadata", () => {
       commandAuthMocks.resolveCommandArgMenu.mock.calls.some(
         ([params]) =>
           params.command.key === "fast" &&
-          (params.provider === "openai" || params.provider === "openai-codex"),
+          params.provider === "openai" &&
+          params.model === "gpt-5.5",
       ),
     ).toBe(true);
     const options = expectSendMessageCall({
       sendMessage,
       chatId: 100,
       textIncludes:
-        "Current fast mode: auto (30 sec) (session).\nOptions: on, off, auto (30 sec), default, status.",
+        "Current fast mode: auto (30 sec) (default: model).\nOptions: on, off, auto (30 sec), default, status.",
       requireReplyMarkup: true,
       label: "fast menu",
     });
