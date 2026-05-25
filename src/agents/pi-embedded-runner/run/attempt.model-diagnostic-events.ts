@@ -6,6 +6,7 @@ import {
   diagnosticProviderRequestIdHash,
 } from "../../../infra/diagnostic-error-metadata.js";
 import {
+  areDiagnosticsEnabledForProcess,
   emitTrustedDiagnosticEvent,
   type DiagnosticEventInput,
   type DiagnosticMemoryUsage,
@@ -110,6 +111,9 @@ function maybeEmitModelCallStreamProgress(
   eventBase: ModelCallEventBase,
   state: ModelCallObservationState,
 ): void {
+  if (!areDiagnosticsEnabledForProcess()) {
+    return;
+  }
   const now = Date.now();
   const progressFields = {
     runId: eventBase.runId,
