@@ -780,6 +780,26 @@ describe("startGatewayPostAttachRuntime", () => {
     expect(returned).toBe(true);
   });
 
+  it("does not schedule provider auth prewarm unless explicitly enabled", async () => {
+    const onPostReadySidecars = vi.fn();
+    const onGatewayLifetimeSidecars = vi.fn();
+    const log = { info: vi.fn(), warn: vi.fn() };
+
+    await startGatewayPostAttachRuntime({
+      ...createPostAttachParams(),
+      log,
+      deferSidecars: true,
+      providerAuthPrewarm: { getConfig: () => ({ marker: "current" }) as never },
+      onPostReadySidecars,
+      onGatewayLifetimeSidecars,
+    });
+
+    expect((onPostReadySidecars.mock.calls[0]?.[0] ?? [])).toHaveLength(0);
+    expect((onGatewayLifetimeSidecars.mock.calls[0]?.[0] ?? [])).toHaveLength(0);
+    expect(hoisted.setAuthProfileFailureHook).not.toHaveBeenCalled();
+    expect(hoisted.warmCurrentProviderAuthState).not.toHaveBeenCalled();
+  });
+
   it("delays provider auth prewarm so post-ready gateway work can run first", async () => {
     vi.useFakeTimers();
     const postReadyRequestTurn = vi.fn();
