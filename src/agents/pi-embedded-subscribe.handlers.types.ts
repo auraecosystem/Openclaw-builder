@@ -39,6 +39,7 @@ export type EmbeddedPiSubscribeState = {
   assistantTexts: string[];
   toolMetas: Array<{ toolName?: string; meta?: string; asyncStarted?: boolean }>;
   acceptedSessionSpawns: AcceptedSessionSpawn[];
+  completedToolCount: number;
   toolMetaById: Map<string, ToolCallSummary>;
   toolSummaryById: Set<string>;
   execLiveUpdateStateById?: Map<string, { lastEmittedAtMs: number }>;
@@ -104,6 +105,7 @@ export type EmbeddedPiSubscribeState = {
   messagingToolSentTexts: string[];
   messagingToolSentTextsNormalized: string[];
   messagingToolSentTargets: MessagingToolSend[];
+  lastMessagingToolDeliveryCompletedToolCount?: number;
   heartbeatToolResponse?: HeartbeatToolResponse;
   messagingToolSentMediaUrls: string[];
   messagingToolSourceReplyPayloads: MessagingToolSourceReplyPayload[];
@@ -213,6 +215,7 @@ type ToolHandlerState = Pick<
   | "toolMetaById"
   | "toolMetas"
   | "acceptedSessionSpawns"
+  | "completedToolCount"
   | "toolSummaryById"
   | "execLiveUpdateStateById"
   | "itemActiveIds"
@@ -233,6 +236,7 @@ type ToolHandlerState = Pick<
   | "messagingToolSentMediaUrls"
   | "messagingToolSourceReplyPayloads"
   | "messagingToolSentTargets"
+  | "lastMessagingToolDeliveryCompletedToolCount"
   | "heartbeatToolResponse"
   | "successfulCronAdds"
   | "deterministicApprovalPromptSent"

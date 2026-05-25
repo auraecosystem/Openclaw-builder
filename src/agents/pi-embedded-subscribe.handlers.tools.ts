@@ -1052,6 +1052,9 @@ export async function handleToolExecutionEnd(
   if (acceptedSessionSpawn) {
     ctx.state.acceptedSessionSpawns.push(acceptedSessionSpawn);
   }
+
+  ctx.state.completedToolCount += 1;
+  const completedToolOrdinal = ctx.state.completedToolCount;
   ctx.state.toolMetaById.delete(toolCallId);
   ctx.state.toolSummaryById.delete(toolCallId);
   if (isToolError) {
@@ -1096,6 +1099,7 @@ export async function handleToolExecutionEnd(
   }
 
   // Commit messaging tool evidence on success, discard on error.
+  let committedMessagingDeliveryEvidence = false;
   const pendingText = ctx.state.pendingMessagingTexts.get(toolCallId);
   const pendingTarget = ctx.state.pendingMessagingTargets.get(toolCallId);
   const pendingMediaUrls = ctx.state.pendingMessagingMediaUrls.get(toolCallId) ?? [];
@@ -1115,6 +1119,7 @@ export async function handleToolExecutionEnd(
     if (!isToolError) {
       ctx.state.messagingToolSentTexts.push(pendingText);
       ctx.state.messagingToolSentTextsNormalized.push(normalizeTextForComparison(pendingText));
+      committedMessagingDeliveryEvidence = true;
       ctx.log.debug(`Committed messaging text: tool=${toolName} len=${pendingText.length}`);
       ctx.trimMessagingToolSent();
     }
@@ -1127,6 +1132,7 @@ export async function handleToolExecutionEnd(
         ...(pendingText ? { text: pendingText } : {}),
         ...(committedMediaUrls.length > 0 ? { mediaUrls: committedMediaUrls.slice() } : {}),
       });
+      committedMessagingDeliveryEvidence = true;
       ctx.trimMessagingToolSent();
     }
   }
@@ -1134,6 +1140,7 @@ export async function handleToolExecutionEnd(
   if (!isToolError && isMessagingSend) {
     if (committedMediaUrls.length > 0) {
       ctx.state.messagingToolSentMediaUrls.push(...committedMediaUrls);
+      committedMessagingDeliveryEvidence = true;
       ctx.trimMessagingToolSent();
     }
     const sourceReplyPayload = extractMessagingToolSourceReplyPayload(result);
@@ -1141,6 +1148,12 @@ export async function handleToolExecutionEnd(
       ctx.state.messagingToolSourceReplyPayloads.push(sourceReplyPayload);
       ctx.trimMessagingToolSent();
     }
+  }
+  if (committedMessagingDeliveryEvidence) {
+    // Record the completed-tool ordinal for the messaging delivery that just finished.
+    // This is deliberately separate from toolMetas length and item lifecycle counts so
+    // later start/end event timing or command-item bookkeeping cannot skew the guard.
+    ctx.state.lastMessagingToolDeliveryCompletedToolCount = completedToolOrdinal;
   }
 
   // Track committed reminders only when cron.add completed successfully.

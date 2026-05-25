@@ -9,6 +9,7 @@ import { resolveContextTokensForModel } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import { resolveModelAuthMode } from "../../agents/model-auth.js";
 import { isCliProvider } from "../../agents/model-selection.js";
+import type { MessagingToolSend } from "../../agents/pi-embedded-messaging.types.js";
 import {
   formatEmbeddedPiQueueFailureSummary,
   queueEmbeddedPiMessageWithOutcomeAsync,
@@ -37,7 +38,10 @@ import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
 import { shouldPreserveUserFacingSessionStateForInputProvenance } from "../../sessions/input-provenance.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
-import { normalizeOptionalString } from "../../shared/string-coerce.js";
+import {
+  normalizeOptionalString,
+  normalizeOptionalStringifiedId,
+} from "../../shared/string-coerce.js";
 import {
   estimateUsageCost,
   formatTokenCount,
@@ -95,6 +99,7 @@ import {
   type QueueSettings,
 } from "./queue.js";
 import { createReplyMediaContext } from "./reply-media-paths.js";
+import { getMatchingMessagingToolReplyTargets } from "./reply-payloads-dedupe.js";
 import { replyRunRegistry, type ReplyOperation } from "./reply-run-registry.js";
 import { createReplyToModeFilterForChannel, resolveReplyToMode } from "./reply-threading.js";
 import { admitReplyTurn, resolveReplyTurnKind } from "./reply-turn-admission.js";
@@ -104,6 +109,9 @@ import { createTypingSignaler } from "./typing-mode.js";
 import type { TypingController } from "./typing.js";
 
 const BLOCK_REPLY_SEND_TIMEOUT_MS = 15_000;
+const ACK_LONGWORK_TERMINAL_CHECKPOINT_TEXT =
+  "ℹ️ This run sent an earlier update and then completed more tool work, but it ended without a final checkpoint. " +
+  "Please ask for status or retry if you expected a completed result.";
 
 function markBeforeAgentRunBlockedPayloads(payloads: ReplyPayload[]): ReplyPayload[] {
   return payloads.map((payload) =>
@@ -160,12 +168,90 @@ function hasCommittedMessagingTargetDeliveryEvidence(value: unknown): boolean {
   });
 }
 
+function isAcknowledgedLongworkMessagingText(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  // Keep this guard conservative: a generic checkpoint is only helpful when the
+  // earlier message looks like an ACK/progress commitment, not a final result.
+  if (
+    /\b(?:done|finished|completed|complete|ready|resolved|fixed|passed|success(?:fully)?|sent|delivered)\b/.test(
+      normalized,
+    ) &&
+    /\b(?:i(?:'|’)?m|i am|i(?:'|’)?ve|i have|tests?|checks?|patch|result|summary|report|final|reply|message)\b/.test(
+      normalized,
+    )
+  ) {
+    return false;
+  }
+  return (
+    /\b(i(?:'|’)?ll|i will|working|starting|checking|investigating|continu(?:e|ing)|handling|handle|look into|going to|detaching)\b/.test(
+      normalized,
+    ) || /收到|我会|我先|继续|处理|处理中|开始|稍后|马上|先.*[看查做]/.test(value)
+  );
+}
+
+function hasAcknowledgedLongworkMessagingText(params: {
+  messagingToolSentTexts?: unknown;
+  messagingToolSentTargets?: unknown;
+}): boolean {
+  if (
+    Array.isArray(params.messagingToolSentTexts) &&
+    params.messagingToolSentTexts.some(
+      (entry) => typeof entry === "string" && isAcknowledgedLongworkMessagingText(entry),
+    )
+  ) {
+    return true;
+  }
+  if (!Array.isArray(params.messagingToolSentTargets)) {
+    return false;
+  }
+  return params.messagingToolSentTargets.some((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return false;
+    }
+    const text = (entry as { text?: unknown }).text;
+    return typeof text === "string" && isAcknowledgedLongworkMessagingText(text);
+  });
+}
+
+function resolveAcknowledgedLongworkRouteTexts(params: {
+  followupRun: FollowupRun;
+  sessionCtx: TemplateContext;
+  messagingToolSentTargets?: MessagingToolSend[];
+}): string[] {
+  const sentTargets = params.messagingToolSentTargets ?? [];
+  const matchingTargets = getMatchingMessagingToolReplyTargets({
+    messageProvider: resolveOriginMessageProvider({
+      originatingChannel: params.sessionCtx.OriginatingChannel,
+      provider: params.followupRun.run.messageProvider,
+    }),
+    messagingToolSentTargets: sentTargets,
+    originatingTo: resolveOriginMessageTo({
+      originatingTo: params.sessionCtx.OriginatingTo,
+      to: params.sessionCtx.To,
+    }),
+    accountId: params.sessionCtx.AccountId,
+  }).filter((target) => {
+    const originThreadId = normalizeOptionalStringifiedId(params.sessionCtx.MessageThreadId);
+    const targetThreadId = normalizeOptionalStringifiedId(target.threadId);
+    if (!originThreadId) {
+      return !targetThreadId;
+    }
+    return targetThreadId === originThreadId;
+  });
+  return matchingTargets.flatMap((target) =>
+    typeof target.text === "string" && target.text.trim() ? [target.text] : [],
+  );
+}
+
 function hasSuccessfulSideEffectDelivery(params: {
   blockReplyPipeline: { didStream: () => boolean; isAborted: () => boolean } | null;
   directlySentBlockKeys?: Set<string>;
   messagingToolSentTexts?: string[];
   messagingToolSentMediaUrls?: string[];
-  messagingToolSentTargets?: unknown[];
+  messagingToolSentTargets?: MessagingToolSend[];
   successfulCronAdds?: number;
   didSendDeterministicApprovalPrompt?: boolean;
 }): boolean {
@@ -178,6 +264,58 @@ function hasSuccessfulSideEffectDelivery(params: {
     (params.successfulCronAdds ?? 0) > 0 ||
     params.didSendDeterministicApprovalPrompt === true
   );
+}
+
+function isDiscordChannelTurn(params: {
+  sessionCtx: TemplateContext;
+  followupRun: FollowupRun;
+}): boolean {
+  const channelHints = [
+    params.sessionCtx.OriginatingChannel,
+    params.sessionCtx.Surface,
+    params.sessionCtx.Provider,
+    params.followupRun.originatingChannel,
+    params.followupRun.run.messageProvider,
+  ];
+  return channelHints.some((hint) => normalizeOptionalString(hint)?.toLowerCase() === "discord");
+}
+
+function buildAcknowledgedLongworkCheckpointPayload(): ReplyPayload {
+  return markReplyPayloadForSourceSuppressionDelivery({
+    text: ACK_LONGWORK_TERMINAL_CHECKPOINT_TEXT,
+  });
+}
+
+function shouldSurfaceAcknowledgedLongworkCheckpoint(params: {
+  followupRun: FollowupRun;
+  sessionCtx: TemplateContext;
+  isHeartbeat: boolean;
+  toolActivityAfterMessagingToolDelivery?: boolean;
+  messagingToolSentTexts?: string[];
+  messagingToolSentMediaUrls?: string[];
+  messagingToolSentTargets?: MessagingToolSend[];
+  successfulCronAdds?: number;
+  didSendDeterministicApprovalPrompt?: boolean;
+}): boolean {
+  if (
+    params.isHeartbeat ||
+    params.followupRun.currentInboundEventKind === "room_event" ||
+    params.followupRun.run.silentExpected === true ||
+    params.didSendDeterministicApprovalPrompt === true ||
+    (params.successfulCronAdds ?? 0) > 0 ||
+    params.toolActivityAfterMessagingToolDelivery !== true ||
+    !isDiscordChannelTurn(params)
+  ) {
+    return false;
+  }
+  const routeSentTexts = resolveAcknowledgedLongworkRouteTexts({
+    followupRun: params.followupRun,
+    sessionCtx: params.sessionCtx,
+    messagingToolSentTargets: params.messagingToolSentTargets,
+  });
+  return hasAcknowledgedLongworkMessagingText({
+    messagingToolSentTexts: routeSentTexts,
+  });
 }
 
 function resolveConfiguredFallbackModel(params: {
@@ -1733,10 +1871,37 @@ export async function runReplyAgent(params: {
     // Drain any late tool/block deliveries before deciding there's "nothing to send".
     // Otherwise, a late typing trigger (e.g. from a tool callback) can outlive the run and
     // keep the typing indicator stuck.
+    const shouldSurfaceAckLongworkCheckpoint = shouldSurfaceAcknowledgedLongworkCheckpoint({
+      followupRun,
+      sessionCtx,
+      isHeartbeat,
+      toolActivityAfterMessagingToolDelivery: runResult.toolActivityAfterMessagingToolDelivery,
+      messagingToolSentTexts: runResult.messagingToolSentTexts,
+      messagingToolSentMediaUrls: runResult.messagingToolSentMediaUrls,
+      messagingToolSentTargets: runResult.messagingToolSentTargets,
+      successfulCronAdds: runResult.successfulCronAdds,
+      didSendDeterministicApprovalPrompt: runResult.didSendDeterministicApprovalPrompt,
+    });
+    const returnAckLongworkCheckpointIfNeeded = async (): Promise<ReplyPayload | undefined> => {
+      if (!shouldSurfaceAckLongworkCheckpoint) {
+        return undefined;
+      }
+      const checkpointPayload = buildAcknowledgedLongworkCheckpointPayload();
+      logVerbose(
+        "acknowledged longwork checkpoint guard: synthesized terminal checkpoint after post-ACK tool activity without final payload",
+      );
+      await signalTypingIfNeeded([checkpointPayload], typingSignals);
+      return returnWithQueuedFollowupDrain(checkpointPayload);
+    };
+
     if (payloadArray.length === 0 && fallbackNoticePayloads.length === 0) {
       const silentFallbackFailurePayload = await returnSilentFallbackFailureIfNeeded();
       if (silentFallbackFailurePayload) {
         return silentFallbackFailurePayload;
+      }
+      const ackLongworkCheckpointPayload = await returnAckLongworkCheckpointIfNeeded();
+      if (ackLongworkCheckpointPayload) {
+        return ackLongworkCheckpointPayload;
       }
       return returnWithQueuedFollowupDrain(undefined);
     }
@@ -1787,6 +1952,10 @@ export async function runReplyAgent(params: {
       const silentFallbackFailurePayload = await returnSilentFallbackFailureIfNeeded();
       if (silentFallbackFailurePayload) {
         return silentFallbackFailurePayload;
+      }
+      const ackLongworkCheckpointPayload = await returnAckLongworkCheckpointIfNeeded();
+      if (ackLongworkCheckpointPayload) {
+        return ackLongworkCheckpointPayload;
       }
       return returnWithQueuedFollowupDrain(undefined);
     }

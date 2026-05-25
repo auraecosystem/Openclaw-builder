@@ -262,6 +262,7 @@ function normalizeEmbeddedRunAttemptResult(
     messagingToolSentTexts?: EmbeddedRunAttemptForRunner["messagingToolSentTexts"] | null;
     messagingToolSentMediaUrls?: EmbeddedRunAttemptForRunner["messagingToolSentMediaUrls"] | null;
     messagingToolSentTargets?: EmbeddedRunAttemptForRunner["messagingToolSentTargets"] | null;
+    toolActivityAfterMessagingToolDelivery?: boolean | null;
     messagingToolSourceReplyPayloads?:
       | EmbeddedRunAttemptForRunner["messagingToolSourceReplyPayloads"]
       | null;
@@ -276,6 +277,7 @@ function normalizeEmbeddedRunAttemptResult(
     messagingToolSentTexts: raw.messagingToolSentTexts ?? [],
     messagingToolSentMediaUrls: raw.messagingToolSentMediaUrls ?? [],
     messagingToolSentTargets: raw.messagingToolSentTargets ?? [],
+    toolActivityAfterMessagingToolDelivery: raw.toolActivityAfterMessagingToolDelivery === true,
     messagingToolSourceReplyPayloads: raw.messagingToolSourceReplyPayloads ?? [],
     itemLifecycle: raw.itemLifecycle ?? {
       startedCount: 0,
@@ -2859,6 +2861,8 @@ export async function runEmbeddedPiAgent(
               },
               didSendViaMessagingTool: attempt.didSendViaMessagingTool,
               didSendDeterministicApprovalPrompt: attempt.didSendDeterministicApprovalPrompt,
+              toolActivityAfterMessagingToolDelivery:
+                attempt.toolActivityAfterMessagingToolDelivery,
               messagingToolSentTexts: attempt.messagingToolSentTexts,
               messagingToolSentMediaUrls: attempt.messagingToolSentMediaUrls,
               messagingToolSentTargets: attempt.messagingToolSentTargets,
@@ -3085,6 +3089,8 @@ export async function runEmbeddedPiAgent(
               },
               didSendViaMessagingTool: attempt.didSendViaMessagingTool,
               didSendDeterministicApprovalPrompt: attempt.didSendDeterministicApprovalPrompt,
+              toolActivityAfterMessagingToolDelivery:
+                attempt.toolActivityAfterMessagingToolDelivery,
               messagingToolSentTexts: attempt.messagingToolSentTexts,
               messagingToolSentMediaUrls: attempt.messagingToolSentMediaUrls,
               messagingToolSentTargets: attempt.messagingToolSentTargets,
@@ -3138,6 +3144,8 @@ export async function runEmbeddedPiAgent(
               },
               didSendViaMessagingTool: attempt.didSendViaMessagingTool,
               didSendDeterministicApprovalPrompt: attempt.didSendDeterministicApprovalPrompt,
+              toolActivityAfterMessagingToolDelivery:
+                attempt.toolActivityAfterMessagingToolDelivery,
               messagingToolSentTexts: attempt.messagingToolSentTexts,
               messagingToolSentMediaUrls: attempt.messagingToolSentMediaUrls,
               messagingToolSentTargets: attempt.messagingToolSentTargets,
@@ -3250,6 +3258,8 @@ export async function runEmbeddedPiAgent(
               },
               didSendViaMessagingTool: attempt.didSendViaMessagingTool,
               didSendDeterministicApprovalPrompt: attempt.didSendDeterministicApprovalPrompt,
+              toolActivityAfterMessagingToolDelivery:
+                attempt.toolActivityAfterMessagingToolDelivery,
               messagingToolSentTexts: attempt.messagingToolSentTexts,
               messagingToolSentMediaUrls: attempt.messagingToolSentMediaUrls,
               messagingToolSentTargets: attempt.messagingToolSentTargets,
@@ -3367,6 +3377,7 @@ export async function runEmbeddedPiAgent(
             },
             didSendViaMessagingTool: attempt.didSendViaMessagingTool,
             didSendDeterministicApprovalPrompt: attempt.didSendDeterministicApprovalPrompt,
+            toolActivityAfterMessagingToolDelivery: attempt.toolActivityAfterMessagingToolDelivery,
             messagingToolSentTexts: attempt.messagingToolSentTexts,
             messagingToolSentMediaUrls: attempt.messagingToolSentMediaUrls,
             messagingToolSentTargets: attempt.messagingToolSentTargets,
