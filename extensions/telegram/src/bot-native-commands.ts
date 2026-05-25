@@ -807,6 +807,9 @@ export const registerTelegramNativeCommands = ({
           command: normalized,
           description: command.description,
         };
+        if (command.isAlias) {
+          menuCommand.isAlias = true;
+        }
         if (command.descriptionLocalizations) {
           menuCommand.descriptionLocalizations = command.descriptionLocalizations;
         }
