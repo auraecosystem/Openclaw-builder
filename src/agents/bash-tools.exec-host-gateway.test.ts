@@ -1056,7 +1056,7 @@ EOF`,
   it("shows reviewer rationale when auto-review defers to human approval", async () => {
     const warnings: string[] = [];
     defaultExecAutoReviewerMock.mockResolvedValueOnce({
-      decision: "ask-human",
+      decision: "ask",
       risk: "unknown",
       rationale: "command intent is unclear",
     });
@@ -1084,9 +1084,10 @@ EOF`,
     ]);
   });
 
-  it("returns a failed result when auto-review denies an approval miss", async () => {
+  it("requests human approval when auto-review asks on an approval miss", async () => {
+    const warnings: string[] = [];
     defaultExecAutoReviewerMock.mockResolvedValueOnce({
-      decision: "deny",
+      decision: "ask",
       risk: "high",
       rationale: "command mutates files",
     });
@@ -1104,20 +1105,19 @@ EOF`,
       command: "rm -rf dist",
       ask: "on-miss",
       autoReview: true,
+      warnings,
     });
 
-    expect(createAndRegisterDefaultExecApprovalRequestMock).not.toHaveBeenCalled();
-    expect(result.pendingResult?.details.status).toBe("failed");
-    const firstContent = result.pendingResult?.content[0];
-    expect(firstContent?.type).toBe("text");
-    expect(firstContent?.type === "text" ? firstContent.text : "").toContain(
-      "exec auto-review denied command: command mutates files",
-    );
+    expect(createAndRegisterDefaultExecApprovalRequestMock).toHaveBeenCalledTimes(1);
+    expect(result.pendingResult?.details.status).toBe("approval-pending");
+    expect(warnings).toEqual([
+      "Exec auto-review deferred to human approval (risk=high): command mutates files",
+    ]);
   });
 
-  it("does not run ssh-keygen when auto-review denies SSH key generation", async () => {
+  it("requests human approval instead of running ssh-keygen when auto-review asks on SSH key generation", async () => {
     defaultExecAutoReviewerMock.mockResolvedValueOnce({
-      decision: "deny",
+      decision: "ask",
       risk: "high",
       rationale: "command creates SSH key material",
     });
@@ -1157,14 +1157,52 @@ EOF`,
         reason: "approval-required",
       }),
     );
-    expect(createAndRegisterDefaultExecApprovalRequestMock).not.toHaveBeenCalled();
+    expect(createAndRegisterDefaultExecApprovalRequestMock).toHaveBeenCalledTimes(1);
     expect(runExecProcessMock).not.toHaveBeenCalled();
-    expect(result.pendingResult?.details.status).toBe("failed");
-    const firstContent = result.pendingResult?.content[0];
-    expect(firstContent?.type).toBe("text");
-    expect(firstContent?.type === "text" ? firstContent.text : "").toContain(
-      "exec auto-review denied command: command creates SSH key material",
-    );
+    expect(result.pendingResult?.details.status).toBe("approval-pending");
+  });
+
+  it("does not let auto-review ask use timeout fallback approval", async () => {
+    defaultExecAutoReviewerMock.mockResolvedValueOnce({
+      decision: "ask",
+      risk: "high",
+      rationale: "command mutates files",
+    });
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: { allowlist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "full",
+      hostAsk: "on-miss",
+      askFallback: "full",
+    });
+    evaluateShellAllowlistMock.mockReturnValue({
+      allowlistMatches: [],
+      analysisOk: true,
+      allowlistSatisfied: false,
+      segments: [{ resolution: null, argv: ["rm", "-rf", "dist"] }],
+      segmentAllowlistEntries: [],
+    });
+    hasDurableExecApprovalMock.mockReturnValue(false);
+    requiresExecApprovalMock.mockReturnValue(true);
+    resolveApprovalDecisionOrUndefinedMock.mockResolvedValue(null);
+    createExecApprovalDecisionStateMock.mockReturnValue({
+      baseDecision: { timedOut: true },
+      approvedByAsk: true,
+      deniedReason: null,
+    });
+
+    const result = await runGatewayAllowlist({
+      command: "rm -rf dist",
+      ask: "on-miss",
+      autoReview: true,
+    });
+
+    expect(result.pendingResult?.details.status).toBe("approval-pending");
+    await vi.waitFor(() => {
+      expect(sendExecApprovalFollowupResultMock).toHaveBeenCalledWith(
+        null,
+        "Exec denied (gateway id=req-1, approval-timeout): rm -rf dist",
+      );
+    });
   });
 
   it("keeps security audit suppression edits on explicit approval in auto-review mode", async () => {

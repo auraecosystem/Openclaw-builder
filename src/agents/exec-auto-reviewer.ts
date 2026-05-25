@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { AgentModelConfig } from "../config/types.agents-shared.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { formatErrorMessage } from "../infra/errors.js";
@@ -6,9 +7,9 @@ import {
   type ExecAutoReviewDecision,
   type ExecAutoReviewInput,
   type ExecAutoReviewer,
-  type ExecAutoReviewRisk,
 } from "../infra/exec-auto-review.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
+import { DEFAULT_EXEC_REVIEWER_SYSTEM_PROMPT } from "./exec-auto-reviewer.prompt.js";
 import {
   completeWithPreparedSimpleCompletionModel,
   prepareSimpleCompletionModelForAgent,
@@ -19,6 +20,12 @@ const DEFAULT_EXEC_REVIEWER_TIMEOUT_MS = 30_000;
 const EXEC_REVIEWER_MAX_TOKENS = 360;
 const EXEC_REVIEWER_TIMEOUT = Symbol("exec-reviewer-timeout");
 
+const execAutoReviewResponseSchema = z.object({
+  decision: z.enum(["allow", "ask"]),
+  risk: z.enum(["low", "medium", "high", "unknown"]),
+  rationale: z.string().optional(),
+});
+
 export type ExecReviewerConfig = {
   model?: AgentModelConfig;
   timeoutMs?: number;
@@ -28,21 +35,6 @@ type ExecReviewerDeps = {
   prepareSimpleCompletionModelForAgent?: typeof prepareSimpleCompletionModelForAgent;
   completeWithPreparedSimpleCompletionModel?: typeof completeWithPreparedSimpleCompletionModel;
 };
-
-const EXEC_REVIEWER_SYSTEM_PROMPT = [
-  "You are OpenClaw's exec safety reviewer.",
-  "Review exactly one pending shell command before it runs.",
-  "Return exactly one JSON object and no other text.",
-  "",
-  "Decision rules:",
-  '- Use "allow-once" only when the command is clearly low-risk for this single execution.',
-  '- Use "deny" when the command is destructive, credential-seeking, creates or modifies SSH key material, privilege-escalating, exfiltrating, or tries to bypass policy.',
-  '- Use "ask-human" when intent, path safety, command parsing, or side effects are unclear.',
-  "- Never return allow-always. Durable approvals are human-only.",
-  "- Treat inline eval, shell wrappers, compound shell syntax, network access, package publish, chmod/chown, rm/mv, sudo, ssh/scp/rsync, and secret paths as high scrutiny.",
-  "",
-  'Output schema: {"decision":"allow-once|deny|ask-human","risk":"low|medium|high|unknown","rationale":"one short sentence"}',
-].join("\n");
 
 function stringifyInput(input: ExecAutoReviewInput): string {
   return JSON.stringify(
@@ -59,12 +51,6 @@ function stringifyInput(input: ExecAutoReviewInput): string {
     null,
     2,
   );
-}
-
-function normalizeRisk(value: unknown): ExecAutoReviewRisk {
-  return value === "low" || value === "medium" || value === "high" || value === "unknown"
-    ? value
-    : "unknown";
 }
 
 function normalizeRationale(value: unknown, fallback: string): string {
@@ -95,7 +81,7 @@ export function parseExecAutoReviewResponse(text: string): ExecAutoReviewDecisio
   const objectText = extractJsonObject(text);
   if (!objectText) {
     return {
-      decision: "ask-human",
+      decision: "ask",
       risk: "unknown",
       rationale: "exec reviewer returned no parseable JSON",
     };
@@ -105,54 +91,45 @@ export function parseExecAutoReviewResponse(text: string): ExecAutoReviewDecisio
     parsed = JSON.parse(objectText);
   } catch {
     return {
-      decision: "ask-human",
+      decision: "ask",
       risk: "unknown",
       rationale: "exec reviewer returned malformed JSON",
     };
   }
-  if (!parsed || typeof parsed !== "object") {
+  const response = execAutoReviewResponseSchema.safeParse(parsed);
+  if (!response.success) {
     return {
-      decision: "ask-human",
+      decision: "ask",
       risk: "unknown",
-      rationale: "exec reviewer returned an invalid JSON payload",
+      rationale: "exec reviewer returned an unsupported response",
     };
   }
-  const record = parsed as Record<string, unknown>;
-  const decision = record.decision;
-  const risk = normalizeRisk(record.risk);
-  const rationale = normalizeRationale(record.rationale, "exec reviewer did not explain decision");
-  if (decision === "allow-once") {
-    if (risk !== "low") {
-      return {
-        decision: "ask-human",
-        risk,
-        rationale: "exec reviewer returned a non-low allow decision",
-      };
-    }
+
+  const { decision, risk } = response.data;
+  const rationale = normalizeRationale(
+    response.data.rationale,
+    "exec reviewer did not explain decision",
+  );
+  if (decision === "ask") {
     return {
-      decision,
+      decision: "ask",
       risk,
       rationale,
     };
   }
-  if (decision === "deny") {
+
+  if (risk !== "low") {
     return {
-      decision,
-      risk: risk === "low" || risk === "unknown" ? "medium" : risk,
-      rationale,
-    };
-  }
-  if (decision === "ask-human") {
-    return {
-      decision,
+      decision: "ask",
       risk,
-      rationale,
+      rationale: "exec reviewer returned a non-low allow decision",
     };
   }
+
   return {
-    decision: "ask-human",
+    decision: "allow-once",
     risk,
-    rationale: "exec reviewer returned an unsupported decision",
+    rationale,
   };
 }
 
@@ -178,7 +155,7 @@ function resolveReviewerTimeoutMs(config?: ExecReviewerConfig): number {
 
 function buildReviewerTimeoutDecision(timeoutMs: number): ExecAutoReviewDecision {
   return {
-    decision: "ask-human",
+    decision: "ask",
     risk: "unknown",
     rationale: `exec reviewer timed out after ${timeoutMs}ms`,
   };
@@ -242,7 +219,7 @@ export function createModelExecAutoReviewer(params: {
       }
       if ("error" in prepared) {
         return {
-          decision: "ask-human",
+          decision: "ask",
           risk: "unknown",
           rationale: `exec reviewer model unavailable: ${prepared.error}`,
         };
@@ -255,7 +232,7 @@ export function createModelExecAutoReviewer(params: {
           auth: prepared.auth,
           cfg,
           context: {
-            systemPrompt: EXEC_REVIEWER_SYSTEM_PROMPT,
+            systemPrompt: DEFAULT_EXEC_REVIEWER_SYSTEM_PROMPT,
             messages: [
               {
                 role: "user",
@@ -284,7 +261,7 @@ export function createModelExecAutoReviewer(params: {
         return buildReviewerTimeoutDecision(timeoutMs);
       }
       return {
-        decision: "ask-human",
+        decision: "ask",
         risk: "unknown",
         rationale: `exec reviewer failed: ${formatErrorMessage(err)}`,
       };

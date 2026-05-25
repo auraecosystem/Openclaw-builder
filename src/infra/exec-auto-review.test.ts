@@ -18,7 +18,7 @@ function reviewCommand(command: string, argv: string[]) {
 describe("default exec auto reviewer", () => {
   it("falls back to human approval instead of maintaining a static allowlist", () => {
     expect(reviewCommand("pwd", ["pwd"])).toMatchObject({
-      decision: "ask-human",
+      decision: "ask",
     });
   });
 
@@ -27,7 +27,7 @@ describe("default exec auto reviewer", () => {
     ["/tmp/pwd", ["/tmp/pwd"]],
   ])("does not auto-approve path-qualified pwd lookalikes: %s", (_command, argv) => {
     expect(reviewCommand(_command, argv)).toMatchObject({
-      decision: "ask-human",
+      decision: "ask",
     });
   });
 
@@ -43,7 +43,7 @@ describe("default exec auto reviewer", () => {
     "asks for human review on sensitive or externally influenced commands: %s",
     (_command, argv) => {
       expect(reviewCommand(_command, argv)).toMatchObject({
-        decision: "ask-human",
+        decision: "ask",
       });
     },
   );

@@ -457,6 +457,7 @@ export async function processGatewayAllowlist(
   }
 
   if (requiresAsk) {
+    let autoReviewRequiresHumanApproval = false;
     const [autoReviewSegment] = allowlistEval.segments;
     const autoReviewArgv =
       allowlistEval.segments.length === 1 &&
@@ -509,20 +510,7 @@ export async function processGatewayAllowlist(
           allowWithoutEnforcedCommand: enforcedCommand === undefined,
         };
       }
-      if (decision.decision === "deny") {
-        return {
-          pendingResult: failedTextResult(
-            `exec auto-review denied command: ${decision.rationale}`,
-            {
-              status: "failed",
-              exitCode: null,
-              durationMs: 0,
-              aggregated: "",
-              cwd: params.workdir,
-            },
-          ),
-        };
-      }
+      autoReviewRequiresHumanApproval = true;
       params.warnings.push(
         `Exec auto-review deferred to human approval (risk=${decision.risk}): ${decision.rationale}`,
       );
@@ -588,7 +576,9 @@ export async function processGatewayAllowlist(
         deniedReason,
         requiresInlineEvalApproval,
         requiresExplicitApproval:
-          requiresSecurityAuditSuppressionApproval || requiresMutableScriptApproval,
+          requiresSecurityAuditSuppressionApproval ||
+          requiresMutableScriptApproval ||
+          autoReviewRequiresHumanApproval,
       });
 
       if (strictInlineEvalDecision.deniedReason || !strictInlineEvalDecision.approvedByAsk) {
@@ -687,7 +677,9 @@ export async function processGatewayAllowlist(
         deniedReason,
         requiresInlineEvalApproval,
         requiresExplicitApproval:
-          requiresSecurityAuditSuppressionApproval || requiresMutableScriptApproval,
+          requiresSecurityAuditSuppressionApproval ||
+          requiresMutableScriptApproval ||
+          autoReviewRequiresHumanApproval,
       }));
 
       if (

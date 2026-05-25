@@ -153,6 +153,7 @@ export async function executeNodeHostCommand(
   let inlineApprovalDecision: "allow-once" | "allow-always" | null = null;
   let inlineApprovalId: string | undefined;
   if (requiresAsk) {
+    let autoReviewRequiresHumanApproval = false;
     if (
       params.autoReview === true &&
       hostAsk !== "always" &&
@@ -197,14 +198,11 @@ export async function executeNodeHostCommand(
         inlineApprovalDecision = "allow-once";
         inlineApprovalId = approvalId;
       }
-      if (decision.decision === "deny") {
-        return failedTextResult(`exec auto-review denied command: ${decision.rationale}`, {
-          status: "failed",
-          exitCode: null,
-          durationMs: 0,
-          aggregated: "",
-          cwd: prepared.cwd,
-        });
+      if (decision.decision !== "allow-once") {
+        autoReviewRequiresHumanApproval = true;
+        params.warnings.push(
+          `Exec auto-review deferred to human approval (risk=${decision.risk}): ${decision.rationale}`,
+        );
       }
     }
 
@@ -247,7 +245,9 @@ export async function executeNodeHostCommand(
           deniedReason,
           requiresInlineEvalApproval: inlineEvalHit !== null,
           requiresExplicitApproval:
-            requiresSecurityAuditSuppressionApproval || requiresMutableScriptApproval,
+            requiresSecurityAuditSuppressionApproval ||
+            requiresMutableScriptApproval ||
+            autoReviewRequiresHumanApproval,
         });
         if (strictInlineEvalDecision.deniedReason || !strictInlineEvalDecision.approvedByAsk) {
           throw new Error(
@@ -317,7 +317,9 @@ export async function executeNodeHostCommand(
               deniedReason,
               requiresInlineEvalApproval: inlineEvalHit !== null,
               requiresExplicitApproval:
-                requiresSecurityAuditSuppressionApproval || requiresMutableScriptApproval,
+                requiresSecurityAuditSuppressionApproval ||
+                requiresMutableScriptApproval ||
+                autoReviewRequiresHumanApproval,
             },
           ));
           if (deniedReason) {

@@ -290,10 +290,21 @@ describe("exec security floor", () => {
   });
 
   it("honors normalized auto mode before elevated full bypass", async () => {
+    const calls: string[] = [];
+    vi.mocked(callGatewayTool).mockImplementation(async (method) => {
+      calls.push(method);
+      if (method === "exec.approval.request") {
+        return { status: "accepted", id: "approval-id" };
+      }
+      if (method === "exec.approval.waitDecision") {
+        return { decision: null };
+      }
+      return { ok: true };
+    });
     const autoReviewer = vi.fn<ExecAutoReviewer>(async () => ({
-      decision: "deny",
+      decision: "ask",
       risk: "high",
-      rationale: "test reviewer denial",
+      rationale: "test reviewer asks for approval",
     }));
     const tool = createExecTool({
       host: "gateway",
@@ -315,19 +326,28 @@ describe("exec security floor", () => {
         reason: "approval-required",
       }),
     );
-    expect(result.content[0]?.type).toBe("text");
-    expect((result.content[0] as { text?: string }).text ?? "").toContain(
-      "exec auto-review denied command: test reviewer denial",
-    );
+    expect(result.details.status).toBe("approval-pending");
+    expect(calls).toContain("exec.approval.request");
   });
 
   it.each(["on-miss", "off"] as const)(
     "keeps auto review enabled when legacy ask=%s does not strengthen auto mode",
     async (ask) => {
+      const calls: string[] = [];
+      vi.mocked(callGatewayTool).mockImplementation(async (method) => {
+        calls.push(method);
+        if (method === "exec.approval.request") {
+          return { status: "accepted", id: "approval-id" };
+        }
+        if (method === "exec.approval.waitDecision") {
+          return { decision: null };
+        }
+        return { ok: true };
+      });
       const autoReviewer = vi.fn<ExecAutoReviewer>(async () => ({
-        decision: "deny",
+        decision: "ask",
         risk: "high",
-        rationale: "test reviewer denial",
+        rationale: "test reviewer asks for approval",
       }));
       const tool = createExecTool({
         host: "gateway",
@@ -348,10 +368,8 @@ describe("exec security floor", () => {
           reason: "approval-required",
         }),
       );
-      expect(result.content[0]?.type).toBe("text");
-      expect((result.content[0] as { text?: string }).text ?? "").toContain(
-        "exec auto-review denied command: test reviewer denial",
-      );
+      expect(result.details.status).toBe("approval-pending");
+      expect(calls).toContain("exec.approval.request");
     },
   );
 });

@@ -676,6 +676,45 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
     }
   });
 
+  it("defers to human approval when system.run auto reviewer asks", async () => {
+    const tmp = createFixtureDir("openclaw-system-run-auto-deny-");
+    const executablePath = createTempExecutable({ dir: tmp, name: "mutate-files" });
+    setRuntimeConfigSnapshot({
+      tools: {
+        exec: {
+          mode: "auto",
+        },
+      },
+    });
+    try {
+      const autoReviewer = vi.fn<ExecAutoReviewer>(() => ({
+        decision: "ask",
+        rationale: "command mutates files",
+        risk: "high",
+      }));
+      const runCommand = vi.fn(async () => createLocalRunResult("should-not-run"));
+      const invoke = await runSystemInvoke({
+        preferMacAppExecHost: false,
+        command: [executablePath],
+        cwd: tmp,
+        runCommand,
+        resolveExecSecurity: resolveProductionExecSecurity,
+        resolveExecAsk: resolveProductionExecAsk,
+        autoReviewer,
+      });
+
+      expect(autoReviewer).toHaveBeenCalledTimes(1);
+      expect(runCommand).not.toHaveBeenCalled();
+      expectInvokeErrorMessage(invoke.sendInvokeResult, {
+        message:
+          "SYSTEM_RUN_DENIED: approval required (exec auto-review deferred to human approval: command mutates files)",
+        exact: true,
+      });
+    } finally {
+      clearRuntimeConfigSnapshot();
+    }
+  });
+
   it("requires explicit approval for security audit suppression edits in system.run auto mode", async () => {
     const tmp = createFixtureDir("openclaw-system-run-auto-suppression-edit-");
     setRuntimeConfigSnapshot({
@@ -1360,7 +1399,7 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
     });
     try {
       const autoReviewer = vi.fn<ExecAutoReviewer>(() => ({
-        decision: "ask-human",
+        decision: "ask",
         rationale: "script intent is unclear",
         risk: "unknown",
       }));

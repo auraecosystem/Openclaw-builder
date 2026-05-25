@@ -870,9 +870,10 @@ describe("executeNodeHostCommand", () => {
     );
   });
 
-  it("returns a failed result when node auto-review denies an approval miss", async () => {
+  it("requests human approval when node auto-review asks on an approval miss", async () => {
+    const warnings: string[] = [];
     defaultExecAutoReviewerMock.mockResolvedValueOnce({
-      decision: "deny",
+      decision: "ask",
       risk: "high",
       rationale: "command mutates files",
     });
@@ -908,18 +909,68 @@ describe("executeNodeHostCommand", () => {
       autoReview: true,
       defaultTimeoutSec: 30,
       approvalRunningNoticeMs: 0,
+      warnings,
+      agentId: "requested-agent",
+      sessionKey: "requested-session",
+    });
+
+    expect(createAndRegisterDefaultExecApprovalRequestMock).toHaveBeenCalledTimes(1);
+    expect(result.details?.status).toBe("approval-pending");
+    expect(warnings).toEqual([
+      "Exec auto-review deferred to human approval (risk=high): command mutates files",
+    ]);
+  });
+
+  it("does not let node auto-review ask use timeout fallback approval", async () => {
+    defaultExecAutoReviewerMock.mockResolvedValueOnce({
+      decision: "ask",
+      risk: "high",
+      rationale: "command mutates files",
+    });
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: { allowlist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "allowlist",
+      hostAsk: "on-miss",
+      askFallback: "allowlist",
+    });
+    parsePreparedSystemRunPayloadMock.mockReturnValue({
+      plan: {
+        ...preparedPlan,
+        argv: ["/bin/sh", "-lc", "rm -rf dist"],
+        commandText: "/bin/sh -lc 'rm -rf dist'",
+        commandPreview: "rm -rf dist",
+        mutableFileOperand: null,
+      },
+    });
+    evaluateShellAllowlistMock.mockReturnValue({
+      allowlistMatches: [],
+      analysisOk: true,
+      allowlistSatisfied: false,
+      segments: [{ resolution: null, argv: ["rm", "-rf", "dist"] }],
+      segmentAllowlistEntries: [],
+    });
+    resolveApprovalDecisionOrUndefinedMock.mockResolvedValue(null);
+    createExecApprovalDecisionStateMock.mockReturnValue({
+      baseDecision: { timedOut: true },
+      approvedByAsk: false,
+      deniedReason: null,
+    });
+
+    const result = await executeNodeHostCommand({
+      command: "rm -rf dist",
+      workdir: "/tmp/work",
+      env: {},
+      security: "allowlist",
+      ask: "on-miss",
+      autoReview: true,
+      defaultTimeoutSec: 30,
+      approvalRunningNoticeMs: 0,
       warnings: [],
       agentId: "requested-agent",
       sessionKey: "requested-session",
     });
 
-    expect(createAndRegisterDefaultExecApprovalRequestMock).not.toHaveBeenCalled();
-    expect(result.details?.status).toBe("failed");
-    const firstContent = result.content[0];
-    expect(firstContent?.type).toBe("text");
-    expect(firstContent?.type === "text" ? firstContent.text : "").toContain(
-      "exec auto-review denied command: command mutates files",
-    );
+    expect(result.details?.status).toBe("approval-pending");
   });
 
   it("builds a local systemRunPlan for non-script approval when the node omits prepare", async () => {

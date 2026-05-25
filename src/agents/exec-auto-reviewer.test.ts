@@ -16,11 +16,11 @@ const input = {
 };
 
 describe("parseExecAutoReviewResponse", () => {
-  it("parses strict JSON allow decisions", () => {
+  it("maps model allow decisions to single-use approvals", () => {
     expect(
       parseExecAutoReviewResponse(
         JSON.stringify({
-          decision: "allow-once",
+          decision: "allow",
           risk: "low",
           rationale: "read-only inspection",
         }),
@@ -32,37 +32,65 @@ describe("parseExecAutoReviewResponse", () => {
     });
   });
 
+  it("maps model ask decisions to human approval", () => {
+    expect(
+      parseExecAutoReviewResponse(
+        JSON.stringify({
+          decision: "ask",
+          risk: "medium",
+          rationale: "side effects need a human",
+        }),
+      ),
+    ).toEqual({
+      decision: "ask",
+      risk: "medium",
+      rationale: "side effects need a human",
+    });
+  });
+
   it("normalizes unsupported or malformed decisions to human review", () => {
     expect(parseExecAutoReviewResponse("sure, run it")).toMatchObject({
-      decision: "ask-human",
+      decision: "ask",
     });
     expect(
       parseExecAutoReviewResponse(
         JSON.stringify({
-          decision: "allow-always",
+          decision: "allow-once",
           risk: "low",
-          rationale: "cached",
+          rationale: "legacy internal decision",
         }),
       ),
     ).toMatchObject({
-      decision: "ask-human",
-      rationale: "exec reviewer returned an unsupported decision",
+      decision: "ask",
+      rationale: "exec reviewer returned an unsupported response",
+    });
+    expect(
+      parseExecAutoReviewResponse(
+        JSON.stringify({
+          decision: "deny",
+          risk: "high",
+          rationale: "dangerous command",
+        }),
+      ),
+    ).toMatchObject({
+      decision: "ask",
+      rationale: "exec reviewer returned an unsupported response",
     });
   });
 
   it("requires allow decisions to carry low risk", () => {
-    for (const risk of ["medium", "high", "unknown", undefined]) {
+    for (const risk of ["medium", "high", "unknown"] as const) {
       expect(
         parseExecAutoReviewResponse(
           JSON.stringify({
-            decision: "allow-once",
+            decision: "allow",
             risk,
             rationale: "looks fine",
           }),
         ),
       ).toEqual({
-        decision: "ask-human",
-        risk: risk ?? "unknown",
+        decision: "ask",
+        risk,
         rationale: "exec reviewer returned a non-low allow decision",
       });
     }
@@ -85,9 +113,9 @@ describe("createModelExecAutoReviewer", () => {
         {
           type: "text",
           text: JSON.stringify({
-            decision: "deny",
+            decision: "ask",
             risk: "high",
-            rationale: "network exfiltration",
+            rationale: "network side effect",
           }),
         },
       ],
@@ -105,9 +133,9 @@ describe("createModelExecAutoReviewer", () => {
     });
 
     await expect(reviewer(input)).resolves.toEqual({
-      decision: "deny",
+      decision: "ask",
       risk: "high",
-      rationale: "network exfiltration",
+      rationale: "network side effect",
     });
     expect(prepare).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -118,7 +146,7 @@ describe("createModelExecAutoReviewer", () => {
     expect(complete).toHaveBeenCalledWith(
       expect.objectContaining({
         context: expect.objectContaining({
-          systemPrompt: expect.stringContaining("SSH key material"),
+          systemPrompt: expect.stringContaining('"decision":"allow|ask"'),
         }),
         options: expect.objectContaining({
           temperature: 0,
@@ -138,7 +166,7 @@ describe("createModelExecAutoReviewer", () => {
     });
 
     await expect(reviewer(input)).resolves.toMatchObject({
-      decision: "ask-human",
+      decision: "ask",
       rationale: "exec reviewer model unavailable: missing API key",
     });
   });
@@ -170,7 +198,7 @@ describe("createModelExecAutoReviewer", () => {
 
       expect(settled).toBe(true);
       await expect(result).resolves.toMatchObject({
-        decision: "ask-human",
+        decision: "ask",
         rationale: "exec reviewer timed out after 5000ms",
       });
     } finally {
@@ -210,7 +238,7 @@ describe("createModelExecAutoReviewer", () => {
                   {
                     type: "text",
                     text: JSON.stringify({
-                      decision: "allow-once",
+                      decision: "allow",
                       risk: "low",
                       rationale: "read-only inspection",
                     }),

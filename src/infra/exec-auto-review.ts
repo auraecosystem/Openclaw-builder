@@ -7,12 +7,7 @@ export type ExecAutoReviewDecision =
       risk: "low" | "medium" | "high";
     }
   | {
-      decision: "deny";
-      rationale: string;
-      risk: "medium" | "high";
-    }
-  | {
-      decision: "ask-human";
+      decision: "ask";
       rationale: string;
       risk: ExecAutoReviewRisk;
     };
@@ -51,7 +46,7 @@ export type ExecAutoReviewer = (
  */
 export const defaultExecAutoReviewer: ExecAutoReviewer = (input) => {
   return {
-    decision: "ask-human",
+    decision: "ask",
     rationale: `no model-backed exec reviewer is configured for ${input.host}`,
     risk: input.analysis.inlineEval ? "medium" : "unknown",
   };

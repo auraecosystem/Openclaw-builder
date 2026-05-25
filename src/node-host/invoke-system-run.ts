@@ -663,12 +663,6 @@ async function evaluateSystemRunPolicyPhase(
           cmdInvocation,
           shellWrapperInvocation: parsed.shellPayload !== null,
         });
-      } else if (decision.decision === "deny") {
-        await sendSystemRunDenied(opts, parsed.execution, {
-          reason: policy.eventReason,
-          message: `SYSTEM_RUN_DENIED: exec auto-review denied command: ${decision.rationale}`,
-        });
-        return null;
       } else {
         autoReviewDeferredMessage = `${policy.errorMessage} (exec auto-review deferred to human approval: ${decision.rationale})`;
       }
