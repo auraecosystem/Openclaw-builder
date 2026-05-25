@@ -410,6 +410,7 @@ export function createAgentEventHandler({
         if (chatLink) {
           const finished = chatRunState.registry.shift(evt.runId);
           if (!finished) {
+            spawnedByCache.delete(sessionKey);
             clearAgentRunContext(evt.runId);
             return;
           }
@@ -454,6 +455,7 @@ export function createAgentEventHandler({
     agentRunSeq.delete(clientRunId);
 
     if (sessionKey) {
+      spawnedByCache.delete(sessionKey);
       void persistGatewaySessionLifecycleEvent({ sessionKey, event: evt }).catch(() => undefined);
       const sessionEventConnIds = sessionEventSubscribers.getAll();
       if (sessionEventConnIds.size > 0) {
