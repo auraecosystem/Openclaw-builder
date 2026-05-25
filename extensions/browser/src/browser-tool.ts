@@ -46,6 +46,7 @@ import {
   untrackSessionBrowserTab,
 } from "./browser-tool.runtime.js";
 import { DEFAULT_BROWSER_SCREENSHOT_TIMEOUT_MS } from "./browser/constants.js";
+import { assertNoBrowserNavigationUrlUserInfo } from "./browser/navigation-url-userinfo.js";
 
 const browserToolDeps = {
   browserAct,
@@ -136,10 +137,11 @@ function readOptionalTargetAndTimeout(params: Record<string, unknown>) {
 }
 
 function readTargetUrlParam(params: Record<string, unknown>) {
-  return (
+  const targetUrl =
     readStringParam(params, "targetUrl") ??
-    readStringParam(params, "url", { required: true, label: "targetUrl" })
-  );
+    readStringParam(params, "url", { required: true, label: "targetUrl" });
+  assertNoBrowserNavigationUrlUserInfo(targetUrl);
+  return targetUrl;
 }
 
 const LEGACY_BROWSER_ACT_REQUEST_KEYS = [
