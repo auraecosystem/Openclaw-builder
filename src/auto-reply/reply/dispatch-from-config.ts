@@ -2109,6 +2109,9 @@ export async function dispatchReplyFromConfig(
       if (!hasPendingDirectBlockReplyDelivery) {
         return;
       }
+      // Direct block replies are queued asynchronously so lightweight replies do
+      // not wait for dispatcher idle. Flush only before later tool/progress
+      // callbacks where block-before-tool ordering is externally visible.
       hasPendingDirectBlockReplyDelivery = false;
       await waitForReplyDispatcherIdle(dispatcher, abortSignal);
     };

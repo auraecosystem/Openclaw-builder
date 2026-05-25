@@ -70,6 +70,10 @@ function shouldDeferOwningContextEngineBudgetCompaction(params: {
   compactParams: CompactEmbeddedPiSessionParams;
   contextEngine: ContextEngine;
 }): boolean {
+  // Request-time budget compaction for context-engine-owned transcripts can
+  // spend the whole reply preflight budget. Only defer engines that explicitly
+  // advertise background turn maintenance, leaving native/current-session
+  // harness compaction synchronous.
   return (
     params.compactParams.deferOwningContextEngineCompaction === true &&
     params.compactParams.trigger === "budget" &&

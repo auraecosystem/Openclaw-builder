@@ -302,6 +302,9 @@ function scheduleDeliveredSourceReplyTranscriptMirror(params: {
 }) {
   const queueKey = resolveSourceReplyTranscriptMirrorQueueKey(params.mirror);
   const previous = sourceReplyTranscriptMirrorQueues.get(queueKey);
+  // Transcript mirroring is best-effort bookkeeping after a successful channel
+  // send. Queue it per session so gateway responses are not held hostage by
+  // session-store I/O while transcript order remains deterministic.
   const queued = (async () => {
     await previous?.catch(() => undefined);
     await mirrorDeliveredSourceReplyToTranscriptBestEffort(params);

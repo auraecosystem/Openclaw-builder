@@ -369,6 +369,9 @@ export const buildTelegramMessageContext = async ({
   ) {
     return null;
   }
+  // Direct chats have already passed access checks here; send the first typing
+  // cue before session/binding setup so slow context construction does not look
+  // like a dropped Telegram message.
   const initialTypingCueSent = !isGroup;
   if (initialTypingCueSent) {
     void sendTyping().catch((err) => {

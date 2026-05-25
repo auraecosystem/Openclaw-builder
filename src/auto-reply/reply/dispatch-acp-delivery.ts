@@ -239,6 +239,9 @@ export function createAcpDispatchDeliveryCoordinator(params: {
     if (!hasPendingDirectBlockReplyDelivery) {
       return;
     }
+    // ACP direct block replies should not block the common visible-reply path.
+    // Defer the idle wait until a later tool delivery would otherwise overtake
+    // that block reply in user-visible ordering.
     hasPendingDirectBlockReplyDelivery = false;
     await waitForReplyDispatcherIdle(params.dispatcher, params.abortSignal);
   };
