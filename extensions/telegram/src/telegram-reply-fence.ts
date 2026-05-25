@@ -8,8 +8,11 @@ type TelegramReplyFenceState = {
   generation: number;
   activeDispatches: number;
   abortControllers?: Set<AbortController>;
+  normalSupersedeProtectedControllers?: Set<AbortController>;
   laneKeys?: Set<string>;
 };
+
+type TelegramReplyFenceSupersedeMode = "normal" | "abort";
 
 export type TelegramReplyFenceKey = {
   activeKey: string;
@@ -62,11 +65,22 @@ export function resolveTelegramReplyFenceKey(params: {
   };
 }
 
-function abortTelegramReplyFenceControllers(state: TelegramReplyFenceState): void {
+function abortTelegramReplyFenceControllers(
+  state: TelegramReplyFenceState,
+  mode: TelegramReplyFenceSupersedeMode,
+): void {
   for (const controller of state.abortControllers ?? []) {
+    if (mode === "normal" && state.normalSupersedeProtectedControllers?.has(controller)) {
+      continue;
+    }
     controller.abort();
+    state.abortControllers?.delete(controller);
+    state.normalSupersedeProtectedControllers?.delete(controller);
   }
-  state.abortControllers?.clear();
+  if (mode === "abort") {
+    state.abortControllers?.clear();
+    state.normalSupersedeProtectedControllers?.clear();
+  }
 }
 
 function deleteTelegramReplyFenceState(key: string, state: TelegramReplyFenceState): void {
@@ -91,6 +105,7 @@ function maybeDeleteTelegramReplyFenceState(key: string, state: TelegramReplyFen
 export function beginTelegramReplyFence(params: {
   key: string;
   supersede: boolean;
+  supersedeMode?: TelegramReplyFenceSupersedeMode;
   abortController?: AbortController;
   laneKey?: string;
 }): number {
@@ -100,9 +115,10 @@ export function beginTelegramReplyFence(params: {
     activeDispatches: 0,
   };
   if (params.supersede) {
+    const supersedeMode = params.supersedeMode ?? "abort";
     state.generation += 1;
-    abortTelegramReplyFenceControllers(state);
-    supersedeTelegramNonInterruptingReplyFenceChildren(params.key);
+    abortTelegramReplyFenceControllers(state, supersedeMode);
+    supersedeTelegramNonInterruptingReplyFenceChildren(params.key, supersedeMode);
   }
   if (params.abortController) {
     (state.abortControllers ??= new Set()).add(params.abortController);
@@ -119,31 +135,37 @@ export function beginTelegramReplyFence(params: {
   return state.generation;
 }
 
-function supersedeTelegramReplyFenceState(key: string): boolean {
+function supersedeTelegramReplyFenceState(
+  key: string,
+  mode: TelegramReplyFenceSupersedeMode,
+): boolean {
   const state = telegramReplyFenceByKey.get(key);
   if (!state) {
     return false;
   }
   state.generation += 1;
-  abortTelegramReplyFenceControllers(state);
+  abortTelegramReplyFenceControllers(state, mode);
   maybeDeleteTelegramReplyFenceState(key, state);
   return true;
 }
 
-function supersedeTelegramNonInterruptingReplyFenceChildren(key: string): boolean {
+function supersedeTelegramNonInterruptingReplyFenceChildren(
+  key: string,
+  mode: TelegramReplyFenceSupersedeMode,
+): boolean {
   let superseded = false;
   const childPrefix = buildTelegramNonInterruptingReplyFenceKeyPrefix(key);
   for (const childKey of telegramReplyFenceByKey.keys()) {
     if (childKey.startsWith(childPrefix)) {
-      superseded = supersedeTelegramReplyFenceState(childKey) || superseded;
+      superseded = supersedeTelegramReplyFenceState(childKey, mode) || superseded;
     }
   }
   return superseded;
 }
 
 export function supersedeTelegramReplyFence(key: string): boolean {
-  let superseded = supersedeTelegramReplyFenceState(key);
-  superseded = supersedeTelegramNonInterruptingReplyFenceChildren(key) || superseded;
+  let superseded = supersedeTelegramReplyFenceState(key, "abort");
+  superseded = supersedeTelegramNonInterruptingReplyFenceChildren(key, "abort") || superseded;
   return superseded;
 }
 
@@ -170,6 +192,7 @@ export function endTelegramReplyFence(key: string, abortController?: AbortContro
   }
   if (abortController) {
     state.abortControllers?.delete(abortController);
+    state.normalSupersedeProtectedControllers?.delete(abortController);
   }
   state.activeDispatches = Math.max(0, state.activeDispatches - 1);
   maybeDeleteTelegramReplyFenceState(key, state);
@@ -187,7 +210,41 @@ export function releaseTelegramReplyFenceAbortController(
     return;
   }
   state.abortControllers?.delete(abortController);
+  state.normalSupersedeProtectedControllers?.delete(abortController);
   maybeDeleteTelegramReplyFenceState(key, state);
+}
+
+export function protectTelegramReplyFenceAbortControllerFromNormalSupersede(
+  key: string,
+  abortController?: AbortController,
+): void {
+  if (!abortController) {
+    return;
+  }
+  const state = telegramReplyFenceByKey.get(key);
+  if (!state?.abortControllers?.has(abortController)) {
+    return;
+  }
+  (state.normalSupersedeProtectedControllers ??= new Set()).add(abortController);
+}
+
+export function resolveTelegramReplyFenceSupersedeMode(ctxPayload: {
+  Body?: string;
+  RawBody?: string;
+  CommandBody?: string;
+  CommandAuthorized: boolean;
+}): TelegramReplyFenceSupersedeMode | "none" {
+  const dispatchText = ctxPayload.CommandBody ?? ctxPayload.RawBody ?? ctxPayload.Body ?? "";
+  if (isAbortRequestText(dispatchText)) {
+    return ctxPayload.CommandAuthorized ? "abort" : "none";
+  }
+  if (
+    isBtwRequestText(dispatchText) ||
+    isTelegramReadOnlyControlLaneText({ rawText: dispatchText })
+  ) {
+    return "none";
+  }
+  return "normal";
 }
 
 export function shouldSupersedeTelegramReplyFence(ctxPayload: {
@@ -196,17 +253,7 @@ export function shouldSupersedeTelegramReplyFence(ctxPayload: {
   CommandBody?: string;
   CommandAuthorized: boolean;
 }): boolean {
-  const dispatchText = ctxPayload.CommandBody ?? ctxPayload.RawBody ?? ctxPayload.Body ?? "";
-  if (isAbortRequestText(dispatchText)) {
-    return ctxPayload.CommandAuthorized;
-  }
-  if (
-    isBtwRequestText(dispatchText) ||
-    isTelegramReadOnlyControlLaneText({ rawText: dispatchText })
-  ) {
-    return false;
-  }
-  return true;
+  return resolveTelegramReplyFenceSupersedeMode(ctxPayload) !== "none";
 }
 
 export function getTelegramReplyFenceSizeForTests(): number {
