@@ -437,6 +437,10 @@ export function createEventHandlers(context: EventHandlerContext) {
       if (evt.state === "delta") {
         return;
       }
+      if (evt.state === "error" && finalizedRunsWithDisplay.has(evt.runId)) {
+        clearStaleStreamingIfNoTrackedRunRemains();
+        return;
+      }
       if (evt.state === "final") {
         const hasLateDisplayableFinal =
           hasDisplayableFinalEvent(evt) && !finalizedRunsWithDisplay.has(evt.runId);
@@ -661,7 +665,24 @@ export function createEventHandlers(context: EventHandlerContext) {
         if (!canUpdateActivityStatus) {
           return;
         }
-        setActivityStatus("error");
+        const isTerminalLifecycleError = typeof evt.data?.endedAt === "number";
+        if (isTerminalLifecycleError && (isActiveRun || isPendingRun)) {
+          const wasActiveRun = state.activeChatRunId === evt.runId;
+          const errorMessage =
+            typeof evt.data?.error === "string"
+              ? evt.data.error
+              : typeof evt.data?.errorMessage === "string"
+                ? evt.data.errorMessage
+                : "unknown";
+          const renderedError = formatRawAssistantErrorForUi(errorMessage);
+          chatLog.dismissPendingSystem(evt.runId);
+          chatLog.addSystem(resolveAuthErrorHint(errorMessage) ?? `run error: ${renderedError}`);
+          noteFinalizedRun(evt.runId, { displayedFinal: true });
+          terminateRun({ runId: evt.runId, wasActiveRun, status: "error" });
+          maybeRefreshHistoryForRun(evt.runId);
+        } else {
+          setActivityStatus("error");
+        }
       }
       tui.requestRender();
     }

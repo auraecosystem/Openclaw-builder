@@ -815,7 +815,7 @@ export function findUnmatchedExplicitTestTargets(args, cwd = process.cwd()) {
   const unmatched = [];
   for (const targetArg of targetArgs) {
     const relative = toRepoRelativeTarget(targetArg, cwd);
-    if (resolveVitestConfigTargetKind(relative)) {
+    if (resolveVitestConfigTargetKind(relative) || isVitestConfigFileTarget(relative)) {
       continue;
     }
     const kind = classifyTarget(targetArg, cwd);
@@ -1121,6 +1121,12 @@ function resolveAffectedTestsFromImportGraph(changedPath, cwd) {
 
 function resolveVitestConfigTargetKind(relative) {
   return VITEST_CONFIG_TARGET_KIND_BY_PATH.get(relative) ?? null;
+}
+
+function isVitestConfigFileTarget(relative) {
+  return (
+    relative === "vitest.config.ts" || /^test\/vitest\/vitest\..+\.config\.ts$/u.test(relative)
+  );
 }
 
 function isVitestConfigTargetForKind(kind, targetArg, cwd) {
@@ -1653,6 +1659,24 @@ export function buildVitestRunPlans(
     ];
   }
 
+  const nonTargetArgs = activeForwardedArgs.filter((arg) => !activeTargetArgs.includes(arg));
+  const explicitConfigTargets = activeTargetArgs.map((targetArg) =>
+    toRepoRelativeTarget(targetArg, cwd),
+  );
+  if (explicitConfigTargets.every(isVitestConfigFileTarget)) {
+    if (watchMode && explicitConfigTargets.length > 1) {
+      throw new Error(
+        "watch mode with mixed test suites is not supported; target one suite at a time or use a dedicated suite command",
+      );
+    }
+    return explicitConfigTargets.map((config) => ({
+      config,
+      forwardedArgs: nonTargetArgs,
+      includePatterns: null,
+      watchMode,
+    }));
+  }
+
   const groupedTargets = new Map();
   for (const targetArg of activeTargetArgs) {
     const kind = classifyTarget(targetArg, cwd);
@@ -1667,7 +1691,6 @@ export function buildVitestRunPlans(
     );
   }
 
-  const nonTargetArgs = activeForwardedArgs.filter((arg) => !activeTargetArgs.includes(arg));
   const orderedKinds = [
     "unitFast",
     "default",

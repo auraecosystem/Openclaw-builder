@@ -219,6 +219,66 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     expect(tui.requestRender).toHaveBeenCalledTimes(1);
   });
 
+  it("renders terminal lifecycle errors and clears the active run", () => {
+    const { state, chatLog, tui, setActivityStatus, loadHistory, handleAgentEvent } =
+      createHandlersHarness({
+        state: { activeChatRunId: "run-error" },
+      });
+
+    handleAgentEvent({
+      runId: "run-error",
+      stream: "lifecycle",
+      data: { phase: "error", endedAt: Date.now(), error: "provider exploded" },
+    });
+
+    expect(chatLog.dismissPendingSystem).toHaveBeenCalledWith("run-error");
+    expect(chatLog.addSystem).toHaveBeenCalledWith("run error: provider exploded");
+    expect(state.activeChatRunId).toBeNull();
+    expect(setActivityStatus).toHaveBeenCalledWith("error");
+    expect(loadHistory).toHaveBeenCalled();
+    expect(tui.requestRender).toHaveBeenCalledTimes(1);
+  });
+
+  it("deduplicates delayed chat errors after terminal lifecycle errors", () => {
+    const { state, chatLog, tui, handleAgentEvent, handleChatEvent } = createHandlersHarness({
+      state: { activeChatRunId: "run-error" },
+    });
+
+    handleAgentEvent({
+      runId: "run-error",
+      stream: "lifecycle",
+      data: { phase: "error", endedAt: Date.now(), error: "provider exploded" },
+    });
+
+    handleChatEvent({
+      runId: "run-error",
+      sessionKey: state.currentSessionKey,
+      state: "error",
+      errorMessage: "provider exploded",
+    });
+
+    expect(chatLog.addSystem).toHaveBeenCalledTimes(1);
+    expect(chatLog.addSystem).toHaveBeenCalledWith("run error: provider exploded");
+    expect(state.activeChatRunId).toBeNull();
+    expect(tui.requestRender).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps retryable lifecycle errors active until a terminal lifecycle event arrives", () => {
+    const { state, chatLog, setActivityStatus, handleAgentEvent } = createHandlersHarness({
+      state: { activeChatRunId: "run-retryable" },
+    });
+
+    handleAgentEvent({
+      runId: "run-retryable",
+      stream: "lifecycle",
+      data: { phase: "error", error: "primary model timed out" },
+    });
+
+    expect(chatLog.addSystem).not.toHaveBeenCalledWith("run error: primary model timed out");
+    expect(state.activeChatRunId).toBe("run-retryable");
+    expect(setActivityStatus).toHaveBeenCalledWith("error");
+  });
+
   it("updates the displayed model from fallback lifecycle steps", () => {
     const { state, tui, handleAgentEvent } = createHandlersHarness({
       state: {
