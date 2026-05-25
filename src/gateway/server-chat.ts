@@ -5,6 +5,7 @@ import { getRuntimeConfig } from "../config/io.js";
 import { type AgentEventPayload, getAgentRunContext } from "../infra/agent-events.js";
 import { detectErrorKind, type ErrorKind } from "../infra/errors.js";
 import { resolveHeartbeatVisibility } from "../infra/heartbeat-visibility.js";
+import { isDiagnosticQueuePressureBackoffActive } from "../logging/diagnostic.js";
 import { isAcpSessionKey, isSubagentSessionKey } from "../sessions/session-key-utils.js";
 import { setSafeTimeout } from "../utils/timer-delay.js";
 import {
@@ -175,6 +176,12 @@ function readChatErrorKind(value: unknown): ErrorKind | undefined {
     : undefined;
 }
 
+const TERMINAL_TOOL_EVENT_PHASES = new Set(["end", "error", "result"]);
+
+function isTerminalToolEventPhase(phase: string): boolean {
+  return TERMINAL_TOOL_EVENT_PHASES.has(phase);
+}
+
 type BroadcastDelta = { deltaText: string; replace?: true };
 
 function resolveBroadcastDelta(params: {
@@ -213,6 +220,7 @@ export type AgentEventHandlerOptions = {
   loadGatewaySessionRowForSnapshot?: typeof loadGatewaySessionRow;
   lifecycleErrorRetryGraceMs?: number;
   isChatSendRunActive?: (runId: string) => boolean;
+  shouldBackoffLowPrioritySessionToolEvents?: () => boolean;
 };
 
 export function createAgentEventHandler({
@@ -228,8 +236,16 @@ export function createAgentEventHandler({
   loadGatewaySessionRowForSnapshot = loadGatewaySessionRow,
   lifecycleErrorRetryGraceMs = AGENT_LIFECYCLE_ERROR_RETRY_GRACE_MS,
   isChatSendRunActive = () => false,
+  shouldBackoffLowPrioritySessionToolEvents = isDiagnosticQueuePressureBackoffActive,
 }: AgentEventHandlerOptions) {
-  const pendingTerminalLifecycleErrors = new Map<string, NodeJS.Timeout>();
+  type TerminalLifecycleOptions = { skipChatErrorFinal?: boolean };
+  type PendingTerminalLifecycleError = {
+    timer: NodeJS.Timeout;
+    event: AgentEventPayload;
+    opts?: TerminalLifecycleOptions;
+  };
+
+  const pendingTerminalLifecycleErrors = new Map<string, PendingTerminalLifecycleError>();
 
   type AgentTextThrottleStream = "assistant" | "thinking";
 
@@ -263,7 +279,7 @@ export function createAgentEventHandler({
     if (!pending) {
       return;
     }
-    clearTimeout(pending);
+    clearTimeout(pending.timer);
     pendingTerminalLifecycleErrors.delete(runId);
   };
 
@@ -362,10 +378,7 @@ export function createAgentEventHandler({
     };
   };
 
-  const finalizeLifecycleEvent = (
-    evt: AgentEventPayload,
-    opts?: { skipChatErrorFinal?: boolean },
-  ) => {
+  const finalizeLifecycleEvent = (evt: AgentEventPayload, opts?: TerminalLifecycleOptions) => {
     const lifecyclePhase =
       evt.stream === "lifecycle" && typeof evt.data?.phase === "string" ? evt.data.phase : null;
     if (lifecyclePhase !== "end" && lifecyclePhase !== "error") {
@@ -458,15 +471,19 @@ export function createAgentEventHandler({
 
   const scheduleTerminalLifecycleError = (
     evt: AgentEventPayload,
-    opts?: { skipChatErrorFinal?: boolean },
+    opts?: TerminalLifecycleOptions,
   ) => {
     clearPendingTerminalLifecycleError(evt.runId);
     const timer = setSafeTimeout(() => {
+      const pending = pendingTerminalLifecycleErrors.get(evt.runId);
+      if (!pending || pending.timer !== timer) {
+        return;
+      }
       pendingTerminalLifecycleErrors.delete(evt.runId);
-      finalizeLifecycleEvent(evt, opts);
+      finalizeLifecycleEvent(pending.event, pending.opts);
     }, lifecycleErrorRetryGraceMs);
     timer.unref?.();
-    pendingTerminalLifecycleErrors.set(evt.runId, timer);
+    pendingTerminalLifecycleErrors.set(evt.runId, { timer, event: evt, opts });
   };
 
   const emitChatDelta = (
@@ -806,7 +823,7 @@ export function createAgentEventHandler({
   return (evt: AgentEventPayload) => {
     const lifecyclePhase =
       evt.stream === "lifecycle" && typeof evt.data?.phase === "string" ? evt.data.phase : null;
-    if (evt.stream !== "lifecycle" || lifecyclePhase !== "error") {
+    if (lifecyclePhase !== null && lifecyclePhase !== "error") {
       clearPendingTerminalLifecycleError(evt.runId);
     }
 
@@ -902,7 +919,14 @@ export function createAgentEventHandler({
       // not know the runId in advance, so they cannot register as run-scoped
       // tool recipients. Mirror tool lifecycle onto a session-scoped event so
       // they can render live pending tool cards without polling history.
-      if (isControlUiVisible && sessionKey && !suppressHeartbeatToolEvents) {
+      const shouldMirrorSessionToolEvent =
+        !shouldBackoffLowPrioritySessionToolEvents() || isTerminalToolEventPhase(toolPhase);
+      if (
+        isControlUiVisible &&
+        sessionKey &&
+        !suppressHeartbeatToolEvents &&
+        shouldMirrorSessionToolEvent
+      ) {
         const sessionSubscribers = sessionEventSubscribers.getAll();
         if (sessionSubscribers.size > 0) {
           broadcastToConnIds(
