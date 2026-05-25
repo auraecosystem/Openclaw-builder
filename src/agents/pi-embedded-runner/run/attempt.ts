@@ -2316,7 +2316,15 @@ export async function runEmbeddedAttempt(
           params.suppressTranscriptOnlyAssistantPersistence,
         suppressAssistantErrorPersistence: params.suppressAssistantErrorPersistence,
         onMessagePersisted: () => {
-          sessionLockController.refreshAfterOwnedSessionWrite();
+          // Publish pi's appendFileSync write to the controller's owned-write
+          // map so subsequent assertSessionFileFence calls (inside
+          // beforeToolCall / afterToolCall / provider hooks / compact) accept
+          // the lane's own writes via the owned-write match path instead of
+          // misclassifying them as external mutation. External same-file
+          // writes that do not go through this callback remain unpublished
+          // and still trip EmbeddedAttemptSessionTakeoverError correctly,
+          // preserving the fail-closed takeover invariant. See #86572.
+          sessionLockController.publishOwnedPostMessageWrite();
         },
         onUserMessagePersisted: (message) => {
           params.onUserMessagePersisted?.(message);
@@ -2592,13 +2600,6 @@ export async function runEmbeddedAttempt(
       installSessionExternalHookWriteLock({
         session: activeSession,
         withSessionWriteLock: (operation) => sessionLockController.withSessionWriteLock(operation),
-        // Synchronously snap the file fingerprint into the fence right before
-        // a hook acquires the write lock. Required because pi's _persist path
-        // uses appendFileSync directly and the onMessagePersisted callback
-        // can lag behind successive writes; without this snap, a hook firing
-        // between two rapid writes would see a stale fenceFingerprint and
-        // trip EmbeddedAttemptSessionTakeoverError. See #86572.
-        refreshBeforeLock: () => sessionLockController.refreshAfterOwnedSessionWrite(),
       });
       installMessageToolOnlyTerminalHook({
         agent: activeSession.agent,

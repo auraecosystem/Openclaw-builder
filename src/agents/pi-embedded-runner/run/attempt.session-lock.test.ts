@@ -1167,13 +1167,13 @@ describe("embedded attempt session lock lifecycle", () => {
     expect(session["_extensionRunner"].hasHandlers).not.toHaveBeenCalledWith("tool_call");
   });
 
-  it("does not trip takeover when pi-style writes happen before beforeToolCall fires", async () => {
-    // Regression for #86572: when pi's stream iteration writes via direct
-    // appendFileSync between releaseForPrompt and the next external-hook
-    // lock acquisition, refreshBeforeLock must snap the current fingerprint
-    // so assertSessionFileFence doesn't misclassify the lane's own writes as
-    // external mutation. Verified to FAIL without refreshBeforeLock wired
-    // (test throws EmbeddedAttemptSessionTakeoverError on the beforeToolCall).
+  it("accepts pi-style writes published via publishOwnedPostMessageWrite before beforeToolCall fires", async () => {
+    // Regression for #86572: when pi's _persist path appends to the session
+    // file via appendFileSync between releaseForPrompt and the next external
+    // hook firing, publishOwnedPostMessageWrite (called from the
+    // onMessagePersisted callback) records the post-write fingerprint as an
+    // OWNED write so the subsequent assertSessionFileFence accepts the lane's
+    // own writes via the owned-write match path.
     const sessionFile = await createTempSessionFile();
     const release = vi.fn(async () => {});
     const acquireSessionWriteLock = vi.fn(async () => ({ release }));
@@ -1194,27 +1194,65 @@ describe("embedded attempt session lock lifecycle", () => {
     installSessionExternalHookWriteLock({
       session,
       withSessionWriteLock: (op) => controller.withSessionWriteLock(op),
-      refreshBeforeLock: () => controller.refreshAfterOwnedSessionWrite(),
     });
 
-    // Mimic the prompt-window lifecycle: release for prompt (captures F0),
-    // then pi's stream iteration writes directly via appendFileSync (F0->F1).
+    // Mimic the prompt-window lifecycle: release for prompt (captures F0 +
+    // marks it trusted), pi writes directly via appendFileSync (F0->F1), then
+    // pi synchronously fires onMessagePersisted which calls
+    // publishOwnedPostMessageWrite to record F1 as owned.
     await controller.releaseForPrompt();
     await fs.appendFile(sessionFile, '{"type":"message","id":"pi-stream-write"}\n', "utf8");
+    controller.publishOwnedPostMessageWrite();
 
-    // beforeToolCall fires before any onMessagePersisted has refreshed the
-    // fence. With refreshBeforeLock wired, waitBeforeLock snaps F1 into the
-    // fence; without it, withSessionWriteLock's assertSessionFileFence would
-    // see F1 != F0 and throw.
+    // beforeToolCall fires after the publish. assertSessionFileFence sees the
+    // owned-write match and accepts the lane's own write.
     await expect(session.agent.beforeToolCall()).resolves.toBeUndefined();
     expect(toolCallFired).toEqual(["tool-call"]);
     expect(controller.hasSessionTakeover()).toBe(false);
   });
 
-  it("allows multiple prompt turns with pi-style direct writes per turn", async () => {
+  it("trips takeover on a same-file external write that bypasses publishOwnedPostMessageWrite", async () => {
+    // Negative companion to the test above. If an external mutation advances
+    // the session file WITHOUT going through pi's _persist ->
+    // onMessagePersisted -> publishOwnedPostMessageWrite chain, the write is
+    // never recorded in ownedSessionFileWrites and assertSessionFileFence
+    // must fail closed: the lane's own beforeToolCall throws
+    // EmbeddedAttemptSessionTakeoverError. This is the invariant the bot
+    // flagged: only writes proven to be this controller's own pi persistence
+    // may advance the fence.
+    const sessionFile = await createTempSessionFile();
+    const release = vi.fn(async () => {});
+    const acquireSessionWriteLock = vi.fn(async () => ({ release }));
+    const controller = await createEmbeddedAttemptSessionLockController({
+      acquireSessionWriteLock,
+      lockOptions: { ...lockOptions, sessionFile },
+    });
+
+    const session = {
+      agent: {
+        beforeToolCall: vi.fn(async () => {}),
+      },
+    };
+
+    installSessionExternalHookWriteLock({
+      session,
+      withSessionWriteLock: (op) => controller.withSessionWriteLock(op),
+    });
+
+    await controller.releaseForPrompt();
+    // External mutation: NO publishOwnedPostMessageWrite() call follows.
+    await fs.appendFile(sessionFile, '{"type":"message","id":"external-write"}\n', "utf8");
+
+    await expect(session.agent.beforeToolCall()).rejects.toBeInstanceOf(
+      EmbeddedAttemptSessionTakeoverError,
+    );
+    expect(controller.hasSessionTakeover()).toBe(true);
+  });
+
+  it("allows multiple prompt turns with pi-style writes published per turn", async () => {
     // Regression for #86572 multi-turn case: each continuation captures its
-    // own fenceFingerprint at releaseForPrompt; refreshBeforeLock must work
-    // independently per turn without leaking state across them.
+    // own fenceFingerprint at releaseForPrompt; publishOwnedPostMessageWrite
+    // must work independently per turn without leaking state across them.
     const sessionFile = await createTempSessionFile();
     const release = vi.fn(async () => {});
     const acquireSessionWriteLock = vi.fn(async () => ({ release }));
@@ -1231,12 +1269,12 @@ describe("embedded attempt session lock lifecycle", () => {
     installSessionExternalHookWriteLock({
       session,
       withSessionWriteLock: (op) => controller.withSessionWriteLock(op),
-      refreshBeforeLock: () => controller.refreshAfterOwnedSessionWrite(),
     });
 
     for (let turn = 0; turn < 3; turn += 1) {
       await controller.releaseForPrompt();
       await fs.appendFile(sessionFile, `{"type":"message","id":"turn-${turn}"}\n`, "utf8");
+      controller.publishOwnedPostMessageWrite();
       await expect(session.agent.beforeToolCall()).resolves.toBeUndefined();
       await controller.reacquireAfterPrompt();
     }
@@ -1246,10 +1284,11 @@ describe("embedded attempt session lock lifecycle", () => {
   });
 
   it("does not classify a different session file's writes as owned by this controller", async () => {
-    // Regression for #86572 cross-file isolation: refreshAfterOwnedSessionWrite
-    // is keyed to this controller's sessionFile. Writes to a DIFFERENT
-    // session file must not advance this controller's fence and must not be
-    // silently accepted on this controller's next lock acquisition.
+    // Cross-file isolation: publishOwnedPostMessageWrite reads THIS
+    // controller's sessionFile, so a write to a different file is invisible
+    // to it. Calling publish after a write to file B leaves controllerA's
+    // fence untouched, and a subsequent genuine external write to file A
+    // must still trip the fence.
     const sessionFileA = await createTempSessionFile();
     const sessionFileB = await createTempSessionFile();
     const release = vi.fn(async () => {});
@@ -1264,10 +1303,10 @@ describe("embedded attempt session lock lifecycle", () => {
     // Write to file B only. File A is unchanged.
     await fs.appendFile(sessionFileB, '{"type":"message","id":"file-b-write"}\n', "utf8");
 
-    // refreshAfterOwnedSessionWrite reads sessionFileA's stat. File A is
-    // unchanged, so the fence stays at F0(A). A subsequent owned-lock
-    // operation succeeds.
-    controllerA.refreshAfterOwnedSessionWrite();
+    // publishOwnedPostMessageWrite reads sessionFileA's stat. File A is
+    // unchanged so the fingerprint matches the existing fence — no-op. A
+    // subsequent owned-lock operation succeeds.
+    controllerA.publishOwnedPostMessageWrite();
     await expect(controllerA.withSessionWriteLock(() => "a-1")).resolves.toBe("a-1");
 
     // Now a genuine external write to file A must still trip the fence.

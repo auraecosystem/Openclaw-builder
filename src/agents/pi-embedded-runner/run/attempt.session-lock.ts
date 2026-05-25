@@ -572,52 +572,36 @@ export function installSessionEventWriteLock(params: {
 export function installSessionExternalHookWriteLock(params: {
   session: unknown;
   withSessionWriteLock: <T>(run: () => Promise<T> | T) => Promise<T>;
-  // Snap the session file's current fingerprint into the fence just before
-  // acquiring the write lock. Required for vanilla pi, where direct
-  // appendFileSync writes from `_handleAgentEvent` -> `_persist` can advance
-  // the file between successive onMessagePersisted callbacks; without this
-  // refresh, assertSessionFileFence sees the pre-write fingerprint and
-  // misclassifies the lane's own writes as external mutation. See #86572.
-  refreshBeforeLock?: () => void;
 }): void {
   const session = params.session as SessionWithExternalHooks;
   const agent = session.agent;
-  // Shared closure: drain any in-flight pi event queue first, then snap the
-  // current file fingerprint so the fence sees the post-write state when
-  // withSessionWriteLock calls assertSessionFileFence below. In vanilla pi
-  // the queue drain is a no-op (`_agentEventQueue` unset), but the fingerprint
-  // refresh is load-bearing.
-  const waitBeforeLock = async () => {
-    await waitForSessionEventQueue(session);
-    params.refreshBeforeLock?.();
-  };
   if (agent) {
     installLockableFunction({
       owner: agent as Record<string, unknown>,
       key: "beforeToolCall",
       shouldLock: () => true,
-      waitBeforeLock,
+      waitBeforeLock: () => waitForSessionEventQueue(session),
       withSessionWriteLock: params.withSessionWriteLock,
     });
     installLockableFunction({
       owner: agent as Record<string, unknown>,
       key: "afterToolCall",
       shouldLock: () => sessionHasExtensionHandlers(session, "tool_result"),
-      waitBeforeLock,
+      waitBeforeLock: () => waitForSessionEventQueue(session),
       withSessionWriteLock: params.withSessionWriteLock,
     });
     installLockableFunction({
       owner: agent as Record<string, unknown>,
       key: "onPayload",
       shouldLock: () => sessionHasExtensionHandlers(session, "before_provider_request"),
-      waitBeforeLock,
+      waitBeforeLock: () => waitForSessionEventQueue(session),
       withSessionWriteLock: params.withSessionWriteLock,
     });
     installLockableFunction({
       owner: agent as Record<string, unknown>,
       key: "onResponse",
       shouldLock: () => sessionHasExtensionHandlers(session, "after_provider_response"),
-      waitBeforeLock,
+      waitBeforeLock: () => waitForSessionEventQueue(session),
       withSessionWriteLock: params.withSessionWriteLock,
     });
   }
@@ -625,7 +609,7 @@ export function installSessionExternalHookWriteLock(params: {
     owner: session as Record<string, unknown>,
     key: "compact",
     shouldLock: () => true,
-    waitBeforeLock,
+    waitBeforeLock: () => waitForSessionEventQueue(session),
     withSessionWriteLock: params.withSessionWriteLock,
   });
 }
@@ -633,6 +617,7 @@ export function installSessionExternalHookWriteLock(params: {
 export type EmbeddedAttemptSessionLockController = {
   releaseForPrompt(): Promise<void>;
   refreshAfterOwnedSessionWrite(): void;
+  publishOwnedPostMessageWrite(): void;
   reacquireAfterPrompt(): Promise<void>;
   waitForSessionEvents(session: unknown): Promise<void>;
   withSessionWriteLock<T>(
@@ -787,6 +772,35 @@ export async function createEmbeddedAttemptSessionLockController(params: {
       if (fenceActive && !takeoverDetected) {
         fenceFingerprint = readSessionFileFingerprintSync(params.lockOptions.sessionFile);
         fenceSnapshot = { fingerprint: fenceFingerprint };
+      }
+    },
+    publishOwnedPostMessageWrite(): void {
+      // Called synchronously after pi's `sessionManager.appendMessage` → `_persist`
+      // → `appendFileSync` from the `onMessagePersisted` callback. Records the
+      // post-write fingerprint as an OWNED write in `ownedSessionFileWrites` so
+      // that subsequent `assertSessionFileFence` calls inside `withSessionWriteLock`
+      // accept the lane's own writes via the owned-write match path rather than
+      // tripping `EmbeddedAttemptSessionTakeoverError`. Critically, this only
+      // publishes when the prior `fenceFingerprint` is in
+      // `trustedSessionFileStates` (set at `releaseForPrompt` time), so an
+      // external mutation that arrives without going through this callback
+      // never gets recorded as owned — preserving fail-closed takeover
+      // detection for genuine same-file external edits.
+      if (takeoverDetected || !fenceFingerprint) {
+        return;
+      }
+      const current = readSessionFileFingerprintSync(params.lockOptions.sessionFile);
+      if (sameSessionFileFingerprint(fenceFingerprint, current)) {
+        return;
+      }
+      if (!isTrustedSessionFileState(sessionFileFenceKey, fenceFingerprint)) {
+        return;
+      }
+      const generation = recordOwnedSessionFileWrite(sessionFileFenceKey, current);
+      if (fenceActive) {
+        fenceFingerprint = current;
+        fenceSnapshot = { fingerprint: current };
+        fenceGeneration = generation;
       }
     },
     async reacquireAfterPrompt(): Promise<void> {
