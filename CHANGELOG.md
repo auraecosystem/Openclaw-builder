@@ -1075,6 +1075,7 @@ Docs: https://docs.openclaw.ai
 - Agents: mark adapter-caught tool execution failures as error tool results in embedded Pi sessions, so models can retry recoverable edit failures instead of seeing a successful tool result. Fixes #81546. (#81564) Thanks @najef1979-code and @MonkeyLeeT.
 - Plugins: reject malformed `package.json` `openclaw.extensions` metadata during install, discovery, and post-update payload smoke instead of silently dropping invalid entries.
 - Plugins: reject package metadata records whose `package.json` resolves outside the plugin root instead of trusting persisted or reconstructed registry snapshots.
+- Plugins/install: preserve the previous managed npm plugin root when a blocked install or update mutates `package.json`, `package-lock.json`, or hoisted dependencies, so rejected candidates cannot uninstall the active plugin. (#77237) Thanks @zhuisDEV.
 - Plugins: ignore malformed persisted package channel/install metadata instead of crashing catalog reconstruction or leaking invalid install hints.
 - Plugin releases: reject package `files` negations that would omit advertised package-local runtime entries from npm plugin tarballs.
 - Media/files: sniff `input_file` bytes before trusting declared MIME headers, rejecting spoofed image or zip payloads before they become agent-visible text.
