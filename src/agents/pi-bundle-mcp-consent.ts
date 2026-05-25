@@ -144,6 +144,10 @@ export type McpConsentApprovalContext = {
   /** Optional — agent + session metadata for the channel runtime. */
   agentId?: string;
   sessionKey?: string;
+  /** The channel that originated the agent turn (e.g. "whatsapp", "telegram"). */
+  channel?: string;
+  /** The target within the channel (e.g. phone number, chat ID). */
+  channelTarget?: string;
 };
 
 export type RequestMcpConsentApproval = (params: {
@@ -191,6 +195,9 @@ export const defaultRequestMcpConsentApproval: RequestMcpConsentApproval = async
   const rawDescription = `${ctx.serverName}.${safeToolName} — ${envelope.summary}`;
   const description =
     rawDescription.length > 256 ? rawDescription.slice(0, 253) + "…" : rawDescription;
+  const turnSourceChannel = ctx.channel || undefined;
+  const turnSourceTo = ctx.channelTarget || undefined;
+
   let requestResult: { id?: string; decision?: string | null } | undefined;
   try {
     requestResult = await callGatewayTool<{ id?: string; decision?: string | null }>(
@@ -205,7 +212,9 @@ export const defaultRequestMcpConsentApproval: RequestMcpConsentApproval = async
         toolCallId: ctx.toolCallId,
         agentId: ctx.agentId,
         sessionKey: ctx.sessionKey,
-        allowedDecisions: ["allow-once", "deny"],
+        turnSourceChannel,
+        turnSourceTo,
+        allowedDecisions: ["allow-once", "allow-always", "deny"],
         timeoutMs,
         twoPhase: true,
       },

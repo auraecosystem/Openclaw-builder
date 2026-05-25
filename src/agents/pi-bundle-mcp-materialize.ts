@@ -108,6 +108,8 @@ export async function callMcpToolWithConsent(params: {
   toolCallId?: string;
   agentId?: string;
   sessionKey?: string;
+  channel?: string;
+  channelTarget?: string;
   input: unknown;
   requestApproval?: RequestMcpConsentApproval;
   consentEnabled?: boolean;
@@ -138,6 +140,8 @@ export async function callMcpToolWithConsent(params: {
         toolCallId: params.toolCallId,
         agentId: params.agentId,
         sessionKey: params.sessionKey,
+        channel: params.channel,
+        channelTarget: params.channelTarget,
       },
       defaultTimeoutMs: params.consentDefaultTimeoutMs,
       signal: params.signal,
@@ -238,6 +242,8 @@ export async function materializeBundleMcpToolsForRun(params: {
    *  silently auto-cancels — making the boundary a permanent deny gate. */
   agentId?: string;
   sessionKey?: string;
+  channel?: string;
+  channelTarget?: string;
 }): Promise<BundleMcpToolRuntime> {
   let disposed = false;
   const releaseLease = params.runtime.acquireLease?.();
@@ -295,6 +301,8 @@ export async function materializeBundleMcpToolsForRun(params: {
           input,
           agentId: params.agentId,
           sessionKey: params.sessionKey,
+          channel: params.channel,
+          channelTarget: params.channelTarget,
           requestApproval: params.requestApproval,
           consentEnabled: params.consentEnabled,
           consentDefaultTimeoutMs: params.consentDefaultTimeoutMs,
