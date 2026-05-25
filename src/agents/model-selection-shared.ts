@@ -22,6 +22,7 @@ import {
   type ModelManifestNormalizationContext,
   type ModelRef,
   findNormalizedProviderValue,
+  legacyModelKey,
   modelKey,
   normalizeModelRef,
   normalizeProviderId,
@@ -434,7 +435,96 @@ export function buildModelAliasIndex(
 type ModelCatalogMetadata = {
   configuredByKey: Map<string, ModelCatalogEntry>;
   aliasByKey: Map<string, string>;
+  paramsByKey: Map<string, Record<string, unknown>>;
 };
+
+function mergeModelParams(
+  ...candidates: Array<Record<string, unknown> | undefined>
+): Record<string, unknown> | undefined {
+  const merged = Object.assign({}, ...candidates.filter(Boolean));
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function resolveConfiguredAgentModelParams(params: {
+  cfg: OpenClawConfig;
+  provider: string;
+  model: string;
+}): Record<string, unknown> | undefined {
+  const configuredModels = params.cfg.agents?.defaults?.models;
+  if (!configuredModels) {
+    return undefined;
+  }
+  const canonicalKey = modelKey(params.provider, params.model);
+  const legacyKey = legacyModelKey(params.provider, params.model);
+  const entry =
+    configuredModels[canonicalKey] ?? (legacyKey ? configuredModels[legacyKey] : undefined);
+  return entry?.params && typeof entry.params === "object" ? entry.params : undefined;
+}
+
+function buildConfiguredAgentModelCatalogEntries(params: {
+  cfg: OpenClawConfig;
+  existingKeys: ReadonlySet<string>;
+  manifestPlugins?: ModelManifestPlugins;
+}): ModelCatalogEntry[] {
+  const configuredModels = params.cfg.agents?.defaults?.models ?? {};
+  const entries: ModelCatalogEntry[] = [];
+  for (const [rawKey, entryRaw] of Object.entries(configuredModels)) {
+    if (rawKey.includes("*")) {
+      continue;
+    }
+    const modelParams =
+      (entryRaw as { params?: Record<string, unknown> } | undefined)?.params ?? undefined;
+    if (!modelParams || typeof modelParams !== "object") {
+      continue;
+    }
+    const parsed = parseModelRef(rawKey, DEFAULT_PROVIDER, {
+      manifestPlugins: params.manifestPlugins,
+    });
+    if (!parsed) {
+      continue;
+    }
+    const key = modelKey(parsed.provider, parsed.model);
+    if (params.existingKeys.has(key)) {
+      continue;
+    }
+    entries.push({
+      provider: parsed.provider,
+      id: parsed.model,
+      name: parsed.model,
+      params: modelParams,
+    });
+  }
+  return entries;
+}
+
+function buildConfiguredProviderModelKeySet(params: {
+  cfg: OpenClawConfig;
+  manifestPlugins?: ModelManifestPlugins;
+}): Set<string> {
+  const keys = new Set<string>();
+  const providers = params.cfg.models?.providers;
+  if (!providers || typeof providers !== "object") {
+    return keys;
+  }
+  for (const [providerRaw, provider] of Object.entries(providers)) {
+    const providerId = normalizeProviderId(providerRaw);
+    if (!providerId || !Array.isArray(provider?.models)) {
+      continue;
+    }
+    for (const model of provider.models) {
+      const rawId = normalizeOptionalString(model?.id) ?? "";
+      const id = rawId
+        ? normalizeConfiguredProviderCatalogModelId(providerId, rawId, {
+            manifestPlugins: params.manifestPlugins,
+          })
+        : "";
+      if (id) {
+        keys.add(modelKey(providerId, id));
+      }
+    }
+  }
+  return keys;
+}
 
 function buildModelCatalogMetadata(
   params: {
@@ -443,14 +533,26 @@ function buildModelCatalogMetadata(
   } & ModelManifestNormalizationContext,
 ): ModelCatalogMetadata {
   const configuredByKey = new Map<string, ModelCatalogEntry>();
-  for (const entry of buildConfiguredModelCatalog({
+  const manifestPlugins = resolveConfiguredModelManifestPlugins({
     cfg: params.cfg,
     manifestPlugins: params.manifestPlugins,
+  });
+  const providerModelKeys = buildConfiguredProviderModelKeySet({
+    cfg: params.cfg,
+    manifestPlugins,
+  });
+  for (const entry of buildConfiguredModelCatalog({
+    cfg: params.cfg,
+    manifestPlugins,
   })) {
-    configuredByKey.set(modelKey(entry.provider, entry.id), entry);
+    const key = modelKey(entry.provider, entry.id);
+    if (providerModelKeys.has(key)) {
+      configuredByKey.set(key, entry);
+    }
   }
 
   const aliasByKey = new Map<string, string>();
+  const paramsByKey = new Map<string, Record<string, unknown>>();
   const configuredModels = params.cfg.agents?.defaults?.models ?? {};
   for (const [rawKey, entryRaw] of Object.entries(configuredModels)) {
     const key = resolveAllowlistModelKey({
@@ -463,13 +565,17 @@ function buildModelCatalogMetadata(
       continue;
     }
     const alias = ((entryRaw as { alias?: string } | undefined)?.alias ?? "").trim();
-    if (!alias) {
-      continue;
+    if (alias) {
+      aliasByKey.set(key, alias);
     }
-    aliasByKey.set(key, alias);
+    const modelParams =
+      (entryRaw as { params?: Record<string, unknown> } | undefined)?.params ?? undefined;
+    if (modelParams && typeof modelParams === "object") {
+      paramsByKey.set(key, modelParams);
+    }
   }
 
-  return { configuredByKey, aliasByKey };
+  return { configuredByKey, aliasByKey, paramsByKey };
 }
 
 function applyModelCatalogMetadata(params: {
@@ -479,7 +585,8 @@ function applyModelCatalogMetadata(params: {
   const key = modelKey(params.entry.provider, params.entry.id);
   const configuredEntry = params.metadata.configuredByKey.get(key);
   const alias = params.metadata.aliasByKey.get(key);
-  if (!configuredEntry && !alias) {
+  const configuredParams = params.metadata.paramsByKey.get(key);
+  if (!configuredEntry && !alias && !configuredParams) {
     return params.entry;
   }
   const nextAlias = alias ?? params.entry.alias;
@@ -488,6 +595,11 @@ function applyModelCatalogMetadata(params: {
   const nextReasoning = configuredEntry?.reasoning ?? params.entry.reasoning;
   const nextInput = configuredEntry?.input ?? params.entry.input;
   const nextCompat = configuredEntry?.compat ?? params.entry.compat;
+  const nextParams = mergeModelParams(
+    params.entry.params,
+    configuredEntry?.params,
+    configuredParams,
+  );
 
   return {
     ...params.entry,
@@ -498,6 +610,7 @@ function applyModelCatalogMetadata(params: {
     ...(nextReasoning !== undefined ? { reasoning: nextReasoning } : {}),
     ...(nextInput ? { input: nextInput } : {}),
     ...(nextCompat ? { compat: nextCompat } : {}),
+    ...(nextParams ? { params: nextParams } : {}),
   };
 }
 
@@ -508,11 +621,13 @@ function buildSyntheticAllowedCatalogEntry(params: {
   const key = modelKey(params.parsed.provider, params.parsed.model);
   const configuredEntry = params.metadata.configuredByKey.get(key);
   const alias = params.metadata.aliasByKey.get(key);
+  const configuredParams = params.metadata.paramsByKey.get(key);
   const nextContextWindow = configuredEntry?.contextWindow;
   const nextContextTokens = configuredEntry?.contextTokens;
   const nextReasoning = configuredEntry?.reasoning;
   const nextInput = configuredEntry?.input;
   const nextCompat = configuredEntry?.compat;
+  const nextParams = mergeModelParams(configuredEntry?.params, configuredParams);
 
   return {
     id: params.parsed.model,
@@ -524,6 +639,7 @@ function buildSyntheticAllowedCatalogEntry(params: {
     ...(nextReasoning !== undefined ? { reasoning: nextReasoning } : {}),
     ...(nextInput ? { input: nextInput } : {}),
     ...(nextCompat ? { compat: nextCompat } : {}),
+    ...(nextParams ? { params: nextParams } : {}),
   };
 }
 
@@ -953,49 +1069,65 @@ export function buildConfiguredModelCatalog(params: {
   manifestPlugins?: ModelManifestPlugins;
 }): ModelCatalogEntry[] {
   const providers = params.cfg.models?.providers;
-  if (!providers || typeof providers !== "object") {
-    return [];
-  }
-
   const manifestPlugins = resolveConfiguredModelManifestPlugins(params);
   const catalog: ModelCatalogEntry[] = [];
-  for (const [providerRaw, provider] of Object.entries(providers)) {
-    const providerId = normalizeProviderId(providerRaw);
-    if (!providerId || !Array.isArray(provider?.models)) {
-      continue;
-    }
-    for (const model of provider.models) {
-      const rawId = normalizeOptionalString(model?.id) ?? "";
-      const id = rawId
-        ? normalizeConfiguredProviderCatalogModelId(providerId, rawId, { manifestPlugins })
-        : "";
-      if (!id) {
+  if (providers && typeof providers === "object") {
+    for (const [providerRaw, provider] of Object.entries(providers)) {
+      const providerId = normalizeProviderId(providerRaw);
+      if (!providerId || !Array.isArray(provider?.models)) {
         continue;
       }
-      const name = normalizeOptionalString(model?.name) || id;
-      const contextWindow =
-        typeof model?.contextWindow === "number" && model.contextWindow > 0
-          ? model.contextWindow
-          : undefined;
-      const contextTokens =
-        typeof model?.contextTokens === "number" && model.contextTokens > 0
-          ? model.contextTokens
-          : undefined;
-      const reasoning = typeof model?.reasoning === "boolean" ? model.reasoning : undefined;
-      const input = Array.isArray(model?.input) ? model.input : undefined;
-      const compat = model?.compat && typeof model.compat === "object" ? model.compat : undefined;
-      catalog.push({
-        provider: providerId,
-        id,
-        name,
-        contextWindow,
-        contextTokens,
-        reasoning,
-        input,
-        compat,
-      });
+      for (const model of provider.models) {
+        const rawId = normalizeOptionalString(model?.id) ?? "";
+        const id = rawId
+          ? normalizeConfiguredProviderCatalogModelId(providerId, rawId, { manifestPlugins })
+          : "";
+        if (!id) {
+          continue;
+        }
+        const name = normalizeOptionalString(model?.name) || id;
+        const contextWindow =
+          typeof model?.contextWindow === "number" && model.contextWindow > 0
+            ? model.contextWindow
+            : undefined;
+        const contextTokens =
+          typeof model?.contextTokens === "number" && model.contextTokens > 0
+            ? model.contextTokens
+            : undefined;
+        const reasoning = typeof model?.reasoning === "boolean" ? model.reasoning : undefined;
+        const input = Array.isArray(model?.input) ? model.input : undefined;
+        const compat = model?.compat && typeof model.compat === "object" ? model.compat : undefined;
+        const modelParams =
+          model?.params && typeof model.params === "object" ? model.params : undefined;
+        const agentModelParams = resolveConfiguredAgentModelParams({
+          cfg: params.cfg,
+          provider: providerId,
+          model: id,
+        });
+        const resolvedParams = mergeModelParams(modelParams, agentModelParams);
+        catalog.push({
+          provider: providerId,
+          id,
+          name,
+          contextWindow,
+          contextTokens,
+          reasoning,
+          input,
+          compat,
+          params: resolvedParams,
+        });
+      }
     }
   }
+
+  const existingKeys = new Set(catalog.map((entry) => modelKey(entry.provider, entry.id)));
+  catalog.push(
+    ...buildConfiguredAgentModelCatalogEntries({
+      cfg: params.cfg,
+      existingKeys,
+      manifestPlugins,
+    }),
+  );
 
   return catalog;
 }

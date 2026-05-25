@@ -13,4 +13,5 @@ export type ModelCatalogEntry = {
   input?: ModelInputType[];
   compat?: ModelCompatConfig;
   mediaInput?: ModelMediaInputConfig;
+  params?: Record<string, unknown>;
 };

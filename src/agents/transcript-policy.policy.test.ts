@@ -3,6 +3,7 @@ import type { OpenClawConfig } from "../config/config.js";
 import { resolveTranscriptPolicy } from "./transcript-policy.js";
 
 vi.mock("../plugins/provider-hook-runtime.js", () => ({
+  clearProviderRuntimePluginCacheForTest: vi.fn(),
   resolveProviderRuntimePlugin: vi.fn(({ provider }: { provider?: string }) =>
     provider === "mistral"
       ? {

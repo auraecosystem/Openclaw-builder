@@ -5,42 +5,25 @@ import {
   createPayloadPatchStreamWrapper,
   isOpenAICompatibleThinkingEnabled,
 } from "openclaw/plugin-sdk/provider-stream-shared";
+import {
+  resolveVllmQwenThinkingFormatFromCompat,
+  resolveVllmQwenThinkingFormatFromParams,
+  type VllmQwenThinkingFormat,
+} from "./thinking-policy.js";
 
 type VllmThinkingLevel = ProviderWrapStreamFnContext["thinkingLevel"];
-type VllmQwenThinkingFormat = "chat-template" | "top-level";
 
 function isVllmProviderId(providerId: string): boolean {
   return normalizeProviderId(providerId) === "vllm";
 }
 
-function normalizeQwenThinkingFormat(value: unknown): VllmQwenThinkingFormat | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase().replace(/_/g, "-");
-  if (
-    normalized === "chat-template" ||
-    normalized === "chat-template-kwargs" ||
-    normalized === "chat-template-kwarg" ||
-    normalized === "chat-template-arguments"
-  ) {
-    return "chat-template";
-  }
-  if (
-    normalized === "top-level" ||
-    normalized === "enable-thinking" ||
-    normalized === "request-body"
-  ) {
-    return "top-level";
-  }
-  return undefined;
-}
-
 function resolveVllmQwenThinkingFormat(
-  extraParams: ProviderWrapStreamFnContext["extraParams"],
+  ctx: Pick<ProviderWrapStreamFnContext, "extraParams" | "model">,
 ): VllmQwenThinkingFormat | undefined {
-  return normalizeQwenThinkingFormat(
-    extraParams?.qwenThinkingFormat ?? extraParams?.qwen_thinking_format,
+  return (
+    resolveVllmQwenThinkingFormatFromParams(ctx.extraParams) ??
+    resolveVllmQwenThinkingFormatFromParams(ctx.model?.params) ??
+    resolveVllmQwenThinkingFormatFromCompat(ctx.model?.compat)
   );
 }
 
@@ -110,7 +93,7 @@ export function createVllmQwenThinkingWrapper(params: {
       delete payloadObj.reasoning;
     },
     {
-      shouldPatch: ({ model }) => model.api === "openai-completions" && model.reasoning,
+      shouldPatch: ({ model }) => model.api === "openai-completions" && (model.reasoning ?? true),
     },
   );
 }
@@ -145,7 +128,7 @@ export function wrapVllmProviderStream(ctx: ProviderWrapStreamFnContext): Stream
   if (!isVllmProviderId(ctx.provider) || (ctx.model && ctx.model.api !== "openai-completions")) {
     return undefined;
   }
-  const qwenFormat = resolveVllmQwenThinkingFormat(ctx.extraParams);
+  const qwenFormat = resolveVllmQwenThinkingFormat(ctx);
   const shouldHandleNemotron =
     ctx.thinkingLevel === "off" &&
     isVllmNemotronModel({

@@ -12,6 +12,7 @@ vi.mock("../../plugins/provider-runtime.js", () => ({
 }));
 
 vi.mock("../../plugins/provider-hook-runtime.js", () => ({
+  clearProviderRuntimePluginCacheForTest: vi.fn(),
   resolveProviderRuntimePlugin: () => undefined,
 }));
 

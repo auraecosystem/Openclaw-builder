@@ -146,7 +146,10 @@ wildcard to the visible model catalog:
   <Accordion title="Qwen thinking controls">
     For Qwen models served through vLLM, set
     `params.qwenThinkingFormat: "chat-template"` on the model entry when the
-    server expects Qwen chat-template kwargs. OpenClaw maps `/think off` to:
+    server expects Qwen chat-template kwargs. Models configured this way expose
+    a binary `/think` profile (`off`, `on`) because Qwen template thinking is an
+    on/off request flag, not an OpenAI-style effort ladder. OpenClaw maps
+    `/think off` to:
 
     ```json
     {
@@ -161,6 +164,9 @@ wildcard to the visible model catalog:
     expects DashScope-style top-level flags instead, use
     `params.qwenThinkingFormat: "top-level"` to send `enable_thinking` at the
     request root. Snake-case `params.qwen_thinking_format` is also accepted.
+    Generic `compat.thinkingFormat: "qwen"` and
+    `compat.thinkingFormat: "qwen-chat-template"` are also recognized for the
+    binary thinking profile and request wrapper.
 
   </Accordion>
 

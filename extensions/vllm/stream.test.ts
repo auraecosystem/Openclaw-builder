@@ -101,10 +101,19 @@ describe("createVllmQwenThinkingWrapper", () => {
     });
   });
 
-  it("skips non-reasoning and non-completions models", () => {
+  it("patches configured Qwen models unless reasoning is explicitly disabled", () => {
+    expect(capturePayload({ format: "chat-template", model: { reasoning: undefined } })).toEqual({
+      chat_template_kwargs: {
+        enable_thinking: true,
+        preserve_thinking: true,
+      },
+    });
     expect(capturePayload({ format: "chat-template", model: { reasoning: false } })).toStrictEqual(
       {},
     );
+  });
+
+  it("skips non-completions models", () => {
     expect(
       capturePayload({ format: "chat-template", model: { api: "openai-responses" as never } }),
     ).toStrictEqual({});
@@ -213,6 +222,42 @@ describe("wrapVllmProviderStream", () => {
           id: "Qwen/Qwen3-8B",
           reasoning: true,
         } as Model<"openai-completions">,
+        streamFn: undefined,
+      } as never),
+    ).toBeTypeOf("function");
+  });
+
+  it("registers when vLLM Qwen thinking format compat is configured", () => {
+    expect(
+      wrapVllmProviderStream({
+        provider: "vllm",
+        modelId: "Qwen/Qwen3-8B",
+        extraParams: {},
+        model: {
+          api: "openai-completions",
+          provider: "vllm",
+          id: "Qwen/Qwen3-8B",
+          reasoning: true,
+          compat: { thinkingFormat: "qwen-chat-template" },
+        } as Model<"openai-completions">,
+        streamFn: undefined,
+      } as never),
+    ).toBeTypeOf("function");
+  });
+
+  it("registers when vLLM Qwen thinking format model params are configured", () => {
+    expect(
+      wrapVllmProviderStream({
+        provider: "vllm",
+        modelId: "Qwen/Qwen3-8B",
+        extraParams: {},
+        model: {
+          api: "openai-completions",
+          provider: "vllm",
+          id: "Qwen/Qwen3-8B",
+          reasoning: true,
+          params: { qwenThinkingFormat: "chat-template" },
+        } as unknown as Model<"openai-completions">,
         streamFn: undefined,
       } as never),
     ).toBeTypeOf("function");

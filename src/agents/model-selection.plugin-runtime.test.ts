@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const normalizeProviderModelIdWithPluginMock = vi.fn();
 const emptyPluginMetadataSnapshot = vi.hoisted(() => ({
   configFingerprint: "model-selection-plugin-runtime-test-empty-plugin-metadata",
+  index: {
+    plugins: [],
+  },
+  registryDiagnostics: [],
   plugins: [
     {
       modelIdNormalization: {
