@@ -1,4 +1,5 @@
 import { resolveChannelConfigWrites } from "openclaw/plugin-sdk/channel-config-writes";
+import type { CommandTurnContext } from "openclaw/plugin-sdk/channel-inbound";
 import { createChannelPairingController } from "openclaw/plugin-sdk/channel-pairing";
 import {
   ensureConfiguredBindingRouteReady,
@@ -956,6 +957,10 @@ export async function handleFeishuMessage(params: {
       audioTranscript === undefined
         ? shouldComputeCommandAuthorized
         : core.channel.commands.shouldComputeCommandAuthorized(effectiveCommandProbeBody, cfg);
+    const isTextSlashCommandTurn = core.channel.commands.isControlCommandMessage(
+      effectiveCommandProbeBody,
+      cfg,
+    );
     const commandAuthorized = shouldComputeEffectiveCommandAuthorized
       ? isDirect && audioTranscript === undefined && dmIngress
         ? dmIngress.commandAccess.authorized
@@ -988,6 +993,19 @@ export async function handleFeishuMessage(params: {
               })
             ).commandAccess.authorized
       : undefined;
+    const commandTurn: CommandTurnContext = isTextSlashCommandTurn
+      ? {
+          kind: "text-slash",
+          source: "text",
+          authorized: Boolean(commandAuthorized),
+          body: effectiveCommandProbeBody,
+        }
+      : {
+          kind: "normal",
+          source: "message",
+          authorized: false,
+          body: agentFacingContent,
+        };
 
     // Fetch quoted/replied message content if parentId exists
     let quotedMessageInfo: Awaited<ReturnType<typeof getMessageFeishu>> = null;
@@ -1300,6 +1318,7 @@ export async function handleFeishuMessage(params: {
         Timestamp: messageCreateTimeMs,
         WasMentioned: wasMentioned,
         CommandAuthorized: commandAuthorized,
+        CommandTurn: commandTurn,
         OriginatingChannel: "feishu" as const,
         OriginatingTo: feishuTo,
         GroupSystemPrompt: isGroup ? normalizeOptionalString(groupConfig?.systemPrompt) : undefined,
