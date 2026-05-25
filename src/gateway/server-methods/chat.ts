@@ -83,10 +83,12 @@ import {
 } from "../chat-attachments.js";
 import {
   isToolHistoryBlockType,
+  projectSafeChatHistoryMessages,
   projectChatDisplayMessage,
   projectRecentChatDisplayMessages,
   resolveEffectiveChatHistoryMaxChars,
 } from "../chat-display-projection.js";
+import { projectChatHistoryTurns } from "../chat-history-turns.js";
 import { stripEnvelopeFromMessage } from "../chat-sanitize.js";
 import { augmentChatHistoryWithCliSessionImports } from "../cli-session-history.js";
 import { isSuppressedControlReplyText } from "../control-reply-text.js";
@@ -120,7 +122,8 @@ import {
   resolveGatewayModelSupportsImages,
   resolveGatewaySessionThinkingDefault,
   resolveDeletedAgentIdFromSessionKey,
-  readRecentSessionMessagesAsync,
+  readRecentSessionMessagesDetailedAsync,
+  type ReadRecentSessionMessagesTiming,
   resolveSessionModelRef,
 } from "../session-utils.js";
 import { formatForLog } from "../ws-log.js";
@@ -137,6 +140,7 @@ import {
   buildWebchatAudioContentBlocksFromReplyPayloads,
 } from "./chat-webchat-media.js";
 import type {
+  GatewayClient,
   GatewayRequestContext,
   GatewayRequestHandlerOptions,
   GatewayRequestHandlers,
@@ -313,6 +317,7 @@ type ChatSendOriginatingRoute = {
 };
 
 const ACTIVE_CHAT_SEND_DEDUPE_PREFIX = "chat:active-send";
+const CHAT_HISTORY_METRICS_SLOW_MS = 500;
 
 function resolveActiveChatSendRunId(value: unknown): string | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -344,6 +349,45 @@ function buildActiveChatSendDedupeKey(params: {
     .digest("hex")
     .slice(0, 32);
   return `${ACTIVE_CHAT_SEND_DEDUPE_PREFIX}:${digest}`;
+}
+
+function buildChatHistorySessionHash(sessionKey: string): string {
+  return createHash("sha256").update(sessionKey).digest("hex").slice(0, 12);
+}
+
+function shouldDefaultChatHistoryToTurns(params: {
+  client: GatewayClient | null;
+  isWebchatConnect: (params: GatewayClient["connect"] | null | undefined) => boolean;
+}): boolean {
+  const clientInfo = params.client?.connect?.client;
+  if (isWebchatClient(clientInfo) || isOperatorUiClient(clientInfo)) {
+    return true;
+  }
+  if (params.isWebchatConnect(params.client?.connect)) {
+    return true;
+  }
+  if (
+    clientInfo?.id === GATEWAY_CLIENT_NAMES.MACOS_APP ||
+    clientInfo?.id === GATEWAY_CLIENT_NAMES.IOS_APP ||
+    clientInfo?.id === GATEWAY_CLIENT_NAMES.ANDROID_APP
+  ) {
+    return true;
+  }
+  return clientInfo?.mode === GATEWAY_CLIENT_MODES.UI;
+}
+
+function canReadUnsafeRawChatHistory(client: GatewayClient | null): boolean {
+  const scopes = Array.isArray(client?.connect?.scopes) ? client.connect.scopes : [];
+  return scopes.includes(ADMIN_SCOPE) || client?.internal?.approvalRuntime === true;
+}
+
+function formatChatHistoryMetricFields(
+  fields: Record<string, boolean | number | string | undefined>,
+) {
+  return Object.entries(fields)
+    .filter((entry): entry is [string, boolean | number | string] => entry[1] !== undefined)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(" ");
 }
 
 type ChatSendExplicitOrigin = {
@@ -2095,7 +2139,15 @@ function isSourceReplyTranscriptMirrorPayload(payload: ReplyPayload | undefined)
 }
 
 export const chatHandlers: GatewayRequestHandlers = {
-  "chat.history": async ({ params, respond, context }) => {
+  "chat.history": async ({ params, respond, context, client, isWebchatConnect }) => {
+    const metricsStartedAt = Date.now();
+    let metricsCheckpoint = metricsStartedAt;
+    const markMetricMs = () => {
+      const now = Date.now();
+      const elapsed = now - metricsCheckpoint;
+      metricsCheckpoint = now;
+      return elapsed;
+    };
     if (!validateChatHistoryParams(params)) {
       respond(
         false,
@@ -2107,48 +2159,148 @@ export const chatHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const { sessionKey, limit, maxChars } = params as {
+    const { sessionKey, limit, maxChars, mode, unsafeRawToolPayloads } = params as {
       sessionKey: string;
       limit?: number;
       maxChars?: number;
+      mode?: "messages" | "turns" | "raw-messages";
+      unsafeRawToolPayloads?: boolean;
     };
+    const historyMode =
+      mode === "turns" ||
+      (mode !== "messages" &&
+        mode !== "raw-messages" &&
+        shouldDefaultChatHistoryToTurns({ client, isWebchatConnect }))
+        ? "turns"
+        : "messages";
+    const rawToolPayloadsRequested =
+      historyMode === "messages" && (mode === "raw-messages" || unsafeRawToolPayloads === true);
+    if (rawToolPayloadsRequested && !canReadUnsafeRawChatHistory(client)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "chat.history raw-messages requires operator.admin scope",
+        ),
+      );
+      return;
+    }
     const { cfg, storePath, entry } = loadSessionEntry(sessionKey);
+    const loadMs = markMetricMs();
     const sessionId = entry?.sessionId;
     const sessionAgentId = resolveSessionAgentId({ sessionKey, config: cfg });
-    const resolvedSessionModel = resolveSessionModelRef(cfg, entry, sessionAgentId);
+    const agentMs = markMetricMs();
+    const resolvedSessionModel = entry ? resolveSessionModelRef(cfg, entry, sessionAgentId) : null;
+    const modelMs = markMetricMs();
     const hardMax = 1000;
     const defaultLimit = 200;
     const requested = typeof limit === "number" ? limit : defaultLimit;
     const max = Math.min(hardMax, requested);
+    const scanMax = historyMode === "turns" ? hardMax : max;
     const maxHistoryBytes = getMaxChatHistoryMessagesBytes();
-    const localMessages =
-      sessionId && storePath
-        ? await readRecentSessionMessagesAsync(sessionId, storePath, entry?.sessionFile, {
-            maxMessages: max,
-            maxBytes: Math.max(maxHistoryBytes * 2, 1024 * 1024),
-          })
-        : [];
+    const transcriptRead = Boolean(sessionId && storePath);
+    let readTimings: ReadRecentSessionMessagesTiming | undefined;
+    let localMessages: unknown[] = [];
+    if (sessionId && storePath) {
+      const recentResult = await readRecentSessionMessagesDetailedAsync(
+        sessionId,
+        storePath,
+        entry?.sessionFile,
+        {
+          maxMessages: scanMax,
+          maxBytes: Math.max(maxHistoryBytes * 2, 1024 * 1024),
+        },
+      );
+      localMessages = recentResult.messages;
+      readTimings = recentResult.timings;
+    }
+    const readMs = markMetricMs();
     const rawMessages = augmentChatHistoryWithCliSessionImports({
       entry,
-      provider: resolvedSessionModel.provider,
+      provider: resolvedSessionModel?.provider,
       localMessages,
     });
+    const importMs = markMetricMs();
     const effectiveMaxChars = resolveEffectiveChatHistoryMaxChars(cfg, maxChars);
-    const normalized = augmentChatHistoryWithCanvasBlocks(
-      projectRecentChatDisplayMessages(rawMessages, {
-        maxChars: effectiveMaxChars,
-        maxMessages: max,
-      }),
+    const projectedMessages = projectRecentChatDisplayMessages(rawMessages, {
+      maxChars: effectiveMaxChars,
+      maxMessages: scanMax,
+    });
+    const projectMs = markMetricMs();
+    const canvasAugmentedMessages = augmentChatHistoryWithCanvasBlocks(projectedMessages) as Array<
+      Record<string, unknown>
+    >;
+    const turnProjection =
+      historyMode === "turns"
+        ? projectChatHistoryTurns(canvasAugmentedMessages, {
+            dropLeadingPartialTurn: localMessages.length >= scanMax,
+            maxTurns: max,
+            maxPreviewChars: effectiveMaxChars,
+          })
+        : null;
+    const groupMs = markMetricMs();
+    const safeMessagesProjection =
+      historyMode === "messages" && !rawToolPayloadsRequested
+        ? projectSafeChatHistoryMessages(canvasAugmentedMessages)
+        : null;
+    const responseMode = rawToolPayloadsRequested ? "raw-messages" : historyMode;
+    const responseMessages = rawToolPayloadsRequested
+      ? rawMessages.slice(-scanMax)
+      : (turnProjection?.messages ?? safeMessagesProjection?.messages ?? canvasAugmentedMessages);
+    const normalized = augmentChatHistoryWithCanvasBlocks(responseMessages);
+    const normalizeMs = markMetricMs();
+    const finalHistoryBudgetBytes = maxHistoryBytes;
+    const perMessageHardCap = Math.min(
+      CHAT_HISTORY_MAX_SINGLE_MESSAGE_BYTES,
+      finalHistoryBudgetBytes,
     );
-    const perMessageHardCap = Math.min(CHAT_HISTORY_MAX_SINGLE_MESSAGE_BYTES, maxHistoryBytes);
     const replaced = replaceOversizedChatHistoryMessages({
       messages: normalized,
       maxSingleMessageBytes: perMessageHardCap,
     });
     scheduleChatHistoryManagedImageCleanup({ sessionKey, context });
-    const capped = capArrayByJsonBytes(replaced.messages, maxHistoryBytes).items;
-    const bounded = enforceChatHistoryFinalBudget({ messages: capped, maxBytes: maxHistoryBytes });
-    const placeholderCount = replaced.replacedCount + bounded.placeholderCount;
+    const capped = capArrayByJsonBytes(replaced.messages, finalHistoryBudgetBytes).items;
+    const bounded = enforceChatHistoryFinalBudget({
+      messages: capped,
+      maxBytes: finalHistoryBudgetBytes,
+    });
+    const budgetMs = markMetricMs();
+    let boundedTurnItems = turnProjection?.items;
+    let boundedTurnMeta = turnProjection?.meta;
+    if (turnProjection) {
+      const metaWithEmptyItems = {
+        ...turnProjection.meta,
+        displayItemsReturned: 0,
+        hasMoreBefore: true,
+      };
+      const basePayloadBytes = jsonUtf8Bytes({
+        sessionKey,
+        sessionId,
+        mode: responseMode,
+        messages: bounded.messages,
+        items: [],
+        meta: metaWithEmptyItems,
+        thinkingLevel: entry?.thinkingLevel,
+        fastMode: entry?.fastMode,
+        verboseLevel: cfg.agents?.defaults?.verboseDefault,
+      });
+      const itemBudgetBytes = Math.max(0, finalHistoryBudgetBytes - basePayloadBytes);
+      const cappedTurnItems =
+        itemBudgetBytes > 2 ? capArrayByJsonBytes(turnProjection.items, itemBudgetBytes).items : [];
+      boundedTurnItems = jsonUtf8Bytes(cappedTurnItems) <= itemBudgetBytes ? cappedTurnItems : [];
+      boundedTurnMeta = {
+        ...turnProjection.meta,
+        displayItemsReturned: boundedTurnItems.length,
+        hasMoreBefore:
+          turnProjection.meta.hasMoreBefore ||
+          boundedTurnItems.length < turnProjection.items.length,
+      };
+    }
+    const safeToolPlaceholders = safeMessagesProjection?.placeholders ?? 0;
+    const safeToolOmittedBytes = safeMessagesProjection?.omittedBytes ?? 0;
+    const placeholderCount =
+      safeToolPlaceholders + replaced.replacedCount + bounded.placeholderCount;
     if (placeholderCount > 0) {
       chatHistoryPlaceholderEmitCount += placeholderCount;
       logLargePayload({
@@ -2164,7 +2316,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       );
     }
     let thinkingLevel = entry?.thinkingLevel;
-    if (!thinkingLevel) {
+    if (!thinkingLevel && resolvedSessionModel) {
       thinkingLevel = resolveGatewaySessionThinkingDefault({
         cfg,
         agentId: sessionAgentId,
@@ -2173,14 +2325,95 @@ export const chatHandlers: GatewayRequestHandlers = {
       });
     }
     const verboseLevel = entry?.verboseLevel ?? cfg.agents?.defaults?.verboseDefault;
-    respond(true, {
+    let responsePayload = {
       sessionKey,
       sessionId,
+      mode: responseMode,
       messages: bounded.messages,
+      ...(turnProjection
+        ? {
+            items: boundedTurnItems,
+            meta: boundedTurnMeta,
+          }
+        : {}),
       thinkingLevel,
       fastMode: entry?.fastMode,
       verboseLevel,
-    });
+    };
+    if (turnProjection && jsonUtf8Bytes(responsePayload) > finalHistoryBudgetBytes) {
+      responsePayload = {
+        sessionKey,
+        sessionId,
+        mode: responseMode,
+        messages: bounded.messages,
+        items: [],
+        meta: {
+          ...turnProjection.meta,
+          displayItemsReturned: 0,
+          hasMoreBefore: true,
+        },
+        thinkingLevel,
+        fastMode: entry?.fastMode,
+        verboseLevel,
+      };
+    }
+    const messagesBytesReturned = jsonUtf8Bytes(bounded.messages);
+    const responseBytesReturned = jsonUtf8Bytes(responsePayload);
+    const totalMs = Date.now() - metricsStartedAt;
+    if (historyMode === "turns" || totalMs >= CHAT_HISTORY_METRICS_SLOW_MS) {
+      context.logGateway.info(
+        `chat.history metrics ${formatChatHistoryMetricFields({
+          mode: historyMode,
+          responseMode,
+          rawToolPayloads: rawToolPayloadsRequested,
+          sessionHash: buildChatHistorySessionHash(sessionKey),
+          requestedLimit: requested,
+          max,
+          scanMax,
+          maxChars: effectiveMaxChars,
+          maxHistoryBytes,
+          finalHistoryBudgetBytes,
+          localMessages: localMessages.length,
+          rawMessages: rawMessages.length,
+          projectedMessages: projectedMessages.length,
+          normalizedMessages: normalized.length,
+          returnedMessages: bounded.messages.length,
+          returnedItems: boundedTurnItems?.length,
+          rawMessagesMatched: turnProjection?.meta.rawMessagesMatched,
+          toolRecordsCollapsed: turnProjection?.meta.toolRecordsCollapsed,
+          hasMoreBefore: turnProjection?.meta.hasMoreBefore,
+          placeholders: placeholderCount,
+          safeToolPlaceholders,
+          safeToolOmittedBytes,
+          messagesBytesReturned,
+          responseBytesReturned,
+          sessionKnown: Boolean(entry),
+          transcriptRead,
+          loadMs,
+          agentMs,
+          modelMs,
+          readMs,
+          readStatMs: readTimings?.statMs,
+          readOpenMs: readTimings?.openMs,
+          readIoMs: readTimings?.readIoMs,
+          readDecodeSplitMs: readTimings?.decodeSplitMs,
+          readParseSelectMs: readTimings?.parseSelectMs,
+          readCloseMs: readTimings?.closeMs,
+          readFileBytes: readTimings?.fileBytes,
+          readBytes: readTimings?.bytesRead,
+          readLines: readTimings?.linesRead,
+          readMaxLines: readTimings?.maxLines,
+          readMode: readTimings?.readMode,
+          importMs,
+          projectMs,
+          groupMs,
+          normalizeMs,
+          budgetMs,
+          totalMs,
+        })}`,
+      );
+    }
+    respond(true, responsePayload);
   },
   "chat.abort": async ({ params, respond, context, client }) => {
     if (!validateChatAbortParams(params)) {

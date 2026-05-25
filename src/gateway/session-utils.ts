@@ -109,6 +109,7 @@ export {
   readLatestRecentSessionUsageFromTranscriptAsync,
   readRecentSessionUsageFromTranscriptAsync,
   readRecentSessionMessagesAsync,
+  readRecentSessionMessagesDetailedAsync,
   readRecentSessionMessagesWithStatsAsync,
   readRecentSessionTranscriptLines,
   readRecentSessionUsageFromTranscript,
@@ -120,7 +121,10 @@ export {
   visitSessionMessagesAsync,
   resolveSessionTranscriptCandidates,
 } from "./session-utils.fs.js";
-export type { ReadSessionMessagesAsyncOptions } from "./session-utils.fs.js";
+export type {
+  ReadRecentSessionMessagesTiming,
+  ReadSessionMessagesAsyncOptions,
+} from "./session-utils.fs.js";
 export { canonicalizeSpawnedByForAgent, resolveSessionStoreKey } from "./session-store-key.js";
 export type {
   GatewayAgentRow,
