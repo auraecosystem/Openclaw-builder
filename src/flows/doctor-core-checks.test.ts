@@ -315,4 +315,26 @@ describe("registerCoreHealthChecks", () => {
       }),
     );
   });
+
+  it("registers config audit scrub as a legacy-owned structured check", async () => {
+    const check = getCheck(createCoreHealthChecks(createDeps()), "core/doctor/config-audit-scrub");
+
+    expect(check.repair).toBeTypeOf("function");
+    await expect(
+      check.repair?.(
+        {
+          mode: "fix",
+          runtime,
+          cfg: {},
+          cwd: "/tmp/openclaw-test-workspace",
+        },
+        [],
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "skipped",
+        reason: "legacy doctor config audit contribution owns cleanup",
+      }),
+    );
+  });
 });

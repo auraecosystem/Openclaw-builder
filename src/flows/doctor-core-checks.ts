@@ -7,6 +7,11 @@ import {
   type LegacyClawdBrowserProfileResidue,
 } from "../commands/doctor-browser.js";
 import { hasConfiguredCommandOwners } from "../commands/doctor-command-owner.js";
+import {
+  configAuditScrubToHealthFinding,
+  configAuditScrubToRepairEffect,
+  detectConfigAuditScrubIssue,
+} from "../commands/doctor-config-audit-scrub.js";
 import { disableUnavailableSkillsInConfig } from "../commands/doctor-skills-core.js";
 import type { ConfigValidationIssue, OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveSecretInputRef } from "../config/types.secrets.js";
@@ -16,6 +21,7 @@ import { registerHealthCheck } from "./health-check-registry.js";
 import type { HealthCheck, HealthFinding } from "./health-checks.js";
 
 const BROWSER_CLAWD_PROFILE_RESIDUE_CHECK_ID = "core/doctor/browser-clawd-profile-residue";
+const CONFIG_AUDIT_SCRUB_CHECK_ID = "core/doctor/config-audit-scrub";
 const FINAL_CONFIG_VALIDATION_CHECK_ID = "core/doctor/final-config-validation";
 
 export type CoreHealthCheckDeps = {
@@ -493,6 +499,31 @@ const legacyWhatsAppCrontabCheck: HealthCheck = {
   },
 };
 
+const configAuditScrubCheck: HealthCheck = {
+  id: CONFIG_AUDIT_SCRUB_CHECK_ID,
+  kind: "core",
+  description:
+    "Historical config-audit argv redaction gaps are represented as structured findings.",
+  source: "doctor",
+  async detect() {
+    const result = await detectConfigAuditScrubIssue();
+    return result.rewritten > 0 ? [configAuditScrubToHealthFinding(result)] : [];
+  },
+  async repair(ctx) {
+    const result = await detectConfigAuditScrubIssue();
+    const effects = result.rewritten > 0 ? [configAuditScrubToRepairEffect(result)] : [];
+    if (ctx.dryRun === true) {
+      return { status: "repaired", changes: [], effects };
+    }
+    return {
+      status: "skipped",
+      reason: "legacy doctor config audit contribution owns cleanup",
+      changes: [],
+      effects,
+    };
+  },
+};
+
 const gatewayPlatformNotesCheck: HealthCheck = {
   id: "core/doctor/gateway-services/platform-notes",
   kind: "core",
@@ -742,6 +773,7 @@ function createConvertedWorkflowChecks(deps: CoreHealthCheckDeps): readonly Heal
     gatewayAuthCheck,
     legacyStateCheck,
     legacyWhatsAppCrontabCheck,
+    configAuditScrubCheck,
     gatewayPlatformNotesCheck,
     createSecurityCheck(deps),
     browserCheck,
