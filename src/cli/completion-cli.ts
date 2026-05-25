@@ -192,6 +192,7 @@ export function registerCompletionCli(program: Command) {
       // the completion script written to stdout.
       routeLogsToStderr();
       const shell = options.shell ?? "zsh";
+      const writeState = Boolean(options.writeState);
 
       // Completion needs the full Commander command tree (including nested subcommands).
       // Our CLI defaults to lazy registration for perf; force-register core commands here.
@@ -212,7 +213,7 @@ export function registerCompletionCli(program: Command) {
         });
       }
 
-      if (options.writeState) {
+      if (writeState) {
         const writeShells = options.shell ? [shell] : [...COMPLETION_SHELLS];
         await writeCompletionCache({
           program,
@@ -227,7 +228,7 @@ export function registerCompletionCli(program: Command) {
         return;
       }
 
-      if (options.writeState) {
+      if (writeState) {
         return;
       }
 
