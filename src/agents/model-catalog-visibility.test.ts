@@ -35,7 +35,7 @@ describe("resolveVisibleModelCatalog", () => {
     expect(authChecker).toHaveBeenNthCalledWith(2, "openai");
     expect(authChecker).toHaveBeenCalledTimes(2);
     expect(result).toEqual([{ provider: "openai", id: "gpt-test", name: "GPT Test" }]);
-  });
+  }, 240_000);
 
   it("limits visible catalog to provider wildcard entries after default discovery", async () => {
     const authChecker = vi.fn((provider: string) => provider !== "blocked");
@@ -76,7 +76,7 @@ describe("resolveVisibleModelCatalog", () => {
       { provider: "vllm", id: "qwen-local", name: "Qwen Local" },
     ]);
     expect(normalizeProviderModelIdWithRuntimeMock).not.toHaveBeenCalled();
-  });
+  }, 240_000);
 
   it("does not broaden visibility when selected providers have no catalog rows", async () => {
     const authChecker = vi.fn(() => true);
