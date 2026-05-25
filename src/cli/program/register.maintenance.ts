@@ -47,6 +47,7 @@ export function registerMaintenanceCommands(program: Command) {
             const { runDoctorLintCli } = await import("../../commands/doctor-lint.js");
             const exitCode = await runDoctorLintCli(defaultRuntime, {
               json: Boolean(opts.json),
+              deep: Boolean(opts.deep),
               severityMin: typeof opts.severityMin === "string" ? opts.severityMin : undefined,
               skipIds: Array.isArray(opts.skip) ? opts.skip : [],
               onlyIds: Array.isArray(opts.only) ? opts.only : [],

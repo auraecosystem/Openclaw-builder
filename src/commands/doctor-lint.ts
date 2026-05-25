@@ -20,6 +20,7 @@ import type { RuntimeEnv } from "../runtime.js";
 
 export interface DoctorLintCliOptions {
   readonly json?: boolean;
+  readonly deep?: boolean;
   readonly severityMin?: string;
   readonly skipIds?: readonly string[];
   readonly onlyIds?: readonly string[];
@@ -69,6 +70,7 @@ export async function runDoctorLintCli(
     runtime,
     cfg: snapshot.config,
     cwd: resolveAgentWorkspaceDir(snapshot.config, resolveDefaultAgentId(snapshot.config)),
+    deep: opts.deep === true,
     ...(snapshot.path !== undefined ? { configPath: snapshot.path } : {}),
   };
   registerBundledHealthChecks({ cfg: snapshot.config, cwd: ctx.cwd });
