@@ -40,7 +40,6 @@ Scope intent:
 - `talk.providers.*.apiKey`
 - `messages.tts.providers.*.apiKey`
 - `tools.web.fetch.firecrawl.apiKey`
-- `plugins.entries.acpx.config.mcpServers.*.env.*`
 - `plugins.entries.brave.config.webSearch.apiKey`
 - `plugins.entries.exa.config.webSearch.apiKey`
 - `plugins.entries.google.config.webSearch.apiKey`
@@ -54,6 +53,7 @@ Scope intent:
 - `plugins.entries.voice-call.config.streaming.providers.*.apiKey`
 - `plugins.entries.voice-call.config.tts.providers.*.apiKey`
 - `plugins.entries.voice-call.config.twilio.authToken`
+- `plugins.entries.acpx.config.mcpServers.*.env.*`
 - `tools.web.search.*.apiKey`
 - `tools.web.search.apiKey`
 - `gateway.auth.password`
@@ -79,6 +79,12 @@ Scope intent:
 - `channels.discord.accounts.*.token`
 - `channels.discord.accounts.*.pluralkit.token`
 - `channels.discord.accounts.*.voice.tts.providers.*.apiKey`
+- `channels.channel-broker.outboundToken`
+- `channels.channel-broker.signingSecret`
+- `channels.channel-broker.accounts.*.outboundToken`
+- `channels.channel-broker.accounts.*.signingSecret`
+- `channels.channel-broker.providers.*.outboundToken`
+- `channels.channel-broker.providers.*.signingSecret`
 - `channels.irc.password`
 - `channels.irc.nickserv.password`
 - `channels.irc.accounts.*.password`
