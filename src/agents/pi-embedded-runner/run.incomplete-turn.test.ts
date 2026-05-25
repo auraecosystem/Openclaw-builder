@@ -73,9 +73,14 @@ describe("runEmbeddedPiAgent incomplete-turn safety", () => {
   }
 
   it("emits the before_agent_run hook block message as the agent payload", async () => {
+    const prepStages = {
+      totalMs: 7,
+      stages: [{ name: "bundle-tools", durationMs: 7, elapsedMs: 7 }],
+    };
     mockedRunEmbeddedAttempt.mockResolvedValueOnce(
       makeAttemptResult({
         assistantTexts: [],
+        prepStages,
         promptError: new Error("Blocked by before-run policy."),
         promptErrorSource: "hook:before_agent_run",
       }),
@@ -91,6 +96,7 @@ describe("runEmbeddedPiAgent incomplete-turn safety", () => {
     expect(result.meta?.finalAssistantVisibleText).toBe("Blocked by before-run policy.");
     expect(result.meta?.finalAssistantRawText).toBe("Blocked by before-run policy.");
     expect(result.meta?.finalPromptText).toBeUndefined();
+    expect(result.meta?.prepStages).toBe(prepStages);
     expect(result.meta?.error).toEqual({
       kind: "hook_block",
       message: "Blocked by before-run policy.",
