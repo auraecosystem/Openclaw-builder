@@ -566,6 +566,10 @@ async function dispatchDiscordCommandInteraction(params: {
     const messageThreadId = !isDirectMessage && isThreadChannel ? channelId : undefined;
     const pluginThreadParentId = !isDirectMessage && isThreadChannel ? threadParentId : undefined;
     const { effectiveRoute } = await getNativeRouteState();
+    const targetSessionEntry = nativeCommandRuntime.getSessionEntry({
+      agentId: effectiveRoute.agentId,
+      sessionKey: effectiveRoute.sessionKey,
+    });
     const pluginReply = await nativeCommandRuntime.executePluginCommand({
       command: pluginMatch.command,
       args: pluginMatch.args,
@@ -575,6 +579,7 @@ async function dispatchDiscordCommandInteraction(params: {
       isAuthorizedSender: commandAuthorized,
       senderIsOwner: senderIsCommandOwner,
       sessionKey: effectiveRoute.sessionKey,
+      authProfileId: targetSessionEntry?.authProfileOverride,
       commandBody: prompt,
       config: cfg,
       from: isDirectMessage
