@@ -120,11 +120,7 @@ describe("registerCoreHealthChecks", () => {
         rule.target.filter((target) => target.startsWith("core/doctor/")),
       ),
     );
-    const plannedOnlyTargets = [
-      "core/doctor/auth-profiles/keychain",
-      "core/doctor/session-locks",
-      "core/doctor/gateway-daemon",
-    ];
+    const plannedOnlyTargets = ["core/doctor/auth-profiles/keychain", "core/doctor/gateway-daemon"];
 
     for (const id of CORE_HEALTH_CHECKS.map((check) => check.id)) {
       if (id === "core/doctor/browser-clawd-profile-residue") {
@@ -312,6 +308,28 @@ describe("registerCoreHealthChecks", () => {
         checkId: "core/doctor/workspace-suggestions",
         severity: "info",
         message: "Memory system not found in workspace.",
+      }),
+    );
+  });
+
+  it("registers stale session locks as a legacy-owned structured check", async () => {
+    const check = getCheck(createCoreHealthChecks(createDeps()), "core/doctor/session-locks");
+
+    expect(check.repair).toBeTypeOf("function");
+    await expect(
+      check.repair?.(
+        {
+          mode: "fix",
+          runtime,
+          cfg: {},
+          cwd: "/tmp/openclaw-test-workspace",
+        },
+        [],
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "skipped",
+        reason: "legacy doctor session lock contribution owns cleanup",
       }),
     );
   });

@@ -7,6 +7,11 @@ import {
   type LegacyClawdBrowserProfileResidue,
 } from "../commands/doctor-browser.js";
 import { hasConfiguredCommandOwners } from "../commands/doctor-command-owner.js";
+import {
+  detectStaleSessionLocks,
+  sessionLockToHealthFinding,
+  sessionLockToRepairEffect,
+} from "../commands/doctor-session-locks.js";
 import { disableUnavailableSkillsInConfig } from "../commands/doctor-skills-core.js";
 import type { ConfigValidationIssue, OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveSecretInputRef } from "../config/types.secrets.js";
@@ -17,6 +22,7 @@ import type { HealthCheck, HealthFinding } from "./health-checks.js";
 
 const BROWSER_CLAWD_PROFILE_RESIDUE_CHECK_ID = "core/doctor/browser-clawd-profile-residue";
 const FINAL_CONFIG_VALIDATION_CHECK_ID = "core/doctor/final-config-validation";
+const SESSION_LOCKS_CHECK_ID = "core/doctor/session-locks";
 
 export type CoreHealthCheckDeps = {
   readonly detectUnavailableSkills: (cfg: OpenClawConfig) => Promise<readonly SkillStatusEntry[]>;
@@ -512,6 +518,32 @@ const gatewayPlatformNotesCheck: HealthCheck = {
   },
 };
 
+const sessionLocksCheck: HealthCheck = {
+  id: SESSION_LOCKS_CHECK_ID,
+  kind: "core",
+  description: "Stale session lock files are represented as structured findings.",
+  source: "doctor",
+  async detect(ctx) {
+    return (await detectStaleSessionLocks({ config: ctx.cfg, env: process.env })).map(
+      sessionLockToHealthFinding,
+    );
+  },
+  async repair(ctx) {
+    const effects = (await detectStaleSessionLocks({ config: ctx.cfg, env: process.env })).map(
+      sessionLockToRepairEffect,
+    );
+    if (ctx.dryRun === true) {
+      return { status: "repaired", changes: [], effects };
+    }
+    return {
+      status: "skipped",
+      reason: "legacy doctor session lock contribution owns cleanup",
+      changes: [],
+      effects,
+    };
+  },
+};
+
 const browserCheck: HealthCheck = {
   id: "core/doctor/browser",
   kind: "core",
@@ -742,6 +774,7 @@ function createConvertedWorkflowChecks(deps: CoreHealthCheckDeps): readonly Heal
     gatewayAuthCheck,
     legacyStateCheck,
     legacyWhatsAppCrontabCheck,
+    sessionLocksCheck,
     gatewayPlatformNotesCheck,
     createSecurityCheck(deps),
     browserCheck,
