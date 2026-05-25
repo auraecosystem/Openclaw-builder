@@ -45,6 +45,22 @@ function chatTypeFromConversationType(
   return undefined;
 }
 
+function inferTelegramChatTypeFromConversation(params: {
+  conversationId: string;
+  threadId?: string;
+}): "direct" | "group" | "channel" | undefined {
+  if (params.threadId) {
+    return "channel";
+  }
+  if (/^\d+$/.test(params.conversationId)) {
+    return "direct";
+  }
+  if (/^-\d+$/.test(params.conversationId)) {
+    return "group";
+  }
+  return undefined;
+}
+
 export function inferChannelBrokerTargetChatType(
   rawTarget: string,
 ): "direct" | "group" | "channel" | undefined {
@@ -69,6 +85,17 @@ export function inferChannelBrokerTargetChatType(
     }
     if (type === "channel" || type === "thread") {
       return "channel";
+    }
+    const rawPlatform =
+      brokerPrefixed && parsed.conversationId.includes(":")
+        ? parsed.conversationId.slice(0, parsed.conversationId.indexOf(":"))
+        : parsed.platform;
+    if (normalizeBrokerPlatformId(rawPlatform) === "telegram") {
+      const telegramConversation = parseTelegramTopicConversation(rawConversationId);
+      const telegramType = inferTelegramChatTypeFromConversation(telegramConversation);
+      if (telegramType) {
+        return telegramType;
+      }
     }
     return "channel";
   } catch {
@@ -145,11 +172,21 @@ export function parseChannelBrokerTarget(params: {
     params.threadId == null
       ? (parsed.threadId ?? platformConversation.threadId)
       : String(params.threadId).trim() || parsed.threadId || platformConversation.threadId;
+  const inferredType =
+    platform === "telegram"
+      ? inferTelegramChatTypeFromConversation({
+          conversationId: platformConversation.conversationId,
+          ...(threadId ? { threadId } : {}),
+        })
+      : undefined;
   return {
     platform,
     conversationId: platformConversation.conversationId,
     conversationType:
-      explicitType ?? parsed.conversationType ?? params.account.defaultConversationType,
+      explicitType ??
+      parsed.conversationType ??
+      inferredType ??
+      params.account.defaultConversationType,
     ...(threadId ? { threadId } : {}),
   };
 }
