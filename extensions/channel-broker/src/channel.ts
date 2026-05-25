@@ -10,6 +10,7 @@ import {
 } from "openclaw/plugin-sdk/channel-core";
 import { defineChannelMessageAdapter } from "openclaw/plugin-sdk/channel-message";
 import { getChatChannelMeta } from "openclaw/plugin-sdk/channel-plugin-common";
+import { parseThreadSessionSuffix } from "openclaw/plugin-sdk/routing";
 import { DEFAULT_ACCOUNT_ID } from "./accounts.js";
 import {
   listChannelBrokerProviderIds,
@@ -36,18 +37,47 @@ const CHANNEL_ID = "channel-broker" as const;
 
 function resolveBrokerSessionConversation(rawId: string) {
   try {
-    const parsed = parseBrokerConversationTarget(rawId);
+    const threadSuffix = parseThreadSessionSuffix(rawId);
+    const rawTarget = threadSuffix.baseSessionKey ?? rawId;
+    const parsed = parseBrokerConversationTarget(rawTarget);
     if (parsed.conversationType === "direct") {
       return null;
     }
+    const threadId = parsed.threadId ?? threadSuffix.threadId;
+    const id = buildBrokerConversationTarget({
+      platform: parsed.platform,
+      conversationId: parsed.conversationId,
+      ...(parsed.conversationType && parsed.conversationType !== "thread"
+        ? { conversationType: parsed.conversationType }
+        : {}),
+    });
     return {
-      id: parsed.conversationId,
-      threadId: parsed.threadId,
-      baseConversationId: parsed.conversationId,
-      parentConversationCandidates: [parsed.conversationId],
+      id,
+      threadId,
+      baseConversationId: id,
+      parentConversationCandidates: [id],
     };
   } catch {
     return null;
+  }
+}
+
+function resolveBrokerSessionTarget(params: {
+  kind: "group" | "channel";
+  id: string;
+  threadId?: string | null;
+}): string | undefined {
+  try {
+    const parsed = parseBrokerConversationTarget(params.id);
+    return buildBrokerConversationTarget({
+      platform: parsed.platform,
+      conversationId: parsed.conversationId,
+      conversationType:
+        parsed.conversationType ?? (params.threadId ? "thread" : params.kind),
+      threadId: parsed.threadId ?? params.threadId ?? undefined,
+    });
+  } catch {
+    return normalizeBrokerTarget(params.id);
   }
 }
 
@@ -177,6 +207,7 @@ export const channelBrokerPlugin = createChatChannelPlugin({
       targetPrefixes: CHANNEL_BROKER_PLATFORM_TARGET_PREFIXES,
       normalizeTarget: normalizeBrokerTarget,
       inferTargetChatType: ({ to }) => inferChannelBrokerTargetChatType(to),
+      resolveSessionTarget: resolveBrokerSessionTarget,
       targetResolver: {
         looksLikeId: (raw) => Boolean(normalizeBrokerTarget(raw)),
         hint: "<platform>:<conversationId>[?threadId=<threadId>]",

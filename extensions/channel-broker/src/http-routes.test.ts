@@ -243,7 +243,7 @@ describe("channel-broker HTTP routes", () => {
         accountId: "acme",
         peer: {
           kind: "channel",
-          id: "telegram:-100123?conversationType=thread&threadId=77",
+          id: "telegram:-100123:thread:77",
         },
         parentPeer: { kind: "channel", id: "telegram:-100123" },
       }),

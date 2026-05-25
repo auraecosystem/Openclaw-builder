@@ -224,8 +224,8 @@ function createRuntimeFromPluginRuntime(pluginRuntime: PluginRuntime): ChannelBr
         const peer = {
           kind: chatKind,
           id:
-            event.conversation.type === "thread"
-              ? replyTarget
+            event.conversation.type === "thread" && event.conversation.threadId
+              ? `${event.platform}:${event.conversation.id}:thread:${event.conversation.threadId}`
               : `${event.platform}:${event.conversation.id}`,
         };
         const parentPeer =
