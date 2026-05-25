@@ -110,9 +110,11 @@ export const registerProviderStreamForModelMock: Mock<(params?: unknown) => unkn
 export const applyExtraParamsToAgentMock = vi.fn(() => ({ effectiveExtraParams: {} }));
 export const resolveAgentTransportOverrideMock: Mock<(params?: unknown) => string | undefined> =
   vi.fn(() => undefined);
+export const resolveAgentHarnessPolicyMock = vi.fn(() => ({ runtime: "pi" }));
 export const resolveSandboxContextMock = vi.fn(async () => null);
 export const maybeCompactAgentHarnessSessionMock: Mock<(params?: unknown) => Promise<unknown>> =
   vi.fn(async () => undefined);
+export const resolveContextWindowInfoMock = vi.fn(() => ({ tokens: 128_000 }));
 export const rotateTranscriptAfterCompactionMock: Mock<
   (_params?: unknown) => Promise<CompactionTranscriptRotation>
 > = vi.fn(async () => ({
@@ -264,10 +266,14 @@ export function resetCompactSessionStateMocks(): void {
   applyExtraParamsToAgentMock.mockReturnValue({ effectiveExtraParams: {} });
   resolveAgentTransportOverrideMock.mockReset();
   resolveAgentTransportOverrideMock.mockReturnValue(undefined);
+  resolveAgentHarnessPolicyMock.mockReset();
+  resolveAgentHarnessPolicyMock.mockReturnValue({ runtime: "pi" });
   resolveSandboxContextMock.mockReset();
   resolveSandboxContextMock.mockResolvedValue(null);
   maybeCompactAgentHarnessSessionMock.mockReset();
   maybeCompactAgentHarnessSessionMock.mockResolvedValue(undefined);
+  resolveContextWindowInfoMock.mockReset();
+  resolveContextWindowInfoMock.mockReturnValue({ tokens: 128_000 });
   rotateTranscriptAfterCompactionMock.mockReset();
   rotateTranscriptAfterCompactionMock.mockResolvedValue({ rotated: false });
   listRegisteredPluginAgentPromptGuidanceMock.mockReset();
@@ -359,6 +365,7 @@ export async function loadCompactHooksHarness(): Promise<{
     })),
     clearCurrentPluginMetadataSnapshot: vi.fn(),
     getCurrentPluginMetadataSnapshot: () => emptyPluginMetadataSnapshot,
+    isReusableCurrentPluginMetadataSnapshot: vi.fn(() => true),
     resolvePluginMetadataControlPlaneFingerprint: vi.fn(() => "test-plugin-fingerprint"),
     restoreCurrentPluginMetadataSnapshotState: vi.fn(),
     setCurrentPluginMetadataSnapshot: vi.fn(),
@@ -381,7 +388,7 @@ export async function loadCompactHooksHarness(): Promise<{
 
   vi.doMock("../harness/selection.js", () => ({
     maybeCompactAgentHarnessSession: maybeCompactAgentHarnessSessionMock,
-    resolveAgentHarnessPolicy: vi.fn(() => ({ runtime: "pi" })),
+    resolveAgentHarnessPolicy: resolveAgentHarnessPolicyMock,
   }));
 
   vi.doMock("../../plugins/provider-runtime.js", () => ({
@@ -537,7 +544,7 @@ export async function loadCompactHooksHarness(): Promise<{
   }));
 
   vi.doMock("../context-window-guard.js", () => ({
-    resolveContextWindowInfo: vi.fn(() => ({ tokens: 128_000 })),
+    resolveContextWindowInfo: resolveContextWindowInfoMock,
   }));
 
   vi.doMock("../bootstrap-files.js", () => ({
