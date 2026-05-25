@@ -432,13 +432,21 @@ export function buildModelAliasIndex(
   if (rawModelEntries.length === 0) {
     return { byAlias, byKey };
   }
-  const manifestPlugins = resolveManifestPluginsForModelIdNormalization(params);
-
-  for (const [keyRaw, entryRaw] of rawModelEntries) {
+  const aliasCandidates = rawModelEntries.flatMap(([keyRaw, entryRaw]) => {
     const trimmedKey = keyRaw.trim();
     if (trimmedKey.endsWith("/*") && normalizeProviderId(trimmedKey.slice(0, -2))) {
-      continue;
+      return [];
     }
+    const alias =
+      normalizeOptionalString((entryRaw as { alias?: string } | undefined)?.alias) ?? "";
+    return alias ? [{ keyRaw, alias }] : [];
+  });
+  if (aliasCandidates.length === 0) {
+    return { byAlias, byKey };
+  }
+  const manifestPlugins = resolveManifestPluginsForModelIdNormalization(params);
+
+  for (const { keyRaw, alias } of aliasCandidates) {
     const parsed = parseModelRefWithCompatAlias({
       cfg: params.cfg,
       raw: keyRaw,
@@ -448,11 +456,6 @@ export function buildModelAliasIndex(
       manifestPlugins,
     });
     if (!parsed) {
-      continue;
-    }
-    const alias =
-      normalizeOptionalString((entryRaw as { alias?: string } | undefined)?.alias) ?? "";
-    if (!alias) {
       continue;
     }
     const aliasKey = normalizeLowercaseStringOrEmpty(alias);
