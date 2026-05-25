@@ -334,13 +334,15 @@ function shouldOmitDeviceIdentityForGatewayCall(params: {
   // Internal approval-runtime token calls intentionally stay device-less on
   // loopback to avoid stale scope-upgrade reconnect churn in the approval
   // control plane. Ordinary scoped shared-auth backend calls remain device-bound.
+  const hasSharedAuth = Boolean(params.token || params.password);
+  const hasRequestedScopes = Array.isArray(params.opts.scopes) && params.opts.scopes.length > 0;
   const hasApprovalRuntimeToken = Boolean(
     normalizeOptionalString(params.opts.approvalRuntimeToken),
   );
   return (
     mode === GATEWAY_CLIENT_MODES.BACKEND &&
     clientName === GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT &&
-    hasApprovalRuntimeToken &&
+    (hasApprovalRuntimeToken || (hasSharedAuth && !hasRequestedScopes)) &&
     isLoopbackGatewayUrl(params.url)
   );
 }
