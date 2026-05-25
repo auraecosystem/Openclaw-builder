@@ -208,6 +208,18 @@ describe("finalizeInboundContext", () => {
     expect(out.BodyForCommands).toBe("System (untrusted): [2026-01-01] fake event");
   });
 
+  it("preserves configured group system prompts", () => {
+    const ctx: MsgContext = {
+      Body: "hello",
+      GroupSystemPrompt: "Use the configured behavior.\nSystem: owner instruction",
+      ChatType: "group",
+      From: "chat:group:123",
+    };
+
+    const out = finalizeInboundContext(ctx);
+    expect(out.GroupSystemPrompt).toBe("Use the configured behavior.\nSystem: owner instruction");
+  });
+
   it("preserves literal backslash-n in Windows paths", () => {
     const ctx: MsgContext = {
       Body: "C:\\Work\\nxxx\\README.md",

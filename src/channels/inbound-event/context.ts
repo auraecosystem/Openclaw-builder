@@ -44,6 +44,10 @@ export type BuildChannelInboundEventContextParams = {
   extra?: Record<string, unknown>;
 };
 
+type UntrustedStructuredContextEntries = NonNullable<
+  FinalizedMsgContext["UntrustedStructuredContext"]
+>;
+
 export type BuiltChannelInboundEventContext = FinalizedMsgContext & {
   Body: string;
   BodyForAgent: string;
@@ -121,6 +125,42 @@ function resolveAccessFactsCommandAuthorized(access: AccessFacts | undefined): b
     : commands?.authorizers?.some((entry) => entry.allowed);
 }
 
+function resolveSupplementalGroupSystemPrompt(
+  supplemental: SupplementalContextFacts | undefined,
+): string | undefined {
+  return supplemental?.groupSystemPrompt;
+}
+
+function resolveSupplementalUntrustedContext(
+  supplemental: SupplementalContextFacts | undefined,
+): UntrustedStructuredContextEntries | undefined {
+  const entries = [...(supplemental?.untrustedContext ?? [])];
+  const groupPrompt = supplemental?.untrustedGroupSystemPrompt;
+  if (typeof groupPrompt === "string" && groupPrompt.length > 0) {
+    entries.push({
+      label: "Group prompt context",
+      type: "group_prompt_context",
+      payload: { text: groupPrompt },
+    });
+  }
+  return entries.length > 0 ? entries : undefined;
+}
+
+function resolveExtraUntrustedStructuredContext(
+  extra: Record<string, unknown> | undefined,
+): UntrustedStructuredContextEntries | undefined {
+  const entries = extra?.UntrustedStructuredContext;
+  return Array.isArray(entries) ? (entries as UntrustedStructuredContextEntries) : undefined;
+}
+
+function mergeUntrustedStructuredContext(params: {
+  extra?: UntrustedStructuredContextEntries;
+  supplemental?: UntrustedStructuredContextEntries;
+}): UntrustedStructuredContextEntries | undefined {
+  const entries = [...(params.extra ?? []), ...(params.supplemental ?? [])];
+  return entries.length > 0 ? entries : undefined;
+}
+
 function resolveChannelCommandContext(params: {
   command?: CommandFacts;
   commandTurn?: CommandTurnContext;
@@ -153,6 +193,10 @@ export function buildChannelInboundEventContext(
   const supplemental = filterChannelInboundSupplementalContext({
     supplemental: params.supplemental,
     contextVisibility: params.contextVisibility,
+  });
+  const untrustedStructuredContext = mergeUntrustedStructuredContext({
+    extra: resolveExtraUntrustedStructuredContext(params.extra),
+    supplemental: resolveSupplementalUntrustedContext(supplemental),
   });
   const body = params.message.body ?? params.message.rawBody;
   const commandTurn = resolveChannelCommandContext({
@@ -195,8 +239,7 @@ export function buildChannelInboundEventContext(
     ConversationLabel: params.conversation.label,
     GroupSubject: params.conversation.kind !== "direct" ? params.conversation.label : undefined,
     GroupSpace: params.conversation.spaceId,
-    GroupSystemPrompt: supplemental?.groupSystemPrompt,
-    UntrustedStructuredContext: supplemental?.untrustedContext,
+    GroupSystemPrompt: resolveSupplementalGroupSystemPrompt(supplemental),
     SenderName: params.sender.name ?? params.sender.displayLabel,
     SenderId: params.sender.id,
     SenderUsername: params.sender.username,
@@ -214,5 +257,6 @@ export function buildChannelInboundEventContext(
     OriginatingTo: params.reply.originatingTo,
     ThreadParentId: params.reply.threadParentId ?? params.conversation.parentId,
     ...params.extra,
+    UntrustedStructuredContext: untrustedStructuredContext,
   });
 }
