@@ -625,6 +625,7 @@ export function createDeepSeekV4OpenAICompatibleThinkingWrapper(params: {
   baseStreamFn: StreamFn | undefined;
   thinkingLevel: DeepSeekV4ThinkingLevel;
   shouldPatchModel: (model: Parameters<StreamFn>[0]) => boolean;
+  emitThinkingField?: boolean;
   resolveReasoningEffort?: (thinkingLevel: DeepSeekV4ThinkingLevel) => DeepSeekV4ReasoningEffort;
   shouldBackfillAssistantReasoningContent?: (message: Record<string, unknown>) => boolean;
 }): StreamFn | undefined {
@@ -639,15 +640,22 @@ export function createDeepSeekV4OpenAICompatibleThinkingWrapper(params: {
     }
 
     return streamWithPayloadPatch(underlying, model, context, options, (payload) => {
+      if (params.emitThinkingField === false) {
+        delete payload.thinking;
+      }
       if (isDisabledDeepSeekV4ThinkingLevel(params.thinkingLevel)) {
-        payload.thinking = { type: "disabled" };
+        if (params.emitThinkingField !== false) {
+          payload.thinking = { type: "disabled" };
+        }
         delete payload.reasoning_effort;
         delete payload.reasoning;
         stripDeepSeekV4ReasoningContent(payload);
         return;
       }
 
-      payload.thinking = { type: "enabled" };
+      if (params.emitThinkingField !== false) {
+        payload.thinking = { type: "enabled" };
+      }
       payload.reasoning_effort = resolveReasoningEffort(params.thinkingLevel);
       ensureDeepSeekV4AssistantReasoningContent(payload, {
         shouldBackfillAssistantMessage: params.shouldBackfillAssistantReasoningContent,

@@ -329,7 +329,7 @@ describe("deepseek provider plugin", () => {
       {},
     );
 
-    expect(readThinking(capturedPayload)?.type).toBe("disabled");
+    expect(capturedPayload).not.toHaveProperty("thinking");
     expect(capturedPayload).not.toHaveProperty("reasoning_effort");
 
     const wrapThinkingXhigh = requireThinkingWrapper(
@@ -346,7 +346,7 @@ describe("deepseek provider plugin", () => {
       {},
     );
 
-    expect(readThinking(capturedPayload)?.type).toBe("enabled");
+    expect(capturedPayload).not.toHaveProperty("thinking");
     expect(capturedPayload?.reasoning_effort).toBe("max");
   });
 
@@ -362,7 +362,7 @@ describe("deepseek provider plugin", () => {
     );
     await wrapThinkingHigh(model, context, {});
 
-    expect(readThinking(capture.payload)?.type).toBe("enabled");
+    expect(capture.payload).not.toHaveProperty("thinking");
     expect(capture.payload?.reasoning_effort).toBe("high");
     const assistantMessage = readPayloadMessage(capture, 1);
     expect(assistantMessage?.role).toBe("assistant");
@@ -444,7 +444,7 @@ describe("deepseek provider plugin", () => {
     );
     await wrapThinkingNone(model, context, {});
 
-    expect(readThinking(capture.payload)?.type).toBe("disabled");
+    expect(capture.payload).not.toHaveProperty("thinking");
     expect(capture.payload).not.toHaveProperty("reasoning_effort");
     expect((capture.payload?.messages as Array<Record<string, unknown>>)[1]).not.toHaveProperty(
       "reasoning_content",
