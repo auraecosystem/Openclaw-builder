@@ -67,6 +67,23 @@ function hasExplicitChannelPluginBlockerConfig(cfg: OpenClawConfig): boolean {
   );
 }
 
+const IGNORED_CHANNEL_CONFIG_KEYS = new Set(["defaults", "modelByChannel"]);
+
+function hasConcreteConfiguredChannelSurface(cfg: OpenClawConfig): boolean {
+  if (!hasRecord(cfg.channels)) {
+    return false;
+  }
+  return Object.entries(cfg.channels).some(([channelId, entry]) => {
+    if (IGNORED_CHANNEL_CONFIG_KEYS.has(channelId) || !hasRecord(entry)) {
+      return false;
+    }
+    if (entry.enabled === false) {
+      return false;
+    }
+    return entry.enabled === true || Object.keys(entry).some((key) => key !== "enabled");
+  });
+}
+
 function hasToolsBySenderKey(value: unknown): boolean {
   if (Array.isArray(value)) {
     return value.some(hasToolsBySenderKey);
@@ -390,7 +407,9 @@ export async function collectDoctorPreviewNotes(params: {
   warnings.push(...collectChannelBoundMessageToolPolicyWarnings(params.cfg));
 
   const channelPluginRuntime =
-    hasChannelConfig && hasExplicitChannelPluginBlockerConfig(params.cfg)
+    hasChannelConfig &&
+    (hasExplicitChannelPluginBlockerConfig(params.cfg) ||
+      hasConcreteConfiguredChannelSurface(params.cfg))
       ? await import("./channel-plugin-blockers.js")
       : undefined;
   const channelPluginBlockerHits =
