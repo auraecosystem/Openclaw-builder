@@ -2262,6 +2262,7 @@ export async function runEmbeddedAttempt(
       // that must be passed to the resource loader for the safeguard to be active.
       const extensionFactories = buildEmbeddedExtensionFactories({
         cfg: params.config,
+        agentId: sessionAgentId,
         sessionManager,
         workspaceDir: effectiveWorkspace,
         provider: params.provider,
