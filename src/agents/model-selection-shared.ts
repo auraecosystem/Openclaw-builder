@@ -43,6 +43,50 @@ export type ModelAliasIndex = {
   byKey: Map<string, string[]>;
 };
 
+function resolveManifestPluginsForModelIdNormalization(params: {
+  cfg: OpenClawConfig;
+  workspaceDir?: string;
+  manifestPlugins?: ModelManifestPlugins;
+  allowManifestNormalization?: boolean;
+}): ModelManifestPlugins {
+  if (params.allowManifestNormalization === false || params.manifestPlugins) {
+    return params.manifestPlugins;
+  }
+  const workspaceDir = params.workspaceDir ?? getActivePluginRegistryWorkspaceDirFromState();
+  if (!workspaceDir) {
+    const currentManifestPlugins = getCurrentPluginMetadataSnapshot({
+      config: params.cfg,
+      env: process.env,
+    })?.plugins;
+    if (currentManifestPlugins) {
+      return currentManifestPlugins;
+    }
+    return loadManifestMetadataSnapshot({
+      config: params.cfg,
+      env: process.env,
+    }).plugins;
+  }
+  return loadManifestMetadataSnapshot({
+    config: params.cfg,
+    workspaceDir,
+    env: process.env,
+  }).plugins;
+}
+
+function hasConfiguredModelAliasEntries(cfg: OpenClawConfig): boolean {
+  const rawModels = cfg.agents?.defaults?.models;
+  if (!rawModels) {
+    return false;
+  }
+  return Object.entries(rawModels).some(([keyRaw, entryRaw]) => {
+    const trimmedKey = keyRaw.trim();
+    if (trimmedKey.endsWith("/*") && normalizeProviderId(trimmedKey.slice(0, -2))) {
+      return false;
+    }
+    return Boolean(normalizeOptionalString((entryRaw as { alias?: string } | undefined)?.alias));
+  });
+}
+
 function sanitizeModelWarningValue(value: string): string {
   const stripped = value ? stripAnsi(value) : "";
   let controlBoundary = -1;
@@ -80,6 +124,7 @@ export function inferUniqueProviderFromConfiguredModels(
   params: {
     cfg: OpenClawConfig;
     model: string;
+    allowManifestNormalization?: boolean;
   } & ModelManifestNormalizationContext,
 ): string | undefined {
   const model = params.model.trim();
@@ -103,7 +148,9 @@ export function inferUniqueProviderFromConfiguredModels(
         continue;
       }
       const parsed = parseModelRef(ref, DEFAULT_PROVIDER, {
+        allowManifestNormalization: params.allowManifestNormalization,
         allowPluginNormalization: false,
+        manifestPlugins: params.manifestPlugins,
       });
       if (!parsed) {
         continue;
@@ -129,6 +176,7 @@ export function inferUniqueProviderFromConfiguredModels(
           continue;
         }
         const normalizedModelId = normalizeConfiguredProviderCatalogModelId(providerId, modelId, {
+          allowManifestNormalization: params.allowManifestNormalization,
           manifestPlugins: params.manifestPlugins,
         });
         if (
@@ -397,27 +445,35 @@ export function buildModelAliasIndex(
 ): ModelAliasIndex {
   const byAlias = new Map<string, { alias: string; ref: ModelRef }>();
   const byKey = new Map<string, string[]>();
-
   const rawModels = params.cfg.agents?.defaults?.models ?? {};
-  for (const [keyRaw, entryRaw] of Object.entries(rawModels)) {
+  const rawModelEntries = Object.entries(rawModels);
+  if (rawModelEntries.length === 0) {
+    return { byAlias, byKey };
+  }
+  const aliasCandidates = rawModelEntries.flatMap(([keyRaw, entryRaw]) => {
     const trimmedKey = keyRaw.trim();
     if (trimmedKey.endsWith("/*") && normalizeProviderId(trimmedKey.slice(0, -2))) {
-      continue;
+      return [];
     }
+    const alias =
+      normalizeOptionalString((entryRaw as { alias?: string } | undefined)?.alias) ?? "";
+    return alias ? [{ keyRaw, alias }] : [];
+  });
+  if (aliasCandidates.length === 0) {
+    return { byAlias, byKey };
+  }
+  const manifestPlugins = resolveManifestPluginsForModelIdNormalization(params);
+
+  for (const { keyRaw, alias } of aliasCandidates) {
     const parsed = parseModelRefWithCompatAlias({
       cfg: params.cfg,
       raw: keyRaw,
       defaultProvider: params.defaultProvider,
       allowManifestNormalization: params.allowManifestNormalization,
       allowPluginNormalization: params.allowPluginNormalization,
-      manifestPlugins: params.manifestPlugins,
+      manifestPlugins,
     });
     if (!parsed) {
-      continue;
-    }
-    const alias =
-      normalizeOptionalString((entryRaw as { alias?: string } | undefined)?.alias) ?? "";
-    if (!alias) {
       continue;
     }
     const aliasKey = normalizeLowercaseStringOrEmpty(alias);
@@ -572,12 +628,25 @@ export function resolveConfiguredModelRef(
   const rawModel = resolveAgentModelPrimaryValue(params.cfg.agents?.defaults?.model) ?? "";
   if (rawModel) {
     const trimmed = rawModel.trim();
+    let manifestPlugins = params.manifestPlugins;
+    let manifestPluginsResolved =
+      params.allowManifestNormalization === false || params.manifestPlugins !== undefined;
+    const getManifestPlugins = () => {
+      if (!manifestPluginsResolved) {
+        manifestPlugins = resolveManifestPluginsForModelIdNormalization(params);
+        manifestPluginsResolved = true;
+      }
+      return manifestPlugins;
+    };
+    const aliasIndexManifestPlugins = hasConfiguredModelAliasEntries(params.cfg)
+      ? getManifestPlugins()
+      : manifestPlugins;
     const aliasIndex = buildModelAliasIndex({
       cfg: params.cfg,
       defaultProvider: params.defaultProvider,
       allowManifestNormalization: params.allowManifestNormalization,
       allowPluginNormalization: params.allowPluginNormalization,
-      manifestPlugins: params.manifestPlugins,
+      manifestPlugins: aliasIndexManifestPlugins,
     });
     const aliasKey = normalizeLowercaseStringOrEmpty(trimmed);
     const aliasMatch = aliasIndex.byAlias.get(aliasKey);
@@ -586,26 +655,53 @@ export function resolveConfiguredModelRef(
     }
 
     if (!trimmed.includes("/")) {
+      const normalizedTrimmed = normalizeLowercaseStringOrEmpty(trimmed);
+      const needsOpenRouterCompatManifestPlugins =
+        normalizedTrimmed === "openrouter:auto" ||
+        normalizedTrimmed === OPENROUTER_COMPAT_FREE_ALIAS;
       const openrouterCompatRef = resolveConfiguredOpenRouterCompatAlias({
         cfg: params.cfg,
         raw: trimmed,
         defaultProvider: params.defaultProvider,
         allowManifestNormalization: params.allowManifestNormalization,
         allowPluginNormalization: params.allowPluginNormalization,
-        manifestPlugins: params.manifestPlugins,
+        manifestPlugins: needsOpenRouterCompatManifestPlugins
+          ? getManifestPlugins()
+          : manifestPlugins,
       });
       if (openrouterCompatRef) {
         return openrouterCompatRef;
       }
 
-      const inferredProvider = inferUniqueProviderFromConfiguredModels({
+      let inferredProvider = inferUniqueProviderFromConfiguredModels({
         cfg: params.cfg,
         model: trimmed,
-        manifestPlugins: params.manifestPlugins,
+        allowManifestNormalization: false,
+        manifestPlugins,
       });
+      let inferredProviderManifestPlugins = manifestPlugins;
+      if (
+        hasConfiguredProviderRowsNeedingManifestLookup(params.cfg) &&
+        (!inferredProvider || inferredProvider !== "openai")
+      ) {
+        inferredProviderManifestPlugins = getManifestPlugins();
+        inferredProvider =
+          inferUniqueProviderFromConfiguredModels({
+            cfg: params.cfg,
+            model: trimmed,
+            allowManifestNormalization: params.allowManifestNormalization,
+            manifestPlugins: inferredProviderManifestPlugins,
+          }) ?? inferredProvider;
+      }
       if (inferredProvider) {
         return normalizeModelRef(inferredProvider, trimmed, {
-          manifestPlugins: params.manifestPlugins,
+          allowManifestNormalization: inferredProviderManifestPlugins
+            ? params.allowManifestNormalization
+            : false,
+          allowPluginNormalization: inferredProviderManifestPlugins
+            ? params.allowPluginNormalization
+            : false,
+          manifestPlugins: inferredProviderManifestPlugins,
         });
       }
 
@@ -624,7 +720,7 @@ export function resolveConfiguredModelRef(
       aliasIndex,
       allowManifestNormalization: params.allowManifestNormalization,
       allowPluginNormalization: params.allowPluginNormalization,
-      manifestPlugins: params.manifestPlugins,
+      manifestPlugins: getManifestPlugins(),
     });
     if (resolved) {
       return resolved.ref;
@@ -918,6 +1014,17 @@ export function hasConfiguredProviderModelRows(cfg: OpenClawConfig): boolean {
     return false;
   }
   return Object.values(providers).some((provider) => Array.isArray(provider?.models));
+}
+
+function hasConfiguredProviderRowsNeedingManifestLookup(cfg: OpenClawConfig): boolean {
+  const providers = cfg.models?.providers;
+  if (!providers || typeof providers !== "object") {
+    return false;
+  }
+  return Object.entries(providers).some(
+    ([providerRaw, provider]) =>
+      Array.isArray(provider?.models) && normalizeProviderId(providerRaw) !== "openai",
+  );
 }
 
 function resolveConfiguredModelManifestPlugins(params: {
