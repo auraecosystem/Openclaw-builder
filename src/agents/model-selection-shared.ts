@@ -110,6 +110,7 @@ export function inferUniqueProviderFromConfiguredModels(
   params: {
     cfg: OpenClawConfig;
     model: string;
+    allowManifestNormalization?: boolean;
   } & ModelManifestNormalizationContext,
 ): string | undefined {
   const model = params.model.trim();
@@ -133,7 +134,9 @@ export function inferUniqueProviderFromConfiguredModels(
         continue;
       }
       const parsed = parseModelRef(ref, DEFAULT_PROVIDER, {
+        allowManifestNormalization: params.allowManifestNormalization,
         allowPluginNormalization: false,
+        manifestPlugins: params.manifestPlugins,
       });
       if (!parsed) {
         continue;
@@ -159,6 +162,7 @@ export function inferUniqueProviderFromConfiguredModels(
           continue;
         }
         const normalizedModelId = normalizeConfiguredProviderCatalogModelId(providerId, modelId, {
+          allowManifestNormalization: params.allowManifestNormalization,
           manifestPlugins: params.manifestPlugins,
         });
         if (
@@ -417,20 +421,23 @@ export function buildConfiguredAllowlistKeys(
   return keys.size > 0 ? keys : null;
 }
 
-export function buildModelAliasIndex(
-  params: {
-    cfg: OpenClawConfig;
-    defaultProvider: string;
-    allowManifestNormalization?: boolean;
-    allowPluginNormalization?: boolean;
-  } & ModelManifestNormalizationContext,
-): ModelAliasIndex {
+type BuildModelAliasIndexParams = {
+  cfg: OpenClawConfig;
+  defaultProvider: string;
+  allowManifestNormalization?: boolean;
+  allowPluginNormalization?: boolean;
+} & ModelManifestNormalizationContext;
+
+function buildModelAliasIndexWithManifestPlugins(params: BuildModelAliasIndexParams): {
+  aliasIndex: ModelAliasIndex;
+  manifestPlugins?: ModelManifestPlugins;
+} {
   const byAlias = new Map<string, { alias: string; ref: ModelRef }>();
   const byKey = new Map<string, string[]>();
   const rawModels = params.cfg.agents?.defaults?.models ?? {};
   const rawModelEntries = Object.entries(rawModels);
   if (rawModelEntries.length === 0) {
-    return { byAlias, byKey };
+    return { aliasIndex: { byAlias, byKey } };
   }
   const aliasCandidates = rawModelEntries.flatMap(([keyRaw, entryRaw]) => {
     const trimmedKey = keyRaw.trim();
@@ -442,7 +449,7 @@ export function buildModelAliasIndex(
     return alias ? [{ keyRaw, alias }] : [];
   });
   if (aliasCandidates.length === 0) {
-    return { byAlias, byKey };
+    return { aliasIndex: { byAlias, byKey } };
   }
   const manifestPlugins = resolveManifestPluginsForModelIdNormalization(params);
 
@@ -466,7 +473,11 @@ export function buildModelAliasIndex(
     byKey.set(key, existing);
   }
 
-  return { byAlias, byKey };
+  return { aliasIndex: { byAlias, byKey }, manifestPlugins };
+}
+
+export function buildModelAliasIndex(params: BuildModelAliasIndexParams): ModelAliasIndex {
+  return buildModelAliasIndexWithManifestPlugins(params).aliasIndex;
 }
 
 type ModelCatalogMetadata = {
@@ -610,14 +621,26 @@ export function resolveConfiguredModelRef(
   const rawModel = resolveAgentModelPrimaryValue(params.cfg.agents?.defaults?.model) ?? "";
   if (rawModel) {
     const trimmed = rawModel.trim();
-    const manifestPlugins = resolveManifestPluginsForModelIdNormalization(params);
-    const aliasIndex = buildModelAliasIndex({
-      cfg: params.cfg,
-      defaultProvider: params.defaultProvider,
-      allowManifestNormalization: params.allowManifestNormalization,
-      allowPluginNormalization: params.allowPluginNormalization,
-      manifestPlugins,
-    });
+    const { aliasIndex, manifestPlugins: aliasManifestPlugins } =
+      buildModelAliasIndexWithManifestPlugins({
+        cfg: params.cfg,
+        defaultProvider: params.defaultProvider,
+        allowManifestNormalization: params.allowManifestNormalization,
+        allowPluginNormalization: params.allowPluginNormalization,
+        manifestPlugins: params.manifestPlugins,
+      });
+    let manifestPlugins = aliasManifestPlugins ?? params.manifestPlugins;
+    let manifestPluginsResolved =
+      params.allowManifestNormalization === false ||
+      params.manifestPlugins !== undefined ||
+      aliasManifestPlugins !== undefined;
+    const getManifestPlugins = () => {
+      if (!manifestPluginsResolved) {
+        manifestPlugins = resolveManifestPluginsForModelIdNormalization(params);
+        manifestPluginsResolved = true;
+      }
+      return manifestPlugins;
+    };
     const aliasKey = normalizeLowercaseStringOrEmpty(trimmed);
     const aliasMatch = aliasIndex.byAlias.get(aliasKey);
     if (aliasMatch) {
@@ -625,26 +648,52 @@ export function resolveConfiguredModelRef(
     }
 
     if (!trimmed.includes("/")) {
+      const normalizedTrimmed = normalizeLowercaseStringOrEmpty(trimmed);
+      const needsOpenRouterCompatManifestPlugins =
+        normalizedTrimmed === "openrouter:auto" ||
+        normalizedTrimmed === OPENROUTER_COMPAT_FREE_ALIAS;
       const openrouterCompatRef = resolveConfiguredOpenRouterCompatAlias({
         cfg: params.cfg,
         raw: trimmed,
         defaultProvider: params.defaultProvider,
         allowManifestNormalization: params.allowManifestNormalization,
         allowPluginNormalization: params.allowPluginNormalization,
-        manifestPlugins,
+        manifestPlugins: needsOpenRouterCompatManifestPlugins
+          ? getManifestPlugins()
+          : manifestPlugins,
       });
       if (openrouterCompatRef) {
         return openrouterCompatRef;
       }
 
-      const inferredProvider = inferUniqueProviderFromConfiguredModels({
+      let inferredProvider = inferUniqueProviderFromConfiguredModels({
         cfg: params.cfg,
         model: trimmed,
+        allowManifestNormalization: manifestPlugins ? params.allowManifestNormalization : false,
         manifestPlugins,
       });
+      let inferredProviderManifestPlugins = manifestPlugins;
+      if (!inferredProvider && hasConfiguredProviderRowsNeedingManifestLookup(params.cfg)) {
+        const resolvedManifestPlugins = getManifestPlugins();
+        inferredProvider = inferUniqueProviderFromConfiguredModels({
+          cfg: params.cfg,
+          model: trimmed,
+          allowManifestNormalization: params.allowManifestNormalization,
+          manifestPlugins: resolvedManifestPlugins,
+        });
+        if (inferredProvider) {
+          inferredProviderManifestPlugins = resolvedManifestPlugins;
+        }
+      }
       if (inferredProvider) {
         return normalizeModelRef(inferredProvider, trimmed, {
-          manifestPlugins,
+          allowManifestNormalization: inferredProviderManifestPlugins
+            ? params.allowManifestNormalization
+            : false,
+          allowPluginNormalization: inferredProviderManifestPlugins
+            ? params.allowPluginNormalization
+            : false,
+          manifestPlugins: inferredProviderManifestPlugins,
         });
       }
 
@@ -663,7 +712,7 @@ export function resolveConfiguredModelRef(
       aliasIndex,
       allowManifestNormalization: params.allowManifestNormalization,
       allowPluginNormalization: params.allowPluginNormalization,
-      manifestPlugins,
+      manifestPlugins: getManifestPlugins(),
     });
     if (resolved) {
       return resolved.ref;
@@ -957,6 +1006,17 @@ export function hasConfiguredProviderModelRows(cfg: OpenClawConfig): boolean {
     return false;
   }
   return Object.values(providers).some((provider) => Array.isArray(provider?.models));
+}
+
+function hasConfiguredProviderRowsNeedingManifestLookup(cfg: OpenClawConfig): boolean {
+  const providers = cfg.models?.providers;
+  if (!providers || typeof providers !== "object") {
+    return false;
+  }
+  return Object.entries(providers).some(
+    ([providerRaw, provider]) =>
+      Array.isArray(provider?.models) && normalizeProviderId(providerRaw) !== "openai",
+  );
 }
 
 function resolveConfiguredModelManifestPlugins(params: {
