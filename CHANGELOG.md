@@ -13,6 +13,8 @@ Docs: https://docs.openclaw.ai
 - iOS: improve Talk mode with direct realtime voice sessions, compact toolbar status, and responsive voice waveform feedback. (#86355) Thanks @ngutman.
 
 ### Fixes
+ 
+- Agents/session-write-lock: extend the payload-less orphan-lock init grace from 5 s to 30 s. Fixes #80686. Thanks @wAngByg.
 
 - Discord/OpenAI voice: accept leading fuzzy wake-name transcripts such as "Monty" or "Moti" for a Molty agent while keeping ambient speech gated.
 - Media understanding: convert HEIC and HEIF images to JPEG before image description providers run so iPhone photos work in direct and configured image-description flows. (#86037)

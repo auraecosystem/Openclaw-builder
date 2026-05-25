@@ -42,9 +42,11 @@ export const DEFAULT_SESSION_WRITE_LOCK_MAX_HOLD_MS = 5 * 60 * 1000;
 export const DEFAULT_SESSION_WRITE_LOCK_ACQUIRE_TIMEOUT_MS = 60_000;
 const DEFAULT_WATCHDOG_INTERVAL_MS = 60_000;
 const DEFAULT_TIMEOUT_GRACE_MS = 2 * 60 * 1000;
-// A payload-less lock can be left behind if shutdown lands between open("wx")
-// and the owner metadata write. Keep the grace short so 10s callers recover.
-const ORPHAN_LOCK_PAYLOAD_GRACE_MS = 5_000;
+// A payload-less lock can be left behind during the window between open("wx")
+// and the owner metadata write if the owner is suspended (CPU pressure,
+// container freeze, I/O stall, GC pause). 30 s covers realistic system
+// pauses while staying well below DEFAULT_TIMEOUT_GRACE_MS (120 s).
+const ORPHAN_LOCK_PAYLOAD_GRACE_MS = 30_000;
 const MAX_LOCK_HOLD_MS = 2_147_000_000;
 
 type CleanupState = {

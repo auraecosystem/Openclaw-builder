@@ -281,12 +281,34 @@ describe("acquireSessionWriteLock", () => {
     }
   });
 
-  it("reclaims payload-less orphan lock files after the short init grace", async () => {
+  it("preserves payload-less lock files within the 30s init grace", async () => {
     await withTempSessionLockFile(async ({ sessionFile, lockPath }) => {
       await fs.writeFile(lockPath, "", "utf8");
       const orphanDate = new Date(Date.now() - 10_000);
       await fs.utimes(lockPath, orphanDate, orphanDate);
 
+      // 10s < 30s grace, so the payload-less lock is preserved (not reclaimed).
+      // acquireSessionWriteLock should fail (timeout) because the lock is not reclaimed.
+      await expect(
+        acquireSessionWriteLock({
+          sessionFile,
+          timeoutMs: 500, // short timeout for fast failure
+          staleMs: 60_000,
+        }),
+      ).rejects.toThrow();
+
+      // The lock file should still exist (not reclaimed).
+      await expect(fs.access(lockPath)).resolves.toBeUndefined();
+    });
+  });
+
+  it("reclaims payload-less orphan lock files past the 30s init grace", async () => {
+    await withTempSessionLockFile(async ({ sessionFile, lockPath }) => {
+      await fs.writeFile(lockPath, "", "utf8");
+      const orphanDate = new Date(Date.now() - 35_000);
+      await fs.utimes(lockPath, orphanDate, orphanDate);
+
+      // 35s > 30s grace, so the payload-less lock is reclaimed.
       const lock = await acquireSessionWriteLock({
         sessionFile,
         timeoutMs: 10_000,
