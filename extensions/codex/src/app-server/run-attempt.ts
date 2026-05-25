@@ -920,6 +920,7 @@ export async function runCodexAppServerAttempt(
   params: EmbeddedRunAttemptParams,
   options: {
     pluginConfig?: unknown;
+    startupTimeoutMs?: number;
     startupTimeoutFloorMs?: number;
     nativeHookRelay?: {
       enabled?: boolean;
@@ -1355,7 +1356,7 @@ export async function runCodexAppServerAttempt(
     | (() => Promise<CodexAppServerThreadLifecycleBinding>)
     | undefined;
   const startupTimeoutMs = resolveCodexStartupTimeoutMs({
-    timeoutMs: params.timeoutMs,
+    timeoutMs: options.startupTimeoutMs ?? appServer.startupTimeoutMs,
     timeoutFloorMs: options.startupTimeoutFloorMs,
   });
   try {

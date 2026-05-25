@@ -108,6 +108,7 @@ export type CodexAppServerRuntimeOptions = {
   start: CodexAppServerStartOptions;
   codeModeOnly: boolean;
   requestTimeoutMs: number;
+  startupTimeoutMs: number;
   turnCompletionIdleTimeoutMs: number;
   postToolRawAssistantCompletionIdleTimeoutMs?: number;
   approvalPolicy: CodexAppServerEffectiveApprovalPolicy;
@@ -136,6 +137,7 @@ export type CodexPluginConfig = {
     clearEnv?: string[];
     codeModeOnly?: boolean;
     requestTimeoutMs?: number;
+    startupTimeoutMs?: number;
     turnCompletionIdleTimeoutMs?: number;
     postToolRawAssistantCompletionIdleTimeoutMs?: number;
     approvalPolicy?: CodexAppServerApprovalPolicy;
@@ -158,6 +160,7 @@ export const CODEX_APP_SERVER_CONFIG_KEYS = [
   "clearEnv",
   "codeModeOnly",
   "requestTimeoutMs",
+  "startupTimeoutMs",
   "turnCompletionIdleTimeoutMs",
   "postToolRawAssistantCompletionIdleTimeoutMs",
   "approvalPolicy",
@@ -275,6 +278,7 @@ const codexPluginConfigSchema = z
         clearEnv: z.array(z.string()).optional(),
         codeModeOnly: z.boolean().optional(),
         requestTimeoutMs: z.number().positive().optional(),
+        startupTimeoutMs: z.number().positive().optional(),
         turnCompletionIdleTimeoutMs: z.number().positive().optional(),
         postToolRawAssistantCompletionIdleTimeoutMs: z.number().positive().optional(),
         approvalPolicy: codexAppServerApprovalPolicySchema.optional(),
@@ -420,6 +424,7 @@ export function resolveCodexAppServerRuntimeOptions(
     },
     codeModeOnly: config.codeModeOnly === true,
     requestTimeoutMs: normalizePositiveNumber(config.requestTimeoutMs, 60_000),
+    startupTimeoutMs: normalizePositiveNumber(config.startupTimeoutMs, 120_000),
     turnCompletionIdleTimeoutMs: normalizePositiveNumber(
       config.turnCompletionIdleTimeoutMs,
       60_000,

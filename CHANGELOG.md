@@ -1689,6 +1689,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Codex/app-server: add `plugins.entries.codex.config.appServer.startupTimeoutMs` (default 120000ms) and stop reusing the per-turn `timeoutMs` budget for app-server startup, so deterministic local startup failures fail at the configured startup ceiling instead of holding the agent lane for the full turn timeout. Thanks @cathrynlavery.
 - Agents: honor `OPENCLAW_WORKSPACE_DIR` when resolving the default agent workspace, preserving explicit config precedence while keeping env-backed deployments out of the system prompt fallback path. Fixes #66786.
 - Doctor/Codex: stop warning that the message tool is unavailable for source-reply paths where OpenClaw grants `message` at runtime, keeping update and doctor output aligned with the OpenAI happy path. Thanks @pashpashpash.
 - Channels/Weixin: bump the external Weixin catalog entry to `@tencent-weixin/openclaw-weixin@2.4.3` with the matching package integrity. (#81730) Thanks @scotthuang.

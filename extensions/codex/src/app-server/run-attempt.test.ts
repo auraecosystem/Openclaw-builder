@@ -516,6 +516,7 @@ function createThreadLifecycleAppServerOptions(): Parameters<
       headers: {},
     },
     requestTimeoutMs: 60_000,
+    startupTimeoutMs: 120_000,
     turnCompletionIdleTimeoutMs: 60_000,
     approvalPolicy: "never",
     approvalsReviewer: "user",
@@ -7268,7 +7269,7 @@ describe("runCodexAppServerAttempt", () => {
     const params = createParams(sessionFile, workspaceDir);
     const abortController = new AbortController();
     const attemptTimeoutMs = 45 * 60_000;
-    const startupTimeoutMs = attemptTimeoutMs;
+    const startupTimeoutMs = 120_000;
     const turnStartTimeoutMs = attemptTimeoutMs;
     const cleanupGraceMs = 5 * 60_000;
     const expectedRelayTtlMs =
@@ -9403,11 +9404,11 @@ describe("runCodexAppServerAttempt", () => {
       path.join(tempDir, "session.jsonl"),
       path.join(tempDir, "workspace"),
     );
-    params.timeoutMs = 1;
+    params.timeoutMs = 30 * 60 * 1000;
 
-    await expect(runCodexAppServerAttempt(params, { startupTimeoutFloorMs: 1 })).rejects.toThrow(
-      "codex app-server startup timed out",
-    );
+    await expect(
+      runCodexAppServerAttempt(params, { startupTimeoutMs: 1, startupTimeoutFloorMs: 1 }),
+    ).rejects.toThrow("codex app-server startup timed out");
     expect(queueActiveRunMessageForTest("session-1", "after timeout")).toBe(false);
   });
 
@@ -11301,6 +11302,7 @@ describe("runCodexAppServerAttempt", () => {
       },
       codeModeOnly: false,
       requestTimeoutMs: 60_000,
+      startupTimeoutMs: 120_000,
       turnCompletionIdleTimeoutMs: 60_000,
       approvalPolicy: "never" as const,
       approvalsReviewer: "user" as const,
@@ -11370,6 +11372,7 @@ describe("runCodexAppServerAttempt", () => {
       },
       codeModeOnly: false,
       requestTimeoutMs: 60_000,
+      startupTimeoutMs: 120_000,
       turnCompletionIdleTimeoutMs: 60_000,
       approvalPolicy: "on-request" as const,
       approvalsReviewer: "guardian_subagent" as const,
@@ -11509,6 +11512,7 @@ describe("runCodexAppServerAttempt", () => {
         },
         codeModeOnly: false,
         requestTimeoutMs: 60_000,
+        startupTimeoutMs: 120_000,
         turnCompletionIdleTimeoutMs: 60_000,
         approvalPolicy: "never",
         approvalsReviewer: "user",
