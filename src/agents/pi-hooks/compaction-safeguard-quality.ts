@@ -137,6 +137,67 @@ function sanitizeExtractedIdentifier(value: string): string {
     .replace(/[)\]"'`,;:.!?<>]+$/, "");
 }
 
+// Blocklist for credential-shaped prefixes. These strings are common API key,
+// token, and secret prefixes that should never be re-appended to a compaction
+// summary. Case-insensitive check against the start of the sanitized value.
+const CREDENTIAL_PREFIXES = [
+  "sk-",
+  "pk-",
+  "rk-",
+  "sk_live_",
+  "sk_test_",
+  "pk_live_",
+  "pk_test_",
+  "whsec_",
+  "xoxb-",
+  "xoxp-",
+  "xoxs-",
+  "xoxa-",
+  "ghp_",
+  "gho_",
+  "ghs_",
+  "ghu_",
+  "github_pat_",
+  "glpat-",
+  "glcbt-",
+  "Bearer ",
+  "bearer ",
+  "AKIA",
+  "ASIA",
+  "eyJ", // JWT prefix (base64-encoded '{')
+];
+
+// URL query parameter names that commonly carry secrets.
+const CREDENTIAL_URL_PARAMS =
+  /[?&](token|access_token|api_key|apikey|secret|password|auth|key|credential)=/i;
+
+function isCredentialShaped(value: string): boolean {
+  for (const prefix of CREDENTIAL_PREFIXES) {
+    if (value.startsWith(prefix)) {
+      return true;
+    }
+  }
+  if (value.startsWith("http") && CREDENTIAL_URL_PARAMS.test(value)) {
+    return true;
+  }
+  return false;
+}
+
+// Pre-extraction redaction: remove credential-shaped substrings from input text
+// BEFORE the identifier regex runs. This prevents hex fragments of API keys
+// (e.g. "abcd1234ef" from "sk-abcd1234efgh") from surviving as identifiers
+// when the prefix falls outside the regex match boundary.
+const CREDENTIAL_REDACT_PATTERN = new RegExp(
+  "(?:" +
+    CREDENTIAL_PREFIXES.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") +
+    ")[A-Za-z0-9_\\-.+/=]{4,}",
+  "g",
+);
+
+function redactCredentials(text: string): string {
+  return text.replace(CREDENTIAL_REDACT_PATTERN, "");
+}
+
 function isPureHexIdentifier(value: string): boolean {
   return /^[A-Fa-f0-9]{8,}$/.test(value);
 }
@@ -153,18 +214,75 @@ function summaryIncludesIdentifier(summary: string, identifier: string): boolean
 }
 
 export function extractOpaqueIdentifiers(text: string): string[] {
+  const safeText = redactCredentials(text);
   const matches =
-    text.match(
+    safeText.match(
       /([A-Fa-f0-9]{8,}|https?:\/\/\S+|\/[\w.-]{2,}(?:\/[\w.-]+)+|[A-Za-z]:\\[\w\\.-]+|[A-Za-z0-9._-]+\.[A-Za-z0-9._/-]+:\d{1,5}|\b\d{6,}\b)/g,
     ) ?? [];
   return Array.from(
     new Set(
       matches
         .map((value) => sanitizeExtractedIdentifier(value))
+        .filter((value) => !isCredentialShaped(value))
         .map((value) => normalizeOpaqueIdentifier(value))
         .filter((value) => value.length >= 4),
     ),
   ).slice(0, MAX_EXTRACTED_IDENTIFIERS);
+}
+
+const TOOL_CALL_BLOCK_TYPES = new Set([
+  "toolCall",
+  "toolUse",
+  "tool_use",
+  "functionCall",
+  "function_call",
+]);
+
+export function extractMessageTextForIdentifiers(message: unknown): string {
+  if (!message || typeof message !== "object") {
+    return "";
+  }
+  const parts: string[] = [];
+  const msg = message as { content?: unknown };
+  const content = msg.content;
+  if (typeof content === "string") {
+    parts.push(content);
+  } else if (Array.isArray(content)) {
+    for (const block of content) {
+      if (!block || typeof block !== "object") {
+        continue;
+      }
+      const rec = block as Record<string, unknown>;
+      if (rec.type === "text" && typeof rec.text === "string") {
+        parts.push(rec.text);
+      }
+      if (typeof rec.type === "string" && TOOL_CALL_BLOCK_TYPES.has(rec.type)) {
+        const args = rec.arguments ?? rec.input;
+        if (typeof args === "string") {
+          parts.push(args);
+        } else if (args && typeof args === "object") {
+          try {
+            parts.push(JSON.stringify(args));
+          } catch {
+            // skip unserializable args
+          }
+        }
+      }
+    }
+  }
+  return parts.join("\n");
+}
+
+export function extractIdentifiersFromMessages(messages: unknown[]): string[] {
+  const text = messages
+    .map((msg) => extractMessageTextForIdentifiers(msg))
+    .filter(Boolean)
+    .join("\n");
+  return extractOpaqueIdentifiers(text);
+}
+
+export function computeLostIdentifiers(sourceIdentifiers: string[], summary: string): string[] {
+  return sourceIdentifiers.filter((identifier) => !summaryIncludesIdentifier(summary, identifier));
 }
 
 function tokenizeAskOverlapText(text: string): string[] {
