@@ -26,7 +26,8 @@ export type OutboundReplyPayload = {
   interactive?: InternalReplyPayload["interactive"];
   channelData?: InternalReplyPayload["channelData"];
   sensitiveMedia?: boolean;
-  replyToId?: string;
+  // null explicitly suppresses inherited reply metadata (distinct from undefined = "not set")
+  replyToId?: string | null;
 };
 
 export type ReasoningReplyPayload = {
@@ -98,7 +99,12 @@ export function normalizeOutboundReplyPayload(
   const interactive = readObjectValue(payload.interactive) as OutboundReplyPayload["interactive"];
   const channelData = readObjectValue(payload.channelData) as OutboundReplyPayload["channelData"];
   const sensitiveMedia = payload.sensitiveMedia === true ? true : undefined;
-  const replyToId = readStringValue(payload.replyToId);
+  const replyToId =
+    typeof payload.replyToId === "string"
+      ? payload.replyToId
+      : payload.replyToId === null
+        ? null
+        : undefined;
   return {
     text,
     mediaUrls,
@@ -478,7 +484,7 @@ export async function deliverFormattedTextWithAttachments(params: {
   }
   await params.send({
     text,
-    replyToId: params.payload.replyToId,
+    replyToId: params.payload.replyToId ?? undefined,
   });
   return true;
 }
