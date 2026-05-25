@@ -100,6 +100,7 @@ import {
   emitDynamicToolTerminalDiagnostic,
 } from "./dynamic-tool-diagnostics.js";
 import {
+  CODEX_APP_SERVER_OWNED_DYNAMIC_TOOL_EXCLUDES,
   filterCodexDynamicTools,
   isForcedPrivateQaCodexRuntime,
   normalizeCodexDynamicToolName,
@@ -3982,11 +3983,16 @@ function shouldEnableCodexAppServerNativeToolSurface(
   if (toolsAllow === undefined) {
     return canCodexAppServerNativeToolSurfaceHonorSandbox(sandbox, options);
   }
-  // Codex native code mode exposes its shell/file surface as one app-server
-  // capability, so narrow OpenClaw allowlists must fail closed rather than
-  // widening `message` or `web_search` into shell access.
+  // Enable native surface if toolsAllow has wildcard OR explicitly requests any
+  // native-owned tool (read, write, edit, exec, etc.). This ensures that when
+  // users request native tools in their allowlist, they actually get them.
+  const hasNativeRequest = toolsAllow.some((name) =>
+    (CODEX_APP_SERVER_OWNED_DYNAMIC_TOOL_EXCLUDES as readonly string[]).includes(
+      normalizeCodexDynamicToolName(name),
+    ),
+  );
   return (
-    hasWildcardCodexToolsAllow(toolsAllow) &&
+    (hasWildcardCodexToolsAllow(toolsAllow) || hasNativeRequest) &&
     canCodexAppServerNativeToolSurfaceHonorSandbox(sandbox, options)
   );
 }
