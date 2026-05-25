@@ -6,7 +6,6 @@ Docs: https://docs.openclaw.ai
 
 ### Changes
 
-- MCP/approvals: gate bundle-MCP tool calls through the existing plugin-approval pipeline when an MCP server returns a standard consent envelope (`{ok: false, requires_confirmation: true, action_id, summary}`). The `action_id` is redacted from the model's view; the user replies `/approve <id> allow-once|deny` on the trusted channel and OpenClaw re-calls the tool with `confirmation_token = action_id`. Servers that don't return the envelope are unaffected. Reuses the same channel-auth, ID-prefix routing, and reply parser already used for shell-exec approvals. Disable per-deployment with `mcp.approvals.enabled: false`. Thanks @oalterg.
 - QA-Lab: add `qa coverage --match <query>` so focused proof selection can discover matching scenarios from existing metadata before running live or remote lanes.
 - Control UI: add an ephemeral Activity tab for sanitized live tool activity summaries without persisting raw telemetry. Fixes #12831. Thanks @BunsDev.
 - Build: include `ui:build` in the `full` and `ciArtifacts` profiles of `scripts/build-all.mjs` so `pnpm build` always rebuilds `dist/control-ui` after `tsdown` cleans `dist`, removing the second-command requirement and the missing-asset failure mode for source/runtime installs and CI artifact uploads. (#85206)
