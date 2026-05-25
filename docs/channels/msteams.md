@@ -666,6 +666,55 @@ Teams delivers messages via HTTP webhook. If processing takes too long (e.g., sl
 
 OpenClaw handles this by returning quickly and sending replies proactively, but very slow responses may still cause issues.
 
+### Teams cloud and service URL support
+
+This SDK-backed Teams path is live-validated for Microsoft Teams public cloud.
+
+Inbound replies use the incoming Teams SDK turn context. Out-of-context proactive operations - sends, edits, deletes, cards, polls, file-consent messages, and queued long-running replies - use the SDK app-level Bot Connector service URL. Public cloud defaults to the Teams SDK public cloud environment and global Teams endpoint: `https://smba.trafficmanager.net/teams/`.
+
+Public cloud is the default. You do not need to set `channels.msteams.cloud` or `channels.msteams.serviceUrl` for normal public-cloud bots.
+
+For non-public Teams clouds, set both values:
+
+- `channels.msteams.cloud` selects the Teams SDK cloud preset for authentication, JWT validation, token services, and Graph scope.
+- `channels.msteams.serviceUrl` selects the Bot Connector endpoint used by proactive sends, edits, deletes, cards, polls, file-consent messages, and queued long-running replies.
+
+Microsoft publishes the global proactive Bot Connector endpoints in the [Create the conversation](https://learn.microsoft.com/en-us/microsoftteams/platform/bots/how-to/conversations/send-proactive-messages?tabs=dotnet#create-the-conversation) section of the Teams proactive messaging docs. Use the incoming activity's `serviceUrl` when available; if you need a global proactive endpoint, use Microsoft's table.
+
+| Teams environment | OpenClaw config                                             | Proactive `serviceUrl`                             |
+| ----------------- | ----------------------------------------------------------- | -------------------------------------------------- |
+| Public            | no cloud/serviceUrl config needed                           | `https://smba.trafficmanager.net/teams`            |
+| GCC               | set `serviceUrl`; no separate Teams SDK cloud preset exists | `https://smba.infra.gcc.teams.microsoft.com/teams` |
+| GCC High          | `cloud: "USGov"` + `serviceUrl`                             | `https://smba.infra.gov.teams.microsoft.us/teams`  |
+| DoD               | `cloud: "USGovDoD"` + `serviceUrl`                          | `https://smba.infra.dod.teams.microsoft.us/teams`  |
+
+Example for GCC, where Microsoft documents a separate proactive service URL but the Teams SDK does not expose a separate GCC cloud preset:
+
+```json
+{
+  "channels": {
+    "msteams": {
+      "serviceUrl": "https://smba.infra.gcc.teams.microsoft.com/teams"
+    }
+  }
+}
+```
+
+Example for GCC High:
+
+```json
+{
+  "channels": {
+    "msteams": {
+      "cloud": "USGov",
+      "serviceUrl": "https://smba.infra.gov.teams.microsoft.us/teams"
+    }
+  }
+}
+```
+
+`channels.msteams.serviceUrl` can also override the public-cloud default for custom or future endpoints. When a service URL is configured, OpenClaw checks that the stored conversation `serviceUrl` uses the same host before proactive sends, edits, deletes, cards, polls, or queued long-running replies run. With the default public-cloud config, OpenClaw fails closed if a stored conversation points outside the public Teams Connector host. Receive a fresh message from the conversation after changing cloud/service URL settings so the stored conversation reference is current.
+
 ### Formatting
 
 Teams markdown is more limited than Slack or Discord:
@@ -680,6 +729,8 @@ Key settings (see `/gateway/configuration` for shared channel patterns):
 
 - `channels.msteams.enabled`: enable/disable the channel.
 - `channels.msteams.appId`, `channels.msteams.appPassword`, `channels.msteams.tenantId`: bot credentials.
+- `channels.msteams.cloud`: Teams SDK cloud environment (`Public`, `USGov`, `USGovDoD`, or `China`; default `Public`). Set this with `serviceUrl` for non-public SDK clouds.
+- `channels.msteams.serviceUrl`: Bot Connector service URL for SDK proactive operations. Public cloud uses the SDK default; set this for GCC (`https://smba.infra.gcc.teams.microsoft.com/teams`), GCC High, DoD, China/21Vianet, or custom endpoints.
 - `channels.msteams.webhook.port` (default `3978`)
 - `channels.msteams.webhook.path` (default `/api/messages`)
 - `channels.msteams.dmPolicy`: `pairing | allowlist | open | disabled` (default: pairing)

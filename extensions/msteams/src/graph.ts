@@ -1,10 +1,11 @@
 import { readProviderJsonResponse } from "openclaw/plugin-sdk/provider-http";
 import { fetchWithSsrFGuard, type MSTeamsConfig } from "../runtime-api.js";
 import { GRAPH_ROOT } from "./attachments/shared.js";
+import { resolveMSTeamsSdkCloudOptions } from "./cloud.js";
+import { createMSTeamsTokenProvider, loadMSTeamsSdkWithAuth } from "./sdk.js";
 
 const GRAPH_BETA = "https://graph.microsoft.com/beta";
 const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
-import { createMSTeamsTokenProvider, loadMSTeamsSdkWithAuth } from "./sdk.js";
 import { readAccessToken } from "./token-response.js";
 import { resolveDelegatedAccessToken, resolveMSTeamsCredentials } from "./token.js";
 import { buildUserAgent } from "./user-agent.js";
@@ -228,7 +229,7 @@ export async function resolveGraphToken(
     // Fall through to app-only token
   }
 
-  const { app } = await loadMSTeamsSdkWithAuth(creds);
+  const { app } = await loadMSTeamsSdkWithAuth(creds, resolveMSTeamsSdkCloudOptions(msteamsCfg));
   const tokenProvider = createMSTeamsTokenProvider(app);
   const graphTokenValue = await tokenProvider.getAccessToken("https://graph.microsoft.com");
   const accessToken = readAccessToken(graphTokenValue);

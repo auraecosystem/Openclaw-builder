@@ -1518,6 +1518,8 @@ export const MSTeamsConfigSchema = z
     appId: z.string().optional(),
     appPassword: SecretInputSchema.optional().register(sensitive),
     tenantId: z.string().optional(),
+    cloud: z.enum(["Public", "USGov", "USGovDoD", "China"]).optional(),
+    serviceUrl: z.string().url().optional(),
     authType: z.enum(["secret", "federated"]).optional(),
     certificatePath: z.string().optional(),
     certificateThumbprint: z.string().optional(),
@@ -1602,6 +1604,14 @@ export const MSTeamsConfigSchema = z
         path: ["sso", "connectionName"],
         message:
           "channels.msteams.sso.enabled=true requires channels.msteams.sso.connectionName to identify the Bot Framework OAuth connection",
+      });
+    }
+    if (value.cloud && value.cloud !== "Public" && !value.serviceUrl?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["serviceUrl"],
+        message:
+          "channels.msteams.cloud requires channels.msteams.serviceUrl for non-public Teams clouds",
       });
     }
 

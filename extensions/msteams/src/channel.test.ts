@@ -96,6 +96,27 @@ describe("msteams config schema", () => {
     }
   });
 
+  it("accepts Teams SDK cloud and serviceUrl configuration", () => {
+    const res = MSTeamsConfigSchema.safeParse({
+      cloud: "USGovDoD",
+      serviceUrl: "https://dod.example.mil/teams",
+    });
+
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.cloud).toBe("USGovDoD");
+      expect(res.data.serviceUrl).toBe("https://dod.example.mil/teams");
+    }
+  });
+
+  it("requires serviceUrl with non-public Teams clouds", () => {
+    const res = MSTeamsConfigSchema.safeParse({
+      cloud: "USGov",
+    });
+
+    expect(res.success).toBe(false);
+  });
+
   it("rejects invalid replyStyle", () => {
     const res = MSTeamsConfigSchema.safeParse({
       replyStyle: "nope",
