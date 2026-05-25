@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { statSync } from "node:fs";
+import { closeSync, openSync, readSync, statSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -293,6 +293,35 @@ async function readAppendedSessionFileText(params: {
   return buffer.toString("utf8");
 }
 
+function readAppendedSessionFileTextSync(params: {
+  sessionFile: string;
+  previous: Extract<SessionFileFingerprint, { exists: true }>;
+  current: Extract<SessionFileFingerprint, { exists: true }>;
+}): string | undefined {
+  if (params.current.size <= params.previous.size || params.previous.size > MAX_SAFE_FILE_OFFSET) {
+    return undefined;
+  }
+  const appendedBytes = params.current.size - params.previous.size;
+  if (
+    appendedBytes > BigInt(MAX_BENIGN_SESSION_FENCE_ADVANCE_BYTES) ||
+    appendedBytes > MAX_SAFE_FILE_OFFSET
+  ) {
+    return undefined;
+  }
+  const length = Number(appendedBytes);
+  const buffer = Buffer.alloc(length);
+  const file = openSync(params.sessionFile, "r");
+  try {
+    const bytesRead = readSync(file, buffer, 0, length, Number(params.previous.size));
+    if (bytesRead !== length) {
+      return undefined;
+    }
+  } finally {
+    closeSync(file);
+  }
+  return buffer.toString("utf8");
+}
+
 async function readSessionFileFenceSnapshot(
   sessionFile: string,
 ): Promise<SessionFileFenceSnapshot> {
@@ -327,6 +356,30 @@ async function sessionFenceAdvanceIsBenign(params: {
     return false;
   }
   const text = await readAppendedSessionFileText({
+    sessionFile: params.sessionFile,
+    previous: params.previous.fingerprint,
+    current: params.current,
+  });
+  if (!text?.endsWith("\n")) {
+    return false;
+  }
+  const lines = normalizeStringEntries(text.split("\n"));
+  return lines.length > 0 && lines.every(isTranscriptOnlyOpenClawAssistantLine);
+}
+
+function sessionFenceAdvanceIsBenignSync(params: {
+  sessionFile: string;
+  previous: SessionFileFenceSnapshot | undefined;
+  current: SessionFileFingerprint;
+}): boolean {
+  if (
+    !params.previous?.fingerprint.exists ||
+    !params.current.exists ||
+    !sameSessionFileIdentity(params.previous.fingerprint, params.current)
+  ) {
+    return false;
+  }
+  const text = readAppendedSessionFileTextSync({
     sessionFile: params.sessionFile,
     previous: params.previous.fingerprint,
     current: params.current,
@@ -798,7 +851,20 @@ export async function createEmbeddedAttemptSessionLockController(params: {
       if (!beforeWrite) {
         return;
       }
-      if (!isTrustedSessionFileState(sessionFileFenceKey, beforeWrite)) {
+      const beforeWriteMatchesActiveFence =
+        fenceActive && sameSessionFileFingerprint(fenceFingerprint, beforeWrite);
+      const beforeWriteIsBenignAdvance =
+        fenceActive &&
+        sessionFenceAdvanceIsBenignSync({
+          sessionFile: params.lockOptions.sessionFile,
+          previous: fenceSnapshot,
+          current: beforeWrite,
+        });
+      if (
+        !beforeWriteMatchesActiveFence &&
+        !beforeWriteIsBenignAdvance &&
+        !isTrustedSessionFileState(sessionFileFenceKey, beforeWrite)
+      ) {
         return;
       }
       const current = readSessionFileFingerprintSync(params.lockOptions.sessionFile);

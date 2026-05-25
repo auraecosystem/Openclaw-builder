@@ -1215,6 +1215,81 @@ describe("embedded attempt session lock lifecycle", () => {
     expect(controller.hasSessionTakeover()).toBe(false);
   });
 
+  it("accepts pi-style writes after a lock-mediated prompt write refreshed the active fence", async () => {
+    // A legitimate locked write can advance the active fence without going
+    // through the global trusted-state map. A later pi append whose pre-write
+    // fingerprint matches that active fence is still part of this lane.
+    const sessionFile = await createTempSessionFile();
+    const release = vi.fn(async () => {});
+    const acquireSessionWriteLock = vi.fn(async () => ({ release }));
+    const controller = await createEmbeddedAttemptSessionLockController({
+      acquireSessionWriteLock,
+      lockOptions: { ...lockOptions, sessionFile },
+    });
+
+    const beforeToolCallSpy = vi.fn(async () => {});
+    const session = {
+      agent: { beforeToolCall: beforeToolCallSpy },
+    };
+
+    installSessionExternalHookWriteLock({
+      session,
+      withSessionWriteLock: (op) => controller.withSessionWriteLock(op),
+    });
+
+    await controller.releaseForPrompt();
+    await controller.withSessionWriteLock(async () => {
+      await fs.appendFile(sessionFile, '{"type":"message","id":"locked-owned"}\n', "utf8");
+    });
+
+    const beforeWrite = readSessionFileFingerprintSync(sessionFile);
+    await fs.appendFile(sessionFile, '{"type":"message","id":"pi-after-locked"}\n', "utf8");
+    controller.publishOwnedPostMessageWrite(beforeWrite);
+
+    await expect(session.agent.beforeToolCall()).resolves.toBeUndefined();
+    expect(beforeToolCallSpy).toHaveBeenCalledTimes(1);
+    expect(controller.hasSessionTakeover()).toBe(false);
+  });
+
+  it("accepts pi-style writes after a benign delivery-mirror append advanced the released fence", async () => {
+    const sessionFile = await createTempSessionFile();
+    const release = vi.fn(async () => {});
+    const acquireSessionWriteLock = vi.fn(async () => ({ release }));
+    const controller = await createEmbeddedAttemptSessionLockController({
+      acquireSessionWriteLock,
+      lockOptions: { ...lockOptions, sessionFile },
+    });
+
+    const beforeToolCallSpy = vi.fn(async () => {});
+    const session = {
+      agent: { beforeToolCall: beforeToolCallSpy },
+    };
+
+    installSessionExternalHookWriteLock({
+      session,
+      withSessionWriteLock: (op) => controller.withSessionWriteLock(op),
+    });
+
+    await controller.releaseForPrompt();
+    await appendSessionTranscriptMessage({
+      transcriptPath: sessionFile,
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "mirrored media delivery" }],
+        provider: "openclaw",
+        model: "delivery-mirror",
+      },
+    });
+
+    const beforeWrite = readSessionFileFingerprintSync(sessionFile);
+    await fs.appendFile(sessionFile, '{"type":"message","id":"pi-after-mirror"}\n', "utf8");
+    controller.publishOwnedPostMessageWrite(beforeWrite);
+
+    await expect(session.agent.beforeToolCall()).resolves.toBeUndefined();
+    expect(beforeToolCallSpy).toHaveBeenCalledTimes(1);
+    expect(controller.hasSessionTakeover()).toBe(false);
+  });
+
   it("trips takeover on a same-file external write that bypasses publishOwnedPostMessageWrite", async () => {
     // Negative companion. If an external mutation advances the session file
     // WITHOUT going through pi's _persist -> onMessagePersisted ->
