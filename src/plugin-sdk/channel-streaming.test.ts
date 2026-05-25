@@ -532,6 +532,46 @@ describe("channel-streaming", () => {
     expect(onStart).toHaveBeenCalledTimes(1);
   });
 
+  it("resets hasStarted to false when onStart rejects via timer", async () => {
+    vi.useFakeTimers();
+    const onStart = vi.fn().mockRejectedValue(new Error("start failed"));
+    const gate = createChannelProgressDraftGate({ onStart });
+
+    await gate.noteWork();
+    await vi.advanceTimersByTimeAsync(5_000); // timer fires; start().catch(() => {}) swallows error
+    await vi.waitFor(() => expect(gate.hasStarted).toBe(false)); // drain full rejection chain
+
+    expect(onStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("resets hasStarted to false and propagates when onStart rejects via noteWork", async () => {
+    const error = new Error("start failed");
+    const onStart = vi.fn().mockRejectedValue(error);
+    const gate = createChannelProgressDraftGate({ onStart });
+
+    await gate.noteWork(); // first event, schedules timer
+    await expect(gate.noteWork()).rejects.toThrow("start failed"); // second event triggers start directly
+
+    expect(gate.hasStarted).toBe(false);
+  });
+
+  it("allows a retry after onStart rejects", async () => {
+    let attempt = 0;
+    const onStart = vi
+      .fn()
+      .mockImplementation(() =>
+        attempt++ === 0 ? Promise.reject(new Error("first attempt")) : Promise.resolve(),
+      );
+    const gate = createChannelProgressDraftGate({ onStart });
+
+    await expect(gate.startNow()).rejects.toThrow("first attempt");
+    expect(gate.hasStarted).toBe(false);
+
+    await gate.startNow();
+    expect(gate.hasStarted).toBe(true);
+    expect(onStart).toHaveBeenCalledTimes(2);
+  });
+
   it("ignores message-like tools for progress draft work", () => {
     expect(isChannelProgressDraftWorkToolName("message")).toBe(false);
     expect(isChannelProgressDraftWorkToolName("react")).toBe(false);

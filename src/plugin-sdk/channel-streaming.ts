@@ -531,7 +531,14 @@ export function createChannelProgressDraftGate(params: {
     }
     started = true;
     clearTimer();
-    startPromise = Promise.resolve().then(params.onStart);
+    startPromise = Promise.resolve()
+      .then(params.onStart)
+      .catch((err) => {
+        // onStart rejected — reset so callers don't believe streaming is live
+        started = false;
+        startPromise = undefined;
+        throw err;
+      });
     return startPromise;
   };
 
