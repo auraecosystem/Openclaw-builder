@@ -514,7 +514,7 @@ function isMissingPathError(error: unknown): boolean {
   return code === "ENOENT" || code === "ENOTDIR";
 }
 
-async function resolveRuntimeCwdForAcpSpawn(params: {
+export async function resolveRuntimeCwdForAcpSpawn(params: {
   resolvedCwd?: string;
   explicitCwd?: string;
 }): Promise<string | undefined> {
