@@ -337,6 +337,68 @@ function clearAllPendingLifecycleTimeouts() {
   pendingLifecycleTimeoutByRunId.clear();
 }
 
+const LIFECYCLE_CATCH_RECOVERY_DELAY_MS = 1_000;
+
+/**
+ * After a `completeSubagentRun` rejection, wait briefly for in-flight state to
+ * settle, then drive cleanup if the run was left in a half-ended state.
+ *
+ * - Orphaned runs (child session gone): reconciled via `reconcileOrphanedRun`.
+ * - Non-orphan runs (ended but cleanup not started): retry `completeSubagentRun`
+ *   which is idempotent for already-mutated fields and includes the full cleanup
+ *   tail (browser sessions, MCP runtime retirement, announce flow).
+ */
+function scheduleLifecycleCatchRecovery(runId: string, expectedOutcomeStatus: string) {
+  const timer = setTimeout(() => {
+    const entry = subagentRuns.get(runId);
+    if (!entry || typeof entry.endedAt !== "number") {
+      return;
+    }
+    if (entry.cleanupHandled || typeof entry.cleanupCompletedAt === "number") {
+      return;
+    }
+    // A newer completion has already changed the outcome; do not overwrite.
+    if (entry.outcome && entry.outcome.status !== expectedOutcomeStatus) {
+      return;
+    }
+    const orphanReason = resolveSubagentRunOrphanReason({ entry });
+    if (orphanReason) {
+      if (
+        reconcileOrphanedRun({
+          runId,
+          entry,
+          reason: orphanReason,
+          source: "lifecycle-catch-recovery",
+          runs: subagentRuns,
+          resumedRuns,
+        })
+      ) {
+        persistSubagentRuns();
+        log.info("recovered orphaned run after lifecycle completion failure", { runId });
+      }
+      return;
+    }
+    // Re-derive completion params from the current entry state instead of
+    // relying on a stale closure, so the retry reflects any state changes
+    // that occurred between the original failure and this recovery.
+    void completeSubagentRun({
+      runId,
+      endedAt: entry.endedAt,
+      outcome: entry.outcome ?? { status: expectedOutcomeStatus as "ok" | "error" | "timeout" },
+      reason: entry.endedReason ?? SUBAGENT_ENDED_REASON_COMPLETE,
+      sendFarewell: true,
+      accountId: entry.requesterOrigin?.accountId,
+      triggerCleanup: true,
+    }).catch((retryErr) => {
+      log.warn("lifecycle catch recovery retry also failed; deferring to session resume", {
+        err: retryErr,
+        runId,
+      });
+    });
+  }, LIFECYCLE_CATCH_RECOVERY_DELAY_MS);
+  timer.unref?.();
+}
+
 function schedulePendingLifecycleError(params: { runId: string; endedAt: number; error?: string }) {
   clearPendingLifecycleTimeout(params.runId);
   clearPendingLifecycleError(params.runId);
@@ -353,17 +415,21 @@ function schedulePendingLifecycleError(params: { runId: string; endedAt: number;
     if (entry.endedReason === SUBAGENT_ENDED_REASON_COMPLETE || entry.outcome?.status === "ok") {
       return;
     }
-    void completeSubagentRun({
+    const completionParams = {
       runId: params.runId,
       endedAt: pending.endedAt,
       outcome: {
-        status: "error",
+        status: "error" as const,
         error: pending.error,
       },
       reason: SUBAGENT_ENDED_REASON_ERROR,
       sendFarewell: true,
       accountId: entry.requesterOrigin?.accountId,
       triggerCleanup: true,
+    };
+    void completeSubagentRun(completionParams).catch((err) => {
+      log.warn("lifecycle error completion failed", { err, runId: params.runId });
+      scheduleLifecycleCatchRecovery(params.runId, "error");
     });
   }, LIFECYCLE_ERROR_RETRY_GRACE_MS);
   timer.unref?.();
@@ -390,16 +456,20 @@ function schedulePendingLifecycleTimeout(params: { runId: string; endedAt: numbe
     if (entry.outcome?.status === "ok") {
       return;
     }
-    void completeSubagentRun({
+    const completionParams = {
       runId: params.runId,
       endedAt: pending.endedAt,
       outcome: {
-        status: "timeout",
+        status: "timeout" as const,
       },
       reason: SUBAGENT_ENDED_REASON_COMPLETE,
       sendFarewell: true,
       accountId: entry.requesterOrigin?.accountId,
       triggerCleanup: true,
+    };
+    void completeSubagentRun(completionParams).catch((err) => {
+      log.warn("lifecycle timeout completion failed", { err, runId: params.runId });
+      scheduleLifecycleCatchRecovery(params.runId, "timeout");
     });
   }, LIFECYCLE_TIMEOUT_RETRY_GRACE_MS);
   timer.unref?.();
@@ -1021,17 +1091,21 @@ function ensureListener() {
       if (isBlockedLivenessState(livenessState)) {
         clearPendingLifecycleError(evt.runId);
         clearPendingLifecycleTimeout(evt.runId);
-        await completeSubagentRun({
+        const blockedParams = {
           runId: evt.runId,
           endedAt,
           outcome: {
-            status: "error",
+            status: "error" as const,
             error: formatBlockedLivenessError(error),
           },
           reason: SUBAGENT_ENDED_REASON_ERROR,
           sendFarewell: true,
           accountId: entry.requesterOrigin?.accountId,
           triggerCleanup: true,
+        };
+        await completeSubagentRun(blockedParams).catch((err) => {
+          log.warn("lifecycle blocked completion failed", { err, runId: evt.runId });
+          scheduleLifecycleCatchRecovery(evt.runId, "error");
         });
         return;
       }
@@ -1057,16 +1131,22 @@ function ensureListener() {
       }
       clearPendingLifecycleError(evt.runId);
       clearPendingLifecycleTimeout(evt.runId);
-      await completeSubagentRun({
+      const completionParams = {
         runId: evt.runId,
         endedAt,
-        outcome: { status: "ok" },
+        outcome: { status: "ok" as const },
         reason: SUBAGENT_ENDED_REASON_COMPLETE,
         sendFarewell: true,
         accountId: entry.requesterOrigin?.accountId,
         triggerCleanup: true,
+      };
+      await completeSubagentRun(completionParams).catch((err) => {
+        log.warn("lifecycle ok completion failed", { err, runId: evt.runId });
+        scheduleLifecycleCatchRecovery(evt.runId, "ok");
       });
-    })();
+    })().catch((err) => {
+      log.warn("lifecycle event handler failed", { err, runId: evt.runId });
+    });
   });
 }
 
