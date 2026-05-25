@@ -82,6 +82,12 @@ export const doctorHealthConversionRules = [
     rule: "Detect stale plugin registry state and let repair return the next config.",
   },
   {
+    contributionId: "doctor:node-runtime",
+    conversion: "detect-only",
+    target: ["doctor-run/node-runtime"],
+    rule: "Detect Node.js runtime lifecycle issues (EOL/maintenance/version-manager) as informational findings via note(); no repair (runtime upgrades are user-driven and outside OpenClaw's control).",
+  },
+  {
     contributionId: "doctor:state-integrity",
     conversion: "repair-backed-detect",
     target: ["core/doctor/state-integrity"],
