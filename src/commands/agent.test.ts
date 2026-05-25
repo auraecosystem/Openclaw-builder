@@ -66,6 +66,14 @@ vi.mock("../agents/command/session-store.runtime.js", () => {
   };
 });
 
+vi.mock("../agents/command/cli-compaction.js", () => {
+  return {
+    runCliTurnCompactionLifecycle: vi.fn(
+      async (params: { sessionEntry?: unknown }) => params.sessionEntry,
+    ),
+  };
+});
+
 vi.mock("../agents/command/attempt-execution.runtime.js", () => {
   return {
     buildAcpResult: vi.fn(),
@@ -550,6 +558,7 @@ describe("agentCommand", () => {
           messageChannel: "telegram",
           deliver: true,
           allowModelOverride: false,
+          sessionEffects: "internal",
         },
         runtime,
         { sendMessageTelegram },
