@@ -100,6 +100,10 @@ import { createReplyToModeFilterForChannel, resolveReplyToMode } from "./reply-t
 import { admitReplyTurn, resolveReplyTurnKind } from "./reply-turn-admission.js";
 import { incrementRunCompactionCount, persistRunSessionUsage } from "./session-run-accounting.js";
 import { resolveSourceReplyVisibilityPolicy } from "./source-reply-delivery-mode.js";
+import {
+  isStrandedMessageToolReply,
+  warnStrandedMessageToolReply,
+} from "./stranded-source-reply.js";
 import { createTypingSignaler } from "./typing-mode.js";
 import type { TypingController } from "./typing.js";
 
@@ -2137,9 +2141,31 @@ export async function runReplyAgent(params: {
         requested: opts?.sourceReplyDeliveryMode,
         sendPolicy,
       });
-      const pendingText = sourceReplyPolicy.suppressDelivery
-        ? ""
-        : buildPendingFinalDeliveryText(finalPayloads);
+      const finalDeliveryText = buildPendingFinalDeliveryText(finalPayloads);
+      // #85714: detect a stranded reply from the actual assistant final text,
+      // not finalDeliveryText — the latter also bundles verbose notices, plugin
+      // status, raw trace, and the usage line, none of which should trip the
+      // warn (e.g. an intentional NO_REPLY turn with trace/usage enabled).
+      const assistantFinalText = rawAssistantText ?? "";
+      if (
+        isStrandedMessageToolReply({
+          sourceReplyDeliveryMode: sourceReplyPolicy.sourceReplyDeliveryMode,
+          sendPolicyDenied: sourceReplyPolicy.sendPolicyDenied,
+          successfulSideEffectDelivery,
+          finalText: assistantFinalText,
+        })
+      ) {
+        warnStrandedMessageToolReply({
+          sessionKey,
+          channel:
+            sessionCtx.OriginatingChannel ??
+            sessionCtx.Surface ??
+            sessionCtx.Provider ??
+            activeSessionEntry?.channel,
+          finalTextLength: assistantFinalText.trim().length,
+        });
+      }
+      const pendingText = sourceReplyPolicy.suppressDelivery ? "" : finalDeliveryText;
       const agentId = followupRun.run.agentId;
       const heartbeatAgentCfg = agentId ? resolveAgentConfig(cfg, agentId)?.heartbeat : undefined;
       const heartbeatAckMaxChars = Math.max(
