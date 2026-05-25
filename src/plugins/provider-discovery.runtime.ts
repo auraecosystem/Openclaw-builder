@@ -171,7 +171,6 @@ export function resolvePluginDiscoveryProvidersRuntime(params: {
             ...params,
             env,
             onlyPluginIds: fullPluginIds,
-            bundledProviderAllowlistCompat: true,
           })
         : [];
     return [...liveEntryProviders, ...fullProviders];
@@ -179,6 +178,5 @@ export function resolvePluginDiscoveryProvidersRuntime(params: {
   return resolvePluginProviders({
     ...params,
     env,
-    bundledProviderAllowlistCompat: true,
   });
 }

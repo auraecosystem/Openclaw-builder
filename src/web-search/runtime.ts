@@ -137,7 +137,6 @@ export function listWebSearchProviders(params?: {
   const config = resolveWebSearchRuntimeConfig({ config: params?.config });
   return resolveRuntimeWebSearchProviders({
     config,
-    bundledAllowlistCompat: true,
   });
 }
 
@@ -147,7 +146,6 @@ export function listConfiguredWebSearchProviders(params?: {
   const config = resolveWebSearchRuntimeConfig({ config: params?.config });
   return resolvePluginWebSearchProviders({
     config,
-    bundledAllowlistCompat: true,
   });
 }
 
@@ -163,7 +161,6 @@ export function resolveWebSearchProviderId(params: {
     params.providers ??
       resolvePluginWebSearchProviders({
         config,
-        bundledAllowlistCompat: true,
       }),
   );
   const raw =
@@ -282,12 +279,10 @@ export function resolveWebSearchDefinition(
     options?.preferRuntimeProviders
       ? resolveRuntimeWebSearchProviders({
           config,
-          bundledAllowlistCompat: true,
           ...loadScope,
         })
       : resolvePluginWebSearchProviders({
           config,
-          bundledAllowlistCompat: true,
           ...loadScope,
         }),
   );
@@ -351,12 +346,10 @@ function resolveWebSearchCandidates(
     options?.preferRuntimeProviders
       ? resolveRuntimeWebSearchProviders({
           config,
-          bundledAllowlistCompat: true,
           ...loadScope,
         })
       : resolvePluginWebSearchProviders({
           config,
-          bundledAllowlistCompat: true,
           ...loadScope,
         }),
   ).filter(Boolean);

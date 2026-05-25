@@ -391,7 +391,6 @@ async function resolveBundledWebSearchProviders(params: {
     return resolvePluginWebSearchProviders({
       config: params.sourceConfig,
       env,
-      bundledAllowlistCompat: true,
       onlyPluginIds,
       origin: "bundled",
     });
@@ -402,7 +401,6 @@ async function resolveBundledWebSearchProviders(params: {
     const bundled = resolveBundledWebSearchProvidersFromPublicArtifacts({
       config: params.sourceConfig,
       env,
-      bundledAllowlistCompat: true,
     });
     if (bundled && bundled.length > 0) {
       return bundled;
@@ -411,7 +409,6 @@ async function resolveBundledWebSearchProviders(params: {
     return resolvePluginWebSearchProviders({
       config: params.sourceConfig,
       env,
-      bundledAllowlistCompat: true,
       origin: "bundled",
     });
   }
@@ -419,7 +416,6 @@ async function resolveBundledWebSearchProviders(params: {
   return resolvePluginWebSearchProviders({
     config: params.sourceConfig,
     env,
-    bundledAllowlistCompat: true,
   });
 }
 
@@ -441,7 +437,6 @@ async function resolveBundledWebFetchProviders(params: {
     return resolvePluginWebFetchProviders({
       config: params.sourceConfig,
       env,
-      bundledAllowlistCompat: true,
       onlyPluginIds: [params.configuredBundledPluginId],
       origin: "bundled",
     });
@@ -452,7 +447,6 @@ async function resolveBundledWebFetchProviders(params: {
     const bundled = resolveBundledWebFetchProvidersFromPublicArtifacts({
       config: params.sourceConfig,
       env,
-      bundledAllowlistCompat: true,
     });
     if (bundled && bundled.length > 0) {
       return bundled;
@@ -461,7 +455,6 @@ async function resolveBundledWebFetchProviders(params: {
     return resolvePluginWebFetchProviders({
       config: params.sourceConfig,
       env,
-      bundledAllowlistCompat: true,
       origin: "bundled",
     });
   }
@@ -469,7 +462,6 @@ async function resolveBundledWebFetchProviders(params: {
   return resolvePluginWebFetchProviders({
     config: params.sourceConfig,
     env,
-    bundledAllowlistCompat: true,
     origin: "bundled",
   });
 }

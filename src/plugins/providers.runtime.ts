@@ -19,8 +19,8 @@ import {
   resolveDiscoveredProviderPluginIds,
   resolveEnabledProviderPluginIds,
   resolveBundledProviderCompatPluginIds,
-  resolveOwningPluginIdsForProvider,
   resolveOwningPluginIdsForModelRefs,
+  resolveOwningPluginIdsForProviderRef,
   withBundledProviderVitestCompat,
 } from "./providers.js";
 import { getActivePluginRegistryWorkspaceDir } from "./runtime.js";
@@ -76,21 +76,9 @@ function resolveExplicitProviderOwnerPluginIds(
         if (apiOwnerPluginIds.length > 0) {
           return apiOwnerPluginIds;
         }
-        const legacyApiOwnerPluginIds = resolveOwningPluginIdsForProvider({
-          provider: apiOwnerHint,
-          config: params.config,
-          workspaceDir: params.workspaceDir,
-          env: params.env,
-          manifestRegistry: snapshot.manifestRegistry,
-        });
-        if (legacyApiOwnerPluginIds?.length) {
-          return legacyApiOwnerPluginIds;
-        }
       }
-      // Keep legacy provider/CLI-backend ownership working until every owner is
-      // expressible through activation descriptors.
       return (
-        resolveOwningPluginIdsForProvider({
+        resolveOwningPluginIdsForProviderRef({
           provider,
           config: params.config,
           workspaceDir: params.workspaceDir,
@@ -253,8 +241,6 @@ function resolveRuntimeProviderPluginLoadState(
     onlyPluginIds: runtimeRequestedPluginIds,
     applyAutoEnable: params.applyAutoEnable ?? true,
     compatMode: {
-      allowlist: params.bundledProviderAllowlistCompat,
-      enablement: "allowlist",
       vitest: params.bundledProviderVitestCompat,
     },
     resolveCompatPluginIds: (compatParams) =>
@@ -330,7 +316,6 @@ export function resolvePluginProviders(params: {
   workspaceDir?: string;
   /** Use an explicit env when plugin roots should resolve independently from process.env. */
   env?: PluginLoadOptions["env"];
-  bundledProviderAllowlistCompat?: boolean;
   bundledProviderVitestCompat?: boolean;
   onlyPluginIds?: string[];
   providerRefs?: readonly string[];

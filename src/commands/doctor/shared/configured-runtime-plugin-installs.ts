@@ -56,10 +56,9 @@ function acpxRuntimeIsConfigured(cfg: OpenClawConfig): boolean {
 
 export function collectConfiguredRuntimePluginIds(
   cfg: OpenClawConfig,
-  env: NodeJS.ProcessEnv,
   options?: ConfiguredAgentHarnessRuntimeOptions,
 ): string[] {
-  const ids = new Set(collectConfiguredAgentHarnessRuntimes(cfg, env, options));
+  const ids = new Set(collectConfiguredAgentHarnessRuntimes(cfg, options));
   if (acpxRuntimeIsConfigured(cfg)) {
     ids.add("acpx");
   }

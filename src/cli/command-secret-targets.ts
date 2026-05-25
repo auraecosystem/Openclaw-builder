@@ -460,7 +460,6 @@ function getCapabilityWebSearchSelectedProviderTargetIds(
   );
   const providers = resolvePluginWebSearchProviders({
     config: providerDiscoveryConfig,
-    bundledAllowlistCompat: true,
   }).filter((provider) => provider.id === selectedProviderId);
   for (const provider of providers) {
     if (provider.credentialPath.trim()) {
@@ -557,7 +556,6 @@ function getCapabilityWebFetchSelectedProviderTargetIds(
   );
   const providers = resolvePluginWebFetchProviders({
     config: providerDiscoveryConfig,
-    bundledAllowlistCompat: true,
   }).filter((provider) => provider.id === selectedProviderId);
   for (const provider of providers) {
     if (provider.credentialPath.trim()) {
@@ -615,7 +613,6 @@ function getCapabilityWebSearchAutoDetectTargets(config: OpenClawConfig): Comman
   const providers = sortWebSearchProvidersForAutoDetect(
     resolvePluginWebSearchProviders({
       config,
-      bundledAllowlistCompat: true,
     }),
   );
   for (const provider of providers) {
@@ -658,7 +655,6 @@ function getCapabilityWebFetchAutoDetectTargets(config: OpenClawConfig): Command
   const providers = sortWebFetchProvidersForAutoDetect(
     resolvePluginWebFetchProviders({
       config,
-      bundledAllowlistCompat: true,
     }),
   );
   for (const provider of providers) {

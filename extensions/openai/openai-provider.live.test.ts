@@ -1,5 +1,5 @@
-import { getModel, type Api, type Model } from "@earendil-works/pi-ai";
 import OpenAI from "openai";
+import type { Api } from "openclaw/plugin-sdk/llm";
 import type { ProviderRuntimeModel } from "openclaw/plugin-sdk/plugin-entry";
 import { describe, expect, it } from "vitest";
 import { buildOpenAIProvider } from "./openai-provider.js";
@@ -19,10 +19,6 @@ type LiveModelCase = {
   reasoning: boolean;
   textVerbosity: "low" | "medium";
 };
-
-function findOpenAIModel(modelId: string): Model<Api> | null {
-  return (getModel("openai", modelId as never) as Model<Api> | undefined) ?? null;
-}
 
 function resolveLiveModelCase(modelId: string): LiveModelCase {
   switch (modelId) {
@@ -129,10 +125,6 @@ describeLive("buildOpenAIProvider live", () => {
         find(providerId: string, id: string) {
           if (providerId !== "openai") {
             return null;
-          }
-          const exactModel = findOpenAIModel(id);
-          if (exactModel) {
-            return exactModel;
           }
           if (id === liveCase.templateId) {
             return {

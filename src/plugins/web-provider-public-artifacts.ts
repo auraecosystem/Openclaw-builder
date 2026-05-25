@@ -18,7 +18,6 @@ type BundledWebProviderPublicArtifactParams = {
   config?: PluginLoadOptions["config"];
   workspaceDir?: string;
   env?: PluginLoadOptions["env"];
-  bundledAllowlistCompat?: boolean;
   onlyPluginIds?: readonly string[];
 };
 
@@ -32,11 +31,7 @@ function filterAllowlistedBundledPluginIds(
   pluginIds: readonly string[],
 ) {
   const allow = config?.plugins?.allow;
-  if (
-    config?.plugins?.bundledDiscovery === "compat" ||
-    !Array.isArray(allow) ||
-    allow.length === 0
-  ) {
+  if (!Array.isArray(allow) || allow.length === 0) {
     return [...pluginIds];
   }
   const allowedPluginIds = new Set(
@@ -51,7 +46,6 @@ function resolveBundledCandidatePluginIds(params: {
   config?: PluginLoadOptions["config"];
   workspaceDir?: string;
   env?: PluginLoadOptions["env"];
-  bundledAllowlistCompat?: boolean;
   onlyPluginIds?: readonly string[];
 }): BundledCandidateResolution {
   if (params.onlyPluginIds !== undefined) {
@@ -111,7 +105,6 @@ export function resolveBundledWebSearchProvidersFromPublicArtifacts(
     config: params.config,
     workspaceDir: params.workspaceDir,
     env: params.env,
-    bundledAllowlistCompat: params.bundledAllowlistCompat,
     onlyPluginIds: params.onlyPluginIds,
   });
   if (pluginIds.pluginIds.length === 0) {
@@ -157,7 +150,6 @@ export function resolveBundledWebFetchProvidersFromPublicArtifacts(
     config: params.config,
     workspaceDir: params.workspaceDir,
     env: params.env,
-    bundledAllowlistCompat: params.bundledAllowlistCompat,
     onlyPluginIds: params.onlyPluginIds,
   });
   if (pluginIds.pluginIds.length === 0) {
