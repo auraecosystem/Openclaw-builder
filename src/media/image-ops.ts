@@ -1,12 +1,14 @@
+import { randomUUID } from "node:crypto";
 import {
   createRastermill,
   isRastermillUnavailableError,
   RastermillUnavailableError,
   readImageMetadataFromHeader as readRastermillImageMetadataFromHeader,
-  type ImageBackendPreference,
+  readImageProbeFromHeader as readRastermillImageProbeFromHeader,
   type ImageMetadata,
 } from "rastermill";
 import { resolveSystemBin } from "../infra/resolve-system-bin.js";
+import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
 
 export type { ImageMetadata };
 
@@ -42,37 +44,19 @@ export class ImageProcessorUnavailableError extends Error {
   }
 }
 
-function normalizeOpenClawImageBackend(): ImageBackendPreference | undefined {
-  const raw = process.env.OPENCLAW_IMAGE_BACKEND?.trim().toLowerCase();
-  switch (raw) {
-    case "photon":
-    case "sips":
-    case "windows-native":
-    case "imagemagick":
-    case "graphicsmagick":
-    case "ffmpeg":
-      return raw;
-    case "windows":
-    case "powershell":
-    case "system.drawing":
-    case "systemdrawing":
-      return "windows-native";
-    case "magick":
-    case "convert":
-      return "imagemagick";
-    case "gm":
-      return "graphicsmagick";
-    default:
-      return undefined;
-  }
-}
-
 function createOpenClawRastermill() {
   return createRastermill({
-    backend: normalizeOpenClawImageBackend(),
-    maxInputPixels: MAX_IMAGE_INPUT_PIXELS,
-    maxOutputPixels: MAX_IMAGE_INPUT_PIXELS,
-    envBackendVariable: "OPENCLAW_IMAGE_BACKEND",
+    limits: {
+      inputPixels: MAX_IMAGE_INPUT_PIXELS,
+      outputPixels: MAX_IMAGE_INPUT_PIXELS,
+    },
+    env: {
+      backendVar: "OPENCLAW_IMAGE_BACKEND",
+    },
+    temp: {
+      rootDir: resolvePreferredOpenClawTmpDir(),
+      prefix: () => `openclaw-img-${randomUUID()}-`,
+    },
     commandResolver: (command) =>
       resolveSystemBin(command, { trust: command === "powershell" ? "strict" : "standard" }),
   });
@@ -111,17 +95,39 @@ function wrapRastermillUnavailable(operation: string, error: unknown): never {
   throw error;
 }
 
+function assertImageInputWithinPixelBudget(buffer: Buffer): void {
+  const metadata = readRastermillImageMetadataFromHeader(buffer);
+  if (!metadata) {
+    throw new Error("Unable to determine image dimensions; refusing to process");
+  }
+  if (metadata.width > Math.floor(MAX_IMAGE_INPUT_PIXELS / metadata.height)) {
+    const pixels = Number.isSafeInteger(metadata.width * metadata.height)
+      ? ` (${metadata.width * metadata.height} pixels)`
+      : "";
+    throw new Error(
+      `Image dimensions exceed the ${MAX_IMAGE_INPUT_PIXELS.toLocaleString("en-US")} pixel input limit: ${metadata.width}x${metadata.height}${pixels}`,
+    );
+  }
+}
+
 export function readImageMetadataFromHeader(buffer: Buffer): ImageMetadata | null {
   return readRastermillImageMetadataFromHeader(buffer);
 }
 
 export async function getImageMetadata(buffer: Buffer): Promise<ImageMetadata | null> {
-  return await createOpenClawRastermill().metadata(buffer);
+  const info = await createOpenClawRastermill().probe(buffer);
+  return info ? { width: info.width, height: info.height } : null;
 }
 
 export async function normalizeExifOrientation(buffer: Buffer): Promise<Buffer> {
   try {
-    return await createOpenClawRastermill().normalize(buffer);
+    assertImageInputWithinPixelBudget(buffer);
+    const rastermill = createOpenClawRastermill();
+    const info = await rastermill.probe(buffer);
+    if (!info?.orientation || info.orientation === 1) {
+      return buffer;
+    }
+    return (await rastermill.encode(buffer, { format: "jpeg", autoOrient: true })).data;
   } catch (error) {
     if (isImageProcessorUnavailableError(error)) {
       return buffer;
@@ -132,11 +138,16 @@ export async function normalizeExifOrientation(buffer: Buffer): Promise<Buffer> 
 
 export async function resizeToJpeg(params: ResizeToJpegParams): Promise<Buffer> {
   try {
-    return await createOpenClawRastermill().toJpeg(params.buffer, {
-      maxSide: params.maxSide,
-      quality: params.quality,
-      withoutEnlargement: params.withoutEnlargement,
-    });
+    return (
+      await createOpenClawRastermill().encode(params.buffer, {
+        format: "jpeg",
+        resize: {
+          maxSide: params.maxSide,
+          enlarge: params.withoutEnlargement === false,
+        },
+        quality: params.quality,
+      })
+    ).data;
   } catch (error) {
     return wrapRastermillUnavailable("resizeToJpeg", error);
   }
@@ -144,7 +155,7 @@ export async function resizeToJpeg(params: ResizeToJpegParams): Promise<Buffer> 
 
 export async function convertHeicToJpeg(buffer: Buffer): Promise<Buffer> {
   try {
-    return await createOpenClawRastermill().convertHeicToJpeg(buffer);
+    return (await createOpenClawRastermill().encode(buffer, { format: "jpeg" })).data;
   } catch (error) {
     return wrapRastermillUnavailable("convertHeicToJpeg", error);
   }
@@ -152,7 +163,24 @@ export async function convertHeicToJpeg(buffer: Buffer): Promise<Buffer> {
 
 export async function hasAlphaChannel(buffer: Buffer): Promise<boolean> {
   try {
-    return await createOpenClawRastermill().hasAlpha(buffer);
+    assertImageInputWithinPixelBudget(buffer);
+    const rastermill = createOpenClawRastermill();
+    const info = await rastermill.probe(buffer);
+    if (!info) {
+      return false;
+    }
+    if (info.hasAlpha !== null) {
+      return info.hasAlpha;
+    }
+    try {
+      const png = await rastermill.encode(buffer, {
+        format: "png",
+        autoOrient: false,
+      });
+      return readRastermillImageProbeFromHeader(png.data)?.hasAlpha ?? false;
+    } catch {
+      return false;
+    }
   } catch (error) {
     if (isImageProcessorUnavailableError(error)) {
       return false;
@@ -163,11 +191,19 @@ export async function hasAlphaChannel(buffer: Buffer): Promise<boolean> {
 
 export async function resizeToPng(params: ResizeToPngParams): Promise<Buffer> {
   try {
-    return await createOpenClawRastermill().toPng(params.buffer, {
-      maxSide: params.maxSide,
-      compressionLevel: params.compressionLevel,
-      withoutEnlargement: params.withoutEnlargement,
-    });
+    return (
+      await createOpenClawRastermill().encode(params.buffer, {
+        format: "png",
+        resize: {
+          maxSide: params.maxSide,
+          enlarge: params.withoutEnlargement === false,
+        },
+        png:
+          params.compressionLevel === undefined
+            ? {}
+            : { compressionLevel: params.compressionLevel },
+      })
+    ).data;
   } catch (error) {
     return wrapRastermillUnavailable("resizeToPng", error);
   }
@@ -184,10 +220,17 @@ export async function optimizeImageToPng(
   compressionLevel: number;
 }> {
   try {
-    return await createOpenClawRastermill().optimizePng(buffer, {
+    const out = await createOpenClawRastermill().encodeWithinBytes(buffer, {
+      format: "png",
       maxBytes,
-      sides: options?.sides,
+      search: options?.sides === undefined ? {} : { maxSide: options.sides },
     });
+    return {
+      buffer: out.data,
+      optimizedSize: out.bytes,
+      resizeSide: out.chosen.maxSide ?? out.width,
+      compressionLevel: out.chosen.compressionLevel ?? 6,
+    };
   } catch (error) {
     return wrapRastermillUnavailable("optimizeImageToPng", error);
   }
