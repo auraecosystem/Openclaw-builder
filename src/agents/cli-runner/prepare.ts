@@ -101,6 +101,18 @@ export function shouldSkipLocalCliCredentialEpoch(params: {
   );
 }
 
+/**
+ * `host-only` backends never inject the selected OpenClaw auth profile into
+ * the spawned process, so the profile credential must not contribute to the
+ * auth epoch — otherwise a cosmetic auth-profile rotation changes the epoch
+ * and needlessly resets a resumable CLI session.
+ */
+export function shouldSkipProfileCliCredentialEpoch(params: {
+  authEpochMode?: CliBackendAuthEpochMode;
+}): boolean {
+  return params.authEpochMode === "host-only";
+}
+
 export async function prepareCliRunContext(
   params: RunCliAgentParams,
 ): Promise<PreparedCliRunContext> {
@@ -256,10 +268,14 @@ export async function prepareCliRunContext(
     authCredential,
     preparedExecution,
   });
+  const skipProfileCredentialEpoch = shouldSkipProfileCliCredentialEpoch({
+    authEpochMode: backendResolved.authEpochMode,
+  });
   const authEpoch = await resolveCliAuthEpoch({
     provider: params.provider,
     authProfileId: effectiveAuthProfileId,
     skipLocalCredential: skipLocalCredentialEpoch,
+    skipProfileCredential: skipProfileCredentialEpoch,
   });
   const preparedBackendEnv =
     preparedExecution?.env && Object.keys(preparedExecution.env).length > 0
