@@ -103,6 +103,18 @@ function parseInboundEvent(value: unknown): BrokerInboundEventV1 {
   return normalizeBrokerInboundEvent(value as BrokerInboundEventV1);
 }
 
+function inboundReceiveStatusCode(status: Awaited<ReturnType<typeof receiveBrokerInboundEvent>>["status"]) {
+  switch (status) {
+    case "accepted":
+      return 202;
+    case "pending":
+      return 425;
+    case "duplicate":
+    case "rejected":
+      return 200;
+  }
+}
+
 export async function handleChannelBrokerInboundHttpRequest(params: {
   cfg: CoreConfig;
   req: IncomingMessage;
@@ -171,8 +183,8 @@ export async function handleChannelBrokerInboundHttpRequest(params: {
     dedupeKey,
     ackPolicy: "after_durable_send",
   });
-  return sendJson(params.res, result.status === "accepted" ? 202 : 200, {
-    ok: result.status !== "rejected",
+  return sendJson(params.res, inboundReceiveStatusCode(result.status), {
+    ok: result.status === "accepted" || result.status === "duplicate",
     status: result.status,
     dedupeKey,
     ...(result.message ? { message: result.message } : {}),

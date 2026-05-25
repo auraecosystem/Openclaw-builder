@@ -24,7 +24,7 @@ export type ChannelBrokerInboundAckPolicy =
   | "after_durable_send";
 
 export type ChannelBrokerInboundReceiveResult = {
-  status: "accepted" | "duplicate" | "rejected";
+  status: "accepted" | "duplicate" | "pending" | "rejected";
   message?: string;
 };
 
@@ -196,8 +196,11 @@ function createRuntimeFromPluginRuntime(pluginRuntime: PluginRuntime): ChannelBr
       );
       const metadata = { providerId: account.providerId, platform: event.platform, ackPolicy };
       const acceptResult = await journal.accept(dedupeKey, event, { metadata });
-      if (acceptResult.duplicate) {
+      if (acceptResult.kind === "completed") {
         return { status: "duplicate" };
+      }
+      if (acceptResult.kind === "pending") {
+        return { status: "pending", message: "delivery pending" };
       }
       if (ackPolicy === "after_receive_record") {
         await journal.complete(dedupeKey, { metadata });
