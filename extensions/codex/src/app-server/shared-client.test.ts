@@ -40,8 +40,10 @@ let listCodexAppServerModels: typeof import("./models.js").listCodexAppServerMod
 let clearSharedCodexAppServerClient: typeof import("./shared-client.js").clearSharedCodexAppServerClient;
 let clearSharedCodexAppServerClientIfCurrent: typeof import("./shared-client.js").clearSharedCodexAppServerClientIfCurrent;
 let clearSharedCodexAppServerClientIfCurrentAndWait: typeof import("./shared-client.js").clearSharedCodexAppServerClientIfCurrentAndWait;
+let acquireSharedCodexAppServerClientLease: typeof import("./shared-client.js").acquireSharedCodexAppServerClientLease;
 let createIsolatedCodexAppServerClient: typeof import("./shared-client.js").createIsolatedCodexAppServerClient;
 let getSharedCodexAppServerClient: typeof import("./shared-client.js").getSharedCodexAppServerClient;
+let retireSharedCodexAppServerClientWhenIdle: typeof import("./shared-client.js").retireSharedCodexAppServerClientWhenIdle;
 let resetSharedCodexAppServerClientForTests: typeof import("./shared-client.js").resetSharedCodexAppServerClientForTests;
 
 async function sendInitializeResult(
@@ -110,11 +112,13 @@ describe("shared Codex app-server client", () => {
   beforeAll(async () => {
     ({ listCodexAppServerModels } = await import("./models.js"));
     ({
+      acquireSharedCodexAppServerClientLease,
       clearSharedCodexAppServerClient,
       clearSharedCodexAppServerClientIfCurrent,
       clearSharedCodexAppServerClientIfCurrentAndWait,
       createIsolatedCodexAppServerClient,
       getSharedCodexAppServerClient,
+      retireSharedCodexAppServerClientWhenIdle,
       resetSharedCodexAppServerClientForTests,
     } = await import("./shared-client.js"));
   });
@@ -514,6 +518,50 @@ describe("shared Codex app-server client", () => {
     expect(secondCloseAndWait).not.toHaveBeenCalled();
     expect(first.process.stdin.destroyed).toBe(true);
     expect(second.process.stdin.destroyed).toBe(false);
+  });
+
+  it("keeps a shared app-server alive until all active leases are released", async () => {
+    const harness = createClientHarness();
+    vi.spyOn(CodexAppServerClient, "start").mockReturnValue(harness.client);
+    const closeAndWait = vi.spyOn(harness.client, "closeAndWait");
+
+    const clientPromise = getSharedCodexAppServerClient({ timeoutMs: 1000 });
+    await sendInitializeResult(harness, "openclaw/0.125.0 (macOS; test)");
+    await expect(clientPromise).resolves.toBe(harness.client);
+
+    const release = acquireSharedCodexAppServerClientLease(harness.client);
+    await expect(
+      retireSharedCodexAppServerClientWhenIdle(harness.client, {
+        exitTimeoutMs: 25,
+        forceKillDelayMs: 5,
+      }),
+    ).resolves.toBe(false);
+    expect(closeAndWait).not.toHaveBeenCalled();
+    expect(harness.process.stdin.destroyed).toBe(false);
+
+    await expect(release()).resolves.toBe(true);
+    expect(closeAndWait).toHaveBeenCalledWith({ exitTimeoutMs: 25, forceKillDelayMs: 5 });
+    expect(harness.process.stdin.destroyed).toBe(true);
+  });
+
+  it("does not retire a leased shared app-server until the last active lease releases", async () => {
+    const harness = createClientHarness();
+    vi.spyOn(CodexAppServerClient, "start").mockReturnValue(harness.client);
+    const closeAndWait = vi.spyOn(harness.client, "closeAndWait");
+
+    const clientPromise = getSharedCodexAppServerClient({ timeoutMs: 1000 });
+    await sendInitializeResult(harness, "openclaw/0.125.0 (macOS; test)");
+    await expect(clientPromise).resolves.toBe(harness.client);
+
+    const releaseFirst = acquireSharedCodexAppServerClientLease(harness.client);
+    const releaseSecond = acquireSharedCodexAppServerClientLease(harness.client);
+    await expect(retireSharedCodexAppServerClientWhenIdle(harness.client)).resolves.toBe(false);
+
+    await expect(releaseFirst()).resolves.toBe(false);
+    expect(closeAndWait).not.toHaveBeenCalled();
+
+    await expect(releaseSecond()).resolves.toBe(true);
+    expect(closeAndWait).toHaveBeenCalledTimes(1);
   });
 
   it("uses a fresh websocket Authorization header after shared-client token rotation", async () => {
