@@ -804,6 +804,9 @@ describe("dispatchCronDelivery — double-announce guard", () => {
       synthesizedText: "Custom main session briefing complete.",
       runStartedAt: 1_000,
     });
+    params.cfg = {
+      session: { mainKey: "work" },
+    } as never;
     params.cfgWithAgentDefaults = {
       session: { mainKey: "work" },
     } as never;
@@ -812,12 +815,12 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     expect(state.result).toBeUndefined();
     expect(state.delivered).toBe(true);
     expect(buildOutboundSessionContext).toHaveBeenCalledWith({
-      cfg: params.cfgWithAgentDefaults,
+      cfg: params.cfg,
       agentId: "main",
       sessionKey: "agent:main:work",
     });
     expect(ensureOutboundSessionEntry).toHaveBeenCalledWith({
-      cfg: params.cfgWithAgentDefaults,
+      cfg: params.cfg,
       channel: "telegram",
       accountId: undefined,
       route: expect.objectContaining({
@@ -844,6 +847,9 @@ describe("dispatchCronDelivery — double-announce guard", () => {
       synthesizedText: "Threaded custom main session briefing complete.",
       runStartedAt: 1_000,
     });
+    params.cfg = {
+      session: { mainKey: "work" },
+    } as never;
     params.cfgWithAgentDefaults = {
       session: { mainKey: "work" },
     } as never;
@@ -852,12 +858,12 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     expect(state.result).toBeUndefined();
     expect(state.delivered).toBe(true);
     expect(buildOutboundSessionContext).toHaveBeenCalledWith({
-      cfg: params.cfgWithAgentDefaults,
+      cfg: params.cfg,
       agentId: "main",
       sessionKey: "agent:main:work:thread:42",
     });
     expect(ensureOutboundSessionEntry).toHaveBeenCalledWith({
-      cfg: params.cfgWithAgentDefaults,
+      cfg: params.cfg,
       channel: "telegram",
       accountId: undefined,
       route: expect.objectContaining({
@@ -1429,7 +1435,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     expect(state.result).toBeUndefined();
     expect(state.delivered).toBe(true);
     expect(buildOutboundSessionContext).toHaveBeenCalledWith({
-      cfg: params.cfgWithAgentDefaults,
+      cfg: params.cfg,
       agentId: "main",
       sessionKey: "agent:main:telegram:123456",
     });
@@ -1458,7 +1464,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     expect(state.result).toBeUndefined();
     expect(state.delivered).toBe(true);
     expect(resolveOutboundSessionRoute).toHaveBeenCalledWith({
-      cfg: params.cfgWithAgentDefaults,
+      cfg: params.cfg,
       channel: "whatsapp",
       agentId: "main",
       accountId: undefined,
@@ -1467,7 +1473,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
       threadId: undefined,
     });
     expect(ensureOutboundSessionEntry).toHaveBeenCalledWith({
-      cfg: params.cfgWithAgentDefaults,
+      cfg: params.cfg,
       channel: "whatsapp",
       accountId: undefined,
       route: expect.objectContaining({
@@ -1475,7 +1481,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
       }),
     });
     expect(buildOutboundSessionContext).toHaveBeenCalledWith({
-      cfg: params.cfgWithAgentDefaults,
+      cfg: params.cfg,
       agentId: "main",
       sessionKey: "agent:main:whatsapp:direct:+15551234567",
     });
@@ -1540,7 +1546,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     expect(state.delivered).toBe(true);
     expect(resolveOutboundSessionRoute).not.toHaveBeenCalled();
     expect(buildOutboundSessionContext).toHaveBeenCalledWith({
-      cfg: params.cfgWithAgentDefaults,
+      cfg: params.cfg,
       agentId: "main",
       sessionKey: "agent:main:session:daily-report",
     });
