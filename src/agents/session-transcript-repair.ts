@@ -24,6 +24,7 @@ type RawToolCallBlock = {
   name?: unknown;
   input?: unknown;
   arguments?: unknown;
+  partialJson?: unknown;
 };
 
 const RAW_TOOL_CALL_BLOCK_TYPES = new Set([
@@ -71,6 +72,25 @@ function hasToolCallId(block: RawToolCallBlock): boolean {
     hasNonEmptyStringField(block.tool_call_id) ||
     hasNonEmptyStringField(block.tool_use_id)
   );
+}
+
+function hasPartialJson(
+  block: RawToolCallBlock,
+): block is RawToolCallBlock & { partialJson: string } {
+  return typeof block.partialJson === "string";
+}
+
+function isFinalizedOpenAIResponsesToolCall(block: RawToolCallBlock): boolean {
+  if (!hasPartialJson(block) || typeof block.id !== "string" || "input" in block) {
+    return false;
+  }
+
+  const separator = block.id.indexOf("|");
+  if (separator <= 0 || separator === block.id.length - 1) {
+    return false;
+  }
+
+  return "arguments" in block && block.arguments !== undefined && block.arguments !== null;
 }
 
 function redactSessionsSpawnAttachmentsArgs(value: unknown): unknown {
@@ -369,10 +389,19 @@ function repairToolCallInputs(
           continue;
         }
       }
-      // Strip partialJson early so sessions_spawn sanitization still runs on
-      // otherwise-complete blocks retained from the OpenAI Responses transport.
       let workBlock = block;
-      if (isRawToolCallBlock(block) && "partialJson" in block) {
+      if (isRawToolCallBlock(block) && hasPartialJson(block)) {
+        if (!isFinalizedOpenAIResponsesToolCall(block)) {
+          droppedToolCalls += 1;
+          droppedInMessage += 1;
+          changed = true;
+          messageChanged = true;
+          continue;
+        }
+
+        // OpenAI Responses persists finalized function calls with both parsed
+        // arguments and the original partialJson bytes. Strip only the
+        // redundant partialJson field so replay keeps the finalized call.
         const stripped = { ...(block as object) } as Record<string, unknown>;
         delete stripped.partialJson;
         workBlock = stripped as typeof block;
