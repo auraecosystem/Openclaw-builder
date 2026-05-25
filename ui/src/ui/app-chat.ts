@@ -229,11 +229,12 @@ function enqueueChatMessage(
   if (!trimmed && !hasAttachments) {
     return;
   }
+  const queuedText = localCommand ? trimmed : text;
   host.chatQueue = [
     ...host.chatQueue,
     {
       id: generateUUID(),
-      text: trimmed,
+      text: queuedText,
       createdAt: Date.now(),
       attachments: hasAttachments ? cloneChatAttachmentsMetadata(attachments ?? []) : undefined,
       refreshSessions,
@@ -258,7 +259,7 @@ function enqueuePendingRunMessage(
     ...host.chatQueue,
     {
       id: generateUUID(),
-      text: trimmed,
+      text,
       createdAt: Date.now(),
       kind: "steered",
       attachments: hasAttachments ? cloneChatAttachmentsMetadata(attachments ?? []) : undefined,
@@ -474,6 +475,7 @@ export async function steerQueuedChatMessage(host: ChatHost, id: string) {
     return;
   }
   const message = item.text.trim();
+  const rawMessage = item.text;
   const attachments = item.attachments ?? [];
   const hasAttachments = attachments.length > 0;
   if (!message && !hasAttachments) {
@@ -485,7 +487,7 @@ export async function steerQueuedChatMessage(host: ChatHost, id: string) {
   );
   const runId = await sendSteerChatMessage(
     host as unknown as ChatState,
-    message,
+    rawMessage,
     hasAttachments ? attachments : undefined,
   );
   if (!runId) {
@@ -560,29 +562,30 @@ export async function handleSendChat(
     return;
   }
   const previousDraft = host.chatMessage;
-  const message = (messageOverride ?? host.chatMessage).trim();
+  const message = messageOverride ?? host.chatMessage;
+  const trimmedMessage = message.trim();
   const submittedSessionKey = host.sessionKey;
   const attachments = host.chatAttachments ?? [];
   const attachmentsToSend = messageOverride == null ? snapshotChatAttachments(attachments) : [];
   const hasAttachments = attachmentsToSend.length > 0;
 
-  if (!message && !hasAttachments) {
+  if (!trimmedMessage && !hasAttachments) {
     return;
   }
 
-  if (messageOverride != null && opts?.confirmReset && !confirmChatResetCommand(message)) {
+  if (messageOverride != null && opts?.confirmReset && !confirmChatResetCommand(trimmedMessage)) {
     return;
   }
 
-  if (isChatStopCommand(message)) {
+  if (isChatStopCommand(trimmedMessage)) {
     if (messageOverride == null) {
-      recordNonTranscriptInputHistory(host, message);
+      recordNonTranscriptInputHistory(host, trimmedMessage);
     }
     await handleAbortChat(host);
     return;
   }
 
-  if (isBtwCommand(message)) {
+  if (isBtwCommand(trimmedMessage)) {
     const submitKey = chatSubmitKey(host, "btw", message, attachmentsToSend);
     await withChatSubmitGuard(host, submitKey, async () => {
       const modelSwitchReady = waitForPendingChatModelSwitch(host, submittedSessionKey);
@@ -609,16 +612,16 @@ export async function handleSendChat(
   }
 
   // Intercept local slash commands (/status, /model, /compact, etc.)
-  const parsed = parseSlashCommand(message);
+  const parsed = parseSlashCommand(trimmedMessage);
   if (parsed?.command.executeLocal) {
     if (isChatBusy(host) && shouldQueueLocalSlashCommand(parsed.command.key)) {
       if (messageOverride == null) {
-        recordNonTranscriptInputHistory(host, message);
+        recordNonTranscriptInputHistory(host, trimmedMessage);
         host.chatMessage = "";
         host.chatAttachments = [];
         resetChatInputHistoryNavigation(host);
       }
-      enqueueChatMessage(host, message, undefined, isChatResetCommand(message), {
+      enqueueChatMessage(host, trimmedMessage, undefined, isChatResetCommand(trimmedMessage), {
         args: parsed.args,
         name: parsed.command.key,
       });
@@ -626,7 +629,7 @@ export async function handleSendChat(
     }
     const prevDraft = messageOverride == null ? previousDraft : undefined;
     if (messageOverride == null) {
-      recordNonTranscriptInputHistory(host, message);
+      recordNonTranscriptInputHistory(host, trimmedMessage);
       host.chatMessage = "";
       host.chatAttachments = [];
       resetChatInputHistoryNavigation(host);
