@@ -174,12 +174,19 @@ export const cronHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+    // Caller-supplied sessionKey / agentId thread through to `cron.wake` so
+    // multi-session deployments wake the originating conversation lane
+    // instead of the heartbeat / main default. Empty strings are dropped
+    // (schema permits omission; presence with empty payload should not
+    // override the default).
     const p = params as {
       mode: "now" | "next-heartbeat";
       text: string;
       sessionKey?: string;
+      agentId?: string;
     };
     const sessionKey = p.sessionKey?.trim() || undefined;
+    const agentId = p.agentId?.trim() || undefined;
     if (sessionKey && isSubagentSessionKey(sessionKey)) {
       respond(
         false,
@@ -192,6 +199,7 @@ export const cronHandlers: GatewayRequestHandlers = {
       mode: p.mode,
       text: p.text,
       ...(sessionKey ? { sessionKey } : {}),
+      ...(agentId ? { agentId } : {}),
     });
     respond(true, result, undefined);
   },

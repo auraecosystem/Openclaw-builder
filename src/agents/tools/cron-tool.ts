@@ -7,6 +7,7 @@ import { normalizeHttpWebhookUrl } from "../../cron/webhook-url.js";
 import { extractTextFromChatContent } from "../../shared/chat-content.js";
 import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 import { isRecord, truncateUtf16Safe } from "../../utils.js";
+import { parseAgentSessionKey } from "../../sessions/session-key-utils.js";
 import type { DeliveryContext } from "../../utils/delivery-context.shared.js";
 import { resolveSessionAgentId } from "../agent-scope.js";
 import { optionalStringEnum, stringEnum } from "../schema/typebox.js";
@@ -303,7 +304,18 @@ export const CronToolSchema = Type.Object(
     contextMessages: Type.Optional(
       Type.Number({ minimum: 0, maximum: REMINDER_CONTEXT_MESSAGES_MAX }),
     ),
-    agentId: Type.Optional(Type.String({ description: "List filter: agent id" })),
+    agentId: Type.Optional(
+      Type.String({
+        description:
+          "List filter for `action: \"list\"`; wake target override for `action: \"wake\"` (defaults to the calling agent when omitted on wake)",
+      }),
+    ),
+    sessionKey: Type.Optional(
+      Type.String({
+        description:
+          "Wake target override for `action: \"wake\"`: route the event to the named session rather than the calling agent's current session. Defaults to the resolved calling-session key when omitted.",
+      }),
+    ),
   },
   { additionalProperties: true },
 );
@@ -505,7 +517,7 @@ ACTIONS:
 - remove: delete job; needs jobId
 - run: trigger now; needs jobId
 - runs: run history; needs jobId
-- wake: send wake event; needs text, optional mode
+- wake: send wake event; needs text, optional mode; defaults the target to the calling session/agent. Pass top-level sessionKey/agentId to wake a different lane.
 
 JOB SCHEMA (for add action):
 {
@@ -813,8 +825,53 @@ Use jobId canonical; id accepted compat. contextMessages (0-10) adds previous me
             params.mode === "now" || params.mode === "next-heartbeat"
               ? params.mode
               : "next-heartbeat";
+          // Resolve the calling agent's session key into the internal form
+          // the cron service routes by (mirrors the `add` action at L569-583
+          // above). Without this, the wake gateway call goes through with no
+          // session key and the system event lands on the heartbeat / main
+          // default rather than the originating conversation lane. Closes
+          // the upstream half of openclaw/openclaw#46886 (#64556 — agentId/
+          // sessionKey silently ignored for `action: "wake"`). Explicit
+          // params on the tool call still take precedence over the inferred
+          // value, so call sites that want to wake a different session can
+          // pass `sessionKey` / `agentId` directly.
+          const cfg = getRuntimeConfig();
+          const { mainKey, alias } = resolveMainSessionAlias(cfg);
+          const explicitSessionKey = readStringParam(params, "sessionKey");
+          const explicitAgentId = readStringParam(params, "agentId");
+          const inferredSessionKey = opts?.agentSessionKey
+            ? resolveInternalSessionKey({ key: opts.agentSessionKey, alias, mainKey })
+            : undefined;
+          const inferredAgentId = opts?.agentSessionKey
+            ? resolveSessionAgentId({ sessionKey: opts.agentSessionKey, config: cfg })
+            : undefined;
+          const sessionKey = explicitSessionKey ?? inferredSessionKey;
+          // When a caller supplies an explicit cross-agent sessionKey without
+          // an explicit agentId, the gateway target resolver treats agentId as
+          // authoritative — pairing the caller's inferred agentId with a
+          // foreign session key would canonicalize the wake back to the
+          // caller's main lane (closes ClawSweeper P1 on PR #83738). Derive
+          // the agentId from the explicit canonical session key instead; only
+          // fall through to the inferred caller-agent when no explicit
+          // sessionKey was supplied.
+          const agentIdFromExplicitSessionKey = explicitSessionKey
+            ? parseAgentSessionKey(explicitSessionKey)?.agentId
+            : undefined;
+          const agentId =
+            explicitAgentId ??
+            (explicitSessionKey ? agentIdFromExplicitSessionKey : inferredAgentId);
           return jsonResult(
-            await callGateway("wake", gatewayOpts, { mode, text }, { expectFinal: false }),
+            await callGateway(
+              "wake",
+              gatewayOpts,
+              {
+                mode,
+                text,
+                ...(sessionKey ? { sessionKey } : {}),
+                ...(agentId ? { agentId } : {}),
+              },
+              { expectFinal: false },
+            ),
           );
         }
         default:

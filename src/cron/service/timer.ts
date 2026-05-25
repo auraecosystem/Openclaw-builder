@@ -2003,23 +2003,56 @@ function emitJobFinished(
 
 export function wake(
   state: CronServiceState,
-  opts: { mode: "now" | "next-heartbeat"; text: string; sessionKey?: string },
+  opts: {
+    mode: "now" | "next-heartbeat";
+    text: string;
+    /**
+     * Internal session key to enqueue the system event against. When omitted,
+     * the dep's default (heartbeat / main) is used — wakes from a non-main
+     * session would otherwise route to the wrong place. Callers wiring an
+     * agent-tool `wake` should thread the resolved session key (e.g. from
+     * `cron-tool`'s `resolveInternalSessionKey`) so the event lands on the
+     * originating conversation lane.
+     */
+    sessionKey?: string;
+    /**
+     * Agent id paired with `sessionKey`. Forwarded to `enqueueSystemEvent`
+     * and the heartbeat request so multi-agent setups route to the agent
+     * that owns the targeted session — fixes the related half of #46886
+     * ("always routes to default agent").
+     */
+    agentId?: string;
+  },
 ) {
   const text = opts.text.trim();
   if (!text) {
     return { ok: false } as const;
   }
   const sessionKey = opts.sessionKey?.trim() || undefined;
+  const agentId = opts.agentId?.trim() || undefined;
   if (sessionKey && isSubagentSessionKey(sessionKey)) {
     return { ok: false, reason: "unwakeable-session-key" } as const;
   }
-  state.deps.enqueueSystemEvent(text, sessionKey ? { sessionKey } : undefined);
+  // Preserve the pre-fix no-origin call shape — when neither sessionKey nor
+  // agentId is set, pass no opts at all so the dep's default-sessionKey
+  // binding kicks in (matches `enqueueSystemEvent(text)` from before this
+  // change). When at least one is set, build the opts object with only the
+  // present fields.
+  const enqueueOpts =
+    sessionKey || agentId
+      ? {
+          ...(sessionKey ? { sessionKey } : {}),
+          ...(agentId ? { agentId } : {}),
+        }
+      : undefined;
+  state.deps.enqueueSystemEvent(text, enqueueOpts);
   if (opts.mode === "now") {
     state.deps.requestHeartbeat({
       source: "manual",
       intent: "immediate",
       reason: "wake",
       ...(sessionKey ? { sessionKey } : {}),
+      ...(agentId ? { agentId } : {}),
     });
   } else if (sessionKey) {
     // next-heartbeat + sessionKey still needs a targeted immediate wake.
@@ -2039,6 +2072,7 @@ export function wake(
       intent: "immediate",
       reason: "wake",
       sessionKey,
+      ...(agentId ? { agentId } : {}),
     });
   }
   return { ok: true } as const;
