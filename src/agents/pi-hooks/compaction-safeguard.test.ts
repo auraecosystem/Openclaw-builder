@@ -1492,7 +1492,7 @@ describe("compaction-safeguard recent-turn preservation", () => {
     });
     const messagesToSummarize: AgentMessage[] = Array.from({ length: 4 }, (_unused, index) => ({
       role: "user",
-      content: `msg-${index}-${"x".repeat(120_000)}`,
+      content: `msg-${index}-${"x".repeat(30_000)}`,
       timestamp: index + 1,
     }));
     const event = {
