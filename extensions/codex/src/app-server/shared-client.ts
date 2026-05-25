@@ -16,6 +16,11 @@ import { withTimeout } from "./timeout.js";
 type SharedCodexAppServerClientEntry = {
   client?: CodexAppServerClient;
   promise?: Promise<CodexAppServerClient>;
+  activeLeases?: number;
+  retireWhenIdle?: {
+    exitTimeoutMs?: number;
+    forceKillDelayMs?: number;
+  };
 };
 
 type SharedCodexAppServerClientState = {
@@ -218,6 +223,46 @@ export function clearSharedCodexAppServerClientIfCurrent(
   return false;
 }
 
+export function acquireSharedCodexAppServerClientLease(
+  client: CodexAppServerClient | undefined,
+): () => Promise<boolean> {
+  if (!client) {
+    return async () => false;
+  }
+  const current = findSharedClientEntry(client);
+  if (!current) {
+    return async () => false;
+  }
+  current.entry.activeLeases = (current.entry.activeLeases ?? 0) + 1;
+  let released = false;
+  return async () => {
+    if (released) {
+      return false;
+    }
+    released = true;
+    current.entry.activeLeases = Math.max(0, (current.entry.activeLeases ?? 1) - 1);
+    return await closeRetiredSharedClientEntryIfIdle(current.key, current.entry);
+  };
+}
+
+export async function retireSharedCodexAppServerClientWhenIdle(
+  client: CodexAppServerClient | undefined,
+  options?: {
+    exitTimeoutMs?: number;
+    forceKillDelayMs?: number;
+  },
+): Promise<boolean> {
+  if (!client) {
+    return false;
+  }
+  const current = findSharedClientEntry(client);
+  if (!current) {
+    return false;
+  }
+  current.entry.retireWhenIdle = options ?? {};
+  return await closeRetiredSharedClientEntryIfIdle(current.key, current.entry);
+}
+
 export async function clearSharedCodexAppServerClientIfCurrentAndWait(
   client: CodexAppServerClient | undefined,
   options?: {
@@ -286,4 +331,32 @@ function collectSharedClients(state: SharedCodexAppServerClientState): CodexAppS
         .filter((client): client is CodexAppServerClient => Boolean(client)),
     ),
   ];
+}
+
+function findSharedClientEntry(
+  client: CodexAppServerClient,
+): { key: string; entry: SharedCodexAppServerClientEntry } | undefined {
+  const state = getSharedCodexAppServerClientState();
+  for (const [key, entry] of state.clients) {
+    if (entry.client === client) {
+      return { key, entry };
+    }
+  }
+  return undefined;
+}
+
+async function closeRetiredSharedClientEntryIfIdle(
+  key: string,
+  entry: SharedCodexAppServerClientEntry,
+): Promise<boolean> {
+  if (!entry.retireWhenIdle || (entry.activeLeases ?? 0) > 0) {
+    return false;
+  }
+  const state = getSharedCodexAppServerClientState();
+  if (state.clients.get(key) !== entry) {
+    return false;
+  }
+  state.clients.delete(key);
+  await entry.client?.closeAndWait(entry.retireWhenIdle);
+  return Boolean(entry.client);
 }

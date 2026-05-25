@@ -167,7 +167,11 @@ import {
   type CodexAppServerThreadBinding,
 } from "./session-binding.js";
 import { readCodexMirroredSessionHistoryMessages } from "./session-history.js";
-import { clearSharedCodexAppServerClientIfCurrent } from "./shared-client.js";
+import {
+  acquireSharedCodexAppServerClientLease,
+  clearSharedCodexAppServerClientIfCurrent,
+  retireSharedCodexAppServerClientWhenIdle,
+} from "./shared-client.js";
 import {
   areCodexDynamicToolFingerprintsCompatible,
   buildDeveloperInstructions,
@@ -1219,6 +1223,7 @@ export async function runCodexAppServerAttempt(
   let trajectoryEndRecorded = false;
   let nativeHookRelay: NativeHookRelayRegistrationHandle | undefined;
   let startupClientForCleanup: CodexAppServerClient | undefined;
+  let releaseSharedClientLease: (() => Promise<boolean>) | undefined;
   let sandboxExecEnvironmentAcquired = false;
   const releaseSandboxExecEnvironment = async () => {
     if (sandboxExecEnvironmentAcquired) {
@@ -1337,6 +1342,7 @@ export async function runCodexAppServerAttempt(
             agentDir,
             params.config,
           );
+          releaseSharedClientLease = acquireSharedCodexAppServerClientLease(startupClient);
           attemptedClient = startupClient;
           startupClientForCleanup = startupClient;
           await ensureCodexComputerUse({
@@ -1478,6 +1484,8 @@ export async function runCodexAppServerAttempt(
             }
             const failedClient = attemptedClient;
             const clearedSharedClient = clearSharedCodexAppServerClientIfCurrent(failedClient);
+            await releaseSharedCodexAppServerClientLeaseBestEffort(releaseSharedClientLease);
+            releaseSharedClientLease = undefined;
             if (startupClientForCleanup === failedClient) {
               startupClientForCleanup = undefined;
             }
@@ -1524,6 +1532,7 @@ export async function runCodexAppServerAttempt(
     nativeHookRelay?.unregister();
     await releaseSandboxExecEnvironment();
     clearSharedCodexAppServerClientIfCurrent(startupClientForCleanup);
+    await releaseSharedCodexAppServerClientLeaseBestEffort(releaseSharedClientLease);
     params.abortSignal?.removeEventListener("abort", abortFromUpstream);
     throw error;
   }
@@ -3047,6 +3056,10 @@ export async function runCodexAppServerAttempt(
     closeCleanup?.();
     nativeHookRelay?.unregister();
     await releaseSandboxExecEnvironment();
+    if (shouldRetireCodexAppServerClientAfterTurn(thread, appServer)) {
+      await retireSharedCodexAppServerClientWhenIdleBestEffort(client);
+    }
+    await releaseSharedCodexAppServerClientLeaseBestEffort(releaseSharedClientLease);
     runAbortController.signal.removeEventListener("abort", abortListener);
     params.abortSignal?.removeEventListener("abort", abortFromUpstream);
     steeringQueue?.cancel();
@@ -3527,6 +3540,36 @@ async function unsubscribeCodexThreadBestEffort(
       threadId: params.threadId,
       error,
     });
+  }
+}
+
+function shouldRetireCodexAppServerClientAfterTurn(
+  thread: CodexAppServerThreadLifecycleBinding,
+  appServer: CodexAppServerRuntimeOptions,
+): boolean {
+  return appServer.start.transport === "stdio" && thread.userMcpServersFingerprint !== undefined;
+}
+
+async function retireSharedCodexAppServerClientWhenIdleBestEffort(
+  client: CodexAppServerClient,
+): Promise<void> {
+  try {
+    await retireSharedCodexAppServerClientWhenIdle(client, {
+      exitTimeoutMs: 2_000,
+      forceKillDelayMs: 250,
+    });
+  } catch (error) {
+    embeddedAgentLog.debug("codex app-server MCP-backed client retirement failed", { error });
+  }
+}
+
+async function releaseSharedCodexAppServerClientLeaseBestEffort(
+  release: (() => Promise<boolean>) | undefined,
+): Promise<void> {
+  try {
+    await release?.();
+  } catch (error) {
+    embeddedAgentLog.debug("codex app-server shared client lease release failed", { error });
   }
 }
 
