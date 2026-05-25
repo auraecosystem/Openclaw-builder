@@ -131,6 +131,8 @@ export {
 };
 export type { ResolvedSessionMaintenanceConfig, SessionMaintenanceWarning };
 
+type SessionStoreFileStatSnapshot = ReturnType<typeof getFileStatSnapshot>;
+
 type SaveSessionStoreOptions = {
   /** Skip pruning, capping, and rotation (e.g. during one-time migrations). */
   skipMaintenance?: boolean;
@@ -142,6 +144,13 @@ type SaveSessionStoreOptions = {
    * whole session entry without carrying ACP state forward.
    */
   allowDropAcpMetaSessionKeys?: string[];
+  /** Fallback ACP metadata snapshot used only when the fresh disk snapshot cannot be read. */
+  preserveAcpMetadataFallback?: Map<string, NonNullable<SessionEntry["acp"]>>;
+  /**
+   * When present, read fresh ACP metadata only if the store file changed since this
+   * baseline. `null` represents a missing file at writer load time.
+   */
+  refreshAcpMetadataIfFileChangedSince?: SessionStoreFileStatSnapshot | null;
   /** Optional callback for warn-only maintenance. */
   onWarn?: (warning: SessionMaintenanceWarning) => void | Promise<void>;
   /** Optional callback with maintenance stats after a save. */
@@ -222,19 +231,37 @@ function updateSessionStoreWriteCaches(params: {
   });
 }
 
-function loadMutableSessionStoreForWriter(storePath: string): Record<string, SessionEntry> {
+type MutableSessionStoreForWriter = {
+  store: Record<string, SessionEntry>;
+  fileStat: SessionStoreFileStatSnapshot;
+};
+
+function loadMutableSessionStoreForWriter(storePath: string): MutableSessionStoreForWriter {
+  const currentFileStat = getFileStatSnapshot(storePath);
   if (isSessionStoreCacheEnabled()) {
-    const currentFileStat = getFileStatSnapshot(storePath);
     const cached = takeMutableSessionStoreCache({
       storePath,
       mtimeMs: currentFileStat?.mtimeMs,
       sizeBytes: currentFileStat?.sizeBytes,
     });
     if (cached) {
-      return cached;
+      return { store: cached, fileStat: currentFileStat };
     }
   }
-  return loadSessionStore(storePath, { skipCache: true, clone: false });
+  return {
+    store: loadSessionStore(storePath, { skipCache: true, clone: false }),
+    fileStat: currentFileStat,
+  };
+}
+
+function hasSessionStoreFileStatChanged(
+  before: SessionStoreFileStatSnapshot | null,
+  after: SessionStoreFileStatSnapshot,
+): boolean {
+  if (!before && !after) {
+    return false;
+  }
+  return before?.mtimeMs !== after?.mtimeMs || before?.sizeBytes !== after?.sizeBytes;
 }
 
 function resolveMutableSessionStoreKey(
@@ -261,23 +288,23 @@ function collectAcpMetadataSnapshot(
   const snapshot = new Map<string, NonNullable<SessionEntry["acp"]>>();
   for (const [sessionKey, entry] of Object.entries(store)) {
     if (entry?.acp) {
-      snapshot.set(sessionKey, entry.acp);
+      snapshot.set(normalizeStoreSessionKey(sessionKey), entry.acp);
     }
   }
   return snapshot;
 }
 
+function normalizeAllowedAcpDropKeys(keys: string[] | undefined): Set<string> {
+  return new Set((keys ?? []).map((key) => normalizeStoreSessionKey(key)));
+}
+
 function preserveExistingAcpMetadata(params: {
   previousAcpByKey: Map<string, NonNullable<SessionEntry["acp"]>>;
   nextStore: Record<string, SessionEntry>;
-  allowDropSessionKeys?: string[];
+  allowDrop: Set<string>;
 }): void {
-  const allowDrop = new Set(
-    (params.allowDropSessionKeys ?? []).map((key) => normalizeStoreSessionKey(key)),
-  );
   for (const [previousKey, previousAcp] of params.previousAcpByKey.entries()) {
-    const normalizedKey = normalizeStoreSessionKey(previousKey);
-    if (allowDrop.has(normalizedKey)) {
+    if (params.allowDrop.has(previousKey)) {
       continue;
     }
     const nextKey = resolveMutableSessionStoreKey(params.nextStore, previousKey);
@@ -292,6 +319,49 @@ function preserveExistingAcpMetadata(params: {
       ...nextEntry,
       acp: previousAcp,
     };
+  }
+}
+
+function reconcileAcpMetadataAuthoritatively(params: {
+  freshAcpByKey: Map<string, NonNullable<SessionEntry["acp"]>>;
+  nextStore: Record<string, SessionEntry>;
+  allowDrop: Set<string>;
+}): void {
+  for (const [storeKey, entry] of Object.entries(params.nextStore)) {
+    const normalizedKey = normalizeStoreSessionKey(storeKey);
+    if (params.allowDrop.has(normalizedKey)) {
+      continue;
+    }
+    const freshAcp = params.freshAcpByKey.get(normalizedKey);
+    if (freshAcp) {
+      if (entry?.acp !== freshAcp) {
+        params.nextStore[storeKey] = { ...entry, acp: freshAcp };
+      }
+      continue;
+    }
+    if (entry?.acp) {
+      const nextEntry = { ...entry };
+      delete nextEntry.acp;
+      params.nextStore[storeKey] = nextEntry;
+    }
+  }
+}
+
+function collectFreshAcpMetadataSnapshot(
+  storePath: string,
+): { ok: true; snapshot: Map<string, NonNullable<SessionEntry["acp"]>> } | { ok: false } {
+  try {
+    const raw = fs.readFileSync(storePath, "utf-8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { ok: false };
+    }
+    return {
+      ok: true,
+      snapshot: collectAcpMetadataSnapshot(parsed as Record<string, SessionEntry>),
+    };
+  } catch {
+    return { ok: false };
   }
 }
 
@@ -440,6 +510,34 @@ async function saveSessionStoreUnlocked(
     }
   }
 
+  const allowDropAcp = normalizeAllowedAcpDropKeys(opts?.allowDropAcpMetaSessionKeys);
+  const hasRefreshBaseline = Object.prototype.hasOwnProperty.call(
+    opts ?? {},
+    "refreshAcpMetadataIfFileChangedSince",
+  );
+  const shouldRefreshAcpMetadataFromDisk =
+    hasRefreshBaseline &&
+    hasSessionStoreFileStatChanged(
+      opts?.refreshAcpMetadataIfFileChangedSince ?? null,
+      getFileStatSnapshot(storePath),
+    );
+  const freshAcpSnapshot = shouldRefreshAcpMetadataFromDisk
+    ? collectFreshAcpMetadataSnapshot(storePath)
+    : { ok: false as const };
+  if (freshAcpSnapshot.ok) {
+    reconcileAcpMetadataAuthoritatively({
+      freshAcpByKey: freshAcpSnapshot.snapshot,
+      nextStore: store,
+      allowDrop: allowDropAcp,
+    });
+  } else if (opts?.preserveAcpMetadataFallback) {
+    preserveExistingAcpMetadata({
+      previousAcpByKey: opts.preserveAcpMetadataFallback,
+      nextStore: store,
+      allowDrop: allowDropAcp,
+    });
+  }
+
   await fs.promises.mkdir(path.dirname(storePath), { recursive: true });
   const json = JSON.stringify(store, null, 2);
   if (getSerializedSessionStore(storePath) === json) {
@@ -510,15 +608,14 @@ export async function updateSessionStore<T>(
   opts?: SaveSessionStoreOptions,
 ): Promise<T> {
   return await runExclusiveSessionStoreWrite(storePath, async () => {
-    const store = loadMutableSessionStoreForWriter(storePath);
-    const previousAcpByKey = collectAcpMetadataSnapshot(store);
-    const result = await mutator(store);
-    preserveExistingAcpMetadata({
-      previousAcpByKey,
-      nextStore: store,
-      allowDropSessionKeys: opts?.allowDropAcpMetaSessionKeys,
+    const mutable = loadMutableSessionStoreForWriter(storePath);
+    const previousAcpByKey = collectAcpMetadataSnapshot(mutable.store);
+    const result = await mutator(mutable.store);
+    await saveSessionStoreUnlocked(storePath, mutable.store, {
+      ...opts,
+      preserveAcpMetadataFallback: previousAcpByKey,
+      refreshAcpMetadataIfFileChangedSince: mutable.fileStat ?? null,
     });
-    await saveSessionStoreUnlocked(storePath, store, opts);
     return result;
   });
 }
@@ -613,6 +710,7 @@ async function persistResolvedSessionEntry(params: {
   store: Record<string, SessionEntry>;
   resolved: ReturnType<typeof resolveSessionStoreEntry>;
   next: SessionEntry;
+  refreshAcpMetadataIfFileChangedSince?: SessionStoreFileStatSnapshot | null;
 }): Promise<SessionEntry> {
   params.store[params.resolved.normalizedKey] = params.next;
   for (const legacyKey of params.resolved.legacyKeys) {
@@ -620,6 +718,7 @@ async function persistResolvedSessionEntry(params: {
   }
   await saveSessionStoreUnlocked(params.storePath, params.store, {
     activeSessionKey: params.resolved.normalizedKey,
+    refreshAcpMetadataIfFileChangedSince: params.refreshAcpMetadataIfFileChangedSince ?? null,
   });
   return params.next;
 }
@@ -631,8 +730,8 @@ export async function updateSessionStoreEntry(params: {
 }): Promise<SessionEntry | null> {
   const { storePath, sessionKey, update } = params;
   return await runExclusiveSessionStoreWrite(storePath, async () => {
-    const store = loadMutableSessionStoreForWriter(storePath);
-    const resolved = resolveSessionStoreEntry({ store, sessionKey });
+    const mutable = loadMutableSessionStoreForWriter(storePath);
+    const resolved = resolveSessionStoreEntry({ store: mutable.store, sessionKey });
     const existing = resolved.existing;
     if (!existing) {
       return null;
@@ -644,9 +743,10 @@ export async function updateSessionStoreEntry(params: {
     const next = mergeSessionEntry(existing, patch);
     return await persistResolvedSessionEntry({
       storePath,
-      store,
+      store: mutable.store,
       resolved,
       next,
+      refreshAcpMetadataIfFileChangedSince: mutable.fileStat ?? null,
     });
   });
 }
@@ -775,8 +875,8 @@ export async function updateLastRoute(params: {
   const { storePath, sessionKey, channel, to, accountId, threadId, ctx } = params;
   const createIfMissing = params.createIfMissing ?? true;
   return await runExclusiveSessionStoreWrite(storePath, async () => {
-    const store = loadMutableSessionStoreForWriter(storePath);
-    const resolved = resolveSessionStoreEntry({ store, sessionKey });
+    const mutable = loadMutableSessionStoreForWriter(storePath);
+    const resolved = resolveSessionStoreEntry({ store: mutable.store, sessionKey });
     const existing = resolved.existing;
     if (!existing && !createIfMissing) {
       return null;
@@ -848,9 +948,10 @@ export async function updateLastRoute(params: {
     );
     return await persistResolvedSessionEntry({
       storePath,
-      store,
+      store: mutable.store,
       resolved,
       next,
+      refreshAcpMetadataIfFileChangedSince: mutable.fileStat ?? null,
     });
   });
 }

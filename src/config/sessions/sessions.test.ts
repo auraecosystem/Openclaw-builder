@@ -16,7 +16,12 @@ import {
 } from "./paths.js";
 import { evaluateSessionFreshness, resolveSessionResetPolicy } from "./reset.js";
 import { resolveAndPersistSessionFile } from "./session-file.js";
-import { clearSessionStoreCacheForTest, loadSessionStore, updateSessionStore } from "./store.js";
+import {
+  clearSessionStoreCacheForTest,
+  loadSessionStore,
+  saveSessionStore,
+  updateSessionStore,
+} from "./store.js";
 import { useTempSessionsFixture } from "./test-helpers.js";
 import { mergeSessionEntry, mergeSessionEntryWithPolicy, type SessionEntry } from "./types.js";
 
@@ -676,6 +681,188 @@ describe("session store writer queue", () => {
     expect(store[key]?.acp).toEqual(acp);
     expect(store[key]?.modelProvider).toBe("openai-codex");
     expect(store[key]?.model).toBe("gpt-5.4");
+  });
+
+  it("preserves caller-provided ACP metadata on direct session-store saves", async () => {
+    const key = "agent:codex:acp:direct-save";
+    const initialAcp: NonNullable<SessionEntry["acp"]> = {
+      backend: "acpx",
+      agent: "codex",
+      runtimeSessionName: "codex-direct-initial",
+      mode: "persistent",
+      state: "idle",
+      lastActivityAt: 100,
+    };
+    const updatedAcp: NonNullable<SessionEntry["acp"]> = {
+      ...initialAcp,
+      runtimeSessionName: "codex-direct-updated",
+      state: "running",
+      lastActivityAt: 200,
+    };
+    const now = Date.now();
+    const { storePath } = await makeTmpStore({
+      [key]: {
+        sessionId: "sess-acp-direct-save",
+        updatedAt: now,
+      },
+    });
+
+    await saveSessionStore(storePath, {
+      [key]: {
+        sessionId: "sess-acp-direct-save",
+        updatedAt: now,
+        acp: initialAcp,
+      },
+    });
+
+    let store = loadSessionStore(storePath, { skipCache: true });
+    expect(store[key]?.acp).toEqual(initialAcp);
+
+    await saveSessionStore(storePath, {
+      [key]: {
+        sessionId: "sess-acp-direct-save",
+        updatedAt: now,
+        acp: updatedAcp,
+      },
+    });
+
+    store = loadSessionStore(storePath, { skipCache: true });
+    expect(store[key]?.acp).toEqual(updatedAcp);
+  });
+
+  it("preserves ACP metadata already written on disk during a stale session-store update", async () => {
+    const key = "agent:gemini:acp:race";
+    const acp: NonNullable<SessionEntry["acp"]> = {
+      backend: "acpx",
+      agent: "gemini",
+      runtimeSessionName: "gemini-runtime",
+      mode: "oneshot",
+      state: "idle",
+      lastActivityAt: 100,
+    };
+    const { storePath } = await makeTmpStore({
+      [key]: {
+        sessionId: "sess-acp-race",
+        updatedAt: 100,
+      },
+    });
+
+    await updateSessionStore(storePath, (store) => {
+      fs.writeFileSync(
+        storePath,
+        JSON.stringify(
+          {
+            [key]: {
+              sessionId: "sess-acp-race",
+              updatedAt: 101,
+              acp,
+            },
+          },
+          null,
+          2,
+        ),
+        "utf-8",
+      );
+      store[key].label = "touched by gateway agent handler";
+      store[key].updatedAt = Date.now();
+    });
+
+    const store = loadSessionStore(storePath, { skipCache: true });
+    expect(store[key]?.label).toBe("touched by gateway agent handler");
+    expect(store[key]?.acp).toEqual(acp);
+  });
+
+  it("uses fresh ACP metadata when disk changes during an in-place stale session-store update", async () => {
+    const key = "agent:gemini:acp:updated-on-disk";
+    const staleAcp: NonNullable<SessionEntry["acp"]> = {
+      backend: "acpx",
+      agent: "gemini",
+      runtimeSessionName: "stale-runtime",
+      mode: "oneshot",
+      state: "idle",
+      lastActivityAt: 100,
+    };
+    const freshAcp: NonNullable<SessionEntry["acp"]> = {
+      backend: "acpx",
+      agent: "gemini",
+      runtimeSessionName: "fresh-runtime",
+      mode: "oneshot",
+      state: "running",
+      lastActivityAt: 200,
+    };
+    const { storePath } = await makeTmpStore({
+      [key]: {
+        sessionId: "sess-acp-updated-on-disk",
+        updatedAt: 100,
+        acp: staleAcp,
+      },
+    });
+
+    await updateSessionStore(storePath, (store) => {
+      fs.writeFileSync(
+        storePath,
+        JSON.stringify(
+          {
+            [key]: {
+              sessionId: "sess-acp-updated-on-disk",
+              updatedAt: 101,
+              acp: freshAcp,
+            },
+          },
+          null,
+          2,
+        ),
+        "utf-8",
+      );
+      store[key].label = "touched after disk ACP update";
+      store[key].updatedAt = Date.now();
+    });
+
+    const store = loadSessionStore(storePath, { skipCache: true });
+    expect(store[key]?.label).toBe("touched after disk ACP update");
+    expect(store[key]?.acp).toEqual(freshAcp);
+  });
+
+  it("does not resurrect ACP metadata removed on disk during an in-place stale session-store update", async () => {
+    const key = "agent:gemini:acp:removed-on-disk";
+    const acp: NonNullable<SessionEntry["acp"]> = {
+      backend: "acpx",
+      agent: "gemini",
+      runtimeSessionName: "gemini-runtime",
+      mode: "oneshot",
+      state: "idle",
+      lastActivityAt: 100,
+    };
+    const { storePath } = await makeTmpStore({
+      [key]: {
+        sessionId: "sess-acp-removed-on-disk",
+        updatedAt: 100,
+        acp,
+      },
+    });
+
+    await updateSessionStore(storePath, (store) => {
+      fs.writeFileSync(
+        storePath,
+        JSON.stringify(
+          {
+            [key]: {
+              sessionId: "sess-acp-removed-on-disk",
+              updatedAt: 101,
+            },
+          },
+          null,
+          2,
+        ),
+        "utf-8",
+      );
+      store[key].label = "touched after disk removal";
+      store[key].updatedAt = Date.now();
+    });
+
+    const store = loadSessionStore(storePath, { skipCache: true });
+    expect(store[key]?.label).toBe("touched after disk removal");
+    expect(store[key]?.acp).toBeUndefined();
   });
 
   it("allows explicit ACP metadata removal through the ACP session helper", async () => {
