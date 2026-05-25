@@ -41,11 +41,51 @@ export function materializePluginAutoEnableCandidates(params: {
   });
 }
 
+const autoEnableCache = new WeakMap<
+  object,
+  WeakMap<object, Map<PluginManifestRegistry | undefined, PluginAutoEnableResult>>
+>();
+
 export function applyPluginAutoEnable(params: {
   config?: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
   manifestRegistry?: PluginManifestRegistry;
   discovery?: PluginDiscoveryResult;
+}): PluginAutoEnableResult {
+  const config = params.config;
+  const env = params.env;
+  if (config && env) {
+    const registryKey = params.manifestRegistry;
+    let envMap = autoEnableCache.get(config);
+    if (envMap) {
+      const registryMap = envMap.get(env);
+      if (registryMap) {
+        const hit = registryMap.get(registryKey);
+        if (hit) {
+          return hit;
+        }
+      }
+    }
+    const result = computeAutoEnable(params);
+    if (!envMap) {
+      envMap = new WeakMap();
+      autoEnableCache.set(config, envMap);
+    }
+    let registryMap = envMap.get(env);
+    if (!registryMap) {
+      registryMap = new Map();
+      envMap.set(env, registryMap);
+    }
+    registryMap.set(registryKey, result);
+    return result;
+  }
+  return computeAutoEnable(params);
+}
+
+function computeAutoEnable(params: {
+  config?: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
+  manifestRegistry?: PluginManifestRegistry;
 }): PluginAutoEnableResult {
   const candidates = detectPluginAutoEnableCandidates(params);
   return materializePluginAutoEnableCandidates({
