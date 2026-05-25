@@ -1,7 +1,18 @@
-import { resolvePinnedHostnameWithPolicy, type SsrFPolicy } from "openclaw/plugin-sdk/ssrf-runtime";
+import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
+import {
+  fetchWithSsrFGuard,
+  resolvePinnedHostnameWithPolicy,
+  type SsrFPolicy,
+} from "openclaw/plugin-sdk/ssrf-runtime";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 type LineOutboundMediaKind = "image" | "video" | "audio";
+
+// "preview" covers previewImageUrl payloads on image/video messages, which
+// LINE caps at 1 MB (smaller than the 10 MB / 200 MB caps that apply to the
+// originalContentUrl). It is not a message-level media kind, so it is kept
+// out of LineOutboundMediaKind / LineOutboundMediaResolved.mediaKind.
+type LineOutboundMediaSizeKind = LineOutboundMediaKind | "preview";
 
 export type LineOutboundMediaResolved = {
   mediaUrl: string;
@@ -21,6 +32,94 @@ type ResolveLineOutboundMediaOpts = {
 const LINE_OUTBOUND_MEDIA_SSRF_POLICY: SsrFPolicy = {
   allowPrivateNetwork: false,
 };
+
+// Verified against developers.line.biz/en/reference/messaging-api/ on 2026-05-20.
+// Image message originalContentUrl: "Max file size: 10MB".
+// Video / audio message originalContentUrl: "Max file size: 200 MB".
+// previewImageUrl (image / video messages): "Max file size: 1 MB" — strictly
+// smaller than the originalContentUrl cap, so it has to be checked separately.
+export const LINE_OUTBOUND_MEDIA_MAX_BYTES: Record<LineOutboundMediaSizeKind, number> = {
+  image: 10 * 1024 * 1024,
+  video: 200 * 1024 * 1024,
+  audio: 200 * 1024 * 1024,
+  preview: 1 * 1024 * 1024,
+};
+
+const LINE_OUTBOUND_MEDIA_PRECHECK_TIMEOUT_MS = 5000;
+
+type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+type PrecheckLineOutboundMediaSizeOpts = {
+  fetchImpl?: FetchImpl;
+};
+
+function redactLineOutboundMediaUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.hostname}${parsed.pathname}`;
+  } catch {
+    return "<invalid-url>";
+  }
+}
+
+export async function precheckLineOutboundMediaSize(
+  url: string,
+  kind: LineOutboundMediaSizeKind,
+  opts: PrecheckLineOutboundMediaSizeOpts = {},
+): Promise<void> {
+  const cap = LINE_OUTBOUND_MEDIA_MAX_BYTES[kind];
+  const redacted = redactLineOutboundMediaUrl(url);
+
+  let response: Response;
+  let release: () => Promise<void>;
+  try {
+    const guarded = await fetchWithSsrFGuard({
+      url,
+      init: { method: "HEAD" },
+      requireHttps: true,
+      mode: "strict",
+      policy: LINE_OUTBOUND_MEDIA_SSRF_POLICY,
+      timeoutMs: LINE_OUTBOUND_MEDIA_PRECHECK_TIMEOUT_MS,
+      ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+    });
+    response = guarded.response;
+    release = guarded.release;
+  } catch {
+    logVerbose(`line: outbound media-size precheck skipped (probe failed): ${redacted}`);
+    return;
+  }
+
+  try {
+    if (response.status !== 200 && response.status !== 206) {
+      logVerbose(
+        `line: outbound media-size precheck skipped (status ${response.status}): ${redacted}`,
+      );
+      return;
+    }
+
+    const lengthHeader = response.headers.get("content-length");
+    if (lengthHeader === null) {
+      logVerbose(`line: outbound media-size precheck skipped (no content-length): ${redacted}`);
+      return;
+    }
+
+    const length = Number(lengthHeader);
+    if (!Number.isFinite(length) || length < 0) {
+      logVerbose(
+        `line: outbound media-size precheck skipped (malformed content-length ${lengthHeader}): ${redacted}`,
+      );
+      return;
+    }
+
+    if (length > cap) {
+      throw new Error(
+        `LINE ${kind} media must be ≤${cap} bytes (got ${length} bytes from ${redacted})`,
+      );
+    }
+  } finally {
+    await release();
+  }
+}
 
 export async function validateLineMediaUrl(url: string): Promise<void> {
   let parsed: URL;
@@ -97,6 +196,19 @@ export async function resolveLineOutboundMedia(
       (opts.trackingId?.trim() ? "video" : undefined) ??
       detectLineMediaKindFromUrl(trimmedUrl) ??
       "image";
+    if (mediaKind === "image" && (!previewImageUrl || previewImageUrl === trimmedUrl)) {
+      // For image kind, buildLineMediaMessageObject defaults
+      // previewImageUrl to mediaUrl when no explicit preview is supplied
+      // (and an explicit same-URL preview is handled identically). The
+      // shared URL must therefore satisfy the stricter preview cap; one
+      // HEAD probe covers both LINE-side validations.
+      await precheckLineOutboundMediaSize(trimmedUrl, "preview");
+    } else {
+      await precheckLineOutboundMediaSize(trimmedUrl, mediaKind);
+      if (previewImageUrl) {
+        await precheckLineOutboundMediaSize(previewImageUrl, "preview");
+      }
+    }
     return {
       mediaUrl: trimmedUrl,
       mediaKind,

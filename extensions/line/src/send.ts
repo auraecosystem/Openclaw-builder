@@ -5,7 +5,7 @@ import { requireRuntimeConfig } from "openclaw/plugin-sdk/plugin-config-runtime"
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { resolveLineAccount } from "./accounts.js";
 import { resolveLineChannelAccessToken } from "./channel-access-token.js";
-import { validateLineMediaUrl } from "./outbound-media.js";
+import { precheckLineOutboundMediaSize, validateLineMediaUrl } from "./outbound-media.js";
 import { createLineSendReceipt } from "./send-receipt.js";
 import type { LineSendResult } from "./types.js";
 
@@ -294,11 +294,18 @@ export async function sendMessageLine(
           throw new Error("LINE video messages require previewImageUrl to reference an image URL");
         }
         await validateLineMediaUrl(previewImageUrl);
+        if (previewImageUrl === mediaUrl) {
+          await precheckLineOutboundMediaSize(mediaUrl, "preview");
+        } else {
+          await precheckLineOutboundMediaSize(mediaUrl, "video");
+          await precheckLineOutboundMediaSize(previewImageUrl, "preview");
+        }
         const trackingId = isLineUserChatId(chatId) ? opts.trackingId : undefined;
         messages.push(createVideoMessage(mediaUrl, previewImageUrl, trackingId));
         break;
       }
       case "audio":
+        await precheckLineOutboundMediaSize(mediaUrl, "audio");
         messages.push(createAudioMessage(mediaUrl, opts.durationMs ?? 60000));
         break;
       case "image":
@@ -307,6 +314,12 @@ export async function sendMessageLine(
         {
           const previewImageUrl = opts.previewImageUrl?.trim() || mediaUrl;
           await validateLineMediaUrl(previewImageUrl);
+          if (previewImageUrl === mediaUrl) {
+            await precheckLineOutboundMediaSize(mediaUrl, "preview");
+          } else {
+            await precheckLineOutboundMediaSize(mediaUrl, "image");
+            await precheckLineOutboundMediaSize(previewImageUrl, "preview");
+          }
           messages.push(createImageMessage(mediaUrl, previewImageUrl));
         }
         break;
@@ -389,6 +402,16 @@ export async function pushImageMessage(
   await validateLineMediaUrl(originalContentUrl);
   if (previewImageUrl) {
     await validateLineMediaUrl(previewImageUrl);
+  }
+  if (!previewImageUrl || previewImageUrl === originalContentUrl) {
+    // createImageMessage defaults previewImageUrl to originalContentUrl
+    // when no explicit preview is supplied (and an explicit same-URL
+    // preview is handled identically). The shared URL must therefore
+    // satisfy the stricter preview cap.
+    await precheckLineOutboundMediaSize(originalContentUrl, "preview");
+  } else {
+    await precheckLineOutboundMediaSize(originalContentUrl, "image");
+    await precheckLineOutboundMediaSize(previewImageUrl, "preview");
   }
   return pushLineMessages(to, [createImageMessage(originalContentUrl, previewImageUrl)], opts, {
     verboseMessage: (chatId) => `line: pushed image to ${chatId}`,
