@@ -774,7 +774,7 @@ export async function resolveApiKeyForProvider(params: {
     const customKey = resolveUsableCustomProviderApiKey({ cfg, provider });
     if (customKey) {
       scopedStore ??= resolveScopedAuthProfileStore({
-        agentDir: params.agentDir,
+        agentDir,
         cfg,
         provider,
         preferredProfile,
@@ -803,7 +803,7 @@ export async function resolveApiKeyForProvider(params: {
         isConfigBackedInlineProviderApiKey({ cfg, provider, source: envResolved.source })
       ) {
         scopedStore ??= resolveScopedAuthProfileStore({
-          agentDir: params.agentDir,
+          agentDir,
           cfg,
           provider,
           preferredProfile,
@@ -1073,10 +1073,12 @@ export async function hasAvailableAuthForProvider(params: {
     typeof inlineUnusableUntil !== "number" || inlineUnusableUntil <= Date.now();
   const envResolved = resolveConfigAwareEnvApiKey(cfg, provider, params.workspaceDir);
   if (envResolved) {
-    return (
+    if (
       !isConfigBackedInlineProviderApiKey({ cfg, provider, source: envResolved.source }) ||
       inlineProviderApiKeyUsable
-    );
+    ) {
+      return true;
+    }
   }
   if (resolveUsableCustomProviderApiKey({ cfg, provider }) && inlineProviderApiKeyUsable) {
     return true;
