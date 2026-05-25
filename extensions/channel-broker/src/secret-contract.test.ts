@@ -70,4 +70,58 @@ describe("channel-broker secret contract", () => {
     );
     expect(context.warnings).toStrictEqual([]);
   });
+
+  it("resolves top-level SecretRefs for the implicit default provider alongside nested providers", async () => {
+    const sourceConfig = {
+      channels: {
+        "channel-broker": {
+          enabled: true,
+          defaultProviderId: "default-broker",
+          baseUrl: "https://default-broker.example.test",
+          signingSecret: { source: "env", provider: "default", id: "DEFAULT_BROKER_SECRET" },
+          providers: {
+            acme: {
+              enabled: true,
+              baseUrl: "https://broker.example.test",
+              signingSecret: { source: "env", provider: "default", id: "ACME_BROKER_SECRET" },
+            },
+          },
+        },
+      },
+    } satisfies OpenClawConfig;
+    const resolvedConfig: OpenClawConfig = structuredClone(sourceConfig);
+    const context = createResolverContext({
+      sourceConfig,
+      env: {
+        DEFAULT_BROKER_SECRET: "resolved-default-secret",
+        ACME_BROKER_SECRET: "resolved-acme-secret",
+      },
+    });
+
+    collectRuntimeConfigAssignments({
+      config: resolvedConfig,
+      defaults: undefined,
+      context,
+    });
+    const resolved = await resolveSecretRefValues(
+      context.assignments.map((assignment) => assignment.ref),
+      {
+        config: sourceConfig,
+        env: context.env,
+        cache: context.cache,
+      },
+    );
+    applyResolvedAssignments({
+      assignments: context.assignments,
+      resolved,
+    });
+
+    expect(resolvedConfig.channels?.["channel-broker"]?.signingSecret).toBe(
+      "resolved-default-secret",
+    );
+    expect(resolvedConfig.channels?.["channel-broker"]?.providers?.acme?.signingSecret).toBe(
+      "resolved-acme-secret",
+    );
+    expect(context.warnings).toStrictEqual([]);
+  });
 });

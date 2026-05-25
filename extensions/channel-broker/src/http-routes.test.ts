@@ -231,7 +231,10 @@ describe("channel-broker HTTP routes", () => {
       expect.objectContaining({
         channel: "channel-broker",
         accountId: "acme",
-        peer: { kind: "channel", id: "telegram:-100123" },
+        peer: {
+          kind: "channel",
+          id: "telegram:-100123?conversationType=thread&threadId=77",
+        },
         parentPeer: { kind: "channel", id: "telegram:-100123" },
       }),
     );

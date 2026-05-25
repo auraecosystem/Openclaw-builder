@@ -207,9 +207,13 @@ function createRuntimeFromPluginRuntime(pluginRuntime: PluginRuntime): ChannelBr
       }
       const cfg = pluginRuntime.config.current() as CoreConfig;
       const chatKind = conversationKind(event.conversation.type);
+      const replyTarget = buildInboundReplyTarget(event);
       const peer = {
         kind: chatKind,
-        id: `${event.platform}:${event.conversation.id}`,
+        id:
+          event.conversation.type === "thread"
+            ? replyTarget
+            : `${event.platform}:${event.conversation.id}`,
       };
       const parentPeer =
         event.conversation.type === "thread"
@@ -225,7 +229,6 @@ function createRuntimeFromPluginRuntime(pluginRuntime: PluginRuntime): ChannelBr
         peer,
         parentPeer,
       });
-      const replyTarget = buildInboundReplyTarget(event);
       const storePath = pluginRuntime.channel.session.resolveStorePath(cfg.session?.store, {
         agentId: route.agentId,
       });
