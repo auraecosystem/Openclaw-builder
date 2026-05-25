@@ -421,23 +421,20 @@ export function buildConfiguredAllowlistKeys(
   return keys.size > 0 ? keys : null;
 }
 
-type BuildModelAliasIndexParams = {
-  cfg: OpenClawConfig;
-  defaultProvider: string;
-  allowManifestNormalization?: boolean;
-  allowPluginNormalization?: boolean;
-} & ModelManifestNormalizationContext;
-
-function buildModelAliasIndexWithManifestPlugins(params: BuildModelAliasIndexParams): {
-  aliasIndex: ModelAliasIndex;
-  manifestPlugins?: ModelManifestPlugins;
-} {
+export function buildModelAliasIndex(
+  params: {
+    cfg: OpenClawConfig;
+    defaultProvider: string;
+    allowManifestNormalization?: boolean;
+    allowPluginNormalization?: boolean;
+  } & ModelManifestNormalizationContext,
+): ModelAliasIndex {
   const byAlias = new Map<string, { alias: string; ref: ModelRef }>();
   const byKey = new Map<string, string[]>();
   const rawModels = params.cfg.agents?.defaults?.models ?? {};
   const rawModelEntries = Object.entries(rawModels);
   if (rawModelEntries.length === 0) {
-    return { aliasIndex: { byAlias, byKey } };
+    return { byAlias, byKey };
   }
   const aliasCandidates = rawModelEntries.flatMap(([keyRaw, entryRaw]) => {
     const trimmedKey = keyRaw.trim();
@@ -449,7 +446,7 @@ function buildModelAliasIndexWithManifestPlugins(params: BuildModelAliasIndexPar
     return alias ? [{ keyRaw, alias }] : [];
   });
   if (aliasCandidates.length === 0) {
-    return { aliasIndex: { byAlias, byKey } };
+    return { byAlias, byKey };
   }
   const manifestPlugins = resolveManifestPluginsForModelIdNormalization(params);
 
@@ -473,11 +470,7 @@ function buildModelAliasIndexWithManifestPlugins(params: BuildModelAliasIndexPar
     byKey.set(key, existing);
   }
 
-  return { aliasIndex: { byAlias, byKey }, manifestPlugins };
-}
-
-export function buildModelAliasIndex(params: BuildModelAliasIndexParams): ModelAliasIndex {
-  return buildModelAliasIndexWithManifestPlugins(params).aliasIndex;
+  return { byAlias, byKey };
 }
 
 type ModelCatalogMetadata = {
@@ -621,19 +614,9 @@ export function resolveConfiguredModelRef(
   const rawModel = resolveAgentModelPrimaryValue(params.cfg.agents?.defaults?.model) ?? "";
   if (rawModel) {
     const trimmed = rawModel.trim();
-    const { aliasIndex, manifestPlugins: aliasManifestPlugins } =
-      buildModelAliasIndexWithManifestPlugins({
-        cfg: params.cfg,
-        defaultProvider: params.defaultProvider,
-        allowManifestNormalization: params.allowManifestNormalization,
-        allowPluginNormalization: params.allowPluginNormalization,
-        manifestPlugins: params.manifestPlugins,
-      });
-    let manifestPlugins = aliasManifestPlugins ?? params.manifestPlugins;
+    let manifestPlugins = params.manifestPlugins;
     let manifestPluginsResolved =
-      params.allowManifestNormalization === false ||
-      params.manifestPlugins !== undefined ||
-      aliasManifestPlugins !== undefined;
+      params.allowManifestNormalization === false || params.manifestPlugins !== undefined;
     const getManifestPlugins = () => {
       if (!manifestPluginsResolved) {
         manifestPlugins = resolveManifestPluginsForModelIdNormalization(params);
@@ -641,6 +624,13 @@ export function resolveConfiguredModelRef(
       }
       return manifestPlugins;
     };
+    const aliasIndex = buildModelAliasIndex({
+      cfg: params.cfg,
+      defaultProvider: params.defaultProvider,
+      allowManifestNormalization: params.allowManifestNormalization,
+      allowPluginNormalization: params.allowPluginNormalization,
+      manifestPlugins,
+    });
     const aliasKey = normalizeLowercaseStringOrEmpty(trimmed);
     const aliasMatch = aliasIndex.byAlias.get(aliasKey);
     if (aliasMatch) {
@@ -669,21 +659,18 @@ export function resolveConfiguredModelRef(
       let inferredProvider = inferUniqueProviderFromConfiguredModels({
         cfg: params.cfg,
         model: trimmed,
-        allowManifestNormalization: manifestPlugins ? params.allowManifestNormalization : false,
+        allowManifestNormalization: false,
         manifestPlugins,
       });
       let inferredProviderManifestPlugins = manifestPlugins;
       if (!inferredProvider && hasConfiguredProviderRowsNeedingManifestLookup(params.cfg)) {
-        const resolvedManifestPlugins = getManifestPlugins();
+        inferredProviderManifestPlugins = getManifestPlugins();
         inferredProvider = inferUniqueProviderFromConfiguredModels({
           cfg: params.cfg,
           model: trimmed,
           allowManifestNormalization: params.allowManifestNormalization,
-          manifestPlugins: resolvedManifestPlugins,
+          manifestPlugins: inferredProviderManifestPlugins,
         });
-        if (inferredProvider) {
-          inferredProviderManifestPlugins = resolvedManifestPlugins;
-        }
       }
       if (inferredProvider) {
         return normalizeModelRef(inferredProvider, trimmed, {

@@ -180,81 +180,44 @@ describe("configured model manifest workspace scope", () => {
     expect(loadManifestMetadataSnapshotMock).not.toHaveBeenCalled();
   });
 
-  it("does not load manifest metadata for a configured primary model without aliases", async () => {
+  it("does not load manifest metadata for statically resolved primary models", async () => {
     const { resolveConfiguredModelRef } = await import("./model-selection-shared.js");
-    const cfg = {
-      agents: {
-        defaults: {
-          model: { primary: "sonnet-4.6" },
-        },
+    const cases: Array<{ cfg: OpenClawConfig; expected: { provider: string; model: string } }> = [
+      {
+        cfg: {
+          agents: { defaults: { model: { primary: "sonnet-4.6" } } },
+        } as unknown as OpenClawConfig,
+        expected: { provider: "anthropic", model: "sonnet-4.6" },
       },
-    } as unknown as OpenClawConfig;
-
-    expect(
-      resolveConfiguredModelRef({
-        cfg,
-        defaultProvider: "anthropic",
-        defaultModel: "claude-sonnet-4-6",
-      }),
-    ).toEqual({ provider: "anthropic", model: "sonnet-4.6" });
-    expect(getCurrentPluginMetadataSnapshotMock).not.toHaveBeenCalled();
-    expect(loadManifestMetadataSnapshotMock).not.toHaveBeenCalled();
-  });
-
-  it("does not load manifest metadata when a primary model matches configured provider rows statically", async () => {
-    const { resolveConfiguredModelRef } = await import("./model-selection-shared.js");
-    const cfg = {
-      agents: {
-        defaults: {
-          model: { primary: "gpt-5.5" },
-        },
+      {
+        cfg: {
+          agents: { defaults: { model: { primary: "gpt-5.5" } } },
+          models: { providers: { openai: { models: [{ id: "gpt-5.5" }] } } },
+        } as unknown as OpenClawConfig,
+        expected: { provider: "openai", model: "gpt-5.5" },
       },
-      models: {
-        providers: {
-          openai: {
-            models: [{ id: "gpt-5.5" }],
-          },
-        },
+      {
+        cfg: {
+          agents: { defaults: { model: { primary: "local-static-model" } } },
+          models: { providers: { vllm: { models: [{ id: "local-static-model" }] } } },
+        } as unknown as OpenClawConfig,
+        expected: { provider: "vllm", model: "local-static-model" },
       },
-    } as unknown as OpenClawConfig;
+    ];
 
-    expect(
-      resolveConfiguredModelRef({
-        cfg,
-        defaultProvider: "anthropic",
-        defaultModel: "claude-sonnet-4-6",
-      }),
-    ).toEqual({ provider: "openai", model: "gpt-5.5" });
-    expect(getCurrentPluginMetadataSnapshotMock).not.toHaveBeenCalled();
-    expect(loadManifestMetadataSnapshotMock).not.toHaveBeenCalled();
-  });
-
-  it("does not load manifest metadata when a primary model matches non-OpenAI provider rows statically", async () => {
-    const { resolveConfiguredModelRef } = await import("./model-selection-shared.js");
-    const cfg = {
-      agents: {
-        defaults: {
-          model: { primary: "local-static-model" },
-        },
-      },
-      models: {
-        providers: {
-          vllm: {
-            models: [{ id: "local-static-model" }],
-          },
-        },
-      },
-    } as unknown as OpenClawConfig;
-
-    expect(
-      resolveConfiguredModelRef({
-        cfg,
-        defaultProvider: "anthropic",
-        defaultModel: "claude-sonnet-4-6",
-      }),
-    ).toEqual({ provider: "vllm", model: "local-static-model" });
-    expect(getCurrentPluginMetadataSnapshotMock).not.toHaveBeenCalled();
-    expect(loadManifestMetadataSnapshotMock).not.toHaveBeenCalled();
+    for (const { cfg, expected } of cases) {
+      getCurrentPluginMetadataSnapshotMock.mockClear();
+      loadManifestMetadataSnapshotMock.mockClear();
+      expect(
+        resolveConfiguredModelRef({
+          cfg,
+          defaultProvider: "anthropic",
+          defaultModel: "claude-sonnet-4-6",
+        }),
+      ).toEqual(expected);
+      expect(getCurrentPluginMetadataSnapshotMock).not.toHaveBeenCalled();
+      expect(loadManifestMetadataSnapshotMock).not.toHaveBeenCalled();
+    }
   });
 
   it("reuses resolved manifest plugins while resolving configured model aliases", async () => {
