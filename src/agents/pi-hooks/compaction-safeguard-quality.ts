@@ -137,6 +137,52 @@ function sanitizeExtractedIdentifier(value: string): string {
     .replace(/[)\]"'`,;:.!?<>]+$/, "");
 }
 
+// Blocklist for credential-shaped prefixes. These strings are common API key,
+// token, and secret prefixes that should never be re-appended to a compaction
+// summary. Case-insensitive check against the start of the sanitized value.
+const CREDENTIAL_PREFIXES = [
+  "sk-",
+  "pk-",
+  "rk-",
+  "sk_live_",
+  "sk_test_",
+  "pk_live_",
+  "pk_test_",
+  "whsec_",
+  "xoxb-",
+  "xoxp-",
+  "xoxs-",
+  "xoxa-",
+  "ghp_",
+  "gho_",
+  "ghs_",
+  "ghu_",
+  "github_pat_",
+  "glpat-",
+  "glcbt-",
+  "Bearer ",
+  "bearer ",
+  "AKIA",
+  "ASIA",
+  "eyJ", // JWT prefix (base64-encoded '{')
+];
+
+// URL query parameter names that commonly carry secrets.
+const CREDENTIAL_URL_PARAMS =
+  /[?&](token|access_token|api_key|apikey|secret|password|auth|key|credential)=/i;
+
+function isCredentialShaped(value: string): boolean {
+  for (const prefix of CREDENTIAL_PREFIXES) {
+    if (value.startsWith(prefix)) {
+      return true;
+    }
+  }
+  if (value.startsWith("http") && CREDENTIAL_URL_PARAMS.test(value)) {
+    return true;
+  }
+  return false;
+}
+
 function isPureHexIdentifier(value: string): boolean {
   return /^[A-Fa-f0-9]{8,}$/.test(value);
 }
@@ -161,6 +207,7 @@ export function extractOpaqueIdentifiers(text: string): string[] {
     new Set(
       matches
         .map((value) => sanitizeExtractedIdentifier(value))
+        .filter((value) => !isCredentialShaped(value))
         .map((value) => normalizeOpaqueIdentifier(value))
         .filter((value) => value.length >= 4),
     ),

@@ -958,6 +958,35 @@ describe("compaction-safeguard recent-turn preservation", () => {
     expect(identifiers).toContain(uniqueTail[10]?.toUpperCase());
   });
 
+  it("filters credential-shaped identifiers from extraction", () => {
+    const identifiers = extractOpaqueIdentifiers(
+      [
+        "commit a1b2c3d4e5f6",
+        "api key sk-proj-abc123def456ghi789",
+        "stripe pk_live_abcdef1234567890",
+        "slack token xoxb-1234-5678-abcdefgh",
+        "github token ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ12345",
+        "aws key AKIAIOSFODNN7EXAMPLE",
+        "jwt eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+        "url https://api.example.com/callback?token=secret123",
+        "safe url https://example.com/repos/123",
+        "bearer Bearer sk-1234567890abcdef",
+      ].join("\n"),
+    );
+    // Safe identifiers preserved
+    expect(identifiers).toContain("A1B2C3D4E5F6");
+    expect(identifiers).toContain("https://example.com/repos/123");
+    // Credential-shaped identifiers filtered
+    expect(identifiers.some((id) => id.includes("sk-proj"))).toBe(false);
+    expect(identifiers.some((id) => id.includes("pk_live"))).toBe(false);
+    expect(identifiers.some((id) => id.includes("xoxb-"))).toBe(false);
+    expect(identifiers.some((id) => id.includes("ghp_"))).toBe(false);
+    expect(identifiers.some((id) => id.startsWith("AKIA"))).toBe(false);
+    expect(identifiers.some((id) => id.startsWith("eyJ"))).toBe(false);
+    expect(identifiers.some((id) => id.includes("token="))).toBe(false);
+    expect(identifiers.some((id) => id.includes("Bearer"))).toBe(false);
+  });
+
   it("filters ordinary short numbers and trims wrapped punctuation", () => {
     const identifiers = extractOpaqueIdentifiers(
       "Year 2026 count 42 port 18789 ticket 123456 URL https://example.com/a, path /tmp/x.log, and tiny /a with prose on/off.",
