@@ -427,10 +427,14 @@ export function buildModelAliasIndex(
 ): ModelAliasIndex {
   const byAlias = new Map<string, { alias: string; ref: ModelRef }>();
   const byKey = new Map<string, string[]>();
+  const rawModels = params.cfg.agents?.defaults?.models ?? {};
+  const rawModelEntries = Object.entries(rawModels);
+  if (rawModelEntries.length === 0) {
+    return { byAlias, byKey };
+  }
   const manifestPlugins = resolveManifestPluginsForModelIdNormalization(params);
 
-  const rawModels = params.cfg.agents?.defaults?.models ?? {};
-  for (const [keyRaw, entryRaw] of Object.entries(rawModels)) {
+  for (const [keyRaw, entryRaw] of rawModelEntries) {
     const trimmedKey = keyRaw.trim();
     if (trimmedKey.endsWith("/*") && normalizeProviderId(trimmedKey.slice(0, -2))) {
       continue;

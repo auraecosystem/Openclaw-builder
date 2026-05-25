@@ -128,6 +128,18 @@ describe("configured model manifest workspace scope", () => {
     expect(loadManifestMetadataSnapshotMock).not.toHaveBeenCalled();
   });
 
+  it("does not load manifest metadata for empty configured model aliases", async () => {
+    const { buildModelAliasIndex } = await import("./model-selection-shared.js");
+    const cfg = {} as unknown as OpenClawConfig;
+
+    const aliases = buildModelAliasIndex({ cfg, defaultProvider: "anthropic" });
+
+    expect(aliases.byAlias.size).toBe(0);
+    expect(aliases.byKey.size).toBe(0);
+    expect(getCurrentPluginMetadataSnapshotMock).not.toHaveBeenCalled();
+    expect(loadManifestMetadataSnapshotMock).not.toHaveBeenCalled();
+  });
+
   it("reuses resolved manifest plugins while resolving configured model aliases", async () => {
     loadManifestMetadataSnapshotMock.mockReturnValue({
       plugins: [
