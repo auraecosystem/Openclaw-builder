@@ -1402,6 +1402,7 @@ describe("runHeartbeatOnce", () => {
     | "actionable"
     | "legacy-comment-only"
     | "fenced-empty"
+    | "fenced-empty-with-related"
     | "fenced-actionable"
     | "missing"
     | "read-error";
@@ -1444,6 +1445,21 @@ describe("runHeartbeatOnce", () => {
 
 # Add tasks below when you want the agent to check something periodically.
 \`\`\`
+`,
+        "utf-8",
+      );
+    } else if (params.fileState === "fenced-empty-with-related") {
+      await fs.writeFile(
+        path.join(workspaceDir, "HEARTBEAT.md"),
+        `\`\`\`markdown
+# Keep this file empty (or with only comments) to skip heartbeat API calls.
+
+# Add tasks below when you want the agent to check something periodically.
+\`\`\`
+
+## Related
+
+- [Heartbeat config](/gateway/config-agents)
 `,
         "utf-8",
       );
@@ -1715,6 +1731,14 @@ tasks:
       {
         name: "fenced empty template + interval skips",
         fileState: "fenced-empty",
+        expectedStatus: "skipped",
+        expectedSkipReason: "empty-heartbeat-file",
+        expectedSendCalls: 0,
+        expectedReplyCalls: 0,
+      },
+      {
+        name: "fenced empty template with docs Related links + interval skips",
+        fileState: "fenced-empty-with-related",
         expectedStatus: "skipped",
         expectedSkipReason: "empty-heartbeat-file",
         expectedSendCalls: 0,
