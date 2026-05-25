@@ -335,9 +335,10 @@ function createRuntimeFromPluginRuntime(pluginRuntime: PluginRuntime): ChannelBr
         });
       } catch (error) {
         if (ackPolicy !== "after_receive_record") {
-          await journal.release(dedupeKey, {
-            lastError: error instanceof Error ? error.message : String(error),
-          });
+          // Channel-broker providers own retry scheduling; keep failed webhook
+          // deliveries re-enterable instead of parking them in a pending queue
+          // that this plugin does not replay.
+          await journal.deletePending(dedupeKey);
         }
         throw error;
       }
@@ -347,9 +348,7 @@ function createRuntimeFromPluginRuntime(pluginRuntime: PluginRuntime): ChannelBr
           await journal.complete(dedupeKey, { metadata });
         }
       } else if (ackPolicy !== "after_receive_record") {
-        const reason =
-          "reason" in turnResult.admission ? String(turnResult.admission.reason) : "not dispatched";
-        await journal.release(dedupeKey, { lastError: reason });
+        await journal.deletePending(dedupeKey);
       }
 
       return {

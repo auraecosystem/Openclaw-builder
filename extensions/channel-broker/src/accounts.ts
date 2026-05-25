@@ -41,10 +41,14 @@ export function listChannelBrokerProviderIds(cfg: CoreConfig): string[] {
   const channelConfig = getChannelBrokerConfig(cfg);
   const providerIds = Object.keys(channelConfig?.providers ?? {});
   const accountIds = Object.keys(channelConfig?.accounts ?? {});
+  const topLevelProviderId =
+    normalizeOptionalString(channelConfig?.defaultProviderId) ??
+    normalizeOptionalString(channelConfig?.defaultAccount) ??
+    DEFAULT_ACCOUNT_ID;
   return listCombinedAccountIds({
     configuredAccountIds: [...providerIds, ...accountIds].map(normalizeAccountId),
     implicitAccountId: hasConfiguredAccountValue(channelConfig?.baseUrl)
-      ? DEFAULT_ACCOUNT_ID
+      ? normalizeAccountId(topLevelProviderId)
       : undefined,
     fallbackAccountIdWhenEmpty: DEFAULT_ACCOUNT_ID,
   });

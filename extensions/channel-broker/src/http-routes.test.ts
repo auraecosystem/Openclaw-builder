@@ -316,6 +316,39 @@ describe("channel-broker HTTP routes", () => {
     expect(pluginRuntime.channel.turn.run).toHaveBeenCalledTimes(1);
   });
 
+  it("allows provider redelivery after a failed broker webhook dispatch", async () => {
+    const body = inboundBody();
+    const config = brokerConfig();
+    const openKeyedStore = createOpenKeyedStoreMock();
+    const pluginRuntime = createPluginRuntimeMock({
+      config: {
+        current: () => config,
+      },
+      state: { openKeyedStore },
+    });
+    vi.mocked(pluginRuntime.channel.turn.run).mockRejectedValueOnce(new Error("transient"));
+    setChannelBrokerRuntime(pluginRuntime);
+
+    await expect(
+      handleChannelBrokerInboundHttpRequest({
+        cfg: config,
+        req: createRequest({ body, signature: sign(body, "broker-secret") }),
+        res: createResponse(),
+      }),
+    ).rejects.toThrow("transient");
+
+    const retry = createResponse();
+    await handleChannelBrokerInboundHttpRequest({
+      cfg: config,
+      req: createRequest({ body, signature: sign(body, "broker-secret") }),
+      res: retry,
+    });
+
+    expect(retry.statusCode).toBe(202);
+    expect(JSON.parse(retry.body)).toMatchObject({ ok: true, status: "accepted" });
+    expect(pluginRuntime.channel.turn.run).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects inbound events with invalid signatures before runtime dispatch", async () => {
     const body = inboundBody();
     const receiveInboundEvent = vi.fn();
@@ -331,6 +364,36 @@ describe("channel-broker HTTP routes", () => {
     expect(res.statusCode).toBe(401);
     expect(JSON.parse(res.body)).toMatchObject({ ok: false, error: "invalid_signature" });
     expect(receiveInboundEvent).not.toHaveBeenCalled();
+  });
+
+  it("accepts top-level broker webhooks for configured default provider ids", async () => {
+    const body = inboundBody();
+    const receiveInboundEvent = vi.fn(async () => ({ status: "accepted" as const }));
+    setChannelBrokerRuntime({ receiveInboundEvent });
+    const res = createResponse();
+
+    await handleChannelBrokerInboundHttpRequest({
+      cfg: {
+        channels: {
+          "channel-broker": {
+            defaultProviderId: "acme",
+            baseUrl: "https://broker.example.test",
+            signingSecret: "broker-secret",
+            allowFrom: ["user-1"],
+          },
+        },
+      },
+      req: createRequest({ body, signature: sign(body, "broker-secret") }),
+      res,
+    });
+
+    expect(res.statusCode).toBe(202);
+    expect(JSON.parse(res.body)).toMatchObject({ ok: true, status: "accepted" });
+    expect(receiveInboundEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        account: expect.objectContaining({ providerId: "acme" }),
+      }),
+    );
   });
 
   it("rejects unlisted inbound provider ids before inheriting top-level credentials", async () => {
