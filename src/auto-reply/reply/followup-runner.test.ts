@@ -2513,6 +2513,68 @@ describe("createFollowupRunner messaging delivery and dedupe", () => {
     });
   });
 
+  it("preserves fallback notice state for queued inter-session fallback followups", async () => {
+    const storePath = "/tmp/openclaw-followup-preserved-fallback-notice.json";
+    const sessionKey = "main";
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      fallbackNoticeSelectedModel: "openai-codex/gpt-5.5",
+      fallbackNoticeActiveModel: "google/gemini-2.5-flash",
+      fallbackNoticeReason: "fallback",
+    };
+    const sessionStore: Record<string, SessionEntry> = { [sessionKey]: sessionEntry };
+    registerFollowupTestSessionStore(storePath, sessionStore);
+    const persistSpy = vi.spyOn(sessionRunAccounting, "persistRunSessionUsage");
+    runEmbeddedPiAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "hello world!" }],
+      meta: {
+        agentMeta: {
+          usage: { input: 10, output: 5 },
+          lastCallUsage: { input: 6, output: 3 },
+          model: "gpt-5.4",
+          provider: "openai-codex",
+        },
+      },
+    });
+
+    const runner = createFollowupRunner({
+      opts: { onBlockReply: createAsyncReplySpy() },
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      defaultModel: "anthropic/claude-opus-4-6",
+      sessionEntry,
+      sessionStore,
+      sessionKey,
+      storePath,
+    });
+
+    await expect(
+      runner(
+        createQueuedRun({
+          run: {
+            provider: "anthropic",
+            model: "claude-opus-4-6",
+            inputProvenance: {
+              kind: "inter_session",
+              sourceSessionKey: "agent:codex:subagent:c34fca91",
+              sourceChannel: "__internal__",
+              sourceTool: "subagent_announce",
+            },
+          },
+        }),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(sessionStore[sessionKey]).toMatchObject({
+      fallbackNoticeSelectedModel: "openai-codex/gpt-5.5",
+      fallbackNoticeActiveModel: "google/gemini-2.5-flash",
+      fallbackNoticeReason: "fallback",
+    });
+    expect(requireMockCallArg(persistSpy, 0).sessionPatch).toBeUndefined();
+    persistSpy.mockRestore();
+  });
+
   it("delivers successful fallback followups when fallback notice persistence fails", async () => {
     const storePath = "/dev/null/openclaw-followup-fallback-notice.json";
     const sessionKey = "main";

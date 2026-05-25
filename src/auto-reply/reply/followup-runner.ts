@@ -1150,7 +1150,7 @@ export function createFollowupRunner(params: {
           allowAsyncLoad: false,
         }) ?? DEFAULT_CONTEXT_TOKENS;
 
-      if (fallbackTransition.stateChanged) {
+      if (fallbackTransition.stateChanged && !preserveUserFacingSessionState) {
         if (fallbackStateEntry) {
           fallbackStateEntry.fallbackNoticeSelectedModel =
             fallbackTransition.nextState.selectedModel;
@@ -1179,13 +1179,14 @@ export function createFollowupRunner(params: {
           contextTokensUsed,
           systemPromptReport: runResult.meta?.systemPromptReport,
           cliSessionBinding: runResult.meta?.agentMeta?.cliSessionBinding,
-          sessionPatch: fallbackTransition.stateChanged
-            ? {
-                fallbackNoticeSelectedModel: fallbackTransition.nextState.selectedModel,
-                fallbackNoticeActiveModel: fallbackTransition.nextState.activeModel,
-                fallbackNoticeReason: fallbackTransition.nextState.reason,
-              }
-            : undefined,
+          sessionPatch:
+            fallbackTransition.stateChanged && !preserveUserFacingSessionState
+              ? {
+                  fallbackNoticeSelectedModel: fallbackTransition.nextState.selectedModel,
+                  fallbackNoticeActiveModel: fallbackTransition.nextState.activeModel,
+                  fallbackNoticeReason: fallbackTransition.nextState.reason,
+                }
+              : undefined,
           logLabel: "followup",
         });
         if (autoFallbackSelectionToClear && didPersistRunSessionUsage) {
