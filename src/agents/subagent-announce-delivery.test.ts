@@ -12,6 +12,7 @@ import type {
 import {
   testing,
   deliverSubagentAnnouncement,
+  isTransientAnnounceDeliveryError,
   resolveSubagentCompletionOrigin,
 } from "./subagent-announce-delivery.js";
 import {
@@ -112,6 +113,26 @@ function createQueueOutcomeSequenceMock(
         };
   });
 }
+
+describe("isTransientAnnounceDeliveryError", () => {
+  it.each([
+    "gateway timeout after 20000ms",
+    "gateway closed (1006): transport close",
+    "WebSocket handshake timeout after 10000ms",
+    "closed before connect conn=abc reason=startup",
+    "Gateway not yet ready to accept connections (retry after a moment)",
+  ])("treats gateway lifecycle failure as transient: %s", (message) => {
+    expect(isTransientAnnounceDeliveryError(new Error(message))).toBe(true);
+  });
+
+  it("does not let lifecycle matching override permanent delivery failures", () => {
+    expect(
+      isTransientAnnounceDeliveryError(
+        new Error("unsupported channel while gateway timeout was being reported"),
+      ),
+    ).toBe(false);
+  });
+});
 
 const longChildCompletionOutput = [
   "34/34 tests pass, clean build. Now docker repro:",
@@ -264,7 +285,7 @@ async function deliverTelegramDirectMessageCompletion(params: {
     to: "123456789",
     accountId: "bot-1",
   };
-  const requesterSessionKey = params.requesterSessionKey ?? "agent:main:telegram:123456789";
+  const requesterSessionKey = params.requesterSessionKey ?? "agent:main:direct:telegram-123456789";
   testing.setDepsForTest({
     callGateway: params.callGateway,
     getRequesterSessionActivity: () => ({
