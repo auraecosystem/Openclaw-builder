@@ -7,6 +7,11 @@ import {
   type LegacyClawdBrowserProfileResidue,
 } from "../commands/doctor-browser.js";
 import { hasConfiguredCommandOwners } from "../commands/doctor-command-owner.js";
+import {
+  detectLegacySandboxRegistryFileIssues,
+  legacySandboxRegistryInspectionToHealthFinding,
+  legacySandboxRegistryInspectionToRepairEffect,
+} from "../commands/doctor-sandbox.js";
 import { disableUnavailableSkillsInConfig } from "../commands/doctor-skills-core.js";
 import type { ConfigValidationIssue, OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveSecretInputRef } from "../config/types.secrets.js";
@@ -17,6 +22,7 @@ import type { HealthCheck, HealthFinding } from "./health-checks.js";
 
 const BROWSER_CLAWD_PROFILE_RESIDUE_CHECK_ID = "core/doctor/browser-clawd-profile-residue";
 const FINAL_CONFIG_VALIDATION_CHECK_ID = "core/doctor/final-config-validation";
+const SANDBOX_REGISTRY_FILES_CHECK_ID = "core/doctor/sandbox/registry-files";
 
 export type CoreHealthCheckDeps = {
   readonly detectUnavailableSkills: (cfg: OpenClawConfig) => Promise<readonly SkillStatusEntry[]>;
@@ -715,6 +721,32 @@ const finalConfigValidationCheck: HealthCheck = {
   },
 };
 
+const sandboxRegistryFilesCheck: HealthCheck = {
+  id: SANDBOX_REGISTRY_FILES_CHECK_ID,
+  kind: "core",
+  description: "Legacy sandbox registry files are represented in sharded registry storage.",
+  source: "doctor",
+  async detect() {
+    return (await detectLegacySandboxRegistryFileIssues()).map(
+      legacySandboxRegistryInspectionToHealthFinding,
+    );
+  },
+  async repair(ctx) {
+    const effects = (await detectLegacySandboxRegistryFileIssues()).map(
+      legacySandboxRegistryInspectionToRepairEffect,
+    );
+    if (ctx.dryRun === true) {
+      return { status: "repaired", changes: [], effects };
+    }
+    return {
+      status: "skipped",
+      reason: "legacy doctor sandbox contribution owns registry migration",
+      changes: [],
+      effects,
+    };
+  },
+};
+
 function createWorkspaceSuggestionsCheck(deps: CoreHealthCheckDeps): HealthCheck {
   return {
     id: "core/doctor/workspace-suggestions",
@@ -742,6 +774,7 @@ function createConvertedWorkflowChecks(deps: CoreHealthCheckDeps): readonly Heal
     gatewayAuthCheck,
     legacyStateCheck,
     legacyWhatsAppCrontabCheck,
+    sandboxRegistryFilesCheck,
     gatewayPlatformNotesCheck,
     createSecurityCheck(deps),
     browserCheck,
