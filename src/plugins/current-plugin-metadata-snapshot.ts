@@ -9,7 +9,11 @@ import {
   resolvePluginControlPlaneFingerprint,
   type ResolvePluginControlPlaneContextParams,
 } from "./plugin-control-plane-context.js";
-import type { PluginMetadataSnapshot } from "./plugin-metadata-snapshot.types.js";
+import type {
+  PluginMetadataSnapshot,
+  PluginMetadataSnapshotPluginIdScope,
+} from "./plugin-metadata-snapshot.types.js";
+import { normalizePluginIdScope, serializePluginIdScope } from "./plugin-scope.js";
 
 type CurrentPluginMetadataSnapshotState = ReturnType<typeof getCurrentPluginMetadataSnapshotState>;
 
@@ -23,9 +27,7 @@ export function resolvePluginMetadataControlPlaneFingerprint(
   });
 }
 
-export function isReusableCurrentPluginMetadataSnapshot(
-  snapshot: PluginMetadataSnapshot,
-): boolean {
+export function isReusableCurrentPluginMetadataSnapshot(snapshot: PluginMetadataSnapshot): boolean {
   return snapshot.registrySource !== "derived";
 }
 
@@ -95,6 +97,9 @@ export function getCurrentPluginMetadataSnapshot(
   params: {
     config?: OpenClawConfig;
     env?: NodeJS.ProcessEnv;
+    allowScopedSnapshot?: boolean;
+    pluginIds?: readonly string[];
+    pluginIdScope?: PluginMetadataSnapshotPluginIdScope;
     workspaceDir?: string;
     allowWorkspaceScopedSnapshot?: boolean;
     requireDefaultDiscoveryContext?: boolean;
@@ -108,6 +113,28 @@ export function getCurrentPluginMetadataSnapshot(
   } = getCurrentPluginMetadataSnapshotState();
   const snapshot = rawSnapshot as PluginMetadataSnapshot | undefined;
   if (!snapshot) {
+    return undefined;
+  }
+  const requestedPluginIds = normalizePluginIdScope(
+    params.pluginIds ?? params.pluginIdScope?.resolve({ index: snapshot.index }),
+  );
+  const snapshotPluginIds = normalizePluginIdScope(snapshot.pluginIds);
+  if (
+    requestedPluginIds !== undefined &&
+    serializePluginIdScope(snapshotPluginIds) !== serializePluginIdScope(requestedPluginIds)
+  ) {
+    return undefined;
+  }
+  if (snapshotPluginIds !== undefined && requestedPluginIds === undefined) {
+    return undefined;
+  }
+  if (
+    snapshotPluginIds !== undefined &&
+    params.config === undefined &&
+    params.allowScopedSnapshot !== true &&
+    (requestedPluginIds === undefined ||
+      serializePluginIdScope(requestedPluginIds) !== serializePluginIdScope(snapshotPluginIds))
+  ) {
     return undefined;
   }
   const requestedPolicyHash = params.config

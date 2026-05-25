@@ -264,6 +264,7 @@ function expectedPluginIndexRecord(params: {
     startup: {
       sidecar: false,
       memory: false,
+      configPaths: [],
       deferConfiguredChannelFullLoadUntilAfterListen: false,
       agentHarnesses: [],
     },
