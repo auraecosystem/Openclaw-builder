@@ -183,6 +183,21 @@ function isCredentialShaped(value: string): boolean {
   return false;
 }
 
+// Pre-extraction redaction: remove credential-shaped substrings from input text
+// BEFORE the identifier regex runs. This prevents hex fragments of API keys
+// (e.g. "abcd1234ef" from "sk-abcd1234efgh") from surviving as identifiers
+// when the prefix falls outside the regex match boundary.
+const CREDENTIAL_REDACT_PATTERN = new RegExp(
+  "(?:" +
+    CREDENTIAL_PREFIXES.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") +
+    ")[A-Za-z0-9_\\-.+/=]{4,}",
+  "g",
+);
+
+function redactCredentials(text: string): string {
+  return text.replace(CREDENTIAL_REDACT_PATTERN, "");
+}
+
 function isPureHexIdentifier(value: string): boolean {
   return /^[A-Fa-f0-9]{8,}$/.test(value);
 }
@@ -199,8 +214,9 @@ function summaryIncludesIdentifier(summary: string, identifier: string): boolean
 }
 
 export function extractOpaqueIdentifiers(text: string): string[] {
+  const safeText = redactCredentials(text);
   const matches =
-    text.match(
+    safeText.match(
       /([A-Fa-f0-9]{8,}|https?:\/\/\S+|\/[\w.-]{2,}(?:\/[\w.-]+)+|[A-Za-z]:\\[\w\\.-]+|[A-Za-z0-9._-]+\.[A-Za-z0-9._/-]+:\d{1,5}|\b\d{6,}\b)/g,
     ) ?? [];
   return Array.from(

@@ -987,6 +987,28 @@ describe("compaction-safeguard recent-turn preservation", () => {
     expect(identifiers.some((id) => id.includes("Bearer"))).toBe(false);
   });
 
+  it("filters sliced credential fragments even when prefix falls outside regex match", () => {
+    // Regression: the hex regex [A-Fa-f0-9]{8,} can match hex portions of API
+    // keys when the prefix (sk-, ghp_, AKIA, etc.) is not captured. Pre-extraction
+    // redaction prevents this by removing the credential before the regex runs.
+    const identifiers = extractOpaqueIdentifiers(
+      [
+        "api key sk-abcd1234efabcdef with path /usr/local/bin",
+        "stripe sk_live_AABB1122CCDD3344 and commit ee11ff2233440055",
+        "aws AKIAIOSFODNN7EXAMPLE more text",
+        "jwt eyJhbGciOiJIUzI1NiJ9 and id deadbeef12345678",
+      ].join("\n"),
+    );
+    // Hex fragments of credentials must NOT appear
+    expect(identifiers.some((id) => id.includes("ABCD1234EF"))).toBe(false);
+    expect(identifiers.some((id) => id.includes("AABB1122CCDD3344"))).toBe(false);
+    expect(identifiers.some((id) => id.includes("IOSFODNN"))).toBe(false);
+    // Legitimate identifiers still extracted
+    expect(identifiers).toContain("/usr/local/bin");
+    expect(identifiers).toContain("EE11FF2233440055");
+    expect(identifiers).toContain("DEADBEEF12345678");
+  });
+
   it("filters ordinary short numbers and trims wrapped punctuation", () => {
     const identifiers = extractOpaqueIdentifiers(
       "Year 2026 count 42 port 18789 ticket 123456 URL https://example.com/a, path /tmp/x.log, and tiny /a with prose on/off.",
