@@ -24,6 +24,10 @@ import { normalizeOptionalLowercaseString, readStringValue } from "../shared/str
 import { truncateUtf16Safe } from "../utils.js";
 import { normalizeAcceptedSessionSpawnResult } from "./accepted-session-spawn.js";
 import type { ApplyPatchSummary } from "./apply-patch.js";
+import {
+  classifyExecOutcome,
+  execOutcomeStatusLabel,
+} from "./bash-tools.exec-outcome-classification.js";
 import type { ExecToolDetails } from "./bash-tools.exec-types.js";
 import { parseExecApprovalResultText } from "./exec-approval-result.js";
 import { normalizeTextForComparison } from "./pi-embedded-helpers.js";
@@ -167,6 +171,10 @@ function buildPatchItemId(toolCallId: string): string {
 
 function buildCommandItemTitle(toolName: string, meta?: string): string {
   return meta ? `command ${meta}` : `${toolName} command`;
+}
+
+function readExecCommandFromArgs(args: Record<string, unknown>): string | undefined {
+  return readStringValue(args.command);
 }
 
 function buildPatchItemTitle(meta?: string): string {
@@ -1240,6 +1248,22 @@ export async function handleToolExecutionEnd(
       const rawOutput = extractExecOutput(sanitizedResult);
       const commandStatus =
         execDetails?.status === "failed" || isToolError ? "failed" : "completed";
+      const outcomeClassification = classifyExecOutcome({
+        command: readExecCommandFromArgs(startArgs),
+        status:
+          execDetails?.status === "completed" || execDetails?.status === "failed"
+            ? execDetails.status
+            : undefined,
+        exitCode:
+          execDetails && "exitCode" in execDetails && typeof execDetails.exitCode === "number"
+            ? execDetails.exitCode
+            : execDetails && "exitCode" in execDetails && execDetails.exitCode === null
+              ? null
+              : undefined,
+        timedOut: execDetails && "timedOut" in execDetails ? execDetails.timedOut : undefined,
+        aggregated: execDetails && "aggregated" in execDetails ? execDetails.aggregated : undefined,
+      });
+      const statusLabel = execOutcomeStatusLabel(outcomeClassification);
       emitTrackedItemEvent(ctx, {
         itemId: commandItemId,
         phase: "end",
@@ -1264,6 +1288,8 @@ export async function handleToolExecutionEnd(
         name: toolName,
         ...(output ? { output } : {}),
         status: commandStatus,
+        outcomeClassification,
+        ...(statusLabel ? { statusLabel } : {}),
         ...(execDetails && "exitCode" in execDetails ? { exitCode: execDetails.exitCode } : {}),
         ...(execDetails && "durationMs" in execDetails
           ? { durationMs: execDetails.durationMs }

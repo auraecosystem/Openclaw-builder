@@ -9,6 +9,7 @@ import type {
   StreamingMode,
   TextChunkMode,
 } from "../config/types.base.js";
+import type { ExecOutcomeClassification } from "../infra/exec-outcome-classification-types.js";
 import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 
 export type {
@@ -246,6 +247,8 @@ export type ChannelProgressDraftLineInput =
       title?: string;
       name?: string;
       status?: string;
+      outcomeClassification?: ExecOutcomeClassification;
+      statusLabel?: string;
       exitCode?: number | null;
     }
   | {
@@ -475,11 +478,13 @@ export function buildChannelProgressDraftLine(
         return undefined;
       }
       const status =
-        input.exitCode === 0
-          ? "completed"
-          : input.exitCode != null
-            ? `exit ${input.exitCode}`
-            : input.status;
+        input.outcomeClassification === "benign_no_result"
+          ? (input.statusLabel ?? "No matches found")
+          : input.exitCode === 0
+            ? "completed"
+            : input.exitCode != null
+              ? `exit ${input.exitCode}`
+              : input.status;
       return buildNamedProgressLine(
         input.event,
         input.name ?? "exec",
