@@ -3,10 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, test } from "vitest";
-import {
-  appendAssistantMessageToSessionTranscript,
-  appendExactAssistantMessageToSessionTranscript,
-} from "../config/sessions/transcript.js";
+import { appendExactAssistantMessageToSessionTranscript } from "../config/sessions/transcript.js";
 import { emitSessionTranscriptUpdate } from "../sessions/transcript-events.js";
 import { testState } from "./test-helpers.runtime-state.js";
 import {
@@ -54,12 +51,11 @@ async function seedSession(params?: { text?: string }) {
     storePath,
   });
   if (params?.text) {
-    const appended = await appendAssistantMessageToSessionTranscript({
+    await appendTranscriptMessage({
       sessionKey: "agent:main:main",
       text: params.text,
       storePath,
     });
-    expect(appended.ok).toBe(true);
   }
   return { storePath };
 }
@@ -67,13 +63,15 @@ async function seedSession(params?: { text?: string }) {
 function makeTranscriptAssistantMessage(params: {
   text: string;
   content?: AssistantMessage["content"];
+  provider?: string;
+  model?: string;
 }): AssistantMessage {
   return {
     role: "assistant" as const,
     content: params.content ?? [{ type: "text", text: params.text }],
     api: "openai-responses",
-    provider: "openclaw",
-    model: "delivery-mirror",
+    provider: params.provider ?? "anthropic",
+    model: params.model ?? "claude-sonnet-4.6",
     usage: {
       input: 0,
       output: 0,
@@ -95,7 +93,8 @@ function makeTranscriptAssistantMessage(params: {
 
 async function appendTranscriptMessage(params: {
   sessionKey: string;
-  message: AssistantMessage;
+  text?: string;
+  message?: AssistantMessage;
   emitInlineMessage?: boolean;
   storePath?: string;
 }): Promise<string> {
@@ -103,7 +102,7 @@ async function appendTranscriptMessage(params: {
     sessionKey: params.sessionKey,
     storePath: params.storePath ?? testState.sessionStorePath,
     updateMode: params.emitInlineMessage === false ? "file-only" : "inline",
-    message: params.message,
+    message: params.message ?? makeTranscriptAssistantMessage({ text: params.text ?? "" }),
   });
   expect(appended.ok).toBe(true);
   if (!appended.ok) {
@@ -278,12 +277,11 @@ async function openBoundedHistoryStreamWithSecondMessage(
   harnessPort: number,
   storePath: string,
 ): Promise<SessionHistorySseStream> {
-  const second = await appendAssistantMessageToSessionTranscript({
+  await appendTranscriptMessage({
     sessionKey: "agent:main:main",
     text: "second message",
     storePath,
   });
-  expect(second.ok).toBe(true);
 
   const stream = await openSessionHistorySse(harnessPort, "agent:main:main", {
     query: "?limit=1",
@@ -400,18 +398,16 @@ describe("session history HTTP endpoints", () => {
 
   test("supports cursor pagination over direct REST while preserving the messages field", async () => {
     const { storePath } = await seedSession({ text: "first message" });
-    const second = await appendAssistantMessageToSessionTranscript({
+    await appendTranscriptMessage({
       sessionKey: "agent:main:main",
       text: "second message",
       storePath,
     });
-    expect(second.ok).toBe(true);
-    const third = await appendAssistantMessageToSessionTranscript({
+    await appendTranscriptMessage({
       sessionKey: "agent:main:main",
       text: "third message",
       storePath,
     });
-    expect(third.ok).toBe(true);
 
     await withGatewayHarness(async (harness) => {
       const firstPage = await fetchSessionHistory(harness.port, "agent:main:main", {
@@ -522,16 +518,11 @@ describe("session history HTTP endpoints", () => {
     });
 
     await withGatewayHarness(async (harness) => {
-      const hidden = await appendAssistantMessageToSessionTranscript({
+      await appendTranscriptMessage({
         sessionKey: "agent:main:main",
         text: "NO_REPLY",
         storePath,
       });
-      expect(hidden.ok).toBe(true);
-
-      if (!hidden.ok) {
-        throw new Error(`append failed: ${hidden.reason}`);
-      }
       const visibleMessageId = await appendTranscriptMessage({
         sessionKey: "agent:main:main",
         storePath,
@@ -579,20 +570,15 @@ describe("session history HTTP endpoints", () => {
       const stream = await openSessionHistorySse(harness.port, "agent:main:main");
       await expectHistoryEventTexts(stream, ["first message"]);
 
-      const appended = await appendAssistantMessageToSessionTranscript({
+      const appendedMessageId = await appendTranscriptMessage({
         sessionKey: "agent:main:main",
         text: "second message",
         storePath,
       });
-      expect(appended.ok).toBe(true);
-
-      if (!appended.ok) {
-        throw new Error(`append failed: ${appended.reason}`);
-      }
       await expectMessageEventMatch(stream, {
         text: "second message",
         seq: 2,
-        id: appended.messageId,
+        id: appendedMessageId,
       });
 
       await stream.reader.cancel();
@@ -665,12 +651,11 @@ describe("session history HTTP endpoints", () => {
       const stream = await openSessionHistorySse(harness.port, "agent:main:main");
       await expectHistoryEventTexts(stream, ["first message"]);
 
-      const visible = await appendAssistantMessageToSessionTranscript({
+      await appendTranscriptMessage({
         sessionKey: "agent:main:main",
         text: "third visible message",
         storePath,
       });
-      expect(visible.ok).toBe(true);
 
       await expectMessageEventMatch(stream, {
         text: "third visible message",
@@ -688,27 +673,21 @@ describe("session history HTTP endpoints", () => {
       const stream = await openSessionHistorySse(harness.port, "agent:main:main");
       await expectHistoryEventTexts(stream, ["first message"]);
 
-      const silent = await appendAssistantMessageToSessionTranscript({
+      await appendTranscriptMessage({
         sessionKey: "agent:main:main",
         text: "NO_REPLY",
         storePath,
       });
-      expect(silent.ok).toBe(true);
 
-      const visible = await appendAssistantMessageToSessionTranscript({
+      const visibleMessageId = await appendTranscriptMessage({
         sessionKey: "agent:main:main",
         text: "third visible message",
         storePath,
       });
-      expect(visible.ok).toBe(true);
-
-      if (!visible.ok) {
-        throw new Error(`append failed: ${visible.reason}`);
-      }
       await expectMessageEventMatch(stream, {
         text: "third visible message",
         seq: 3,
-        id: visible.messageId,
+        id: visibleMessageId,
       });
 
       await stream.reader.cancel();
@@ -722,16 +701,11 @@ describe("session history HTTP endpoints", () => {
       const stream = await openSessionHistorySse(harness.port, "agent:main:main");
       await expectHistoryEventTexts(stream, ["first message"]);
 
-      const second = await appendAssistantMessageToSessionTranscript({
+      await appendTranscriptMessage({
         sessionKey: "agent:main:main",
         text: "second visible message",
         storePath,
       });
-      expect(second.ok).toBe(true);
-
-      if (!second.ok) {
-        throw new Error(`append failed: ${second.reason}`);
-      }
       await expectMessageEventMatch(stream, {
         text: "second visible message",
         seq: 2,
@@ -751,20 +725,15 @@ describe("session history HTTP endpoints", () => {
         ).messages?.map((message) => message.content?.[0]?.text),
       ).toEqual(["first message", "second visible message"]);
 
-      const third = await appendAssistantMessageToSessionTranscript({
+      const thirdMessageId = await appendTranscriptMessage({
         sessionKey: "agent:main:main",
         text: "third visible message",
         storePath,
       });
-      expect(third.ok).toBe(true);
-
-      if (!third.ok) {
-        throw new Error(`append failed: ${third.reason}`);
-      }
       await expectMessageEventMatch(stream, {
         text: "third visible message",
         seq: 4,
-        id: third.messageId,
+        id: thirdMessageId,
       });
 
       await stream.reader.cancel();
@@ -841,21 +810,16 @@ describe("session history HTTP endpoints", () => {
 
       await expectHistoryEventTexts(stream, ["bearer allowed history"]);
 
-      const appended = await appendAssistantMessageToSessionTranscript({
+      const appendedMessageId = await appendTranscriptMessage({
         sessionKey: "agent:main:main",
         text: "bearer sse update",
         storePath,
       });
-      expect(appended.ok).toBe(true);
-
-      if (!appended.ok) {
-        throw new Error(`append failed: ${appended.reason}`);
-      }
 
       await expectMessageEventMatch(stream, {
         text: "bearer sse update",
         seq: 2,
-        id: appended.messageId,
+        id: appendedMessageId,
       });
 
       await stream.reader.cancel();

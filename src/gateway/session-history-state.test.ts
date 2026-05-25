@@ -687,4 +687,75 @@ describe("SessionHistorySseState", () => {
     ).toBeNull();
     expect(state.snapshot().messages).toHaveLength(1);
   });
+  test("filters transcript-only OpenClaw assistant rows from history snapshots and SSE appends", () => {
+    const snapshot = buildSessionHistorySnapshot({
+      rawMessages: [
+        {
+          role: "assistant",
+          provider: "openclaw",
+          model: "delivery-mirror",
+          content: [{ type: "text", text: "duplicate delivery mirror" }],
+          __openclaw: { seq: 1 },
+        },
+        {
+          role: "assistant",
+          provider: "openclaw",
+          model: "gateway-injected",
+          content: [{ type: "text", text: "duplicate gateway injection" }],
+          __openclaw: { seq: 2 },
+        },
+        {
+          role: "assistant",
+          provider: "openclaw",
+          model: "openclawMessageToolMirror",
+          content: [{ type: "text", text: "visible tool mirror" }],
+          __openclaw: { seq: 3 },
+        },
+        {
+          role: "assistant",
+          provider: "anthropic",
+          model: "claude-sonnet-4.6",
+          content: [{ type: "text", text: "real answer" }],
+          __openclaw: { seq: 4 },
+        },
+      ],
+    });
+
+    expect(
+      snapshot.history.messages.map(
+        (message) => (message as { content?: Array<{ text?: string }> }).content?.[0]?.text,
+      ),
+    ).toEqual([
+      "visible tool mirror",
+      "real answer",
+    ]);
+    expect(snapshot.rawTranscriptSeq).toBe(4);
+
+    const state = SessionHistorySseState.fromRawSnapshot({
+      target: { sessionId: "sess-main" },
+      rawMessages: snapshot.history.messages,
+      rawTranscriptSeq: snapshot.rawTranscriptSeq,
+    });
+
+    expect(
+      state.appendInlineMessage({
+        message: {
+          role: "assistant",
+          provider: "openclaw",
+          model: "delivery-mirror",
+          content: [{ type: "text", text: "inline duplicate mirror" }],
+        },
+        messageSeq: 5,
+      }),
+    ).toBeNull();
+    expect(
+      state.snapshot().messages.map(
+        (message) => (message as { content?: Array<{ text?: string }> }).content?.[0]?.text,
+      ),
+    ).toEqual([
+      "visible tool mirror",
+      "real answer",
+    ]);
+  });
+
 });
