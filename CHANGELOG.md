@@ -1258,7 +1258,6 @@ Docs: https://docs.openclaw.ai
 - Exec approvals: omit generated command highlights for non-POSIX Windows and shell-wrapper approval commands until those command languages have native highlighting support. (#80566) Thanks @jesse-merhi.
 - Telegram: keep verbose tool progress and result drafts separate from the final assistant answer so tool output no longer blends into the final Telegram message. (#80294) Thanks @jalehman.
 - Plugin SDK/Windows: enable the native require fast path for root `openclaw/plugin-sdk` dist aliases instead of forcing Jiti transforms. (#80878) Thanks @medns.
-- Memory/promote: archive detailed short-term promotion excerpts under `memory/archived/YYYY-Q#/` while keeping `MEMORY.md` compact with a latest-archive pointer, and document version-control `.gitignore` options for local promotion archives.
 - Agents/compaction: keep the recent tail after manual `/compact` when Pi returns an empty or no-op compaction summary, preventing blank checkpoints from replacing the live context.
 - Native commands: handle slash commands before workspace and agent-reply bootstrap so Telegram `/status` and other command-only native replies do not wait behind full agent turn setup.
 - Telegram/groups: include the recent local chat window and nearby reply-target window as generic inbound context so stale reply ancestry does not overshadow the live group conversation.
