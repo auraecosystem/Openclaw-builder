@@ -480,7 +480,7 @@ describe("message tool secret scoping", () => {
     expect(input?.sourceReplyDeliveryMode).toBe("message_tool_only");
     expect(input?.toolContext?.currentChannelProvider).toBe("telegram");
     expect(input?.toolContext?.currentChannelId).toBe("-5150615830");
-    expect(input?.params).toEqual({ action: "send", message: "hi" });
+    expect(input?.params).toMatchObject({ action: "send", message: "hi" });
 
     const secretResolveCall = latestSecretResolveCall();
     expect(Array.from(secretResolveCall.targetIds ?? [])).toEqual(["channels.telegram.botToken"]);
@@ -508,7 +508,7 @@ describe("message tool secret scoping", () => {
     expect(input?.sourceReplyDeliveryMode).toBe("message_tool_only");
     expect(input?.toolContext?.currentChannelProvider).toBe("discord");
     expect(input?.toolContext?.currentChannelId).toBe("user:123456789");
-    expect(input?.params).toEqual({ action: "send", message: "hi" });
+    expect(input?.params).toMatchObject({ action: "send", message: "hi" });
 
     const secretResolveCall = latestSecretResolveCall();
     expect(Array.from(secretResolveCall.targetIds ?? [])).toEqual(["channels.discord.token"]);
@@ -536,7 +536,7 @@ describe("message tool secret scoping", () => {
     expect(input?.sourceReplyDeliveryMode).toBe("message_tool_only");
     expect(input?.toolContext?.currentChannelProvider).toBe("msteams");
     expect(input?.toolContext?.currentChannelId).toBe("user:user-1");
-    expect(input?.params).toEqual({ action: "send", message: "hi" });
+    expect(input?.params).toMatchObject({ action: "send", message: "hi" });
 
     const secretResolveCall = latestSecretResolveCall();
     expect(Array.from(secretResolveCall.targetIds ?? [])).toEqual(["channels.msteams.appPassword"]);
@@ -564,7 +564,7 @@ describe("message tool secret scoping", () => {
     expect(input?.sourceReplyDeliveryMode).toBe("message_tool_only");
     expect(input?.toolContext?.currentChannelProvider).toBe("telegram");
     expect(input?.toolContext?.currentChannelId).toBe("123456789");
-    expect(input?.params).toEqual({ action: "send", message: "hi" });
+    expect(input?.params).toMatchObject({ action: "send", message: "hi" });
 
     const secretResolveCall = latestSecretResolveCall();
     expect(Array.from(secretResolveCall.targetIds ?? [])).toEqual(["channels.telegram.botToken"]);
@@ -807,6 +807,48 @@ describe("message tool agent routing", () => {
     const call = firstRunMessageActionInput();
     expect(call?.agentId).toBe("alpha");
     expect(call?.sessionKey).toBe("agent:alpha:main");
+  });
+
+  it("stamps sends with a stable tool-call idempotency key", async () => {
+    mockSendResult({ channel: "discord", to: "channel:C123" });
+
+    const tool = createMessageTool({
+      agentSessionKey: "agent:main:discord:channel:c123",
+      sessionId: "session-1",
+      currentChannelProvider: "discord",
+      currentChannelId: "channel:C123",
+      currentMessageId: "msg-1",
+      config: {} as never,
+      runMessageAction: mocks.runMessageAction as never,
+    });
+
+    await tool.execute("call-send-1", {
+      action: "send",
+      message: "hi",
+    });
+
+    const call = mocks.runMessageAction.mock.calls[0]?.[0];
+    expect(call?.params?.idempotencyKey).toBe(
+      "tool:agent:main:discord:channel:c123:session-1:discord:channel:C123:msg-1:call-send-1",
+    );
+  });
+
+  it("preserves caller-provided message idempotency keys", async () => {
+    mockSendResult({ channel: "discord", to: "channel:C123" });
+
+    const call = await executeSend({
+      action: {
+        target: "channel:C123",
+        message: "hi",
+        idempotencyKey: "caller-idem-1",
+      },
+      toolOptions: {
+        currentChannelProvider: "discord",
+        currentChannelId: "channel:C123",
+      },
+    });
+
+    expect(call?.params?.idempotencyKey).toBe("caller-idem-1");
   });
 
   it("uses agentThreadId as ambient thread context when currentThreadTs is absent", async () => {
