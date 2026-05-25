@@ -611,6 +611,7 @@ export const sendHandlers: GatewayRequestHandlers = {
           threadId: outboundRoute?.threadId ?? threadId ?? null,
           deps: outboundDeps,
           gatewayClientScopes: client?.connect?.scopes ?? [],
+          sendPolicyMode: "explicit",
           silent: request.silent,
           formatting: request.parseMode ? { parseMode: request.parseMode } : undefined,
           mirror: outboundSessionKey

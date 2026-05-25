@@ -28,6 +28,7 @@ type DeliveryRequest = DeliveryIntentCallbackParams & {
   payloads?: unknown;
   queuePolicy?: string;
   replyToId?: string;
+  sendPolicyMode?: string;
   threadId?: string | number;
 };
 
@@ -640,5 +641,64 @@ describe("withDurableMessageSendContext", () => {
 
     expect(result).toEqual({ status: "failed", error });
     expect(onSendFailure).toHaveBeenCalledWith(error);
+  });
+
+  it("reports send-policy-denied deliveries as suppressed sends", async () => {
+    deliverOutboundPayloads.mockImplementationOnce(async (params: DeliveryIntentCallbackParams) => {
+      params.onPayloadDeliveryOutcome?.({
+        index: 0,
+        status: "suppressed",
+        reason: "denied_by_send_policy",
+        hookEffect: {
+          cancelReason: "send_policy_peer_mismatch",
+          metadata: {
+            code: "send_policy_peer_mismatch",
+            peerEquals: "inboundPeer",
+            expectedPeer: "user-1",
+            actualPeer: "user-2",
+          },
+        },
+      });
+      return [];
+    });
+
+    const result = await sendDurableMessageBatch({
+      cfg,
+      channel: "telegram",
+      to: "user-2",
+      payloads: [{ text: "blocked" }],
+    });
+
+    expectBatchStatus(result, "suppressed");
+    expect(result.reason).toBe("denied_by_send_policy");
+    expect(result.payloadOutcomes?.[0]).toEqual({
+      index: 0,
+      status: "suppressed",
+      reason: "denied_by_send_policy",
+      hookEffect: {
+        cancelReason: "send_policy_peer_mismatch",
+        metadata: {
+          code: "send_policy_peer_mismatch",
+          peerEquals: "inboundPeer",
+          expectedPeer: "user-1",
+          actualPeer: "user-2",
+        },
+      },
+    });
+  });
+
+  it("forwards explicit send-policy mode to durable delivery", async () => {
+    deliverOutboundPayloads.mockResolvedValueOnce([{ channel: "telegram", messageId: "msg-1" }]);
+
+    const result = await sendDurableMessageBatch({
+      cfg,
+      channel: "telegram",
+      to: "chat-1",
+      payloads: [{ text: "hello" }],
+      sendPolicyMode: "explicit",
+    });
+
+    expectBatchStatus(result, "sent");
+    expect(latestDeliveryRequest().sendPolicyMode).toBe("explicit");
   });
 });

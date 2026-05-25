@@ -187,6 +187,19 @@ function resolveRequiredPlugin(channel: string, cfg: OpenClawConfig) {
   return plugin;
 }
 
+function cfgWithoutSendPolicy(cfg: OpenClawConfig): OpenClawConfig {
+  if (!cfg.session?.sendPolicy) {
+    return cfg;
+  }
+  return {
+    ...cfg,
+    session: {
+      ...cfg.session,
+      sendPolicy: undefined,
+    },
+  };
+}
+
 function payloadRequiresDurablePayloadTransport(payload: ReplyPayload): boolean {
   return (
     payload.presentation !== undefined ||
@@ -315,6 +328,7 @@ async function resolveGatewayIdempotencyKey(idempotencyKey?: string): Promise<st
 
 export async function sendMessage(params: MessageSendParams): Promise<MessageSendResult> {
   const cfg = await resolveMessageConfig(params.cfg);
+  const explicitDeliveryCfg = cfgWithoutSendPolicy(cfg);
   const channel = await resolveRequiredChannel({ cfg, channel: params.channel });
   const plugin = resolveRequiredPlugin(channel, cfg);
   const deliveryMode = plugin.outbound?.deliveryMode ?? "direct";
@@ -372,7 +386,7 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
     });
     if (params.queuePolicy === "required") {
       await assertRequiredMessageSendDurability({
-        cfg,
+        cfg: explicitDeliveryCfg,
         channel: outboundChannel,
         payloads: normalizedPayloads,
         replyToId: params.replyToId,
@@ -381,7 +395,7 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
       });
     }
     const send = await sendDurableMessageBatch({
-      cfg,
+      cfg: explicitDeliveryCfg,
       channel: outboundChannel,
       to: resolvedTarget.to,
       session: outboundSession,
@@ -391,6 +405,7 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
       threadId: params.threadId,
       gifPlayback: params.gifPlayback,
       forceDocument: params.forceDocument,
+      sendPolicyMode: "explicit",
       deps: params.deps,
       bestEffort: params.bestEffort,
       durability:

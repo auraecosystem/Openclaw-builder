@@ -20,9 +20,12 @@ export type OutboundPayloadDeliverySuppressionReason =
   | "cancelled_by_message_sending_hook"
   | "empty_after_message_sending_hook"
   | "no_visible_payload"
-  | "adapter_returned_no_identity";
+  | "adapter_returned_no_identity"
+  | "denied_by_send_policy";
 
 export type OutboundDeliveryFailureStage = "platform_send" | "queue" | "unknown";
+
+export type SendPolicyMode = "automatic" | "explicit";
 
 export type OutboundPayloadDeliveryOutcome =
   | {
