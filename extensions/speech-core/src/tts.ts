@@ -434,6 +434,7 @@ function collectDirectProviderConfigEntries(raw: TtsConfig): Record<string, Spee
     "provider",
     "providers",
     "summaryModel",
+    "skipEmojiSymbols",
     "timeoutMs",
   ]);
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
@@ -486,6 +487,7 @@ export function resolveTtsConfig(
     modelOverrides: resolveModelOverridePolicy(raw.modelOverrides),
     providerConfigs: collectDirectProviderConfigEntries(raw),
     prefsPath: raw.prefsPath,
+    skipEmojiSymbols: raw.skipEmojiSymbols,
     maxTextLength: raw.maxTextLength ?? DEFAULT_MAX_TEXT_LENGTH,
     timeoutMs,
     timeoutMsSource,
@@ -1066,6 +1068,7 @@ function resolveTtsRequestSetup(params: {
       config: ResolvedTtsConfig;
       persona?: ResolvedTtsPersona;
       providers: TtsProvider[];
+      text: string;
     }
   | {
       error: string;
@@ -1076,10 +1079,18 @@ function resolveTtsRequestSetup(params: {
     channelId: params.channelId,
     accountId: params.accountId,
   });
+  const preparedText = prepareTextForTtsSynthesis({
+    text: params.text,
+    skipEmojiSymbols: config.skipEmojiSymbols,
+  });
+  if ("error" in preparedText) {
+    return { error: preparedText.error };
+  }
+
   const prefsPath = params.prefsPath ?? resolveTtsPrefsPath(config);
-  if (params.text.length > config.maxTextLength) {
+  if (preparedText.text.length > config.maxTextLength) {
     return {
-      error: `Text too long (${params.text.length} chars, max ${config.maxTextLength})`,
+      error: `Text too long (${preparedText.text.length} chars, max ${config.maxTextLength})`,
     };
   }
 
@@ -1090,6 +1101,7 @@ function resolveTtsRequestSetup(params: {
     config,
     persona: getTtsPersona(config, prefsPath),
     providers: params.disableFallback ? [provider] : resolveTtsProviderOrder(provider, cfg),
+    text: preparedText.text,
   };
 }
 
@@ -1121,6 +1133,43 @@ function resolveTtsResultVoice(
     readTtsResultString(providerConfig.voiceName) ??
     readTtsResultString(providerConfig.voice)
   );
+}
+
+/**
+ * Strip emoji and symbol characters from text for TTS.
+ * Prevents TTS from speaking "checkmark" for "✓" or "copyright" for "©".
+ */
+const EMOJI_BASE_RE =
+  "[\\u{1F000}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{2B05}-\\u{2B07}\\u{2B1B}-\\u{2B1C}\\u{2B50}-\\u{2B55}\\u{2934}-\\u{2935}\\u{3030}\\u{303D}\\u{3297}\\u{3299}]";
+const EMOJI_MODIFIER_RE = "[\\u{1F3FB}-\\u{1F3FF}]?";
+const EMOJI_COMPONENT_RE = `${EMOJI_BASE_RE}\\uFE0F?${EMOJI_MODIFIER_RE}`;
+const EMOJI_SEQUENCE_RE = new RegExp(
+  [
+    "[\\u{1F1E6}-\\u{1F1FF}]{2}",
+    "[#*0-9]\\uFE0F?\\u20E3",
+    `${EMOJI_COMPONENT_RE}(?:\\u200D${EMOJI_COMPONENT_RE})*`,
+    "[\\u00A9\\u00AE\\u2120\\u2122\\u24C5\\u24C6\\u24DC-\\u24DF]\\uFE0F?",
+  ].join("|"),
+  "gu",
+);
+
+function stripEmojiAndSymbols(text: string): string {
+  return text.replace(EMOJI_SEQUENCE_RE, " ").replace(/(?:\u200D|\uFE0E|\uFE0F)/gu, " ");
+}
+
+function prepareTextForTtsSynthesis(params: {
+  text: string;
+  skipEmojiSymbols?: boolean;
+}): { text: string } | { error: string } {
+  const text = params.skipEmojiSymbols ? stripEmojiAndSymbols(params.text) : params.text;
+  if (!text.trim()) {
+    return {
+      error: params.skipEmojiSymbols
+        ? "TTS text is empty after removing emoji and symbol characters"
+        : "TTS text is empty",
+    };
+  }
+  return { text };
 }
 
 export async function textToSpeech(params: {
@@ -1260,7 +1309,7 @@ export async function synthesizeSpeech(params: {
     return { success: false, error: setup.error };
   }
 
-  const { cfg, config, persona, providers } = setup;
+  const { cfg, config, persona, providers, text } = setup;
   const target = resolveTtsSynthesisTarget(params.channel);
 
   const errors: string[] = [];
@@ -1303,7 +1352,7 @@ export async function synthesizeSpeech(params: {
       });
       const prepared = await prepareSpeechSynthesis({
         provider: resolvedProvider.provider,
-        text: params.text,
+        text,
         cfg,
         providerConfig: resolvedProvider.providerConfig,
         providerOverrides: params.overrides?.providerOverrides?.[resolvedProvider.provider.id],
@@ -1404,7 +1453,7 @@ export async function streamSpeech(params: {
     return { success: false, error: setup.error };
   }
 
-  const { cfg, config, persona, providers } = setup;
+  const { cfg, config, persona, providers, text } = setup;
   const target = resolveTtsSynthesisTarget(params.channel);
   const errors: string[] = [];
   const attemptedProviders: string[] = [];
@@ -1460,7 +1509,7 @@ export async function streamSpeech(params: {
       });
       const prepared = await prepareSpeechSynthesis({
         provider: resolvedProvider.provider,
-        text: params.text,
+        text,
         cfg,
         providerConfig: resolvedProvider.providerConfig,
         providerOverrides: params.overrides?.providerOverrides?.[resolvedProvider.provider.id],
@@ -1577,7 +1626,7 @@ export async function textToSpeechTelephony(params: {
     return { success: false, error: setup.error };
   }
 
-  const { cfg, config, persona, providers } = setup;
+  const { cfg, config, persona, providers, text } = setup;
   const errors: string[] = [];
   const attemptedProviders: string[] = [];
   const attempts: TtsProviderAttempt[] = [];
@@ -1621,7 +1670,7 @@ export async function textToSpeechTelephony(params: {
       >;
       const prepared = await prepareSpeechSynthesis({
         provider: resolvedProvider.provider,
-        text: params.text,
+        text,
         cfg,
         providerConfig: resolvedProvider.providerConfig,
         providerOverrides: params.overrides?.providerOverrides?.[resolvedProvider.provider.id],
