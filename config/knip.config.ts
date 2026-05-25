@@ -68,8 +68,10 @@ const rootBundledPluginRuntimeDependencies = [
   "@slack/bolt",
   "@slack/types",
   "@slack/web-api",
+  "age-encryption",
   "grammy",
   "linkedom",
+  "libsodium-wrappers-sumo",
   "minimatch",
   "node-edge-tts",
   "openshell",
@@ -160,12 +162,7 @@ const config = {
       ],
     },
     ui: {
-      entry: [
-        "index.html!",
-        "src/main.ts!",
-        "vite.config.ts!",
-        "vitest*.ts!",
-      ],
+      entry: ["index.html!", "src/main.ts!", "vite.config.ts!", "vitest*.ts!"],
       project: ["src/**/*.{ts,tsx}!"],
     },
     "packages/sdk": {
