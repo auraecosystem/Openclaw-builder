@@ -220,6 +220,169 @@ describe("resolveAuthForTarget", () => {
         expect(auth.diagnostics).toStrictEqual([
           "gateway.auth.token SecretRef is unresolved (env:default:MISSING_GATEWAY_TOKEN).",
         ]);
+        expect(auth.failureReason).toContain("gateway.auth.token");
+        expect(auth.diagnostics?.join("\n")).not.toContain("missing or empty");
+      },
+    );
+  });
+});
+
+describe("resolveAuthForTarget - authMode guards and explicit URL overrides", () => {
+  it("does not fail-fast for localLoopback when authMode is undefined", async () => {
+    const auth = await resolveAuthForTarget(
+      // No auth mode configured -- open gateway
+      { gateway: {} },
+      {
+        id: "localLoopback",
+        kind: "localLoopback",
+        url: "ws://127.0.0.1:18789",
+        active: true,
+      },
+      {},
+    );
+
+    expect(auth.failureReason).toBeUndefined();
+  });
+
+  it("does not fail-fast for localLoopback when authMode is none", async () => {
+    const auth = await resolveAuthForTarget(
+      { gateway: { auth: { mode: "none" } } },
+      {
+        id: "localLoopback",
+        kind: "localLoopback",
+        url: "ws://127.0.0.1:18789",
+        active: true,
+      },
+      {},
+    );
+
+    expect(auth.failureReason).toBeUndefined();
+  });
+
+  it("does not fail-fast for localLoopback when authMode is trusted-proxy", async () => {
+    const auth = await resolveAuthForTarget(
+      { gateway: { auth: { mode: "trusted-proxy" } } },
+      {
+        id: "localLoopback",
+        kind: "localLoopback",
+        url: "ws://127.0.0.1:18789",
+        active: true,
+      },
+      {},
+    );
+
+    expect(auth.failureReason).toBeUndefined();
+  });
+
+  it("does not fail-fast for explicit loopback URL override even when authMode requires token", async () => {
+    // Comment 3 regression: explicit URL (e.g. --url ws://127.0.0.1:<forwarded-port>)
+    // must not inherit local auth fail-fast rules even if local config requires a token.
+    const auth = await resolveAuthForTarget(
+      { gateway: { auth: { mode: "token" } } },
+      {
+        id: "explicit",
+        kind: "explicit",
+        url: "ws://127.0.0.1:19999",
+        active: true,
+      },
+      {},
+    );
+
+    expect(auth.failureReason).toBeUndefined();
+  });
+
+  it("does not borrow local SecretRef auth for an explicit URL target", async () => {
+    // Explicit `--url` targets must never fall back to config/env credentials
+    // (documented contract). Even when gateway.auth.token is a SecretRef that
+    // would fail to resolve, an explicit URL probes with no auth rather than
+    // surfacing a local-auth diagnostic or leaking a resolved token to an
+    // arbitrary user-supplied URL.
+    await withEnvAsync(
+      {
+        OPENCLAW_GATEWAY_PASSWORD: undefined,
+        OPENCLAW_GATEWAY_TOKEN: undefined,
+        MISSING_GATEWAY_TOKEN: undefined,
+      },
+      async () => {
+        const auth = await resolveAuthForTarget(
+          {
+            secrets: {
+              providers: {
+                default: { source: "env" },
+              },
+            },
+            gateway: {
+              auth: {
+                mode: "token",
+                token: { source: "env", provider: "default", id: "MISSING_GATEWAY_TOKEN" },
+              },
+            },
+          },
+          {
+            id: "explicit",
+            kind: "explicit",
+            url: "wss://prod.example/ws",
+            active: true,
+          },
+          {},
+        );
+
+        expect(auth.failureReason).toBeUndefined();
+        expect(auth.diagnostics).toBeUndefined();
+        expect(auth.token).toBeUndefined();
+        expect(auth.password).toBeUndefined();
+      },
+    );
+  });
+
+  it("does not leak a resolved local token to an explicit URL target", async () => {
+    // Explicit `--url` must not reuse a resolvable gateway.auth.token /
+    // OPENCLAW_GATEWAY_TOKEN; only explicit --token/--password apply.
+    await withEnvAsync(
+      {
+        OPENCLAW_GATEWAY_PASSWORD: undefined,
+        OPENCLAW_GATEWAY_TOKEN: "ambient-local-token",
+      },
+      async () => {
+        const auth = await resolveAuthForTarget(
+          { gateway: { auth: { mode: "token" } } },
+          {
+            id: "explicit",
+            kind: "explicit",
+            url: "wss://prod.example/ws",
+            active: true,
+          },
+          {},
+        );
+
+        expect(auth.token).toBeUndefined();
+        expect(auth.password).toBeUndefined();
+        expect(auth.failureReason).toBeUndefined();
+      },
+    );
+  });
+
+  it("fails-fast for localLoopback when authMode is token and no token is present", async () => {
+    // Clear ambient gateway-auth env vars so a token leaked from the test runner
+    // (or another suite) cannot satisfy the resolver and mask the fail-fast path.
+    await withEnvAsync(
+      {
+        OPENCLAW_GATEWAY_TOKEN: undefined,
+        OPENCLAW_GATEWAY_PASSWORD: undefined,
+      },
+      async () => {
+        const auth = await resolveAuthForTarget(
+          { gateway: { auth: { mode: "token" } } },
+          {
+            id: "localLoopback",
+            kind: "localLoopback",
+            url: "ws://127.0.0.1:18789",
+            active: true,
+          },
+          {},
+        );
+
+        expect(auth.failureReason).toBeTruthy();
       },
     );
   });
