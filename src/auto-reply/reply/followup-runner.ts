@@ -657,6 +657,10 @@ export function createFollowupRunner(params: {
           },
           classifyResult: ({ result, provider, model }) =>
             outcomePlan.classifyRunResult({ result, provider, model }),
+          // Propagate abort signal so terminal aborts (run-budget timeout,
+          // HTTP client disconnect) skip pointless fallback retries.
+          // Closes openclaw/openclaw#60388.
+          abortSignal: replyOperation.abortSignal,
           run: async (provider, model, runOptions) => {
             const suppressQueuedUserPersistenceForCandidate =
               (run.suppressNextUserMessagePersistence ?? false) ||

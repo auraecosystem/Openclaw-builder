@@ -458,6 +458,14 @@ export async function compactEmbeddedPiSessionDirect(
         });
       },
       fallbacksOverride,
+      // Forward the caller's abort signal so a terminal abort during compaction
+      // (run-budget timeout, HTTP client disconnect, cron timeout string) does
+      // not get classified as a retryable compaction failure and cascade into
+      // the configured compaction fallback models. Flagged by @Lellansin
+      // reviewing openclaw/openclaw#62682 — `compactEmbeddedPiSessionDirectOnce`
+      // already plumbs `params.abortSignal` into the actual compaction attempt,
+      // but the surrounding `runWithModelFallback` was missing the same signal.
+      abortSignal: params.abortSignal,
       classifyResult: ({ result, provider, model }) =>
         classifyCompactionFallbackResult(result, provider, model),
       run: async (provider, model) => {
