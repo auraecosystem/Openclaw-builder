@@ -1,0 +1,197 @@
+import {
+  hasConfiguredAccountValue,
+  listCombinedAccountIds,
+  resolveListedDefaultAccountId,
+} from "openclaw/plugin-sdk/account-core";
+import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "openclaw/plugin-sdk/account-id";
+import { resolveMergedAccountConfig } from "openclaw/plugin-sdk/account-resolution-runtime";
+import { normalizeBrokerPlatformId } from "openclaw/plugin-sdk/channel-broker";
+import { normalizeResolvedSecretInputString } from "openclaw/plugin-sdk/secret-input-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import type {
+  ChannelBrokerConfig,
+  ChannelBrokerProviderConfig,
+  CoreConfig,
+  ResolvedChannelBrokerAccount,
+} from "./types.js";
+
+export { DEFAULT_ACCOUNT_ID };
+
+function getChannelBrokerConfig(cfg: CoreConfig): ChannelBrokerConfig | undefined {
+  return cfg.channels?.["channel-broker"];
+}
+
+function resolveMergedBrokerProviderConfig(
+  cfg: CoreConfig,
+  accountId: string,
+): ChannelBrokerProviderConfig {
+  const channelConfig = getChannelBrokerConfig(cfg);
+  const accounts = Object.assign({}, channelConfig?.providers, channelConfig?.accounts);
+  return resolveMergedAccountConfig<ChannelBrokerProviderConfig>({
+    channelConfig,
+    accounts,
+    accountId,
+    omitKeys: ["accounts", "defaultAccount", "defaultProviderId", "providers"],
+    normalizeAccountId,
+  });
+}
+
+export function listChannelBrokerProviderIds(cfg: CoreConfig): string[] {
+  const channelConfig = getChannelBrokerConfig(cfg);
+  const providerIds = Object.keys(channelConfig?.providers ?? {});
+  const accountIds = Object.keys(channelConfig?.accounts ?? {});
+  return listCombinedAccountIds({
+    configuredAccountIds: [...providerIds, ...accountIds].map(normalizeAccountId),
+    implicitAccountId: hasConfiguredAccountValue(channelConfig?.baseUrl)
+      ? DEFAULT_ACCOUNT_ID
+      : undefined,
+    fallbackAccountIdWhenEmpty: DEFAULT_ACCOUNT_ID,
+  });
+}
+
+export function resolveDefaultChannelBrokerProviderId(cfg: CoreConfig): string {
+  const channelConfig = getChannelBrokerConfig(cfg);
+  const preferred = channelConfig?.defaultProviderId ?? channelConfig?.defaultAccount;
+  return resolveListedDefaultAccountId({
+    accountIds: listChannelBrokerProviderIds(cfg),
+    configuredDefaultAccountId: preferred ? normalizeAccountId(preferred) : undefined,
+  });
+}
+
+export function isListedChannelBrokerProviderId(cfg: CoreConfig, providerId: string): boolean {
+  const normalizedProviderId = normalizeAccountId(providerId);
+  return listChannelBrokerProviderIds(cfg).includes(normalizedProviderId);
+}
+
+function normalizePlatformList(values: readonly string[] | undefined): string[] {
+  return Array.from(new Set((values ?? []).map((value) => normalizeBrokerPlatformId(value))));
+}
+
+function normalizePlatformAliasMap(
+  aliases: Record<string, string> | undefined,
+): Record<string, string> {
+  const normalized: Record<string, string> = {};
+  for (const [rawAlias, rawTarget] of Object.entries(aliases ?? {})) {
+    normalized[normalizeBrokerPlatformId(rawAlias)] = normalizeBrokerPlatformId(rawTarget);
+  }
+  return normalized;
+}
+
+function normalizeCapabilities(
+  capabilities: ChannelBrokerProviderConfig["capabilities"],
+): NonNullable<ResolvedChannelBrokerAccount["capabilities"]> {
+  const normalized: NonNullable<ResolvedChannelBrokerAccount["capabilities"]> = {};
+  for (const [rawPlatform, value] of Object.entries(capabilities ?? {})) {
+    const platform = normalizeBrokerPlatformId(value.platform ?? rawPlatform);
+    normalized[platform] = {
+      platform,
+      ...(value.delivery ? { delivery: { ...value.delivery } } : {}),
+      ...(value.live ? { live: { ...value.live } } : {}),
+      ...(value.receive ? { receive: { ...value.receive } } : {}),
+      ...(value.native ? { native: { ...value.native } } : {}),
+    };
+  }
+  return normalized;
+}
+
+function hasOwnProperty(record: Record<string, unknown> | undefined, key: string): boolean {
+  return Boolean(record && Object.prototype.hasOwnProperty.call(record, key));
+}
+
+function resolveProviderConfigRecord(
+  config: ChannelBrokerConfig | undefined,
+  accountId: string,
+): { key: "accounts" | "providers"; value: ChannelBrokerProviderConfig } | undefined {
+  const normalizedAccountId = normalizeAccountId(accountId);
+  const accounts = config?.accounts ?? {};
+  if (hasOwnProperty(accounts, normalizedAccountId)) {
+    return { key: "accounts", value: accounts[normalizedAccountId] ?? {} };
+  }
+  const providers = config?.providers ?? {};
+  if (hasOwnProperty(providers, normalizedAccountId)) {
+    return { key: "providers", value: providers[normalizedAccountId] ?? {} };
+  }
+  return undefined;
+}
+
+function resolveSecretInputPath(params: {
+  config: ChannelBrokerConfig | undefined;
+  accountId: string;
+  field: "outboundToken" | "signingSecret";
+}): string {
+  const provider = resolveProviderConfigRecord(params.config, params.accountId);
+  if (provider && hasOwnProperty(provider.value, params.field)) {
+    return `channels.channel-broker.${provider.key}.${normalizeAccountId(params.accountId)}.${params.field}`;
+  }
+  return `channels.channel-broker.${params.field}`;
+}
+
+function normalizeRuntimeSecretInput(params: {
+  cfg: CoreConfig;
+  value: unknown;
+  path: string;
+}): string | null {
+  return (
+    normalizeResolvedSecretInputString({
+      value: params.value,
+      defaults: params.cfg.secrets?.defaults,
+      path: params.path,
+    }) ?? null
+  );
+}
+
+export function resolveChannelBrokerAccount(params: {
+  cfg: CoreConfig;
+  accountId?: string | null;
+}): ResolvedChannelBrokerAccount {
+  const channelConfig = getChannelBrokerConfig(params.cfg);
+  const accountId =
+    normalizeOptionalString(params.accountId) ??
+    normalizeOptionalString(channelConfig?.defaultProviderId) ??
+    normalizeOptionalString(channelConfig?.defaultAccount) ??
+    resolveDefaultChannelBrokerProviderId(params.cfg as never);
+  const normalizedAccountId = normalizeAccountId(accountId);
+  const merged = resolveMergedBrokerProviderConfig(params.cfg, normalizedAccountId);
+  const baseEnabled = channelConfig?.enabled !== false;
+  const enabled = baseEnabled && merged.enabled !== false;
+  const baseUrl = normalizeOptionalString(merged.baseUrl) ?? null;
+  const defaultPlatform = merged.defaultPlatform
+    ? normalizeBrokerPlatformId(merged.defaultPlatform)
+    : null;
+  return {
+    accountId: normalizeOptionalString(merged.accountId) ?? normalizedAccountId,
+    providerId: normalizedAccountId,
+    enabled,
+    configured: Boolean(baseUrl),
+    name: normalizeOptionalString(merged.name),
+    baseUrl,
+    outboundToken: normalizeRuntimeSecretInput({
+      cfg: params.cfg,
+      value: merged.outboundToken,
+      path: resolveSecretInputPath({
+        config: channelConfig,
+        accountId: normalizedAccountId,
+        field: "outboundToken",
+      }),
+    }),
+    signingSecret: normalizeRuntimeSecretInput({
+      cfg: params.cfg,
+      value: merged.signingSecret,
+      path: resolveSecretInputPath({
+        config: channelConfig,
+        accountId: normalizedAccountId,
+        field: "signingSecret",
+      }),
+    }),
+    platforms: normalizePlatformList(merged.platforms),
+    platformAliases: normalizePlatformAliasMap(merged.platformAliases),
+    defaultPlatform,
+    defaultConversationType: merged.defaultConversationType ?? "channel",
+    defaultTo: normalizeOptionalString(merged.defaultTo),
+    allowFrom: merged.allowFrom ?? [],
+    capabilities: normalizeCapabilities(merged.capabilities),
+    config: merged,
+  };
+}
+
+export type { ResolvedChannelBrokerAccount };
