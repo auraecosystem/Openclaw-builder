@@ -1,3 +1,9 @@
+/**
+ * @deprecated Use `openclaw/plugin-sdk/channel-inbound` for inbound runners and
+ * dispatch predicates. Use `openclaw/plugin-sdk/channel-outbound` for message
+ * delivery helpers.
+ */
+
 import { withReplyDispatcher } from "../auto-reply/dispatch.js";
 import type { GetReplyOptions } from "../auto-reply/get-reply-options.types.js";
 import {
@@ -11,11 +17,12 @@ import {
   hasFinalChannelTurnDispatch,
   hasVisibleChannelTurnDispatch,
   deliverInboundReplyWithMessageSendContext,
+  dispatchChannelInboundReply as dispatchChannelInboundReplyCore,
   isDurableInboundReplyDeliveryHandled,
   resolveChannelTurnDispatchCounts,
-  recordDroppedChannelTurnHistory,
-  runChannelTurn,
-  runPreparedChannelTurn,
+  recordDroppedChannelInboundHistory,
+  runChannelInboundEvent as runChannelInboundEventCore,
+  runPreparedInboundReply as runPreparedInboundReplyCore,
   throwIfDurableInboundReplyDeliveryFailed,
 } from "../channels/turn/kernel.js";
 import type {
@@ -23,10 +30,14 @@ import type {
   DispatchedChannelTurnResult,
   DurableInboundReplyDeliveryOptions,
 } from "../channels/turn/kernel.js";
-import type { PreparedChannelTurn, RunChannelTurnParams } from "../channels/turn/types.js";
+import type {
+  AssembledChannelTurn,
+  PreparedChannelTurn,
+  RunChannelTurnParams,
+} from "../channels/turn/types.js";
 export type {
-  ChannelTurnDroppedHistoryOptions,
-  ChannelTurnRecordOptions,
+  ChannelTurnDroppedHistoryOptions as ChannelInboundDroppedHistoryOptions,
+  ChannelTurnRecordOptions as InboundReplyRecordOptions,
 } from "../channels/turn/types.js";
 export type { DurableInboundReplyDeliveryParams } from "../channels/turn/kernel.js";
 export type { ChannelBotLoopProtectionFacts } from "../channels/turn/kernel.js";
@@ -46,8 +57,15 @@ type ReplyOptionsWithoutModelSelected = Omit<
 type RecordInboundSessionFn = typeof import("../channels/session.js").recordInboundSession;
 
 type ReplyDispatchFromConfigOptions = Omit<GetReplyOptions, "onBlockReply">;
+export type ChannelInboundEventRunnerParams<
+  TRaw,
+  TDispatchResult = DispatchFromConfigResult,
+> = RunChannelTurnParams<TRaw, TDispatchResult>;
+export type PreparedInboundReply<TDispatchResult> = PreparedChannelTurn<TDispatchResult>;
+export type AssembledInboundReply = AssembledChannelTurn;
+export type InboundReplyDispatchResult<TDispatchResult> = ChannelTurnResult<TDispatchResult>;
 
-/** Run an already assembled channel turn through shared session-record + dispatch ordering. */
+/** Run an already prepared inbound reply through shared session-record + dispatch ordering. */
 type PreparedInboundReplyTurnWithBotLoopProtection<TDispatchResult> =
   PreparedChannelTurn<TDispatchResult> & {
     botLoopProtection: NonNullable<PreparedChannelTurn<TDispatchResult>["botLoopProtection"]>;
@@ -60,26 +78,29 @@ type PreparedInboundReplyTurnWithoutBotLoopProtection<TDispatchResult> = Omit<
   botLoopProtection?: undefined;
 };
 
-export function runPreparedInboundReplyTurn<TDispatchResult>(
+export function runPreparedInboundReply<TDispatchResult>(
   params: PreparedInboundReplyTurnWithBotLoopProtection<TDispatchResult>,
 ): Promise<ChannelTurnResult<TDispatchResult>>;
-export function runPreparedInboundReplyTurn<TDispatchResult>(
+export function runPreparedInboundReply<TDispatchResult>(
   params: PreparedInboundReplyTurnWithoutBotLoopProtection<TDispatchResult>,
 ): Promise<DispatchedChannelTurnResult<TDispatchResult>>;
-export function runPreparedInboundReplyTurn<TDispatchResult>(
+export function runPreparedInboundReply<TDispatchResult>(
   params: PreparedChannelTurn<TDispatchResult>,
 ): Promise<ChannelTurnResult<TDispatchResult>>;
-export async function runPreparedInboundReplyTurn<TDispatchResult>(
+export async function runPreparedInboundReply<TDispatchResult>(
   params: PreparedChannelTurn<TDispatchResult>,
 ): Promise<ChannelTurnResult<TDispatchResult>> {
-  return await runPreparedChannelTurn(params);
+  return await runPreparedInboundReplyCore(params);
 }
 
-/** Run a channel turn through shared ingest, record, dispatch, and finalize ordering. */
-export async function runInboundReplyTurn<TRaw, TDispatchResult = DispatchFromConfigResult>(
-  params: RunChannelTurnParams<TRaw, TDispatchResult>,
+export async function runChannelInboundEvent<TRaw, TDispatchResult = DispatchFromConfigResult>(
+  params: ChannelInboundEventRunnerParams<TRaw, TDispatchResult>,
 ) {
-  return await runChannelTurn(params);
+  return await runChannelInboundEventCore(params);
+}
+
+export async function dispatchChannelInboundReply(params: AssembledInboundReply) {
+  return await dispatchChannelInboundReplyCore(params);
 }
 
 export {
@@ -87,7 +108,7 @@ export {
   hasVisibleChannelTurnDispatch as hasVisibleInboundReplyDispatch,
   deliverInboundReplyWithMessageSendContext as deliverDurableInboundReplyPayload,
   deliverInboundReplyWithMessageSendContext,
-  recordDroppedChannelTurnHistory,
+  recordDroppedChannelInboundHistory,
   resolveChannelTurnDispatchCounts as resolveInboundReplyDispatchCounts,
 };
 
@@ -249,7 +270,7 @@ export async function recordChannelMessageReplyDispatch(
     return await params.deliver(normalized);
   };
 
-  await runPreparedChannelTurn({
+  await runPreparedInboundReply({
     channel: params.channel,
     accountId: params.accountId,
     routeSessionKey: params.routeSessionKey,

@@ -8,11 +8,19 @@ import {
   type StatusReactionAdapter,
 } from "openclaw/plugin-sdk/channel-feedback";
 import {
+  type InboundReplyRecordOptions,
+  runPreparedInboundReply,
+} from "openclaw/plugin-sdk/channel-inbound";
+import {
+  type ChannelBotLoopProtectionFacts,
+  hasVisibleInboundReplyDispatch,
+} from "openclaw/plugin-sdk/channel-inbound";
+import {
   createChannelMessageReplyPipeline,
   defineFinalizableLivePreviewAdapter,
   deliverWithFinalizableLivePreviewAdapter,
   resolveChannelMessageSourceReplyDeliveryMode,
-} from "openclaw/plugin-sdk/channel-message";
+} from "openclaw/plugin-sdk/channel-outbound";
 import {
   buildChannelProgressDraftLine,
   buildChannelProgressDraftLineForEntry,
@@ -31,12 +39,6 @@ import {
   type ChannelProgressDraftLine,
 } from "openclaw/plugin-sdk/channel-streaming";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import {
-  type ChannelBotLoopProtectionFacts,
-  type ChannelTurnRecordOptions,
-  hasVisibleInboundReplyDispatch,
-  runPreparedInboundReplyTurn,
-} from "openclaw/plugin-sdk/inbound-reply-dispatch";
 import { resolveAgentOutboundIdentity } from "openclaw/plugin-sdk/outbound-runtime";
 import { mergePairLoopGuardConfig } from "openclaw/plugin-sdk/pair-loop-guard-runtime";
 import {
@@ -1270,14 +1272,14 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
   let counts: { final?: number; block?: number } = {};
   let dispatchSettledBeforeStart = false;
   try {
-    const turnResult = await runPreparedInboundReplyTurn({
+    const turnResult = await runPreparedInboundReply({
       channel: "slack",
       accountId: route.accountId,
       routeSessionKey: route.sessionKey,
       storePath: prepared.turn.storePath,
       ctxPayload: prepared.ctxPayload,
       recordInboundSession,
-      record: prepared.turn.record as ChannelTurnRecordOptions,
+      record: prepared.turn.record as InboundReplyRecordOptions,
       history: prepared.turn.history,
       botLoopProtection: resolveSlackBotLoopProtection(prepared),
       onPreDispatchFailure: async () => {

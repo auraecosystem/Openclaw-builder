@@ -1,4 +1,4 @@
-import { createChannelMessageReplyPipeline } from "openclaw/plugin-sdk/channel-message";
+import { createChannelMessageReplyPipeline } from "openclaw/plugin-sdk/channel-outbound";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { sendClickClackText } from "./outbound.js";
 import { getClickClackRuntime } from "./runtime.js";
@@ -158,7 +158,7 @@ export async function handleClickClackInbound(params: {
     channel: CHANNEL_ID,
     accountId: params.account.accountId,
   });
-  await runtime.channel.turn.runPrepared({
+  await runtime.channel.inbound.runPreparedReply({
     channel: CHANNEL_ID,
     accountId: params.account.accountId,
     routeSessionKey: route.sessionKey,

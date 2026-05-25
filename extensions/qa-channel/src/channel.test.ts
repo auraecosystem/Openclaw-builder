@@ -1,5 +1,5 @@
 import path from "node:path";
-import { verifyChannelMessageAdapterCapabilityProofs } from "openclaw/plugin-sdk/channel-message";
+import { verifyChannelMessageAdapterCapabilityProofs } from "openclaw/plugin-sdk/channel-outbound";
 import {
   createPluginRuntimeMock,
   createStartAccountContext,
@@ -16,7 +16,7 @@ import { createQaBusState, startQaBusServer } from "../../qa-lab/bus-api.js";
 import { qaChannelPlugin, setQaChannelRuntime } from "../api.js";
 import { listQaChannelAccountIds, resolveDefaultQaChannelAccountId } from "./accounts.js";
 
-type QaRunPreparedTurn = Parameters<PluginRuntime["channel"]["turn"]["runPrepared"]>[0];
+type QaRunPreparedTurn = Parameters<PluginRuntime["channel"]["inbound"]["runPreparedReply"]>[0];
 
 afterEach(() => {
   resetPluginRuntimeStateForTest();
@@ -132,8 +132,8 @@ function createMockQaRuntime(params?: {
           });
         },
       },
-      turn: {
-        async runPrepared(turn: QaRunPreparedTurn) {
+      inbound: {
+        async runPreparedReply(turn: QaRunPreparedTurn) {
           await turn.recordInboundSession({
             storePath: turn.storePath,
             sessionKey:
