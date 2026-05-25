@@ -10,6 +10,7 @@ import {
   resolveCodexAppServerRuntimeOptions,
   type CodexAppServerStartOptions,
 } from "./config.js";
+import { applyCodexAppServerLogRetention } from "./log-retention.js";
 import { resolveManagedCodexAppServerStartOptions } from "./managed-binary.js";
 import { withTimeout } from "./timeout.js";
 
@@ -106,6 +107,7 @@ export async function getSharedCodexAppServerClient(options?: {
   const sharedPromise =
     entry.promise ??
     (entry.promise = (async () => {
+      await applyCodexAppServerLogRetention({ startOptions });
       const client = CodexAppServerClient.start(startOptions);
       entry.client = client;
       client.addCloseHandler((closedClient) => clearSharedClientEntryIfCurrent(key, closedClient));
@@ -168,6 +170,7 @@ export async function createIsolatedCodexAppServerClient(options?: {
     authProfileId: usesNativeAuth ? null : authProfileId,
     config: options?.config,
   });
+  await applyCodexAppServerLogRetention({ startOptions });
   const client = CodexAppServerClient.start(startOptions);
   const initialize = client.initialize();
   try {
