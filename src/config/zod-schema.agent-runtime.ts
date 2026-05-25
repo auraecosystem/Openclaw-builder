@@ -1008,6 +1008,17 @@ export const AgentRuntimePolicySchema = z
   .strict()
   .optional();
 
+const AgentPluginSlotsSchema = z
+  .object({
+    memory: z.string().optional(),
+    "memory.recall": z.string().optional(),
+    "memory.compaction": z.string().optional(),
+    "memory.capture": z.string().optional(),
+    "memory.dreaming": z.string().optional(),
+    "memory.userModel": z.string().optional(),
+  })
+  .strict();
+
 export const AgentEntrySchema = z
   .object({
     id: z.string(),
@@ -1075,6 +1086,12 @@ export const AgentEntrySchema = z
     embeddedPi: z
       .object({
         executionContract: z.union([z.literal("default"), z.literal("strict-agentic")]).optional(),
+      })
+      .strict()
+      .optional(),
+    plugins: z
+      .object({
+        slots: AgentPluginSlotsSchema.optional(),
       })
       .strict()
       .optional(),

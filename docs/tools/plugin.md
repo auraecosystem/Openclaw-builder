@@ -142,7 +142,7 @@ The common plugin config shape is:
     allow: ["voice-call"],
     deny: ["untrusted-plugin"],
     load: { paths: ["~/Projects/oss/voice-call-plugin"] },
-    slots: { memory: "memory-core" },
+    slots: { "memory.recall": "memory-core" },
     entries: {
       "voice-call": { enabled: true, config: { provider: "twilio" } },
     },
@@ -170,6 +170,24 @@ Key policy rules:
   for that slot by counting as explicit activation; it can load even when it
   would otherwise be opt-in. `plugins.deny` and
   `plugins.entries.<id>.enabled: false` still block it.
+- Memory also supports purpose-specific role slots:
+  `memory.recall`, `memory.compaction`, `memory.capture`, `memory.dreaming`,
+  and `memory.userModel`. The legacy `memory` slot remains accepted as
+  deprecated shorthand for `memory.recall`; run `openclaw doctor --fix` to
+  migrate non-conflicting legacy selectors. Use role slots when composing
+  complementary memory providers. Per-agent overrides can set the same role
+  slots under `agents.list[].plugins.slots`.
+- Multi-slot memory directly addresses #60572, #38874, #2306, and #2080.
+  Related design and compatibility threads include
+  #25359 and #54501 for per-agent slot overrides and multi-instance memory
+  configuration, #57507 for dual-kind plugin slot ownership, #70823 for
+  machine-readable slot ownership, #61936/#63067/#63590/#63831/#70489/#85473
+  for decoupling dreaming from primary memory slot ownership, #62275/#63874 and
+  #85863 for slot-aware and provider-owned dreaming config/runtime surfaces,
+  #64423 and #76567/#76495 for selected-slot startup and runtime checks,
+  #78540/#78557 for doctor/status recognition of alternate memory owners,
+  #77906/#82265/#82266/#82977 for active-memory and custom recall-tool
+  compatibility, and #76680 for hook-driven capture behavior.
 - Bundled opt-in plugins can auto-activate when config names one of their owned
   surfaces, such as a provider/model ref, channel config, CLI backend, or agent
   harness runtime.

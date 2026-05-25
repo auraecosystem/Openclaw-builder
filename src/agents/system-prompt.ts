@@ -8,6 +8,7 @@ import {
 } from "../channels/plugins/native-approval-prompt.js";
 import type { SubagentDelegationMode } from "../config/types.agent-defaults.js";
 import type { MemoryCitationsMode } from "../config/types.memory.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { buildMemoryPromptSection } from "../plugins/memory-state.js";
 import type { AgentPromptSurfaceKind } from "../plugins/types.js";
 import {
@@ -266,6 +267,10 @@ function buildMemorySection(params: {
   includeMemorySection?: boolean;
   availableTools: Set<string>;
   citationsMode?: MemoryCitationsMode;
+  memoryContext?: {
+    cfg: OpenClawConfig;
+    agentId?: string;
+  };
 }) {
   if (params.isMinimal || params.includeMemorySection === false) {
     return [];
@@ -273,6 +278,8 @@ function buildMemorySection(params: {
   return buildMemoryPromptSection({
     availableTools: params.availableTools,
     citationsMode: params.citationsMode,
+    cfg: params.memoryContext?.cfg,
+    agentId: params.memoryContext?.agentId,
   });
 }
 
@@ -737,6 +744,10 @@ export function buildAgentSystemPrompt(params: {
   };
   includeMemorySection?: boolean;
   memoryCitationsMode?: MemoryCitationsMode;
+  memoryContext?: {
+    cfg: OpenClawConfig;
+    agentId?: string;
+  };
   promptContribution?: ProviderSystemPromptContribution;
 }) {
   const acpEnabled = params.acpEnabled === true;
@@ -951,6 +962,7 @@ export function buildAgentSystemPrompt(params: {
     includeMemorySection: params.includeMemorySection,
     availableTools,
     citationsMode: params.memoryCitationsMode,
+    memoryContext: params.memoryContext,
   });
   const docsSection = buildDocsSection({
     docsPath: params.docsPath,

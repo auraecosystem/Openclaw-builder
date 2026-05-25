@@ -38,6 +38,7 @@ export type ResolvedAgentConfig = {
   runRetries?: AgentEntry["runRetries"];
   embeddedPi?: AgentEntry["embeddedPi"];
   sandbox?: AgentEntry["sandbox"];
+  plugins?: AgentEntry["plugins"];
   tools?: AgentEntry["tools"];
 };
 
@@ -152,6 +153,7 @@ export function resolveAgentConfig(
     embeddedPi:
       typeof entry.embeddedPi === "object" && entry.embeddedPi ? entry.embeddedPi : undefined,
     sandbox: entry.sandbox,
+    plugins: typeof entry.plugins === "object" && entry.plugins ? entry.plugins : undefined,
     tools: entry.tools,
   };
 }
