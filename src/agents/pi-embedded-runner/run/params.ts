@@ -12,6 +12,7 @@ import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import type { PromptImageOrderEntry } from "../../../media/prompt-image-order.js";
 import type { CommandQueueEnqueueFn } from "../../../process/command-queue.types.js";
 import type { InputProvenance } from "../../../sessions/input-provenance.js";
+import type { FastMode } from "../../../shared/string-coerce.js";
 import type { ExecElevatedDefaults, ExecToolDefaults } from "../../bash-tools.exec-types.js";
 import type { AgentStreamParams, ClientToolDefinition } from "../../command/shared-types.js";
 import type { AgentInternalEvent } from "../../internal-events.js";
@@ -125,7 +126,11 @@ export type RunEmbeddedPiAgentParams = {
   authProfileId?: string;
   authProfileIdSource?: "auto" | "user";
   thinkLevel?: ThinkLevel;
-  fastMode?: boolean;
+  fastMode?: FastMode;
+  /** Stable outer-run start time for auto fast-mode cutoff across retries/fallbacks. */
+  fastModeStartedAtMs?: number;
+  /** Effective auto fast-mode cutoff for this run, in seconds. */
+  fastModeAutoOnSeconds?: number;
   verboseLevel?: VerboseLevel;
   reasoningLevel?: ReasoningLevel;
   toolResultFormat?: ToolResultFormat;

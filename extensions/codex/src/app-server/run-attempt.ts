@@ -645,6 +645,20 @@ function resolveCodexAppServerForOpenClawToolPolicy(params: {
   };
 }
 
+function resolveCodexAppServerForFastMode(params: {
+  appServer: CodexAppServerRuntimeOptions;
+  fastMode: EmbeddedRunAttemptParams["fastMode"];
+}): CodexAppServerRuntimeOptions {
+  const resolved = typeof params.fastMode === "function" ? params.fastMode() : params.fastMode;
+  if (resolved === true) {
+    return {
+      ...params.appServer,
+      serviceTier: "priority",
+    };
+  }
+  return params.appServer;
+}
+
 function isCodexAppServerPolicyMode(value: unknown): boolean {
   return value === "guardian" || value === "yolo";
 }
@@ -1528,7 +1542,10 @@ export async function runCodexAppServerAttempt(
               agentId: sessionAgentId,
               cwd: startupExecutionCwd,
               dynamicTools: toolBridge.specs,
-              appServer: pluginAppServer,
+              appServer: resolveCodexAppServerForFastMode({
+                appServer: pluginAppServer,
+                fastMode: params.fastMode,
+              }),
               developerInstructions: promptBuild.developerInstructions,
               config: threadConfig,
               finalConfigPatch: nativeHookRelayConfig,
@@ -2688,7 +2705,10 @@ export async function runCodexAppServerAttempt(
         buildTurnStartParams(params, {
           threadId: thread.threadId,
           cwd: codexExecutionCwd,
-          appServer: pluginAppServer,
+          appServer: resolveCodexAppServerForFastMode({
+            appServer: pluginAppServer,
+            fastMode: params.fastMode,
+          }),
           promptText: codexTurnPromptText,
           sandboxPolicy: codexSandboxPolicy,
           environmentSelection: codexEnvironmentSelection,
@@ -5661,6 +5681,7 @@ export const testing = {
   resolveCodexAppServerForOpenClawToolPolicy,
   resolveCodexAppServerHookChannelId,
   buildCodexAppServerPromptTimeoutOutcome,
+  resolveCodexAppServerForFastMode,
   resolveOpenClawCodingToolsSessionKeys,
   shouldProjectMirroredHistoryForCodexStart,
   shouldEnableCodexAppServerNativeToolSurface,

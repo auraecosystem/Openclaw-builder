@@ -254,13 +254,18 @@ export function createCronPromptExecutor(params: {
             ? params.liveSelection.authProfileIdSource
             : undefined,
           thinkLevel: params.thinkLevel,
-          fastMode: resolveFastModeState({
-            cfg: params.cfgWithAgentDefaults,
-            provider: providerOverride,
-            model: modelOverride,
-            agentId: params.agentId,
-            sessionEntry: params.cronSession.sessionEntry,
-          }).enabled,
+          ...(() => {
+            const fastModeState = resolveFastModeState({
+              cfg: params.cfgWithAgentDefaults,
+              provider: providerOverride,
+              model: modelOverride,
+              agentId: params.agentId,
+              sessionEntry: params.cronSession.sessionEntry,
+            });
+            return {
+              fastMode: fastModeState.mode,
+            };
+          })(),
           verboseLevel: params.resolvedVerboseLevel,
           timeoutMs: params.timeoutMs,
           runTimeoutOverrideMs: params.runTimeoutOverrideMs,

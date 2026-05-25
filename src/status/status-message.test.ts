@@ -6,6 +6,10 @@ describe("formatFastModeLabel", () => {
     expect(formatFastModeLabel(true)).toBe("Fast");
   });
 
+  it("shows auto fast mode", () => {
+    expect(formatFastModeLabel("auto")).toBe("Fast:auto");
+  });
+
   it("hides fast mode when disabled", () => {
     expect(formatFastModeLabel(false)).toBeNull();
   });

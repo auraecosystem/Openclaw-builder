@@ -5,6 +5,7 @@ import * as protocol from "./index.js";
 import {
   formatValidationErrors,
   validateChatEvent,
+  validateChatSendParams,
   validateCommandsListParams,
   validateConnectParams,
   validateModelsListParams,
@@ -603,6 +604,21 @@ describe("validateChatEvent", () => {
         },
       }),
     ).toBe(false);
+  });
+});
+
+describe("validateChatSendParams", () => {
+  it("accepts one-turn fast:auto cutoff seconds", () => {
+    const base = {
+      sessionKey: "agent:main:main",
+      message: "hello",
+      fastMode: "auto",
+      idempotencyKey: "run-1",
+    };
+
+    expect(validateChatSendParams(base)).toBe(true);
+    expect(validateChatSendParams({ ...base, fastAutoOnSeconds: 2 })).toBe(true);
+    expect(validateChatSendParams({ ...base, fastAutoOnSeconds: 0 })).toBe(false);
   });
 });
 

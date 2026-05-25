@@ -33,6 +33,7 @@ import {
 } from "../../routing/session-key.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import type { SilentReplyConversationType } from "../../shared/silent-reply-policy.js";
+import type { FastMode } from "../../shared/string-coerce.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
 import { hasControlCommand } from "../command-detection.js";
@@ -346,6 +347,8 @@ type RunPreparedReplyParams = {
   directives: InlineDirectives;
   defaultActivation: Parameters<typeof buildGroupIntro>[0]["defaultActivation"];
   resolvedThinkLevel: ThinkLevel | undefined;
+  resolvedFastMode?: FastMode;
+  resolvedFastModeAutoOnSeconds?: number;
   resolvedVerboseLevel: VerboseLevel | undefined;
   resolvedReasoningLevel: ReasoningLevel;
   resolvedElevatedLevel: ElevatedLevel;
@@ -1143,15 +1146,26 @@ export async function runPreparedReply(
       authProfileId,
       authProfileIdSource,
       thinkLevel: resolvedThinkLevel,
-      fastMode: useFastReplyRuntime
-        ? false
-        : resolveFastModeState({
-            cfg,
-            provider,
-            model,
-            agentId,
-            sessionEntry: preparedSessionState.sessionEntry,
-          }).enabled,
+      ...(() => {
+        if (useFastReplyRuntime) {
+          return {
+            fastMode: false,
+            fastModeAutoOnSeconds: undefined,
+          };
+        }
+        const fastModeState = resolveFastModeState({
+          cfg,
+          provider,
+          model,
+          agentId,
+          sessionEntry: preparedSessionState.sessionEntry,
+        });
+        return {
+          fastMode: params.resolvedFastMode ?? fastModeState.mode,
+          fastModeAutoOnSeconds:
+            params.resolvedFastModeAutoOnSeconds ?? fastModeState.fastAutoOnSeconds,
+        };
+      })(),
       verboseLevel: resolvedVerboseLevel,
       reasoningLevel: resolvedReasoningLevel,
       elevatedLevel: resolvedElevatedLevel,

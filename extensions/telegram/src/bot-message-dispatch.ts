@@ -899,10 +899,10 @@ export const dispatchTelegramMessage = async ({
   };
   const answerLane = lanes.answer;
   const reasoningLane = lanes.reasoning;
-  const streamToolProgressEnabled =
-    Boolean(answerLane.stream) && resolveChannelStreamingPreviewToolProgress(telegramCfg);
+  const streamToolProgressEnabled = resolveChannelStreamingPreviewToolProgress(telegramCfg);
+  const streamToolProgressDraftEnabled = Boolean(answerLane.stream) && streamToolProgressEnabled;
   const nativeToolProgressDraft =
-    streamToolProgressEnabled &&
+    streamToolProgressDraftEnabled &&
     !isRoomEvent &&
     !isGroup &&
     threadSpec.scope === "dm" &&
@@ -967,9 +967,6 @@ export const dispatchTelegramMessage = async ({
     line?: string | ChannelProgressDraftLine,
     options?: { toolName?: string; startImmediately?: boolean },
   ) => {
-    if (!answerLane.stream) {
-      return false;
-    }
     if (answerLane.finalized || finalAnswerDeliveryStarted || finalAnswerDelivered) {
       return false;
     }
@@ -984,8 +981,11 @@ export const dispatchTelegramMessage = async ({
     if (streamMode !== "progress" && !streamToolProgressEnabled) {
       return false;
     }
+    if (!answerLane.stream) {
+      return false;
+    }
     const shouldUpdateProgressLines =
-      streamToolProgressEnabled && !streamToolProgressSuppressed && Boolean(normalized);
+      streamToolProgressDraftEnabled && !streamToolProgressSuppressed && Boolean(normalized);
     if (!shouldUpdateProgressLines && streamMode !== "progress") {
       return false;
     }
@@ -1765,6 +1765,15 @@ export const dispatchTelegramMessage = async ({
                             continue;
                           }
                         }
+                        if (
+                          streamMode === "progress" &&
+                          (await pushStreamToolProgress(segment.update.text, {
+                            startImmediately: true,
+                          }))
+                        ) {
+                          blockDelivered = true;
+                          continue;
+                        }
                         await prepareAnswerLaneForToolProgress();
                       }
                       const result =
@@ -1811,6 +1820,12 @@ export const dispatchTelegramMessage = async ({
                     if (split.suppressedReasoningOnly) {
                       let delivered = false;
                       if (reply.hasMedia) {
+                        if (info.kind === "final") {
+                          await rotateAnswerLaneAfterToolProgress();
+                          await answerLane.stream?.stop();
+                          await reasoningLane.stream?.stop();
+                          reasoningStepState.resetForNextStep();
+                        }
                         const payloadWithoutSuppressedReasoning =
                           typeof effectivePayload.text === "string"
                             ? { ...effectivePayload, text: "" }
@@ -1934,9 +1949,14 @@ export const dispatchTelegramMessage = async ({
                         enqueueDraftLaneEvent(async () => {
                           reasoningStepState.resetForNextStep();
                           streamToolProgressSuppressed = false;
-                          streamToolProgressLines = [];
                           if (answerLane.finalized) {
+                            streamToolProgressLines = [];
                             await rotateLaneForNewMessage(answerLane);
+                          } else if (
+                            streamMode !== "progress" ||
+                            !activeAnswerDraftIsToolProgressOnly
+                          ) {
+                            streamToolProgressLines = [];
                           }
                         })
                     : undefined,
@@ -1945,11 +1965,14 @@ export const dispatchTelegramMessage = async ({
                         enqueueDraftLaneEvent(async () => {
                           splitReasoningOnNextStream = reasoningLane.hasStreamedMessage;
                           streamToolProgressSuppressed = false;
-                          streamToolProgressLines = [];
+                          if (streamMode !== "progress" || !activeAnswerDraftIsToolProgressOnly) {
+                            streamToolProgressLines = [];
+                          }
                         })
                     : undefined,
                   suppressDefaultToolProgressMessages:
                     !streamDeliveryEnabled || Boolean(answerLane.stream),
+                  forceToolResultProgress: streamMode === "progress" && streamToolProgressEnabled,
                   allowProgressCallbacksWhenSourceDeliverySuppressed:
                     !isRoomEvent && Boolean(answerLane.stream),
                   onToolStart: async (payload) => {
@@ -2016,6 +2039,13 @@ export const dispatchTelegramMessage = async ({
                         message: payload.message,
                       }),
                     );
+                  },
+                  onToolResult: async (payload) => {
+                    const text = payload.text?.trim();
+                    if (!text) {
+                      return;
+                    }
+                    await pushStreamToolProgress(text, { startImmediately: true });
                   },
                   onCommandOutput: async (payload) => {
                     if (payload.phase !== "end") {

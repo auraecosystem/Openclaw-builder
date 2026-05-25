@@ -1619,6 +1619,12 @@ export async function dispatchReplyFromConfig(
       !sendPolicyDenied &&
       shouldEmitVerboseProgress() &&
       shouldSendVerboseProgressMessages();
+    const shouldDeliverForcedToolProgressDespiteSourceSuppression = () =>
+      suppressAutomaticSourceDelivery &&
+      sourceReplyDeliveryMode === "message_tool_only" &&
+      ctx.InboundEventKind !== "room_event" &&
+      !sendPolicyDenied &&
+      params.replyOptions?.forceToolResultProgress === true;
     let finalReplyDeliveryStarted = false;
     const hasExecApprovalPayload = (payload: ReplyPayload) => {
       const execApproval =
@@ -1931,6 +1937,8 @@ export async function dispatchReplyFromConfig(
       ? createTtsDirectiveTextStreamCleaner()
       : undefined;
 
+    const isFastModeAutoProgressPayload = (payload: ReplyPayload): boolean =>
+      payload.channelData?.openclawProgressKind === "fast-mode-auto";
     const resolveToolDeliveryPayload = (payload: ReplyPayload): ReplyPayload | null => {
       if (
         shouldSuppressLocalExecApprovalPrompt({
@@ -1952,6 +1960,9 @@ export async function dispatchReplyFromConfig(
           ? payload.channelData.execApproval
           : undefined;
       if (execApproval && typeof execApproval === "object" && !Array.isArray(execApproval)) {
+        return payload;
+      }
+      if (isFastModeAutoProgressPayload(payload)) {
         return payload;
       }
       // Group/native flows intentionally suppress tool summary text, but media-only
@@ -2109,16 +2120,36 @@ export async function dispatchReplyFromConfig(
                   return;
                 }
                 markInboundDedupeReplayUnsafe();
-                if (!suppressAutomaticSourceDelivery && shouldSendToolSummaries()) {
+                const isFastModeAutoProgress = isFastModeAutoProgressPayload(payload);
+                const isForcedToolProgress =
+                  shouldDeliverForcedToolProgressDespiteSourceSuppression();
+                const progressCallbackForwarded = shouldForwardProgressCallback({
+                  forwardWhenSourceDeliverySuppressed: true,
+                  requiresToolSummaryVisibility:
+                    !isFastModeAutoProgress && !allowSuppressedSourceProgressCallbacks,
+                });
+                if (progressCallbackForwarded) {
                   await onToolResultFromReplyOptions?.(payload);
                 }
                 if (isDispatchOperationAborted()) {
                   return;
                 }
-                if (shouldSuppressProgressDelivery()) {
+                if (isFastModeAutoProgress && progressCallbackForwarded) {
                   return;
                 }
-                const visibleToolPayload = resolveToolDeliveryPayload(payload);
+                if (sendPolicyDenied) {
+                  return;
+                }
+                if (
+                  shouldSuppressProgressDelivery() &&
+                  !isFastModeAutoProgress &&
+                  !isForcedToolProgress
+                ) {
+                  return;
+                }
+                const visibleToolPayload = isForcedToolProgress
+                  ? payload
+                  : resolveToolDeliveryPayload(payload);
                 if (!visibleToolPayload) {
                   return;
                 }
@@ -2133,20 +2164,30 @@ export async function dispatchReplyFromConfig(
                   accountId: replyRoute.accountId,
                 });
                 const normalizedPayload = await normalizeReplyMediaPayload(ttsPayload);
-                const deliveryPayload = resolveToolDeliveryPayload(normalizedPayload);
+                const deliveryPayload = isForcedToolProgress
+                  ? normalizedPayload
+                  : resolveToolDeliveryPayload(normalizedPayload);
                 if (!deliveryPayload) {
                   return;
                 }
                 if (isDispatchOperationAborted()) {
                   return;
                 }
-                if (shouldSuppressLateTextOnlyToolProgress(deliveryPayload)) {
+                if (
+                  shouldSuppressLateTextOnlyToolProgress(deliveryPayload) &&
+                  !isFastModeAutoProgressPayload(deliveryPayload) &&
+                  !isForcedToolProgress
+                ) {
                   return;
                 }
                 if (shouldSuppressMessageToolOnlyTextErrorProgress(deliveryPayload)) {
                   return;
                 }
-                if (shouldSuppressDefaultToolProgressMessages()) {
+                if (
+                  shouldSuppressDefaultToolProgressMessages() &&
+                  !isFastModeAutoProgressPayload(deliveryPayload) &&
+                  !isForcedToolProgress
+                ) {
                   const hasMedia = resolveSendableOutboundReplyParts(deliveryPayload).hasMedia;
                   if (!hasMedia && !hasExecApprovalPayload(deliveryPayload)) {
                     return;

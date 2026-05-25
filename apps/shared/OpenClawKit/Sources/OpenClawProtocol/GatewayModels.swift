@@ -6371,7 +6371,9 @@ public struct ChatSendParams: Codable, Sendable {
     public let sessionid: String?
     public let message: String
     public let thinking: String?
-    public let fastmode: Bool?
+    public let fastmodevalue: AnyCodable?
+    public var fastmode: Bool? { fastmodevalue?.value as? Bool }
+    public let fastautoonseconds: Int?
     public let deliver: Bool?
     public let originatingchannel: String?
     public let originatingto: String?
@@ -6388,7 +6390,8 @@ public struct ChatSendParams: Codable, Sendable {
         sessionid: String?,
         message: String,
         thinking: String?,
-        fastmode: Bool?,
+        fastmode: AnyCodable?,
+        fastautoonseconds: Int?,
         deliver: Bool?,
         originatingchannel: String?,
         originatingto: String?,
@@ -6404,7 +6407,8 @@ public struct ChatSendParams: Codable, Sendable {
         self.sessionid = sessionid
         self.message = message
         self.thinking = thinking
-        self.fastmode = fastmode
+        self.fastmodevalue = fastmode
+        self.fastautoonseconds = fastautoonseconds
         self.deliver = deliver
         self.originatingchannel = originatingchannel
         self.originatingto = originatingto
@@ -6417,12 +6421,50 @@ public struct ChatSendParams: Codable, Sendable {
         self.idempotencykey = idempotencykey
     }
 
+    public init(
+        sessionkey: String,
+        sessionid: String?,
+        message: String,
+        thinking: String?,
+        fastmode: Bool?,
+        fastautoonseconds: Int?,
+        deliver: Bool?,
+        originatingchannel: String?,
+        originatingto: String?,
+        originatingaccountid: String?,
+        originatingthreadid: String?,
+        attachments: [AnyCodable]?,
+        timeoutms: Int?,
+        systeminputprovenance: [String: AnyCodable]?,
+        systemprovenancereceipt: String?,
+        idempotencykey: String)
+    {
+        self.init(
+            sessionkey: sessionkey,
+            sessionid: sessionid,
+            message: message,
+            thinking: thinking,
+            fastmode: fastmode.map { AnyCodable($0) },
+            fastautoonseconds: fastautoonseconds,
+            deliver: deliver,
+            originatingchannel: originatingchannel,
+            originatingto: originatingto,
+            originatingaccountid: originatingaccountid,
+            originatingthreadid: originatingthreadid,
+            attachments: attachments,
+            timeoutms: timeoutms,
+            systeminputprovenance: systeminputprovenance,
+            systemprovenancereceipt: systemprovenancereceipt,
+            idempotencykey: idempotencykey)
+    }
+
     private enum CodingKeys: String, CodingKey {
         case sessionkey = "sessionKey"
         case sessionid = "sessionId"
         case message
         case thinking
-        case fastmode = "fastMode"
+        case fastmodevalue = "fastMode"
+        case fastautoonseconds = "fastAutoOnSeconds"
         case deliver
         case originatingchannel = "originatingChannel"
         case originatingto = "originatingTo"

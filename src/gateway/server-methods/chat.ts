@@ -53,6 +53,7 @@ import { normalizeInputProvenance, type InputProvenance } from "../../sessions/i
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
 import { parseAgentSessionKey } from "../../sessions/session-key-utils.js";
 import { emitSessionTranscriptUpdate } from "../../sessions/transcript-events.js";
+import type { FastMode } from "../../shared/string-coerce.js";
 import { deliveryContextFromSession } from "../../utils/delivery-context.shared.js";
 import {
   stripInlineDirectiveTagsForDisplay,
@@ -2304,7 +2305,8 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionId?: string;
       message: string;
       thinking?: string;
-      fastMode?: boolean;
+      fastMode?: FastMode;
+      fastAutoOnSeconds?: number;
       deliver?: boolean;
       originatingChannel?: string;
       originatingTo?: string;
@@ -2939,6 +2941,7 @@ export const chatHandlers: GatewayRequestHandlers = {
               imageOrder: imageOrder.length > 0 ? imageOrder : undefined,
               thinkingLevelOverride: p.thinking,
               fastModeOverride: p.fastMode,
+              fastModeAutoOnSecondsOverride: p.fastAutoOnSeconds,
               onAgentRunStart: (runId) => {
                 agentRunStarted = true;
                 if (!hasBeforeAgentRunGate) {

@@ -8,6 +8,7 @@ import type { SessionEntry } from "../../../config/sessions.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import type { PromptImageOrderEntry } from "../../../media/prompt-image-order.js";
 import type { InputProvenance } from "../../../sessions/input-provenance.js";
+import type { FastMode } from "../../../shared/string-coerce.js";
 import type {
   QueuedReplyDeliveryCorrelation,
   QueuedReplyLifecycle,
@@ -104,6 +105,8 @@ export type FollowupRun = {
     authProfileId?: string;
     authProfileIdSource?: "auto" | "user";
     thinkLevel?: ThinkLevel;
+    fastMode?: FastMode;
+    fastModeAutoOnSeconds?: number;
     verboseLevel?: VerboseLevel;
     reasoningLevel?: ReasoningLevel;
     elevatedLevel?: ElevatedLevel;
