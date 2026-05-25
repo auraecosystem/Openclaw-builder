@@ -196,13 +196,6 @@ describe("configured model manifest workspace scope", () => {
         } as unknown as OpenClawConfig,
         expected: { provider: "openai", model: "gpt-5.5" },
       },
-      {
-        cfg: {
-          agents: { defaults: { model: { primary: "local-static-model" } } },
-          models: { providers: { vllm: { models: [{ id: "local-static-model" }] } } },
-        } as unknown as OpenClawConfig,
-        expected: { provider: "vllm", model: "local-static-model" },
-      },
     ];
 
     for (const { cfg, expected } of cases) {

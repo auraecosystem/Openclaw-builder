@@ -663,14 +663,18 @@ export function resolveConfiguredModelRef(
         manifestPlugins,
       });
       let inferredProviderManifestPlugins = manifestPlugins;
-      if (!inferredProvider && hasConfiguredProviderRowsNeedingManifestLookup(params.cfg)) {
+      if (
+        hasConfiguredProviderRowsNeedingManifestLookup(params.cfg) &&
+        (!inferredProvider || inferredProvider !== "openai")
+      ) {
         inferredProviderManifestPlugins = getManifestPlugins();
-        inferredProvider = inferUniqueProviderFromConfiguredModels({
-          cfg: params.cfg,
-          model: trimmed,
-          allowManifestNormalization: params.allowManifestNormalization,
-          manifestPlugins: inferredProviderManifestPlugins,
-        });
+        inferredProvider =
+          inferUniqueProviderFromConfiguredModels({
+            cfg: params.cfg,
+            model: trimmed,
+            allowManifestNormalization: params.allowManifestNormalization,
+            manifestPlugins: inferredProviderManifestPlugins,
+          }) ?? inferredProvider;
       }
       if (inferredProvider) {
         return normalizeModelRef(inferredProvider, trimmed, {
