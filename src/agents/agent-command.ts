@@ -81,12 +81,13 @@ import { loadManifestModelCatalog } from "./model-catalog.js";
 import { runWithModelFallback } from "./model-fallback.js";
 import type { ModelManifestNormalizationContext } from "./model-selection-normalize.js";
 import {
+  buildModelAliasIndex,
   buildConfiguredModelCatalog,
   modelKey,
   normalizeModelRef,
-  parseModelRef,
   resolveConfiguredModelRef,
   resolveDefaultModelForAgent,
+  resolveModelRefFromString,
   resolveThinkingDefault,
 } from "./model-selection.js";
 import {
@@ -1006,7 +1007,17 @@ async function agentCommandInternal(
       const explicitRef = explicitModelOverride
         ? explicitProviderOverride
           ? normalizeModelRef(explicitProviderOverride, explicitModelOverride, modelManifestContext)
-          : parseModelRef(explicitModelOverride, provider, modelManifestContext)
+          : resolveModelRefFromString({
+              cfg,
+              raw: explicitModelOverride,
+              defaultProvider: provider,
+              aliasIndex: buildModelAliasIndex({
+                cfg,
+                defaultProvider: provider,
+                ...modelManifestContext,
+              }),
+              ...modelManifestContext,
+            })?.ref
         : explicitProviderOverride
           ? normalizeModelRef(explicitProviderOverride, model, modelManifestContext)
           : null;
