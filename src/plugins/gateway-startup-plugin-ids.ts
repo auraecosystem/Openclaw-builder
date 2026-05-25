@@ -16,14 +16,17 @@ import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 import { hasExplicitChannelConfig } from "./channel-presence-policy.js";
 import { collectPluginConfigContractMatches } from "./config-contracts.js";
 import { normalizePluginsConfigWithResolver } from "./config-normalization-shared.js";
-import { normalizePluginId, resolveEffectivePluginActivationState } from "./config-state.js";
+import { resolveEffectivePluginActivationState } from "./config-state.js";
 import { isPluginEnabledByDefaultForPlatform } from "./default-enablement.js";
 import {
   collectConfiguredSpeechProviderIds,
   normalizeConfiguredSpeechProviderIdForStartup,
 } from "./gateway-startup-speech-providers.js";
-import { CONFIG_PATH_ACTIVATION_COMPAT_CODE } from "./installed-plugin-index-config-path-scope.js";
 import { hashJson } from "./installed-plugin-index-hash.js";
+import {
+  createInstalledPluginIndexScopeLookup,
+  type InstalledPluginIndexScopeLookup,
+} from "./installed-plugin-index-scope-lookup.js";
 import type { InstalledPluginIndex, InstalledPluginIndexRecord } from "./installed-plugin-index.js";
 import type { PluginManifestRecord, PluginManifestRegistry } from "./manifest-registry.js";
 import {
@@ -62,28 +65,11 @@ function sortUniquePluginIds(values: Iterable<string>): string[] {
   );
 }
 
-function createInstalledIndexPluginIdNormalizer(
-  index: InstalledPluginIndex,
-): (pluginId: string) => string {
-  const pluginIdsByLowercase = new Map<string, string>();
-  for (const plugin of index.plugins) {
-    const normalized = normalizeOptionalLowercaseString(plugin.pluginId);
-    if (normalized) {
-      pluginIdsByLowercase.set(normalized, plugin.pluginId);
-    }
-  }
-  return (pluginId: string): string => {
-    const normalized = normalizePluginId(pluginId);
-    const lowercase = normalizeOptionalLowercaseString(normalized);
-    return lowercase ? (pluginIdsByLowercase.get(lowercase) ?? normalized) : normalized;
-  };
-}
-
 function normalizePluginsConfigForInstalledIndex(
   config: OpenClawConfig["plugins"] | undefined,
-  index: InstalledPluginIndex,
+  lookup: InstalledPluginIndexScopeLookup,
 ) {
-  return normalizePluginsConfigWithResolver(config, createInstalledIndexPluginIdNormalizer(index));
+  return normalizePluginsConfigWithResolver(config, lookup.normalizePluginId);
 }
 
 function isConfigActivationValueEnabled(value: unknown): boolean {
@@ -248,14 +234,6 @@ function hasConfiguredActivationPathPatterns(params: {
   );
 }
 
-function canUseInstalledIndexConfigPathActivationScope(index: InstalledPluginIndex): boolean {
-  return index.plugins.every(
-    (plugin) =>
-      !plugin.compat.includes(CONFIG_PATH_ACTIVATION_COMPAT_CODE) ||
-      plugin.startup.configPaths !== undefined,
-  );
-}
-
 function addConfiguredActivationPathPluginIds(
   target: Set<string>,
   params: {
@@ -372,14 +350,22 @@ function addConfiguredSlotPluginIds(
   params: {
     activationSourceConfig: OpenClawConfig;
     activationSourcePlugins: ReturnType<typeof normalizePluginsConfigForInstalledIndex>;
-    normalizePluginId: (pluginId: string) => string;
+    lookup: InstalledPluginIndexScopeLookup;
   },
 ): void {
-  const memorySlot = resolveMemorySlotStartupPluginId(params);
+  const memorySlot = resolveMemorySlotStartupPluginId({
+    activationSourceConfig: params.activationSourceConfig,
+    activationSourcePlugins: params.activationSourcePlugins,
+    normalizePluginId: params.lookup.normalizePluginId,
+  });
   if (memorySlot) {
     target.add(memorySlot);
   }
-  const contextEngineSlot = resolveContextEngineSlotStartupPluginId(params);
+  const contextEngineSlot = resolveContextEngineSlotStartupPluginId({
+    activationSourceConfig: params.activationSourceConfig,
+    activationSourcePlugins: params.activationSourcePlugins,
+    normalizePluginId: params.lookup.normalizePluginId,
+  });
   if (contextEngineSlot) {
     target.add(contextEngineSlot);
   }
@@ -444,110 +430,6 @@ function collectConfigValidationChannelIds(params: {
   ]);
 }
 
-function pluginRecordMatchesConfiguredChannelId(
-  plugin: InstalledPluginIndexRecord,
-  configuredChannelId: string,
-): boolean {
-  const channelId = normalizeOptionalLowercaseString(configuredChannelId);
-  if (!channelId) {
-    return false;
-  }
-  const pluginId = normalizeOptionalLowercaseString(plugin.pluginId);
-  if (pluginId && pluginId === channelId) {
-    return true;
-  }
-  const packageChannelId = normalizeOptionalLowercaseString(plugin.packageChannel?.id);
-  return packageChannelId === channelId;
-}
-
-function pluginRecordMatchesConfiguredChannel(
-  plugin: InstalledPluginIndexRecord,
-  configuredChannelIds: Iterable<string>,
-): boolean {
-  for (const channelId of configuredChannelIds) {
-    if (pluginRecordMatchesConfiguredChannelId(plugin, channelId)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function canUseDirectConfiguredChannelScope(params: {
-  configuredChannelIds: readonly string[];
-  index: InstalledPluginIndex;
-}): boolean {
-  if (params.configuredChannelIds.length === 0) {
-    return true;
-  }
-  return params.configuredChannelIds.every((channelId) =>
-    params.index.plugins.some((plugin) =>
-      pluginRecordMatchesConfiguredChannelId(plugin, channelId),
-    ),
-  );
-}
-
-function addDirectConfiguredChannelPluginIds(
-  target: Set<string>,
-  params: {
-    configuredChannelIds: readonly string[];
-    index: InstalledPluginIndex;
-  },
-): void {
-  if (params.configuredChannelIds.length === 0) {
-    return;
-  }
-  const configuredChannelIds = new Set(params.configuredChannelIds);
-  for (const plugin of params.index.plugins) {
-    if (pluginRecordMatchesConfiguredChannel(plugin, configuredChannelIds)) {
-      target.add(plugin.pluginId);
-    }
-  }
-}
-
-function listPluginContributionValues(
-  plugin: InstalledPluginIndexRecord,
-  key: keyof NonNullable<InstalledPluginIndexRecord["contributions"]>,
-): readonly string[] {
-  const value = plugin.contributions?.[key];
-  return Array.isArray(value) ? value : [];
-}
-
-function listPluginContractContributionValues(
-  plugin: InstalledPluginIndexRecord,
-  key: string,
-): readonly string[] {
-  const value = plugin.contributions?.contracts?.[key];
-  return Array.isArray(value) ? value : [];
-}
-
-function pluginContributionContains(
-  plugin: InstalledPluginIndexRecord,
-  key: keyof NonNullable<InstalledPluginIndexRecord["contributions"]>,
-  value: string,
-): boolean {
-  const normalized = normalizeOptionalLowercaseString(value);
-  return Boolean(
-    normalized &&
-    listPluginContributionValues(plugin, key).some(
-      (entry) => normalizeOptionalLowercaseString(entry) === normalized,
-    ),
-  );
-}
-
-function pluginContractContributionContains(
-  plugin: InstalledPluginIndexRecord,
-  key: string,
-  value: string,
-): boolean {
-  const normalized = normalizeOptionalLowercaseString(value);
-  return Boolean(
-    normalized &&
-    listPluginContractContributionValues(plugin, key).some(
-      (entry) => normalizeOptionalLowercaseString(entry) === normalized,
-    ),
-  );
-}
-
 function collectConfiguredProviderIds(config: OpenClawConfig): string[] {
   const configuredWebSearchProviderIds = collectConfiguredWebSearchProviderIds(config);
   const configuredGenerationProviderIds = collectConfiguredGenerationProviderIds(config);
@@ -606,116 +488,6 @@ function collectValidationConfiguredShorthandModelIds(config: OpenClawConfig): s
   );
 }
 
-function canUseDirectConfiguredProviderScope(params: {
-  configuredProviderIds: readonly string[];
-  index: InstalledPluginIndex;
-  scopePluginIds: ReadonlySet<string>;
-}): boolean {
-  if (params.configuredProviderIds.length === 0) {
-    return true;
-  }
-  const pluginIds = new Set(
-    params.index.plugins
-      .map((plugin) => normalizeOptionalLowercaseString(plugin.pluginId))
-      .filter((pluginId): pluginId is string => Boolean(pluginId)),
-  );
-  const scopePluginIds = new Set(
-    [...params.scopePluginIds]
-      .map((pluginId) => normalizeOptionalLowercaseString(pluginId))
-      .filter((pluginId): pluginId is string => Boolean(pluginId)),
-  );
-  return params.configuredProviderIds.every((providerId) => {
-    const normalized = normalizeOptionalLowercaseString(providerId);
-    return Boolean(normalized && (pluginIds.has(normalized) || scopePluginIds.has(normalized)));
-  });
-}
-
-function pluginRecordOwnsProviderId(
-  plugin: InstalledPluginIndexRecord,
-  providerId: string,
-): boolean {
-  return (
-    pluginContributionContains(plugin, "providers", providerId) ||
-    pluginContributionContains(plugin, "modelCatalogProviders", providerId) ||
-    pluginContributionContains(plugin, "autoEnableProviderIds", providerId) ||
-    pluginContractContributionContains(plugin, "externalAuthProviders", providerId) ||
-    pluginContractContributionContains(plugin, "embeddingProviders", providerId) ||
-    pluginContractContributionContains(plugin, "memoryEmbeddingProviders", providerId) ||
-    pluginContractContributionContains(plugin, "speechProviders", providerId) ||
-    pluginContractContributionContains(plugin, "realtimeTranscriptionProviders", providerId) ||
-    pluginContractContributionContains(plugin, "realtimeVoiceProviders", providerId) ||
-    pluginContractContributionContains(plugin, "mediaUnderstandingProviders", providerId) ||
-    pluginContractContributionContains(plugin, "meetingNotesSourceProviders", providerId) ||
-    pluginContractContributionContains(plugin, "imageGenerationProviders", providerId) ||
-    pluginContractContributionContains(plugin, "videoGenerationProviders", providerId) ||
-    pluginContractContributionContains(plugin, "musicGenerationProviders", providerId) ||
-    pluginContractContributionContains(plugin, "webFetchProviders", providerId) ||
-    pluginContractContributionContains(plugin, "webSearchProviders", providerId)
-  );
-}
-
-function pluginRecordOwnsShorthandModelId(
-  plugin: InstalledPluginIndexRecord,
-  modelId: string,
-): boolean {
-  const trimmed = modelId.trim();
-  if (!trimmed) {
-    return false;
-  }
-  if (
-    listPluginContributionValues(plugin, "modelSupportPrefixes").some((prefix) =>
-      trimmed.startsWith(prefix),
-    )
-  ) {
-    return true;
-  }
-  return listPluginContributionValues(plugin, "modelSupportPatterns").some((pattern) => {
-    try {
-      return new RegExp(pattern, "u").test(trimmed);
-    } catch {
-      return false;
-    }
-  });
-}
-
-function scopeOnlyReferencesInstalledPluginIds(params: {
-  index: InstalledPluginIndex;
-  scope: ReadonlySet<string>;
-}): boolean {
-  const installedPluginIds = new Set(
-    params.index.plugins
-      .map((plugin) => normalizeOptionalLowercaseString(plugin.pluginId))
-      .filter((pluginId): pluginId is string => Boolean(pluginId)),
-  );
-  return [...params.scope].every((pluginId) => {
-    const normalized = normalizeOptionalLowercaseString(pluginId);
-    return Boolean(normalized && installedPluginIds.has(normalized));
-  });
-}
-
-function addDirectConfiguredProviderPluginIds(
-  target: Set<string>,
-  params: {
-    configuredProviderIds: readonly string[];
-    index: InstalledPluginIndex;
-  },
-): void {
-  if (params.configuredProviderIds.length === 0) {
-    return;
-  }
-  const configuredProviderIds = new Set(
-    params.configuredProviderIds
-      .map((providerId) => normalizeOptionalLowercaseString(providerId))
-      .filter((providerId): providerId is string => Boolean(providerId)),
-  );
-  for (const plugin of params.index.plugins) {
-    const pluginId = normalizeOptionalLowercaseString(plugin.pluginId);
-    if (pluginId && configuredProviderIds.has(pluginId)) {
-      target.add(plugin.pluginId);
-    }
-  }
-}
-
 function addRequiredAgentHarnessPluginIds(
   target: Set<string>,
   params: {
@@ -763,14 +535,12 @@ export function resolveGatewayStartupMetadataPluginIds(params: {
   index: InstalledPluginIndex;
   platform?: NodeJS.Platform;
 }): string[] | undefined {
+  const lookup = createInstalledPluginIndexScopeLookup(params.index);
   const activationSourceConfig = params.activationSourceConfig ?? params.config;
-  const pluginsConfig = normalizePluginsConfigForInstalledIndex(
-    params.config.plugins,
-    params.index,
-  );
+  const pluginsConfig = normalizePluginsConfigForInstalledIndex(params.config.plugins, lookup);
   const activationSourcePlugins = normalizePluginsConfigForInstalledIndex(
     activationSourceConfig.plugins,
-    params.index,
+    lookup,
   );
   if (!pluginsConfig.enabled || !activationSourcePlugins.enabled) {
     return [];
@@ -789,16 +559,15 @@ export function resolveGatewayStartupMetadataPluginIds(params: {
   addPluginConfigEntryIds(scope, pluginsConfig);
   addPluginConfigEntryIds(scope, activationSourcePlugins);
 
-  const normalizePluginId = createInstalledIndexPluginIdNormalizer(params.index);
   addConfiguredSlotPluginIds(scope, {
     activationSourceConfig,
     activationSourcePlugins,
-    normalizePluginId,
+    lookup,
   });
   for (const pluginId of resolveGatewayStartupDreamingPluginIds(params.config)) {
     scope.add(pluginId);
   }
-  if (!canUseInstalledIndexConfigPathActivationScope(params.index)) {
+  if (!lookup.hasCompleteConfigPathActivationMetadata()) {
     return undefined;
   }
   addConfiguredActivationPathPluginIds(scope, {
@@ -811,31 +580,19 @@ export function resolveGatewayStartupMetadataPluginIds(params: {
     activationSourceConfig,
     env: params.env,
   });
-  if (!canUseDirectConfiguredChannelScope({ configuredChannelIds, index: params.index })) {
+  if (!lookup.hasDirectChannelOwners(configuredChannelIds)) {
     return undefined;
   }
-  addDirectConfiguredChannelPluginIds(scope, {
-    configuredChannelIds,
-    index: params.index,
-  });
+  lookup.addDirectChannelOwners(scope, configuredChannelIds);
 
   const configuredProviderIds = sortUniquePluginIds([
     ...collectConfiguredProviderIds(params.config),
     ...collectConfiguredProviderIds(activationSourceConfig),
   ]);
-  if (
-    !canUseDirectConfiguredProviderScope({
-      configuredProviderIds,
-      index: params.index,
-      scopePluginIds: scope,
-    })
-  ) {
+  if (!lookup.canResolveDirectProviderIds(configuredProviderIds, scope)) {
     return undefined;
   }
-  addDirectConfiguredProviderPluginIds(scope, {
-    configuredProviderIds,
-    index: params.index,
-  });
+  lookup.addDirectProviderOwners(scope, configuredProviderIds);
 
   addRequiredAgentHarnessPluginIds(scope, {
     activationSourceConfig,
@@ -864,7 +621,7 @@ export function resolveGatewayStartupMetadataPluginIds(params: {
       scope.delete(pluginId);
     }
   }
-  if (!scopeOnlyReferencesInstalledPluginIds({ index: params.index, scope })) {
+  if (!lookup.hasInstalledPluginIds(scope)) {
     return undefined;
   }
   return sortUniquePluginIds(scope);
@@ -937,124 +694,25 @@ function addValidationPluginConfigReferences(
   }
 }
 
-function canUseContributionConfiguredChannelScope(params: {
-  configuredChannelIds: readonly string[];
-  index: InstalledPluginIndex;
-}): boolean {
-  return params.configuredChannelIds.every((channelId) =>
-    params.index.plugins.some(
-      (plugin) =>
-        pluginRecordMatchesConfiguredChannelId(plugin, channelId) ||
-        pluginContributionContains(plugin, "channels", channelId) ||
-        pluginContributionContains(plugin, "channelConfigs", channelId),
-    ),
-  );
-}
-
-function addContributionConfiguredChannelPluginIds(
-  target: Set<string>,
-  params: {
-    configuredChannelIds: readonly string[];
-    index: InstalledPluginIndex;
-  },
-): void {
-  for (const channelId of params.configuredChannelIds) {
-    for (const plugin of params.index.plugins) {
-      if (
-        pluginRecordMatchesConfiguredChannelId(plugin, channelId) ||
-        pluginContributionContains(plugin, "channels", channelId) ||
-        pluginContributionContains(plugin, "channelConfigs", channelId)
-      ) {
-        target.add(plugin.pluginId);
-      }
-    }
-  }
-}
-
-function canUseContributionConfiguredProviderScope(params: {
-  configuredProviderIds: readonly string[];
-  index: InstalledPluginIndex;
-}): boolean {
-  return params.configuredProviderIds.every((providerId) =>
-    params.index.plugins.some(
-      (plugin) =>
-        normalizeOptionalLowercaseString(plugin.pluginId) ===
-          normalizeOptionalLowercaseString(providerId) ||
-        pluginRecordOwnsProviderId(plugin, providerId),
-    ),
-  );
-}
-
-function addContributionConfiguredProviderPluginIds(
-  target: Set<string>,
-  params: {
-    configuredProviderIds: readonly string[];
-    index: InstalledPluginIndex;
-  },
-): void {
-  for (const providerId of params.configuredProviderIds) {
-    const normalizedProviderId = normalizeOptionalLowercaseString(providerId);
-    if (!normalizedProviderId) {
-      continue;
-    }
-    for (const plugin of params.index.plugins) {
-      if (
-        normalizeOptionalLowercaseString(plugin.pluginId) === normalizedProviderId ||
-        pluginRecordOwnsProviderId(plugin, providerId)
-      ) {
-        target.add(plugin.pluginId);
-      }
-    }
-  }
-}
-
-function canUseContributionShorthandModelScope(params: {
-  modelIds: readonly string[];
-  index: InstalledPluginIndex;
-}): boolean {
-  return params.modelIds.every((modelId) =>
-    params.index.plugins.some((plugin) => pluginRecordOwnsShorthandModelId(plugin, modelId)),
-  );
-}
-
-function addContributionShorthandModelPluginIds(
-  target: Set<string>,
-  params: {
-    modelIds: readonly string[];
-    index: InstalledPluginIndex;
-  },
-): void {
-  for (const modelId of params.modelIds) {
-    for (const plugin of params.index.plugins) {
-      if (pluginRecordOwnsShorthandModelId(plugin, modelId)) {
-        target.add(plugin.pluginId);
-      }
-    }
-  }
-}
-
 export function resolveConfigValidationMetadataPluginIds(params: {
   config: OpenClawConfig;
   env: NodeJS.ProcessEnv;
   index: InstalledPluginIndex;
   platform?: NodeJS.Platform;
 }): string[] | undefined {
-  const pluginsConfig = normalizePluginsConfigForInstalledIndex(
-    params.config.plugins,
-    params.index,
-  );
+  const lookup = createInstalledPluginIndexScopeLookup(params.index);
+  const pluginsConfig = normalizePluginsConfigForInstalledIndex(params.config.plugins, lookup);
   if (params.config.plugins?.bundledDiscovery === "compat" || pluginsConfig.loadPaths.length > 0) {
     return undefined;
   }
 
   const scope = new Set<string>();
-  const normalizePluginId = createInstalledIndexPluginIdNormalizer(params.index);
   addValidationPluginConfigReferences(scope, {
     config: params.config,
     pluginsConfig,
-    normalizePluginId,
+    normalizePluginId: lookup.normalizePluginId,
   });
-  if (!canUseInstalledIndexConfigPathActivationScope(params.index)) {
+  if (!lookup.hasCompleteConfigPathActivationMetadata()) {
     return undefined;
   }
   addConfiguredActivationPathPluginIds(scope, {
@@ -1066,46 +724,22 @@ export function resolveConfigValidationMetadataPluginIds(params: {
     config: params.config,
     env: params.env,
   });
-  if (
-    !canUseContributionConfiguredChannelScope({
-      configuredChannelIds,
-      index: params.index,
-    })
-  ) {
+  if (!lookup.hasChannelContributionOwners(configuredChannelIds)) {
     return undefined;
   }
-  addContributionConfiguredChannelPluginIds(scope, {
-    configuredChannelIds,
-    index: params.index,
-  });
+  lookup.addChannelContributionOwners(scope, configuredChannelIds);
 
   const configuredProviderIds = collectValidationConfiguredProviderIds(params.config);
-  if (
-    !canUseContributionConfiguredProviderScope({
-      configuredProviderIds,
-      index: params.index,
-    })
-  ) {
+  if (!lookup.hasProviderContributionOwners(configuredProviderIds)) {
     return undefined;
   }
-  addContributionConfiguredProviderPluginIds(scope, {
-    configuredProviderIds,
-    index: params.index,
-  });
+  lookup.addProviderContributionOwners(scope, configuredProviderIds);
 
   const configuredShorthandModelIds = collectValidationConfiguredShorthandModelIds(params.config);
-  if (
-    !canUseContributionShorthandModelScope({
-      modelIds: configuredShorthandModelIds,
-      index: params.index,
-    })
-  ) {
+  if (!lookup.hasShorthandModelOwners(configuredShorthandModelIds)) {
     return undefined;
   }
-  addContributionShorthandModelPluginIds(scope, {
-    modelIds: configuredShorthandModelIds,
-    index: params.index,
-  });
+  lookup.addShorthandModelOwners(scope, configuredShorthandModelIds);
 
   addRequiredAgentHarnessPluginIds(scope, {
     activationSourceConfig: params.config,
@@ -1120,7 +754,7 @@ export function resolveConfigValidationMetadataPluginIds(params: {
     platform: params.platform,
   });
 
-  if (!scopeOnlyReferencesInstalledPluginIds({ index: params.index, scope })) {
+  if (!lookup.hasInstalledPluginIds(scope)) {
     return undefined;
   }
   return sortUniquePluginIds(scope);
