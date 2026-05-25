@@ -548,10 +548,12 @@ function isIdleQueuedEmbeddedRunStall(params: {
   const hasEmbeddedOwner =
     params.activity.activeWorkKind === "embedded_run" ||
     params.activity.hasActiveEmbeddedRun === true;
+  const hasOrphanedActivity =
+    params.activity.activeWorkKind !== undefined && params.activity.hasActiveEmbeddedRun !== true;
   return (
     params.state.state === "idle" &&
     params.state.queueDepth > 0 &&
-    hasEmbeddedOwner &&
+    (hasEmbeddedOwner || hasOrphanedActivity) &&
     (params.activity.lastProgressAgeMs ?? 0) > params.staleMs
   );
 }
@@ -971,6 +973,7 @@ export function logSessionAttention(
     Date.now(),
   );
   const classification = classifySessionAttention({
+    state: params.state,
     queueDepth: state.queueDepth,
     activity,
     staleMs: params.thresholdMs,
