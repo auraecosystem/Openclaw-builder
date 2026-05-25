@@ -504,6 +504,7 @@ function findConfiguredAgentModelParams(params: {
   cfg?: OpenClawConfig;
   provider: string;
   modelId: string;
+  workspaceDir?: string;
 }): Record<string, unknown> | undefined {
   const configuredModels = params.cfg?.agents?.defaults?.models;
   if (!configuredModels) {
@@ -521,7 +522,10 @@ function findConfiguredAgentModelParams(params: {
   }
 
   const normalizedProvider = normalizeProviderId(params.provider);
-  const normalizedModelId = normalizeStaticProviderModelId(normalizedProvider, params.modelId)
+  const normalizedModelId = normalizeStaticProviderModelId(normalizedProvider, params.modelId, {
+    config: params.cfg,
+    workspaceDir: params.workspaceDir,
+  })
     .trim()
     .toLowerCase();
   for (const [rawKey, entry] of Object.entries(configuredModels)) {
@@ -533,8 +537,12 @@ function findConfiguredAgentModelParams(params: {
     const candidateModelId = rawKey.slice(slashIndex + 1);
     if (
       normalizeProviderId(candidateProvider) === normalizedProvider &&
-      normalizeStaticProviderModelId(normalizedProvider, candidateModelId).trim().toLowerCase() ===
-        normalizedModelId
+      normalizeStaticProviderModelId(normalizedProvider, candidateModelId, {
+        config: params.cfg,
+        workspaceDir: params.workspaceDir,
+      })
+        .trim()
+        .toLowerCase() === normalizedModelId
     ) {
       return readModelParams(entry.params);
     }
@@ -549,6 +557,7 @@ function mergeConfiguredRuntimeModelParams(params: {
   discoveredParams?: unknown;
   providerParams?: unknown;
   configuredParams?: unknown;
+  workspaceDir?: string;
 }): Record<string, unknown> | undefined {
   return mergeModelParams(
     readModelParams(params.discoveredParams),
@@ -557,6 +566,7 @@ function mergeConfiguredRuntimeModelParams(params: {
       cfg: params.cfg,
       provider: params.provider,
       modelId: params.modelId,
+      workspaceDir: params.workspaceDir,
     }),
     readModelParams(params.configuredParams),
   );
@@ -578,6 +588,7 @@ function applyConfiguredProviderOverrides(params: {
     cfg: params.cfg,
     provider: params.provider,
     modelId,
+    workspaceDir: params.workspaceDir,
   });
   if (!providerConfig) {
     const resolvedParams = mergeModelParams(
@@ -768,6 +779,7 @@ function resolveExplicitModelWithRegistry(params: {
       modelId,
       providerParams: providerConfig?.params,
       configuredParams: inlineMatch.params,
+      workspaceDir,
     });
     return {
       kind: "resolved",
@@ -832,6 +844,7 @@ function resolveExplicitModelWithRegistry(params: {
       modelId,
       providerParams: providerConfig?.params,
       configuredParams: fallbackInlineMatch.params,
+      workspaceDir,
     });
     return {
       kind: "resolved",
@@ -935,6 +948,7 @@ function resolveConfiguredFallbackModel(params: {
     modelId,
     providerParams: providerConfig?.params,
     configuredParams: configuredModel?.params,
+    workspaceDir,
   });
   if (!hasConfiguredFallbackSurface({ providerConfig, configuredModel, modelId })) {
     return undefined;
@@ -1052,9 +1066,13 @@ export function resolveModelWithRegistry(params: {
   workspaceDir?: string;
   runtimeHooks?: ProviderRuntimeHooks;
 }): Model<Api> | undefined {
+  const workspaceDir = params.workspaceDir ?? params.cfg?.agents?.defaults?.workspace;
   const normalizedRef = {
     provider: params.provider,
-    model: normalizeStaticProviderModelId(normalizeProviderId(params.provider), params.modelId),
+    model: normalizeStaticProviderModelId(normalizeProviderId(params.provider), params.modelId, {
+      config: params.cfg,
+      workspaceDir,
+    }),
   };
   const normalizedParams = {
     ...params,
@@ -1062,8 +1080,6 @@ export function resolveModelWithRegistry(params: {
     modelId: normalizedRef.model,
   };
   const runtimeHooks = params.runtimeHooks ?? DEFAULT_PROVIDER_RUNTIME_HOOKS;
-  const workspaceDir =
-    normalizedParams.workspaceDir ?? normalizedParams.cfg?.agents?.defaults?.workspace;
   const scopedParams = {
     ...normalizedParams,
     ...(workspaceDir !== undefined ? { workspaceDir } : {}),
@@ -1117,12 +1133,15 @@ export function resolveModel(
   authStorage: AuthStorage;
   modelRegistry: ModelRegistry;
 } {
-  const normalizedRef = {
-    provider,
-    model: normalizeStaticProviderModelId(normalizeProviderId(provider), modelId),
-  };
   const resolvedAgentDir = agentDir ?? resolveDefaultAgentDir(cfg ?? {});
   const workspaceDir = options?.workspaceDir ?? cfg?.agents?.defaults?.workspace;
+  const normalizedRef = {
+    provider,
+    model: normalizeStaticProviderModelId(normalizeProviderId(provider), modelId, {
+      config: cfg,
+      workspaceDir,
+    }),
+  };
   const cachedStores =
     !options?.authStorage && !options?.modelRegistry
       ? discoverCachedPiStoresForAgent(resolvedAgentDir, cfg)
@@ -1182,12 +1201,15 @@ export async function resolveModelAsync(
   authStorage: AuthStorage;
   modelRegistry: ModelRegistry;
 }> {
-  const normalizedRef = {
-    provider,
-    model: normalizeStaticProviderModelId(normalizeProviderId(provider), modelId),
-  };
   const resolvedAgentDir = agentDir ?? resolveDefaultAgentDir(cfg ?? {});
   const workspaceDir = options?.workspaceDir ?? cfg?.agents?.defaults?.workspace;
+  const normalizedRef = {
+    provider,
+    model: normalizeStaticProviderModelId(normalizeProviderId(provider), modelId, {
+      config: cfg,
+      workspaceDir,
+    }),
+  };
   const emptyDiscoveryStores =
     options?.skipPiDiscovery && (!options.authStorage || !options.modelRegistry)
       ? createEmptyPiDiscoveryStores()
