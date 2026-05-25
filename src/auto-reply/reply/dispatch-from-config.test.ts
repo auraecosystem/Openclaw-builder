@@ -6381,7 +6381,7 @@ describe("sendPolicy deny — suppress delivery, not processing (#53328)", () =>
     expect(dispatcher.sendToolResult).not.toHaveBeenCalled();
   });
 
-  it("suppresses marked runtime failure notices for room events", async () => {
+  it("delivers marked room-event runtime fallback notices exactly once", async () => {
     setNoAbort();
     sessionStoreMocks.currentEntry = {
       sessionId: "s1",
@@ -6395,9 +6395,11 @@ describe("sendPolicy deny — suppress delivery, not processing (#53328)", () =>
     );
     const replyResolver = vi.fn(async () => failureNotice satisfies ReplyPayload);
     const ctx = buildTestCtx({
-      ChatType: "group",
+      Provider: "discord",
+      Surface: "discord",
+      ChatType: "channel",
       InboundEventKind: "room_event",
-      SessionKey: "test:session",
+      SessionKey: "test:discord:channel:C1",
     });
 
     const result = await dispatchReplyFromConfig({
@@ -6411,9 +6413,10 @@ describe("sendPolicy deny — suppress delivery, not processing (#53328)", () =>
     });
 
     expect(replyResolver).toHaveBeenCalledTimes(1);
-    expect(result.queuedFinal).toBe(false);
+    expect(result.queuedFinal).toBe(true);
     expect(result.sourceReplyDeliveryMode).toBe("message_tool_only");
-    expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
+    expect(dispatcher.sendFinalReply).toHaveBeenCalledTimes(1);
+    expect(dispatcher.sendFinalReply).toHaveBeenCalledWith(failureNotice);
     expect(dispatcher.sendBlockReply).not.toHaveBeenCalled();
     expect(dispatcher.sendToolResult).not.toHaveBeenCalled();
   });
@@ -6529,6 +6532,120 @@ describe("sendPolicy deny — suppress delivery, not processing (#53328)", () =>
 
     const result = await dispatchReplyFromConfig({
       ctx,
+      cfg: emptyConfig,
+      dispatcher,
+      replyResolver,
+      replyOptions: {
+        sourceReplyDeliveryMode: "message_tool_only",
+      },
+    });
+
+    expect(replyResolver).toHaveBeenCalledTimes(1);
+    expect(result.queuedFinal).toBe(false);
+    expect(result.sourceReplyDeliveryMode).toBe("message_tool_only");
+    expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
+  });
+
+  it("does not deliver marked room-event runtime fallback notices when sendPolicy denies delivery", async () => {
+    setNoAbort();
+    sessionStoreMocks.currentEntry = {
+      sessionId: "s1",
+      updatedAt: 0,
+      sendPolicy: "deny",
+    };
+    const dispatcher = createDispatcher();
+    const replyResolver = vi.fn(
+      async () =>
+        setReplyPayloadMetadata(
+          { text: "⚠️ You've reached your Codex subscription usage limit." },
+          { deliverDespiteSourceReplySuppression: true },
+        ) satisfies ReplyPayload,
+    );
+
+    const result = await dispatchReplyFromConfig({
+      ctx: buildTestCtx({
+        Provider: "discord",
+        Surface: "discord",
+        ChatType: "channel",
+        InboundEventKind: "room_event",
+        SessionKey: "test:discord:channel:C1",
+      }),
+      cfg: emptyConfig,
+      dispatcher,
+      replyResolver,
+      replyOptions: {
+        sourceReplyDeliveryMode: "message_tool_only",
+      },
+    });
+
+    expect(replyResolver).toHaveBeenCalledTimes(1);
+    expect(result.queuedFinal).toBe(false);
+    expect(result.sourceReplyDeliveryMode).toBe("message_tool_only");
+    expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
+  });
+
+  it("keeps marked empty room-event fallback payloads private", async () => {
+    setNoAbort();
+    sessionStoreMocks.currentEntry = {
+      sessionId: "s1",
+      updatedAt: 0,
+      sendPolicy: "allow",
+    };
+    const dispatcher = createDispatcher();
+    const replyResolver = vi.fn(
+      async () =>
+        setReplyPayloadMetadata(
+          { text: "  " },
+          { deliverDespiteSourceReplySuppression: true },
+        ) satisfies ReplyPayload,
+    );
+
+    const result = await dispatchReplyFromConfig({
+      ctx: buildTestCtx({
+        Provider: "discord",
+        Surface: "discord",
+        ChatType: "channel",
+        InboundEventKind: "room_event",
+        SessionKey: "test:discord:channel:C1",
+      }),
+      cfg: emptyConfig,
+      dispatcher,
+      replyResolver,
+      replyOptions: {
+        sourceReplyDeliveryMode: "message_tool_only",
+      },
+    });
+
+    expect(replyResolver).toHaveBeenCalledTimes(1);
+    expect(result.queuedFinal).toBe(false);
+    expect(result.sourceReplyDeliveryMode).toBe("message_tool_only");
+    expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
+  });
+
+  it("keeps marked NO_REPLY room-event fallback payloads private", async () => {
+    setNoAbort();
+    sessionStoreMocks.currentEntry = {
+      sessionId: "s1",
+      updatedAt: 0,
+      sendPolicy: "allow",
+    };
+    const dispatcher = createDispatcher();
+    const replyResolver = vi.fn(
+      async () =>
+        setReplyPayloadMetadata(
+          { text: "  NO_REPLY  " },
+          { deliverDespiteSourceReplySuppression: true },
+        ) satisfies ReplyPayload,
+    );
+
+    const result = await dispatchReplyFromConfig({
+      ctx: buildTestCtx({
+        Provider: "discord",
+        Surface: "discord",
+        ChatType: "channel",
+        InboundEventKind: "room_event",
+        SessionKey: "test:discord:channel:C1",
+      }),
       cfg: emptyConfig,
       dispatcher,
       replyResolver,
