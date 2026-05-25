@@ -416,6 +416,19 @@ export async function handleApprovalResolve<TPayload, TResolvedEvent extends obj
     });
     if (resolvedRepeat.ok) {
       if (resolveRecordedApprovalDecision(resolvedRepeat.snapshot) === params.decision) {
+        const validationError = params.validateDecision?.(resolvedRepeat.snapshot);
+        if (validationError) {
+          params.respond(
+            false,
+            undefined,
+            errorShape(
+              ErrorCodes.INVALID_REQUEST,
+              validationError.message,
+              validationError.details ? { details: validationError.details } : undefined,
+            ),
+          );
+          return;
+        }
         params.respond(true, { ok: true }, undefined);
         return;
       }
