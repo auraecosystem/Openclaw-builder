@@ -1077,7 +1077,7 @@ export function createGoogleThinkingPayloadWrapper(
   thinkingLevel?: GoogleThinkingInputLevel,
 ): StreamFn {
   return createPayloadPatchStreamWrapper(baseStreamFn, ({ payload, model }) => {
-    if (model.api === "google-generative-ai") {
+    if (isGoogleThinkingPayloadApi(model.api)) {
       sanitizeGoogleThinkingPayload({
         payload,
         modelId: model.id,
@@ -1092,6 +1092,10 @@ export function createGoogleThinkingStreamWrapper(
   ctx: ProviderWrapStreamFnContext,
 ): NonNullable<ProviderWrapStreamFnContext["streamFn"]> {
   return createGoogleThinkingPayloadWrapper(ctx.streamFn, ctx.thinkingLevel);
+}
+
+function isGoogleThinkingPayloadApi(api: unknown): boolean {
+  return api === "google-generative-ai" || api === "google-vertex" || api === "google-gemini-cli";
 }
 
 export {
