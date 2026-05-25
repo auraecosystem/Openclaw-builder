@@ -2,6 +2,7 @@ import {
   context as otelContextApi,
   metrics,
   trace,
+  SpanKind,
   SpanStatusCode,
   TraceFlags,
 } from "@opentelemetry/api";
@@ -387,6 +388,17 @@ function assignGenAiModelCallAttrs(
   evt: { api?: string; model?: string; provider?: string },
 ): void {
   assignGenAiSpanIdentityAttrs(attrs, evt);
+}
+
+function modelCallSpanName(evt: { api?: string; model?: string }): string {
+  if (!emitLatestGenAiSemconv()) {
+    return "openclaw.model.call";
+  }
+  return `${genAiOperationName(evt.api)} ${lowCardinalityAttr(evt.model)}`;
+}
+
+function modelCallSpanKind(): SpanKind | undefined {
+  return emitLatestGenAiSemconv() ? SpanKind.CLIENT : undefined;
 }
 
 function addUpstreamRequestIdSpanEvent(
@@ -1589,6 +1601,7 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
         options: {
           parentContext?: ReturnType<typeof contextForTraceContext> | null;
           endTimeMs?: number;
+          kind?: SpanKind;
           startTimeMs?: number;
         } = {},
       ) => {
@@ -1605,6 +1618,7 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
           name,
           {
             attributes: redactOtelAttributes(attributes),
+            ...(options.kind !== undefined ? { kind: options.kind } : {}),
             ...(startTime !== undefined ? { startTime } : {}),
           },
           parentContext,
@@ -2535,7 +2549,8 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
         trackTrustedSpan(
           evt,
           metadata,
-          spanWithDuration("openclaw.model.call", spanAttrs, undefined, {
+          spanWithDuration(modelCallSpanName(evt), spanAttrs, undefined, {
+            kind: modelCallSpanKind(),
             parentContext: activeTrustedParentContext(evt, metadata),
             startTimeMs: evt.ts,
           }),
@@ -2575,7 +2590,8 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
         );
         const span =
           takeTrackedTrustedSpan(evt, metadata) ??
-          spanWithDuration("openclaw.model.call", spanAttrs, evt.durationMs, {
+          spanWithDuration(modelCallSpanName(evt), spanAttrs, evt.durationMs, {
+            kind: modelCallSpanKind(),
             parentContext: activeTrustedParentContext(evt, metadata),
             endTimeMs: evt.ts,
           });
@@ -2629,7 +2645,8 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
         );
         const span =
           takeTrackedTrustedSpan(evt, metadata) ??
-          spanWithDuration("openclaw.model.call", spanAttrs, evt.durationMs, {
+          spanWithDuration(modelCallSpanName(evt), spanAttrs, evt.durationMs, {
+            kind: modelCallSpanKind(),
             parentContext: activeTrustedParentContext(evt, metadata),
             endTimeMs: evt.ts,
           });
