@@ -393,6 +393,13 @@ type TrustedSessionFileState = {
   fingerprint: SessionFileFingerprint;
 };
 
+type PromptSessionFileTurn = {
+  previous?: Promise<void>;
+  released: Promise<void>;
+  release: () => void;
+  tail: Promise<void>;
+};
+
 // Controllers in the same OpenClaw process can legitimately take turns writing
 // the same session file while another attempt is released for model I/O. Track
 // only fingerprints that changed while OpenClaw held the write lock so the
@@ -400,10 +407,43 @@ type TrustedSessionFileState = {
 // external file changes.
 const ownedSessionFileWrites = new Map<string, OwnedSessionFileWrite>();
 const trustedSessionFileStates = new Map<string, TrustedSessionFileState>();
+const promptSessionFileTurnTails = new Map<string, Promise<void>>();
+const promptSessionFileTurns = new Set<PromptSessionFileTurn>();
 let ownedSessionFileWriteGeneration = 0;
 
 function resolveSessionFileFenceKey(sessionFile: string): string {
   return path.resolve(sessionFile);
+}
+
+function enqueuePromptSessionFileTurn(sessionFileKey: string): PromptSessionFileTurn {
+  const previous = promptSessionFileTurnTails.get(sessionFileKey);
+  let release!: () => void;
+  let hasReleased = false;
+  const releasedPromise = new Promise<void>((resolve) => {
+    release = () => {
+      if (hasReleased) {
+        return;
+      }
+      hasReleased = true;
+      resolve();
+    };
+  });
+  const tail = (previous ?? Promise.resolve()).then(() => releasedPromise);
+  const turn: PromptSessionFileTurn = {
+    previous,
+    released: releasedPromise,
+    release: () => {
+      release();
+      promptSessionFileTurns.delete(turn);
+      if (promptSessionFileTurnTails.get(sessionFileKey) === tail) {
+        promptSessionFileTurnTails.delete(sessionFileKey);
+      }
+    },
+    tail,
+  };
+  promptSessionFileTurns.add(turn);
+  promptSessionFileTurnTails.set(sessionFileKey, tail);
+  return turn;
 }
 
 function recordOwnedSessionFileWrite(
@@ -616,6 +656,7 @@ export function installSessionExternalHookWriteLock(params: {
 
 export type EmbeddedAttemptSessionLockController = {
   releaseForPrompt(): Promise<void>;
+  releaseForSessionIdleWait(): Promise<void>;
   refreshAfterOwnedSessionWrite(): void;
   reacquireAfterPrompt(): Promise<void>;
   waitForSessionEvents(session: unknown): Promise<void>;
@@ -648,6 +689,58 @@ export async function createEmbeddedAttemptSessionLockController(params: {
   let fenceActive = false;
   let takeoverDetected = false;
   const sessionFileFenceKey = resolveSessionFileFenceKey(params.lockOptions.sessionFile);
+  let activePromptSessionFileTurn: PromptSessionFileTurn | undefined;
+
+  async function releaseHeldLockForUnlockedSessionWindow(releaseParams: {
+    registerPromptHolder: boolean;
+  }): Promise<void> {
+    if (!heldLock) {
+      return;
+    }
+    const promptTurn = releaseParams.registerPromptHolder
+      ? enqueuePromptSessionFileTurn(sessionFileFenceKey)
+      : undefined;
+    let promptWindowReleased = false;
+    try {
+      if (promptTurn?.previous) {
+        const waitingLock = heldLock;
+        await waitingLock.release();
+        if (heldLock === waitingLock) {
+          heldLock = undefined;
+        }
+        await promptTurn.previous;
+        const reacquired = await acquireWriteLock();
+        heldLock = reacquired.lock;
+      }
+      const lock = heldLock;
+      if (!lock) {
+        promptTurn?.release();
+        return;
+      }
+      const fingerprint = await readSessionFileFingerprint(params.lockOptions.sessionFile);
+      const ownedWrite = ownedSessionFileWrites.get(sessionFileFenceKey);
+      const trustedGeneration = trustSessionFileState(sessionFileFenceKey, fingerprint);
+      fenceFingerprint = fingerprint;
+      fenceSnapshot = await readSessionFileFenceSnapshot(params.lockOptions.sessionFile);
+      fenceGeneration =
+        ownedWrite && sameSessionFileFingerprint(ownedWrite.fingerprint, fingerprint)
+          ? ownedWrite.generation
+          : (trustedGeneration ?? fenceGeneration);
+      fenceActive = true;
+      activePromptSessionFileTurn = promptTurn;
+      heldLock = undefined;
+      await lock.release();
+      promptWindowReleased = true;
+    } catch (err) {
+      if (!promptWindowReleased) {
+        promptTurn?.release();
+        if (activePromptSessionFileTurn === promptTurn) {
+          activePromptSessionFileTurn = undefined;
+        }
+      }
+      throw err;
+    }
+  }
 
   async function acquireWriteLock(): Promise<{ lock: SessionLock; owned: boolean }> {
     if (heldLock) {
@@ -750,22 +843,10 @@ export async function createEmbeddedAttemptSessionLockController(params: {
 
   return {
     async releaseForPrompt(): Promise<void> {
-      if (!heldLock) {
-        return;
-      }
-      const lock = heldLock;
-      heldLock = undefined;
-      const fingerprint = await readSessionFileFingerprint(params.lockOptions.sessionFile);
-      const ownedWrite = ownedSessionFileWrites.get(sessionFileFenceKey);
-      const trustedGeneration = trustSessionFileState(sessionFileFenceKey, fingerprint);
-      fenceFingerprint = fingerprint;
-      fenceSnapshot = await readSessionFileFenceSnapshot(params.lockOptions.sessionFile);
-      fenceGeneration =
-        ownedWrite && sameSessionFileFingerprint(ownedWrite.fingerprint, fingerprint)
-          ? ownedWrite.generation
-          : (trustedGeneration ?? fenceGeneration);
-      fenceActive = true;
-      await lock.release();
+      await releaseHeldLockForUnlockedSessionWindow({ registerPromptHolder: true });
+    },
+    async releaseForSessionIdleWait(): Promise<void> {
+      await releaseHeldLockForUnlockedSessionWindow({ registerPromptHolder: false });
     },
     refreshAfterOwnedSessionWrite(): void {
       if (fenceActive && !takeoverDetected) {
@@ -775,16 +856,24 @@ export async function createEmbeddedAttemptSessionLockController(params: {
     },
     async reacquireAfterPrompt(): Promise<void> {
       if (takeoverDetected || heldLock) {
+        activePromptSessionFileTurn?.release();
+        activePromptSessionFileTurn = undefined;
         return;
       }
-      const lock = await acquireLock();
+      let lock: SessionLock | undefined;
       try {
+        lock = await acquireLock();
         heldLock = lock;
         await assertSessionFileFence();
       } catch (err) {
         heldLock = undefined;
-        await lock.release();
+        if (lock) {
+          await lock.release();
+        }
         throw err;
+      } finally {
+        activePromptSessionFileTurn?.release();
+        activePromptSessionFileTurn = undefined;
       }
     },
     waitForSessionEvents: waitForSessionEventQueue,
@@ -877,6 +966,14 @@ export async function createEmbeddedAttemptSessionLockController(params: {
       await lock.release();
     },
   };
+}
+
+export function resetEmbeddedAttemptSessionFilePromptGuardsForTest(): void {
+  for (const turn of promptSessionFileTurns) {
+    turn.release();
+  }
+  promptSessionFileTurns.clear();
+  promptSessionFileTurnTails.clear();
 }
 
 export function installPromptSubmissionLockRelease(params: {
