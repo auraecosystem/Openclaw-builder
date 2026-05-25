@@ -24,6 +24,7 @@ export async function admitReplyTurn(params: {
   sessionId: string;
   kind: ReplyTurnKind;
   resetTriggered: boolean;
+  routeThreadId?: string | number;
   upstreamAbortSignal?: AbortSignal;
   waitTimeoutMs?: number;
   waitForActive?: boolean;
@@ -40,6 +41,7 @@ export async function admitReplyTurn(params: {
           sessionKey: params.sessionKey,
           sessionId,
           resetTriggered: params.resetTriggered,
+          routeThreadId: params.routeThreadId,
           upstreamAbortSignal: params.upstreamAbortSignal,
         }),
       };
