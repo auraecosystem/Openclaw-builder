@@ -247,25 +247,34 @@ if (
   }
 }
 
+const getErrorMessage = (err) =>
+  err && typeof err === "object" && "message" in err && typeof err.message === "string"
+    ? err.message
+    : "";
+
 const isModuleNotFoundError = (err) =>
   err && typeof err === "object" && "code" in err && err.code === "ERR_MODULE_NOT_FOUND";
 
 const isDirectModuleNotFoundError = (err, specifier) => {
-  if (!isModuleNotFoundError(err)) {
-    return false;
-  }
+  const message = getErrorMessage(err);
+  const bunSpecifierMiss =
+    message.includes(`Cannot find module '${specifier}'`) ||
+    message.includes(`Cannot find module "${specifier}"`);
 
   const expectedUrl = new URL(specifier, import.meta.url);
-  if ("url" in err && err.url === expectedUrl.href) {
-    return true;
+  const expectedPath = fileURLToPath(expectedUrl);
+  const nodePathMiss =
+    message.includes(`Cannot find module '${expectedPath}'`) ||
+    message.includes(`Cannot find module "${expectedPath}"`);
+
+  if (isModuleNotFoundError(err)) {
+    if (err && typeof err === "object" && "url" in err && err.url === expectedUrl.href) {
+      return true;
+    }
+    return nodePathMiss || bunSpecifierMiss;
   }
 
-  const message = "message" in err && typeof err.message === "string" ? err.message : "";
-  const expectedPath = fileURLToPath(expectedUrl);
-  return (
-    message.includes(`Cannot find module '${expectedPath}'`) ||
-    message.includes(`Cannot find module "${expectedPath}"`)
-  );
+  return bunSpecifierMiss;
 };
 
 const installProcessWarningFilter = async () => {
