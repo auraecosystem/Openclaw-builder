@@ -93,6 +93,10 @@ function isFinalizedOpenAIResponsesToolCall(block: RawToolCallBlock): boolean {
   return "arguments" in block && block.arguments !== undefined && block.arguments !== null;
 }
 
+function isInterruptedAssistantTurn(message: AgentMessage): boolean {
+  return message.stopReason === "aborted" || message.stopReason === "error";
+}
+
 function redactSessionsSpawnAttachmentsArgs(value: unknown): unknown {
   if (!value || typeof value !== "object") {
     return value;
@@ -391,7 +395,7 @@ function repairToolCallInputs(
       }
       let workBlock = block;
       if (isRawToolCallBlock(block) && hasPartialJson(block)) {
-        if (!isFinalizedOpenAIResponsesToolCall(block)) {
+        if (isInterruptedAssistantTurn(msg) || !isFinalizedOpenAIResponsesToolCall(block)) {
           droppedToolCalls += 1;
           droppedInMessage += 1;
           changed = true;
