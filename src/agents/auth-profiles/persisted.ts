@@ -419,6 +419,68 @@ function dedupeMergedProfileOrder(profileIds: string[]): string[] {
   return Array.from(new Set(profileIds));
 }
 
+function profileProviderKey(credential: AuthProfileCredential): string {
+  return normalizeProviderId(credential.provider);
+}
+
+function groupProfileIdsByProvider(profiles: AuthProfileStore["profiles"]): Map<string, string[]> {
+  const grouped = new Map<string, string[]>();
+  for (const [profileId, credential] of Object.entries(profiles)) {
+    const providerKey = profileProviderKey(credential);
+    grouped.set(providerKey, [...(grouped.get(providerKey) ?? []), profileId]);
+  }
+  return grouped;
+}
+
+function findOrderEntryKey(
+  order: Record<string, string[]> | undefined,
+  providerKey: string,
+): string | undefined {
+  return Object.keys(order ?? {}).find((key) => normalizeProviderId(key) === providerKey);
+}
+
+function mergeProfileRecordsWithOverridePrecedence(
+  base: AuthProfileStore["profiles"],
+  override: AuthProfileStore["profiles"],
+): AuthProfileStore["profiles"] {
+  const overrideProfileIds = new Set(Object.keys(override));
+  return Object.fromEntries([
+    ...Object.entries(override),
+    ...Object.entries(base).filter(([profileId]) => !overrideProfileIds.has(profileId)),
+  ]);
+}
+
+function mergeProfileOrderWithOverridePrecedence(params: {
+  baseOrder?: AuthProfileStore["order"];
+  overrideOrder?: AuthProfileStore["order"];
+  overrideProfiles: AuthProfileStore["profiles"];
+}): AuthProfileStore["order"] {
+  const mergedOrder = mergeRecord(params.baseOrder, params.overrideOrder);
+  if (!mergedOrder) {
+    return undefined;
+  }
+
+  for (const [providerKey, overrideProfileIds] of groupProfileIdsByProvider(
+    params.overrideProfiles,
+  )) {
+    const overrideOrderKey = findOrderEntryKey(params.overrideOrder, providerKey);
+    const mergedOrderKey = overrideOrderKey ?? findOrderEntryKey(mergedOrder, providerKey);
+    if (!mergedOrderKey) {
+      continue;
+    }
+    const overrideOrderIds = overrideOrderKey
+      ? (params.overrideOrder?.[overrideOrderKey] ?? [])
+      : [];
+    mergedOrder[mergedOrderKey] = dedupeMergedProfileOrder([
+      ...overrideOrderIds,
+      ...overrideProfileIds,
+      ...(mergedOrder[mergedOrderKey] ?? []),
+    ]);
+  }
+
+  return mergedOrder;
+}
+
 function hasComparableOAuthIdentityConflict(
   existing: OAuthCredential,
   candidate: OAuthCredential,
@@ -731,8 +793,12 @@ export function mergeAuthProfileStores(
   }
   const merged = {
     version: Math.max(base.version, override.version ?? base.version),
-    profiles: { ...base.profiles, ...override.profiles },
-    order: mergeRecord(base.order, override.order),
+    profiles: mergeProfileRecordsWithOverridePrecedence(base.profiles, override.profiles),
+    order: mergeProfileOrderWithOverridePrecedence({
+      baseOrder: base.order,
+      overrideOrder: override.order,
+      overrideProfiles: override.profiles,
+    }),
     lastGood: mergeRecord(base.lastGood, override.lastGood),
     usageStats: mergeRecord(base.usageStats, override.usageStats),
   };
