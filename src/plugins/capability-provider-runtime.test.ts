@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveInstalledPluginIndexPolicyHash } from "./installed-plugin-index-policy.js";
 import { createEmptyPluginRegistry } from "./registry.js";
@@ -138,6 +138,7 @@ let resolveBundledCapabilityProviderIds: typeof import("./capability-provider-ru
 let resolveManifestCapabilityProviderIds: typeof import("./capability-provider-runtime.js").resolveManifestCapabilityProviderIds;
 let clearCurrentPluginMetadataSnapshot: typeof import("./current-plugin-metadata-snapshot.js").clearCurrentPluginMetadataSnapshot;
 let setCurrentPluginMetadataSnapshot: typeof import("./current-plugin-metadata-snapshot.js").setCurrentPluginMetadataSnapshot;
+let clearLoadPluginMetadataSnapshotMemo: typeof import("./plugin-metadata-snapshot.js").clearLoadPluginMetadataSnapshotMemo;
 
 function expectResolvedCapabilityProviderIds(providers: Array<{ id: string }>, expected: string[]) {
   expect(providers.map((provider) => provider.id)).toEqual(expected);
@@ -307,9 +308,11 @@ describe("resolvePluginCapabilityProviders", () => {
     } = await import("./capability-provider-runtime.js"));
     ({ clearCurrentPluginMetadataSnapshot, setCurrentPluginMetadataSnapshot } =
       await import("./current-plugin-metadata-snapshot.js"));
+    ({ clearLoadPluginMetadataSnapshotMemo } = await import("./plugin-metadata-snapshot.js"));
   });
 
   beforeEach(() => {
+    clearLoadPluginMetadataSnapshotMemo();
     clearCurrentPluginMetadataSnapshot();
     mocks.resolveRuntimePluginRegistry.mockReset();
     mocks.resolveRuntimePluginRegistry.mockReturnValue(undefined);
@@ -338,6 +341,11 @@ describe("resolvePluginCapabilityProviders", () => {
     mocks.withBundledPluginEnablementCompat.mockImplementation(({ config }) => config);
     mocks.withBundledPluginVitestCompat.mockReset();
     mocks.withBundledPluginVitestCompat.mockImplementation(({ config }) => config);
+  });
+
+  afterEach(() => {
+    clearCurrentPluginMetadataSnapshot();
+    clearLoadPluginMetadataSnapshotMemo();
   });
 
   it("resolves bundled capability ids from the current metadata snapshot", () => {
@@ -1167,7 +1175,7 @@ describe("resolvePluginCapabilityProviders", () => {
     });
   });
 
-  it("reads manifest-derived capability plugin ids for each config snapshot", () => {
+  it("reuses process metadata while deriving capability plugin ids for each config snapshot", () => {
     const { cfg, enablementCompat } = createCompatChainConfig();
     setBundledCapabilityFixture("mediaUnderstandingProviders");
     mocks.withBundledPluginEnablementCompat.mockReturnValue(enablementCompat);
@@ -1180,7 +1188,7 @@ describe("resolvePluginCapabilityProviders", () => {
       resolvePluginCapabilityProviders({ key: "mediaUnderstandingProviders", cfg }),
     );
 
-    expect(mocks.loadPluginManifestRegistry).toHaveBeenCalledTimes(2);
+    expect(mocks.loadPluginManifestRegistry).toHaveBeenCalledTimes(1);
     expect(mocks.withBundledPluginAllowlistCompat).toHaveBeenCalledTimes(2);
     expect(mocks.withBundledPluginAllowlistCompat).toHaveBeenCalledWith({
       config: cfg,
@@ -1222,7 +1230,7 @@ describe("resolvePluginCapabilityProviders", () => {
     expect(snapshotLoads).toHaveLength(1);
   });
 
-  it("resolves manifest-derived capability plugin ids for equivalent config snapshots independently", () => {
+  it("keeps equivalent config compatibility independent while reusing process metadata", () => {
     const first = createCompatChainConfig();
     const second = createCompatChainConfig();
     setBundledCapabilityFixture("mediaUnderstandingProviders");
@@ -1242,7 +1250,7 @@ describe("resolvePluginCapabilityProviders", () => {
       }),
     );
 
-    expect(mocks.loadPluginManifestRegistry).toHaveBeenCalledTimes(2);
+    expect(mocks.loadPluginManifestRegistry).toHaveBeenCalledTimes(1);
     expect(mocks.withBundledPluginAllowlistCompat).toHaveBeenCalledTimes(2);
     expect(mocks.withBundledPluginAllowlistCompat).toHaveBeenNthCalledWith(1, {
       config: first.cfg,
