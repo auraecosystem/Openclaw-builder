@@ -272,6 +272,7 @@ export async function noteSessionSnapshotHealth(params?: {
   bundledSkillsDir?: string;
   cfg?: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
+  shouldRepair?: boolean;
 }) {
   const bundledSkillsDir = params?.bundledSkillsDir ?? resolveBundledSkillsDir();
   if (!bundledSkillsDir) {
@@ -314,6 +315,78 @@ export async function noteSessionSnapshotHealth(params?: {
       findings.map((finding) => finding.sessionKey),
     ),
   );
+
+  // Auto-repair stale paths when --fix is used
+  if (params?.shouldRepair) {
+    let repairedStores = 0;
+    let totalReplacements = 0;
+    for (const [storePath, findings] of findingsByStore) {
+      try {
+        const raw = fs.readFileSync(storePath, "utf-8");
+        let fixed = raw;
+        for (const finding of findings) {
+          // Replace both the JSON-escaped form (as stored in the file) and the
+          // raw unescaped form. JSON.stringify produces the escaped content
+          // with surrounding quotes; slice(1,-1) strips the quotes.
+          const jsonEscaped = JSON.stringify(finding.cachedPath).slice(1, -1);
+          const jsonEscapedExpected = JSON.stringify(finding.expectedPath).slice(1, -1);
+
+          let count = 0;
+          // 1. Replace JSON-escaped paths (handles Windows backslashes, unicode, etc.)
+          if (fixed.includes(jsonEscaped)) {
+            const occurrences = fixed.split(jsonEscaped).length - 1;
+            fixed = fixed.replaceAll(jsonEscaped, jsonEscapedExpected);
+            count += occurrences;
+          }
+          // 2. Replace raw unescaped paths as a fallback for non-JSON-escaped storage
+          if (fixed.includes(finding.cachedPath)) {
+            const occurrences = fixed.split(finding.cachedPath).length - 1;
+            fixed = fixed.replaceAll(finding.cachedPath, finding.expectedPath);
+            count += occurrences;
+          }
+          // 3. For baseDir paths (resolvedSkills), also replace the directory
+          //    prefix without the trailing SKILL.md segment, since the raw JSON
+          //    stores the baseDir as a directory path.
+          if (finding.field === "skillsSnapshot.resolvedSkills" && finding.cachedPath.endsWith("/SKILL.md")) {
+            const cachedDir = finding.cachedPath.slice(0, -"/SKILL.md".length);
+            const expectedDir = finding.expectedPath.slice(0, -"/SKILL.md".length);
+            const jsonEscapedDir = JSON.stringify(cachedDir).slice(1, -1);
+            const jsonEscapedExpectedDir = JSON.stringify(expectedDir).slice(1, -1);
+            if (fixed.includes(jsonEscapedDir)) {
+              const occurrences = fixed.split(jsonEscapedDir).length - 1;
+              fixed = fixed.replaceAll(jsonEscapedDir, jsonEscapedExpectedDir);
+              count += occurrences;
+            }
+            if (fixed.includes(cachedDir)) {
+              const occurrences = fixed.split(cachedDir).length - 1;
+              fixed = fixed.replaceAll(cachedDir, expectedDir);
+              count += occurrences;
+            }
+          }
+          totalReplacements += count;
+        }
+        if (fixed !== raw) {
+          // Create backup before writing
+          const backupPath = `${storePath}.bak.${Date.now()}`;
+          fs.writeFileSync(backupPath, raw, { mode: 0o600 });
+          fs.writeFileSync(storePath, fixed, { mode: 0o600 });
+          repairedStores++;
+        }
+      } catch (err) {
+        note(
+          `- Failed to repair session snapshot paths in ${shortenHomePath(storePath)}: ${String(err)}`,
+          "Session snapshots",
+        );
+      }
+    }
+    if (repairedStores > 0) {
+      note(
+        `- Repaired ${totalReplacements} stale path${totalReplacements === 1 ? "" : "s"} across ${repairedStores} store${repairedStores === 1 ? "" : "s"}.`,
+        "Session snapshots",
+      );
+      return;
+    }
+  }
   const lines = [
     `- Found ${affectedSessions.size} session${affectedSessions.size === 1 ? "" : "s"} with stale cached session metadata paths.`,
     `  Live bundled skills root is healthy: ${shortenHomePath(bundledSkillsDir)}`,
