@@ -1707,10 +1707,20 @@ async function executeMainSessionCronJob(
     };
   }
   const targetMainSessionKey = job.sessionKey;
+  // Carry the bound channel thread/topic (e.g. Telegram message_thread_id) onto
+  // the wake event so the delivered heartbeat lands in the originating thread
+  // rather than the chat root. The channel-correct value is read from the
+  // session store entry the job binds to (not derived by splitting the composite
+  // session-key thread suffix). Absent resolver / no stored context => unchanged.
+  const originDeliveryContext = state.deps.resolveOriginDeliveryContext?.({
+    sessionKey: targetMainSessionKey,
+    agentId: job.agentId,
+  });
   state.deps.enqueueSystemEvent(text, {
     agentId: job.agentId,
     sessionKey: targetMainSessionKey,
     contextKey: `cron:${job.id}`,
+    ...(originDeliveryContext ? { deliveryContext: originDeliveryContext } : {}),
   });
   if (job.wakeMode === "now" && state.deps.runHeartbeatOnce) {
     const reason = `cron:${job.id}`;
@@ -1987,11 +1997,21 @@ export function wake(
   // binding kicks in (matches `enqueueSystemEvent(text)` from before this
   // change). When at least one is set, build the opts object with only the
   // present fields.
+  // Carry the originating session's channel-correct delivery context (e.g. the
+  // bound Telegram topic/thread) so a wake routes back into that thread instead
+  // of the chat root. Only attempt this when an origin session is targeted; a
+  // no-origin wake keeps the exact pre-fix `enqueueSystemEvent(text, undefined)`
+  // shape so its default-sessionKey binding still kicks in.
+  const originDeliveryContext =
+    sessionKey || agentId
+      ? state.deps.resolveOriginDeliveryContext?.({ sessionKey, agentId })
+      : undefined;
   const enqueueOpts =
     sessionKey || agentId
       ? {
           ...(sessionKey ? { sessionKey } : {}),
           ...(agentId ? { agentId } : {}),
+          ...(originDeliveryContext ? { deliveryContext: originDeliveryContext } : {}),
         }
       : undefined;
   state.deps.enqueueSystemEvent(text, enqueueOpts);

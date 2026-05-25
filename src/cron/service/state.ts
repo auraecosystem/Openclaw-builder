@@ -1,5 +1,6 @@
 import type { CronConfig } from "../../config/types.cron.js";
 import type { HeartbeatRunResult, HeartbeatWakeRequest } from "../../infra/heartbeat-wake.js";
+import type { DeliveryContext } from "../../utils/delivery-context.types.js";
 import type {
   CronAgentExecutionPhaseUpdate,
   CronAgentExecutionStarted,
@@ -83,8 +84,27 @@ export type CronServiceDeps = {
       sessionKey?: string;
       contextKey?: string;
       forceSenderIsOwnerFalse?: boolean;
+      /**
+       * Channel-correct delivery context captured from the session the event is
+       * enqueued against (e.g. the bound Telegram topic/thread). When present it
+       * flows through `system-events` -> heartbeat turnSource so a wake-now
+       * heartbeat replies in the originating thread instead of the chat root.
+       * Absent => unchanged default routing.
+       */
+      deliveryContext?: DeliveryContext;
     },
   ) => void;
+  /**
+   * Resolve the channel-correct origin delivery context for a session key (the
+   * value the channel's send expects, e.g. Telegram message_thread_id), sourced
+   * from the session store entry the cron job binds to. Used to carry the bound
+   * thread/topic onto wake system events. Optional: when unset, wakes route as
+   * before. Returning `undefined` is also a no-op (default routing).
+   */
+  resolveOriginDeliveryContext?: (params: {
+    sessionKey?: string;
+    agentId?: string;
+  }) => DeliveryContext | undefined;
   requestHeartbeat: (opts: HeartbeatWakeRequest) => void;
   runHeartbeatOnce?: (opts?: {
     source?: HeartbeatWakeRequest["source"];

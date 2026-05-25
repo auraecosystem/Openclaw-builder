@@ -11,6 +11,7 @@ import {
 import { resolveStorePath } from "../config/sessions/paths.js";
 import type { AgentDefaultsConfig } from "../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { resolveCronStoredDeliveryContext } from "../cron/delivery-context.js";
 import { runCronIsolatedAgentTurn } from "../cron/isolated-agent.js";
 import {
   appendCronRunLog,
@@ -303,7 +304,21 @@ export function buildGatewayCronService(params: {
         contextKey: opts?.contextKey,
         forceSenderIsOwnerFalse: opts?.forceSenderIsOwnerFalse,
         trusted: opts?.forceSenderIsOwnerFalse !== true,
+        // Carry the bound channel thread/topic so wake-now heartbeats reply in
+        // the originating thread instead of the chat root. Resolved upstream
+        // (cron service) from the session store; forwarded verbatim here.
+        ...(opts?.deliveryContext ? { deliveryContext: opts.deliveryContext } : {}),
       });
+    },
+    resolveOriginDeliveryContext: (opts) => {
+      const { runtimeConfig, sessionKey } = resolveCronTarget({
+        ...opts,
+        preserveUntargeted: true,
+      });
+      if (!sessionKey) {
+        return undefined;
+      }
+      return resolveCronStoredDeliveryContext({ cfg: runtimeConfig, sessionKey });
     },
     requestHeartbeat: (opts) => {
       const { agentId, sessionKey } = resolveCronTarget({ ...opts, preserveUntargeted: true });
