@@ -659,6 +659,18 @@ export async function abortChatRun(state: ChatState): Promise<boolean> {
   }
 }
 
+function isTailDuplicate(messages: unknown[], candidate: unknown): boolean {
+  if (messages.length === 0) {
+    return false;
+  }
+  const candidateSig = messageDisplaySignature(candidate);
+  if (!candidateSig) {
+    return false;
+  }
+  const tailSig = messageDisplaySignature(messages[messages.length - 1]);
+  return tailSig === candidateSig;
+}
+
 export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
   if (!payload) {
     return null;
@@ -682,7 +694,11 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
   if (state.chatRunId && payload.runId !== state.chatRunId) {
     if (payload.state === "final") {
       const finalMessage = normalizeFinalAssistantMessage(payload.message);
-      if (finalMessage && !shouldHideAssistantChatMessage(finalMessage)) {
+      if (
+        finalMessage &&
+        !shouldHideAssistantChatMessage(finalMessage) &&
+        !isTailDuplicate(state.chatMessages, finalMessage)
+      ) {
         state.chatMessages = [...state.chatMessages, finalMessage];
         return null;
       }
@@ -717,26 +733,34 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
     }
   } else if (payload.state === "final") {
     const finalMessage = normalizeFinalAssistantMessage(payload.message);
-    if (finalMessage && !shouldHideAssistantChatMessage(finalMessage)) {
+    if (
+      finalMessage &&
+      !shouldHideAssistantChatMessage(finalMessage) &&
+      !isTailDuplicate(state.chatMessages, finalMessage)
+    ) {
       state.chatMessages = [...state.chatMessages, finalMessage];
     } else if (
       state.chatStream?.trim() &&
       !isSilentReplyStream(state.chatStream) &&
       !isHeartbeatAckStream(state.chatStream)
     ) {
-      state.chatMessages = [
-        ...state.chatMessages,
-        {
-          role: "assistant",
-          content: [{ type: "text", text: state.chatStream }],
-          timestamp: Date.now(),
-        },
-      ];
+      const streamMessage = {
+        role: "assistant",
+        content: [{ type: "text", text: state.chatStream }],
+        timestamp: Date.now(),
+      };
+      if (!isTailDuplicate(state.chatMessages, streamMessage)) {
+        state.chatMessages = [...state.chatMessages, streamMessage];
+      }
     }
     reconcileTerminalRun("done", "done");
   } else if (payload.state === "aborted") {
     const normalizedMessage = normalizeAbortedAssistantMessage(payload.message);
-    if (normalizedMessage && !shouldHideAssistantChatMessage(normalizedMessage)) {
+    if (
+      normalizedMessage &&
+      !shouldHideAssistantChatMessage(normalizedMessage) &&
+      !isTailDuplicate(state.chatMessages, normalizedMessage)
+    ) {
       state.chatMessages = [...state.chatMessages, normalizedMessage];
     } else {
       const streamedText = state.chatStream ?? "";
@@ -745,14 +769,14 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
         !isSilentReplyStream(streamedText) &&
         !isHeartbeatAckStream(streamedText)
       ) {
-        state.chatMessages = [
-          ...state.chatMessages,
-          {
-            role: "assistant",
-            content: [{ type: "text", text: streamedText }],
-            timestamp: Date.now(),
-          },
-        ];
+        const abortStreamMessage = {
+          role: "assistant",
+          content: [{ type: "text", text: streamedText }],
+          timestamp: Date.now(),
+        };
+        if (!isTailDuplicate(state.chatMessages, abortStreamMessage)) {
+          state.chatMessages = [...state.chatMessages, abortStreamMessage];
+        }
       }
     }
     reconcileTerminalRun("interrupted", "killed");
