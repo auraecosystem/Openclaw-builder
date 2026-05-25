@@ -118,7 +118,7 @@ export function parseDsmlToolCalls(raw: string): DsmlToolCall[] {
   const invokePattern =
     /<[|｜]DSML[|｜]invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/[|｜]DSML[|｜]invoke>/g;
   const paramPattern =
-    /<[|｜]DSML[|｜]parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/[|｜]DSML[|｜]parameter>/g;
+    /<[|｜]DSML[|｜]parameter\s+name="([^"]+)"([^>]*)>([\s\S]*?)<\/[|｜]DSML[|｜]parameter>/g;
 
   let invokeMatch: RegExpExecArray | null;
   while ((invokeMatch = invokePattern.exec(raw)) !== null) {
@@ -130,12 +130,16 @@ export function parseDsmlToolCalls(raw: string): DsmlToolCall[] {
     paramPattern.lastIndex = 0;
     while ((paramMatch = paramPattern.exec(body)) !== null) {
       const paramName = paramMatch[1];
-      const paramValue = paramMatch[2].trim();
-      // Try parsing as JSON for non-string values; fall back to raw string.
-      try {
-        args[paramName] = JSON.parse(paramValue);
-      } catch {
+      const paramAttrs = paramMatch[2];
+      const paramValue = paramMatch[3].trim();
+      if (/\bstring="true"/.test(paramAttrs)) {
         args[paramName] = paramValue;
+      } else {
+        try {
+          args[paramName] = JSON.parse(paramValue);
+        } catch {
+          args[paramName] = paramValue;
+        }
       }
     }
 

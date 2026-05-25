@@ -128,6 +128,13 @@ describe("parseDsmlToolCalls", () => {
     expect(calls[0].arguments).toEqual({ count: 42 });
   });
 
+  it("honors string='true' for numeric-looking values", () => {
+    const raw =
+      '<｜DSML｜invoke name="set_port"><｜DSML｜parameter name="port" string="true">8080</｜DSML｜parameter></｜DSML｜invoke>';
+    const calls = parseDsmlToolCalls(raw);
+    expect(calls[0].arguments).toEqual({ port: "8080" });
+  });
+
   it("handles ASCII pipe delimiters", () => {
     const raw =
       '<|DSML|invoke name="tool"><|DSML|parameter name="key">val</|DSML|parameter></|DSML|invoke>';

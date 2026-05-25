@@ -2741,6 +2741,9 @@ async function processOpenAICompletionsStream(
   for (const recovered of recoveredCalls) {
     injectRecoveredDsmlToolCall(recovered, output, stream);
   }
+  if (recoveredCalls.length > 0) {
+    output.stopReason = "toolUse";
+  }
   const hasToolCalls = output.content.some((block) => block.type === "toolCall");
   if (output.stopReason === "toolUse" && !hasToolCalls) {
     output.stopReason = "stop";
