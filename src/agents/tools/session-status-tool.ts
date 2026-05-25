@@ -24,6 +24,11 @@ import {
 } from "../../routing/session-key.js";
 import { applyModelOverrideToSessionEntry } from "../../sessions/model-overrides.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
+import {
+  type LiveStatusModelIdentity,
+  resolveLiveStatusModelIdentity,
+  withLiveStatusModelIdentity,
+} from "../../status/live-model-reporting.js";
 import type { BuildStatusTextParams } from "../../status/status-text.types.js";
 import { buildTaskStatusSnapshotForRelatedSessionKeyForOwner } from "../../tasks/task-owner-access.js";
 import { formatTaskStatusDetail, formatTaskStatusTitle } from "../../tasks/task-status.js";
@@ -185,8 +190,6 @@ function listImplicitDefaultDirectFallbackKeys(params: {
   return [...new Set(candidates)];
 }
 
-type ActiveStatusModelIdentity = { provider?: string; model: string };
-
 function resolveActiveStatusModelIdentity(params: {
   activeModelId?: string;
   activeModelProvider?: string;
@@ -195,7 +198,7 @@ function resolveActiveStatusModelIdentity(params: {
   liveSessionKeys: Iterable<string | undefined>;
   modelRaw?: string;
   resolvedKey: string;
-}): ActiveStatusModelIdentity | undefined {
+}): LiveStatusModelIdentity | undefined {
   const activeModelId = params.activeModelId?.trim();
   if (!activeModelId || params.modelRaw !== undefined) {
     return undefined;
@@ -212,25 +215,10 @@ function resolveActiveStatusModelIdentity(params: {
   if (!liveSessionKeys.has(resolvedKey)) {
     return undefined;
   }
-  const activeModelProvider = params.activeModelProvider?.trim();
-  return activeModelProvider
-    ? { provider: activeModelProvider, model: activeModelId }
-    : { model: activeModelId };
-}
-
-function withActiveStatusModelIdentity(
-  entry: SessionEntry,
-  identity: ActiveStatusModelIdentity,
-): SessionEntry {
-  const next: SessionEntry = {
-    ...entry,
-    model: identity.model,
-    ...(identity.provider ? { modelProvider: identity.provider } : {}),
-  };
-  delete next.providerOverride;
-  delete next.modelOverride;
-  delete next.modelOverrideSource;
-  return next;
+  return resolveLiveStatusModelIdentity({
+    provider: params.activeModelProvider,
+    model: activeModelId,
+  });
 }
 
 function formatSessionTaskLine(params: {
@@ -620,6 +608,7 @@ export function createSessionStatusTool(opts?: {
                   model: selection.model,
                   isDefault: selection.isDefault,
                 },
+          preserveDefaultSelectionSource: selection.kind !== "reset",
           markLiveSwitchPending: true,
         });
         if (applied.updated) {
@@ -690,7 +679,7 @@ export function createSessionStatusTool(opts?: {
         ? configured.model
         : runtimeModelForCard || configured.model;
       const statusSessionEntry = activeModelIdentity
-        ? withActiveStatusModelIdentity(resolved.entry, activeModelIdentity)
+        ? withLiveStatusModelIdentity(resolved.entry, activeModelIdentity)
         : !hasExplicitModelOverride && !runtimeProviderForCard && runtimeModelForCard
           ? { ...resolved.entry, providerOverride: "" }
           : resolved.entry;

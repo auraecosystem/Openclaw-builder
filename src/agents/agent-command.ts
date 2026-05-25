@@ -883,11 +883,6 @@ async function agentCommandInternal(
     const hasStoredOverride = Boolean(
       sessionEntry?.modelOverride || sessionEntry?.providerOverride,
     );
-    let storedModelOverrideSource = hasStoredOverride
-      ? sessionEntry?.modelOverrideSource
-      : undefined;
-    const hasStoredAutoFallbackProvenance =
-      hasStoredOverride && hasSessionAutoModelFallbackProvenance(sessionEntry);
     const explicitProviderOverride =
       typeof opts.provider === "string"
         ? normalizeExplicitOverrideInput(opts.provider, "provider")
@@ -973,6 +968,12 @@ async function agentCommandInternal(
 
     const storedProviderOverride = sessionEntry?.providerOverride?.trim();
     let storedModelOverride = sessionEntry?.modelOverride?.trim();
+    let hasStoredModelSelection = Boolean(storedProviderOverride || storedModelOverride);
+    let storedModelOverrideSource = hasStoredModelSelection
+      ? sessionEntry?.modelOverrideSource
+      : undefined;
+    const hasStoredAutoFallbackProvenance =
+      hasStoredModelSelection && hasSessionAutoModelFallbackProvenance(sessionEntry);
     if (storedModelOverride) {
       const candidateProvider = storedProviderOverride || defaultProvider;
       const normalizedStored = normalizeModelRef(
@@ -1279,8 +1280,7 @@ async function agentCommandInternal(
           cfg,
           agentId: sessionAgentId,
           sessionKey,
-          hasSessionModelOverride:
-            hasExplicitRunOverride || Boolean(storedProviderOverride || storedModelOverride),
+          hasSessionModelOverride: hasExplicitRunOverride || hasStoredModelSelection,
           modelOverrideSource: hasExplicitRunOverride ? "user" : storedModelOverrideSource,
           hasAutoFallbackProvenance: hasExplicitRunOverride
             ? false
@@ -1525,6 +1525,7 @@ async function agentCommandInternal(
             err.provider !== previousProvider
           ) {
             storedModelOverride = err.model;
+            hasStoredModelSelection = true;
             storedModelOverrideSource = "user";
           }
           attemptLifecycleState.lifecycleEnded = false;

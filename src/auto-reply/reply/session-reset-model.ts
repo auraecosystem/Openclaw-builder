@@ -117,6 +117,7 @@ function applySelectionToSession(params: {
   const { updated } = applyModelOverrideToSessionEntry({
     entry: sessionEntry,
     selection,
+    preserveDefaultSelectionSource: selection.preserveDefaultSelectionSource !== false,
   });
   if (!updated) {
     return;
