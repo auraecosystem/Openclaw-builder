@@ -304,6 +304,7 @@ async function runDispatch(params: {
   suppressUserDelivery?: boolean;
   suppressReplyLifecycle?: boolean;
   sourceReplyDeliveryMode?: "automatic" | "message_tool_only";
+  ttsChannel?: string;
 }) {
   const targetSessionKey = params.sessionKeyOverride ?? sessionKey;
   return tryDispatchAcpReply({
@@ -319,6 +320,7 @@ async function runDispatch(params: {
     sessionKey: targetSessionKey,
     images: params.images,
     inboundAudio: false,
+    ttsChannel: params.ttsChannel,
     suppressUserDelivery: params.suppressUserDelivery,
     suppressReplyLifecycle: params.suppressReplyLifecycle,
     sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
@@ -1887,7 +1889,218 @@ describe("tryDispatchAcpReply", () => {
     expect(finalPayload.audioAsVoice).toBe(true);
     expect(finalPayload.spokenText).toBe("WebChat ACP block reply.");
     expect(finalPayload.trustedLocalMedia).toBe(true);
+    expect(finalPayload.text).toBeUndefined();
+    expect(finalPayload.ttsSupplement?.visibleTextAlreadyDelivered).toBe(true);
     expect(result?.queuedFinal).toBe(true);
+  });
+
+  it("does not call settleVisibleText before TTS synthesis when mode is final", async () => {
+    setReadyAcpResolution();
+    ttsMocks.resolveTtsConfig.mockReturnValue({ mode: "final" });
+    let settleCalledBeforeTts = false;
+    ttsMocks.maybeApplyTtsToPayload.mockImplementation(async (paramsUnknown: unknown) => {
+      // Track getFailedCounts instead of waitForIdle: waitForIdle can be called
+      // by block delivery (waitForReplyDispatcherIdle) independently of settlement,
+      // but getFailedCounts is only called from settleDirectVisibleText.
+      if ((dispatcher.getFailedCounts as ReturnType<typeof vi.fn>).mock.calls.length > 0) {
+        settleCalledBeforeTts = true;
+      }
+      return {
+        ...(paramsUnknown as { payload: unknown }).payload,
+        mediaUrl: "/tmp/openclaw-media/tts-order.ogg",
+        audioAsVoice: true,
+      };
+    });
+    mockVisibleTextTurn("Order test.");
+    const cfg = createAcpTestConfig({
+      acp: {
+        enabled: true,
+        stream: { deliveryMode: "live", coalesceIdleMs: 0, maxChunkChars: 64 },
+      },
+    });
+
+    const { dispatcher } = createDispatcher();
+    await runDispatch({
+      bodyForAgent: "reply",
+      cfg,
+      dispatcher,
+      ttsChannel: "telegram",
+      ctxOverrides: { Provider: "telegram", Surface: "telegram" },
+    });
+
+    expect(settleCalledBeforeTts).toBe(false);
+    expect(dispatcherCall(dispatcher.sendFinalReply).mediaUrl).toBe(
+      "/tmp/openclaw-media/tts-order.ogg",
+    );
+    expect(dispatcherCall(dispatcher.sendFinalReply).text).toBe("Order test.");
+  });
+
+  it("settles visible text eagerly for non-caption voice channels even when TTS mode is final", async () => {
+    setReadyAcpResolution();
+    ttsMocks.resolveTtsConfig.mockReturnValue({ mode: "final" });
+    let textSettledBeforeTts = false;
+    ttsMocks.maybeApplyTtsToPayload.mockImplementation(async (paramsUnknown: unknown) => {
+      if ((dispatcher.waitForIdle as ReturnType<typeof vi.fn>).mock.calls.length > 0) {
+        textSettledBeforeTts = true;
+      }
+      return {
+        ...(paramsUnknown as { payload: unknown }).payload,
+        mediaUrl: "/tmp/openclaw-media/tts-eager.ogg",
+        audioAsVoice: true,
+      };
+    });
+    mockVisibleTextTurn("Eager discord.");
+    const cfg = createAcpTestConfig({
+      acp: {
+        enabled: true,
+        stream: { deliveryMode: "live", coalesceIdleMs: 0, maxChunkChars: 64 },
+      },
+    });
+
+    const { dispatcher } = createDispatcher();
+    await runDispatch({
+      bodyForAgent: "reply",
+      cfg,
+      dispatcher,
+      ttsChannel: "discord",
+      ctxOverrides: { Provider: "discord", Surface: "discord" },
+    });
+
+    expect(textSettledBeforeTts).toBe(true);
+  });
+
+  it("settles visible text as fallback when TTS final synthesis fails", async () => {
+    setReadyAcpResolution();
+    ttsMocks.resolveTtsConfig.mockReturnValue({ mode: "final" });
+    queueTtsReplies({} as MockTtsReply);
+    mockVisibleTextTurn("Fallback text.");
+    const cfg = createAcpTestConfig({
+      acp: {
+        enabled: true,
+        stream: { deliveryMode: "live", coalesceIdleMs: 0, maxChunkChars: 64 },
+      },
+    });
+
+    const { dispatcher } = createDispatcher();
+    const result = await runDispatch({
+      bodyForAgent: "reply",
+      cfg,
+      dispatcher,
+      ctxOverrides: { Provider: "webchat", Surface: "webchat" },
+    });
+
+    expect(result?.queuedFinal).toBe(true);
+    expect(dispatcherCall(dispatcher.sendFinalReply).text).toBe("Fallback text.");
+    expect(dispatcherCall(dispatcher.sendFinalReply).mediaUrl).toBeUndefined();
+  });
+
+  it("delivers text fallback when queued captioned-voice delivery fails asynchronously on telegram", async () => {
+    setReadyAcpResolution();
+    ttsMocks.resolveTtsConfig.mockReturnValue({ mode: "final" });
+    ttsMocks.maybeApplyTtsToPayload
+      .mockResolvedValueOnce({
+        text: "Captioned fallback.",
+        mediaUrl: "/tmp/openclaw-media/tts-caption.ogg",
+        audioAsVoice: true,
+      })
+      .mockImplementation(async (paramsUnknown: unknown) => {
+        return (paramsUnknown as { payload: unknown }).payload;
+      });
+    mockVisibleTextTurn("Captioned fallback.");
+    const cfg = createAcpTestConfig({
+      acp: {
+        enabled: true,
+        stream: { deliveryMode: "live", coalesceIdleMs: 0, maxChunkChars: 64 },
+      },
+    });
+
+    const { dispatcher } = createDispatcher();
+    (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true);
+    (dispatcher.getFailedCounts as ReturnType<typeof vi.fn>).mockReturnValue({
+      tool: 0,
+      block: 0,
+      final: 1,
+    });
+    const result = await runDispatch({
+      bodyForAgent: "reply",
+      cfg,
+      dispatcher,
+      ttsChannel: "telegram",
+      ctxOverrides: { Provider: "telegram", Surface: "telegram" },
+    });
+
+    expect(result?.queuedFinal).toBe(true);
+    expect(dispatcherCall(dispatcher.sendFinalReply, 0).mediaUrl).toBe(
+      "/tmp/openclaw-media/tts-caption.ogg",
+    );
+    expect(dispatcherCall(dispatcher.sendFinalReply, 1).text).toBe("Captioned fallback.");
+    expect(dispatcherCall(dispatcher.sendFinalReply, 1).mediaUrl).toBeUndefined();
+  });
+
+  it("does not send redundant text fallback when block delivery failed but captioned voice succeeded", async () => {
+    setReadyAcpResolution();
+    ttsMocks.resolveTtsConfig.mockReturnValue({ mode: "final" });
+    ttsMocks.maybeApplyTtsToPayload.mockResolvedValueOnce({
+      text: "Captioned text.",
+      mediaUrl: "/tmp/openclaw-media/tts-ok.ogg",
+      audioAsVoice: true,
+    });
+    mockVisibleTextTurn("Captioned text.");
+    const cfg = createAcpTestConfig({
+      acp: {
+        enabled: true,
+        stream: { deliveryMode: "live", coalesceIdleMs: 0, maxChunkChars: 64 },
+      },
+    });
+
+    const { dispatcher } = createDispatcher();
+    // Captioned voice delivery succeeds
+    (dispatcher.sendFinalReply as ReturnType<typeof vi.fn>).mockReturnValueOnce(true);
+    // Simulate an earlier block delivery failure (block: 1) with no final failures
+    (dispatcher.getFailedCounts as ReturnType<typeof vi.fn>).mockReturnValue({
+      tool: 0,
+      block: 1,
+      final: 0,
+    });
+    const result = await runDispatch({
+      bodyForAgent: "reply",
+      cfg,
+      dispatcher,
+      ttsChannel: "telegram",
+      ctxOverrides: { Provider: "telegram", Surface: "telegram" },
+    });
+
+    // Only the captioned voice should be sent; no redundant text-only final
+    expect(dispatcher.sendFinalReply).toHaveBeenCalledTimes(1);
+    expect(dispatcherCall(dispatcher.sendFinalReply, 0).mediaUrl).toBe(
+      "/tmp/openclaw-media/tts-ok.ogg",
+    );
+    // queuedFinal reflects aggregate visible-text state (block failed), but
+    // no redundant text fallback was sent — that's the key behavior verified.
+  });
+
+  it("settles visible text immediately when TTS mode is not final", async () => {
+    setReadyAcpResolution();
+    ttsMocks.resolveTtsConfig.mockReturnValue({ mode: "all" });
+    mockVisibleTextTurn("Eager settle.");
+    const cfg = createAcpTestConfig({
+      acp: {
+        enabled: true,
+        stream: { deliveryMode: "live", coalesceIdleMs: 0, maxChunkChars: 64 },
+      },
+    });
+
+    const { dispatcher } = createDispatcher();
+    await runDispatch({
+      bodyForAgent: "reply",
+      cfg,
+      dispatcher,
+      ctxOverrides: { Provider: "telegram", Surface: "telegram" },
+    });
+
+    expect(dispatcher.waitForIdle).toHaveBeenCalled();
   });
 
   it("falls back to final text when a later telegram ACP block delivery fails", async () => {

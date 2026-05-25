@@ -213,11 +213,9 @@ async function finalizeAcpTurnOutput(params: {
   sessionTtsAuto?: TtsAutoMode;
   ttsChannel?: string;
   ttsAccountId?: string;
+  supportsCaptionedVoice?: boolean;
   shouldEmitResolvedIdentityNotice: boolean;
 }): Promise<boolean> {
-  await params.delivery.settleVisibleText();
-  let queuedFinal =
-    params.delivery.hasDeliveredVisibleText() && !params.delivery.hasFailedVisibleTextDelivery();
   const ttsMode = resolveConfiguredTtsMode(params.cfg, {
     agentId: params.agentId,
     channelId: params.ttsChannel,
@@ -236,8 +234,17 @@ async function finalizeAcpTurnOutput(params: {
   const canAttemptFinalTts =
     ttsStatus != null && !(ttsStatus.autoMode === "inbound" && !params.inboundAudio);
 
+  const willAttemptFinalTts = ttsMode === "final" && hasAccumulatedBlockText && canAttemptFinalTts;
+
+  const shouldDeferTextForTts = willAttemptFinalTts && (params.supportsCaptionedVoice ?? false);
+  if (!shouldDeferTextForTts) {
+    await params.delivery.settleVisibleText();
+  }
+  let queuedFinal =
+    params.delivery.hasDeliveredVisibleText() && !params.delivery.hasFailedVisibleTextDelivery();
+
   let finalMediaDelivered = false;
-  if (ttsMode === "final" && hasAccumulatedBlockText && canAttemptFinalTts) {
+  if (willAttemptFinalTts) {
     try {
       const { maybeApplyTtsToPayload } = await loadDispatchAcpTtsRuntime();
       const ttsSyntheticReply = await maybeApplyTtsToPayload({
@@ -255,13 +262,14 @@ async function finalizeAcpTurnOutput(params: {
           "final",
           markReplyPayloadAsTtsSupplement(
             {
+              ...(shouldDeferTextForTts ? { text: accumulatedVisibleBlockText } : {}),
               mediaUrl: ttsSyntheticReply.mediaUrl,
               audioAsVoice: ttsSyntheticReply.audioAsVoice,
               spokenText: accumulatedBlockTtsText,
               trustedLocalMedia: true,
             },
             accumulatedBlockTtsText,
-            { visibleTextAlreadyDelivered: true },
+            shouldDeferTextForTts ? undefined : { visibleTextAlreadyDelivered: true },
           ),
         );
         queuedFinal = queuedFinal || delivered;
@@ -269,6 +277,21 @@ async function finalizeAcpTurnOutput(params: {
       }
     } catch (err) {
       logVerbose(`dispatch-acp: accumulated ACP block TTS failed: ${formatErrorMessage(err)}`);
+    }
+    if (shouldDeferTextForTts) {
+      // Always settle deferred text delivery — even when the captioned voice
+      // was accepted by the dispatcher — so we can detect later sendVoice
+      // failures that would otherwise silently lose the caption text.
+      await params.delivery.settleVisibleText();
+      if (finalMediaDelivered && params.delivery.hasFailedFinalDelivery()) {
+        // The captioned voice delivery was queued as "final" but ultimately
+        // failed; check final-specific failure count so earlier block failures
+        // don't incorrectly trigger this reset.
+        finalMediaDelivered = false;
+      }
+      queuedFinal =
+        params.delivery.hasDeliveredVisibleText() &&
+        !params.delivery.hasFailedVisibleTextDelivery();
     }
   }
 
@@ -278,7 +301,8 @@ async function finalizeAcpTurnOutput(params: {
     ttsMode !== "all" &&
     accumulatedVisibleBlockText.trim().length > 0 &&
     !finalMediaDelivered &&
-    !params.delivery.hasDeliveredFinalReply() &&
+    (!params.delivery.hasDeliveredFinalReply() ||
+      (shouldDeferTextForTts && params.delivery.hasFailedVisibleTextDelivery())) &&
     (!params.delivery.hasDeliveredVisibleText() || params.delivery.hasFailedVisibleTextDelivery());
   if (shouldDeliverTextFallback) {
     const delivered = await params.delivery.deliver(
@@ -569,6 +593,7 @@ export async function tryDispatchAcpReply(params: {
         sessionTtsAuto: params.sessionTtsAuto,
         ttsChannel: params.ttsChannel,
         ttsAccountId: effectiveDispatchAccountId,
+        supportsCaptionedVoice: params.ttsChannel === "telegram",
         shouldEmitResolvedIdentityNotice,
       })) || queuedFinal;
 
