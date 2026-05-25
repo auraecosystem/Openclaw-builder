@@ -15,6 +15,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Auth/OpenAI Codex: normalize legacy OAuth profile field aliases and explain stale auth profile mode overrides, so older Codex OAuth accounts do not get masked as missing API keys. Fixes #47964. (#75030) Thanks  and .
 - Agents/media: send direct fallback for generated media still missing after an active requester wake fails. (#85489) Thanks @fuller-stack-dev.
 - Agent transcript: include OpenClaw agent session logs when finding local transcript candidates.
 - Sessions/doctor: load large session stores without clone amplification during read-only doctor checks and reclaim stale `sessions.json.*.tmp` sidecars. Fixes #56827. Thanks @openperf.
