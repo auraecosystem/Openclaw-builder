@@ -21,6 +21,7 @@ import {
   resolveSandboxedSessionToolContext,
   resolveVisibleSessionReference,
   stripToolMessages,
+  stripTranscriptOnlyOpenClawAssistantMessages,
 } from "./sessions-helpers.js";
 
 const SessionsHistoryToolSchema = Type.Object({
@@ -31,6 +32,7 @@ const SessionsHistoryToolSchema = Type.Object({
 
 const SESSIONS_HISTORY_MAX_BYTES = 80 * 1024;
 const SESSIONS_HISTORY_TEXT_MAX_CHARS = 4000;
+const SESSIONS_HISTORY_RAW_FETCH_LIMIT = 1000;
 type GatewayCaller = typeof callGateway;
 
 // sandbox policy handling is shared with sessions-list-tool via sessions-helpers.ts
@@ -152,6 +154,17 @@ function sanitizeHistoryMessage(message: unknown): {
   return { message: entry, truncated, redacted };
 }
 
+function applyVisibleHistoryLimit(messages: unknown[], limit: number | undefined): unknown[] {
+  if (typeof limit !== "number" || messages.length <= limit) {
+    return messages;
+  }
+  return messages.slice(-limit);
+}
+
+function resolveSessionsHistoryRawFetchLimit(): number {
+  return SESSIONS_HISTORY_RAW_FETCH_LIMIT;
+}
+
 function enforceSessionsHistoryHardCap(params: {
   items: unknown[];
   bytes: number;
@@ -252,12 +265,15 @@ export function createSessionsHistoryTool(opts?: {
           ? Math.max(1, Math.floor(params.limit))
           : undefined;
       const includeTools = Boolean(params.includeTools);
+      const rawFetchLimit = resolveSessionsHistoryRawFetchLimit();
       const result = await gatewayCall<{ messages: Array<unknown> }>({
         method: "chat.history",
-        params: { sessionKey: resolvedKey, limit },
+        params: { sessionKey: resolvedKey, limit: rawFetchLimit },
       });
       const rawMessages = Array.isArray(result?.messages) ? result.messages : [];
-      const selectedMessages = includeTools ? rawMessages : stripToolMessages(rawMessages);
+      const visibleMessages = stripTranscriptOnlyOpenClawAssistantMessages(rawMessages);
+      const unboundedSelectedMessages = includeTools ? visibleMessages : stripToolMessages(visibleMessages);
+      const selectedMessages = applyVisibleHistoryLimit(unboundedSelectedMessages, limit);
       const sanitizedMessages = selectedMessages.map((message) => sanitizeHistoryMessage(message));
       const contentTruncated = sanitizedMessages.some((entry) => entry.truncated);
       const contentRedacted = sanitizedMessages.some((entry) => entry.redacted);

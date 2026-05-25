@@ -584,8 +584,9 @@ describe("sessions tools", () => {
 
   it("sessions_history filters tool messages by default", async () => {
     callGatewayMock.mockImplementation(async (opts: unknown) => {
-      const request = opts as { method?: string };
+      const request = opts as { method?: string; params?: { limit?: number } };
       if (request.method === "chat.history") {
+        expect(request.params?.limit).toBe(1000);
         return {
           messages: [
             { role: "toolResult", content: [] },
@@ -612,6 +613,96 @@ describe("sessions tools", () => {
     });
     const withToolsDetails = withTools.details as { messages?: unknown[] };
     expect(withToolsDetails.messages).toHaveLength(2);
+  });
+
+  it("sessions_history filters transcript-only OpenClaw assistant messages", async () => {
+    callGatewayMock.mockImplementation(async (opts: unknown) => {
+      const request = opts as { method?: string };
+      if (request.method === "chat.history") {
+        return {
+          messages: [
+            {
+              role: "assistant",
+              provider: "openclaw",
+              model: "delivery-mirror",
+              content: [{ type: "text", text: "duplicate mirror" }],
+            },
+            {
+              role: "assistant",
+              provider: "openclaw",
+              model: "gateway-injected",
+              content: [{ type: "text", text: "injected duplicate" }],
+            },
+            { role: "toolResult", content: [] },
+            { role: "assistant", content: [{ type: "text", text: "real answer" }] },
+          ],
+        };
+      }
+      return {};
+    });
+
+    const tool = createOpenClawTools().find((candidate) => candidate.name === "sessions_history");
+    if (!tool) {
+      throw new Error("missing sessions_history tool");
+    }
+
+    const result = await tool.execute("call-transcript-only", { sessionKey: "main" });
+    const details = result.details as { messages?: Array<{ content?: Array<{ text?: string }> }> };
+    expect(details.messages).toHaveLength(1);
+    expect(details.messages?.[0]?.content?.[0]?.text).toBe("real answer");
+
+    const withTools = await tool.execute("call-transcript-only-tools", {
+      sessionKey: "main",
+      includeTools: true,
+    });
+    const withToolsDetails = withTools.details as { messages?: Array<{ role?: string }> };
+    expect(withToolsDetails.messages?.map((message) => message.role)).toEqual([
+      "toolResult",
+      "assistant",
+    ]);
+  });
+
+  it("sessions_history applies limit after transcript-only filtering", async () => {
+    callGatewayMock.mockImplementation(async (opts: unknown) => {
+      const request = opts as { method?: string; params?: { limit?: number } };
+      if (request.method === "chat.history") {
+        expect(request.params?.limit).toBe(1000);
+        return {
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "older visible answer" }],
+            },
+            {
+              role: "assistant",
+              provider: "openclaw",
+              model: "delivery-mirror",
+              content: [{ type: "text", text: "duplicate delivery mirror" }],
+            },
+            {
+              role: "assistant",
+              provider: "openclaw",
+              model: "gateway-injected",
+              content: [{ type: "text", text: "duplicate gateway injection" }],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+
+    const tool = createOpenClawTools().find((candidate) => candidate.name === "sessions_history");
+    if (!tool) {
+      throw new Error("missing sessions_history tool");
+    }
+
+    const result = await tool.execute("call-transcript-only-limit", {
+      sessionKey: "main",
+      limit: 1,
+    });
+    const details = result.details as { messages?: Array<{ content?: Array<{ text?: string }> }> };
+    expect(details.messages).toHaveLength(1);
+    expect(details.messages?.[0]?.content?.[0]?.text).toBe("older visible answer");
   });
 
   it("sessions_history caps oversized payloads and strips heavy fields", async () => {

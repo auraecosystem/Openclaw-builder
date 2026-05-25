@@ -1,4 +1,5 @@
 import { extractAssistantTextForPhase } from "../../shared/chat-message-content.js";
+import { isTranscriptOnlyOpenClawAssistantMessage } from "../../shared/openclaw-transcript-only.js";
 import { sanitizeAssistantVisibleTextWithProfile } from "../../shared/text/assistant-visible-text.js";
 import { sanitizeUserFacingText } from "../pi-embedded-helpers/sanitize-user-facing-text.js";
 
@@ -10,6 +11,10 @@ export function stripToolMessages(messages: unknown[]): unknown[] {
     const role = (msg as { role?: unknown }).role;
     return role !== "toolResult" && role !== "tool";
   });
+}
+
+export function stripTranscriptOnlyOpenClawAssistantMessages(messages: unknown[]): unknown[] {
+  return messages.filter((msg) => !isTranscriptOnlyOpenClawAssistantMessage(msg));
 }
 
 /**

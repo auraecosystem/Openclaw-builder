@@ -19,6 +19,7 @@ export {
   extractAssistantText,
   sanitizeTextContent,
   stripToolMessages,
+  stripTranscriptOnlyOpenClawAssistantMessages,
 } from "./chat-history-text.js";
 import { getRuntimeConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";

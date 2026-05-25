@@ -1,4 +1,5 @@
 import { asPositiveSafeInteger } from "../shared/number-coercion.js";
+import { isTranscriptOnlyOpenClawAssistantMessage } from "../shared/openclaw-transcript-only.js";
 import {
   DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
   projectChatDisplayMessages,
@@ -75,6 +76,17 @@ function toSessionHistoryMessages(messages: unknown[]): SessionHistoryMessage[] 
   );
 }
 
+function filterTranscriptOnlyOpenClawAssistantMessages(messages: unknown[]): unknown[] {
+  return messages.filter((message) => !isTranscriptOnlyOpenClawAssistantMessage(message));
+}
+
+function projectSessionHistoryDisplayMessages(
+  messages: unknown[],
+  options?: { maxChars?: number },
+): Array<Record<string, unknown>> {
+  return projectChatDisplayMessages(filterTranscriptOnlyOpenClawAssistantMessages(messages), options);
+}
+
 function buildPaginatedSessionHistory(params: {
   messages: SessionHistoryMessage[];
   hasMore: boolean;
@@ -134,7 +146,7 @@ export function buildSessionHistorySnapshot(params: {
   totalRawMessages?: number;
 }): SessionHistorySnapshot {
   const visibleMessages = toSessionHistoryMessages(
-    projectChatDisplayMessages(params.rawMessages, {
+    projectSessionHistoryDisplayMessages(params.rawMessages, {
       maxChars: params.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
     }),
   );
@@ -253,7 +265,7 @@ export class SessionHistorySseState {
       seq: this.rawTranscriptSeq,
     });
     const projectedMessages = toSessionHistoryMessages(
-      projectChatDisplayMessages([...this.sentHistory.messages, nextMessage], {
+      projectSessionHistoryDisplayMessages([...this.sentHistory.messages, nextMessage], {
         maxChars: this.maxChars,
       }),
     );
@@ -287,7 +299,7 @@ export class SessionHistorySseState {
       }
     }
     const [sanitizedMessage] = toSessionHistoryMessages(
-      projectChatDisplayMessages([nextMessage], { maxChars: this.maxChars }),
+      projectSessionHistoryDisplayMessages([nextMessage], { maxChars: this.maxChars }),
     );
     if (!sanitizedMessage) {
       if (projectedMessages.length < this.sentHistory.messages.length) {
