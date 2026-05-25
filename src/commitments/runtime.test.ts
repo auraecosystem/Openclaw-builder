@@ -24,11 +24,14 @@ vi.mock("./model-selection.runtime.js", () => ({
   resolveCommitmentDefaultModelRef: resolveDefaultModelMock,
 }));
 
-function requireFirstEmbeddedPiRequest(): {
+type EmbeddedPiRequest = {
   provider?: string;
   model?: string;
   disableTools?: boolean;
-} {
+  fastMode?: boolean;
+};
+
+function requireFirstEmbeddedPiRequest(): EmbeddedPiRequest {
   const [call] = runEmbeddedPiAgentMock.mock.calls;
   if (!call) {
     throw new Error("expected embedded PI agent extraction request");
@@ -37,7 +40,7 @@ function requireFirstEmbeddedPiRequest(): {
   if (!request || typeof request !== "object" || Array.isArray(request)) {
     throw new Error("expected embedded PI agent extraction request");
   }
-  return request as { provider?: string; model?: string; disableTools?: boolean };
+  return request as EmbeddedPiRequest;
 }
 
 describe("commitment extraction runtime", () => {
@@ -224,6 +227,46 @@ describe("commitment extraction runtime", () => {
     expect(request.provider).toBe("openai-codex");
     expect(request.model).toBe("gpt-5.5");
     expect(request.disableTools).toBe(true);
+    // Regression for #78451: commitment extraction must resolve fastMode, not
+    // hardcode true, so MiniMax (and similar) stream wrappers do not flip the
+    // configured base model id to a -highspeed variant the operator's plan does
+    // not own.
+    expect(request.fastMode).toBe(false);
+  });
+
+  it("passes configured fast mode into the hidden extractor run", async () => {
+    const cfg = await createConfig();
+    cfg.agents = {
+      list: [{ id: "main", fastModeDefault: true }],
+    };
+    runEmbeddedPiAgentMock.mockResolvedValue({
+      payloads: [{ text: '{"candidates":[]}' }],
+    });
+    resolveDefaultModelMock.mockReturnValue({
+      provider: "openai-codex",
+      model: "gpt-5.5",
+    });
+    configureCommitmentExtractionRuntime({
+      forceInTests: true,
+      setTimer: () => ({ unref() {} }) as ReturnType<typeof setTimeout>,
+      clearTimer: () => undefined,
+    });
+
+    expect(
+      enqueueCommitmentExtraction({
+        cfg,
+        nowMs,
+        agentId: "main",
+        sessionKey: "agent:main:discord:channel-1",
+        channel: "discord",
+        userText: "I have an interview tomorrow.",
+        assistantText: "Good luck.",
+      }),
+    ).toBe(true);
+
+    await expect(drainCommitmentExtractionQueue()).resolves.toBe(1);
+    const request = requireFirstEmbeddedPiRequest();
+    expect(request.fastMode).toBe(true);
   });
 
   it("backs off hidden extraction after terminal model or auth failures", async () => {

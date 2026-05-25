@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
+import { resolveFastModeState } from "../agents/fast-mode.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveStateDir } from "../config/paths.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -240,7 +241,12 @@ async function defaultExtractBatch(params: {
     thinkLevel: "off",
     verboseLevel: "off",
     reasoningLevel: "off",
-    fastMode: true,
+    fastMode: resolveFastModeState({
+      cfg,
+      provider: modelRef.provider,
+      model: modelRef.model,
+      agentId: first.agentId,
+    }).enabled,
     timeoutMs: resolved.extraction.timeoutSeconds * 1000,
     runId,
     bootstrapContextMode: "lightweight",
