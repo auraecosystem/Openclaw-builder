@@ -1,14 +1,15 @@
 import fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DoctorPrompter } from "../commands/doctor-prompter.js";
+import { CORE_HEALTH_CHECKS } from "./doctor-core-checks.js";
 import {
+  resolveDoctorContributionHealthChecks,
   resolveDoctorHealthContributions,
   shouldSkipLegacyUpdateDoctorConfigWrite,
 } from "./doctor-health-contributions.js";
 
 const mocks = vi.hoisted(() => ({
   maybeRunConfiguredPluginInstallReleaseStep: vi.fn(),
-  registerCoreHealthChecks: vi.fn(),
   registerBundledHealthChecks: vi.fn(),
   runDoctorHealthRepairs: vi.fn(),
   listHealthChecks: vi.fn(),
@@ -30,10 +31,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../commands/doctor/shared/release-configured-plugin-installs.js", () => ({
   maybeRunConfiguredPluginInstallReleaseStep: mocks.maybeRunConfiguredPluginInstallReleaseStep,
-}));
-
-vi.mock("./doctor-core-checks.js", () => ({
-  registerCoreHealthChecks: mocks.registerCoreHealthChecks,
 }));
 
 vi.mock("./bundled-health-checks.js", () => ({
@@ -113,7 +110,6 @@ function buildDoctorPrompter(shouldRepair: boolean): DoctorPrompter {
 describe("doctor health contributions", () => {
   beforeEach(() => {
     mocks.maybeRunConfiguredPluginInstallReleaseStep.mockReset();
-    mocks.registerCoreHealthChecks.mockReset();
     mocks.registerBundledHealthChecks.mockReset();
     mocks.runDoctorHealthRepairs.mockReset();
     mocks.runDoctorHealthRepairs.mockResolvedValue({
@@ -130,8 +126,8 @@ describe("doctor health contributions", () => {
     });
     mocks.listHealthChecks.mockReset();
     mocks.listHealthChecks.mockReturnValue([
-      { id: "core/doctor/shell-completion" },
-      { id: "core/doctor/unrelated" },
+      { id: "core/doctor/shell-completion", kind: "core" },
+      { id: "plugin/example/unrelated", kind: "plugin" },
     ]);
     mocks.resolveAgentWorkspaceDir.mockReset();
     mocks.resolveAgentWorkspaceDir.mockReturnValue("/tmp/openclaw-workspace");
@@ -249,6 +245,18 @@ describe("doctor health contributions", () => {
     expect(ids.indexOf("doctor:skills")).toBeLessThan(ids.indexOf("doctor:write-config"));
   });
 
+  it("keeps implemented core health checks owned by ordered doctor contributions", async () => {
+    const coreIds = CORE_HEALTH_CHECKS.map((check) => check.id);
+    const contributionIds = resolveDoctorHealthContributions().flatMap(
+      (entry) => entry.healthCheckIds,
+    );
+    const contributionChecks = await resolveDoctorContributionHealthChecks();
+
+    expect(new Set(contributionIds)).toEqual(new Set(coreIds));
+    expect(contributionIds).toHaveLength(coreIds.length);
+    expect(contributionChecks.map((check) => check.id)).toEqual(contributionIds);
+  });
+
   it("runs structured repairs before legacy skill repairs and config writes", () => {
     const ids = resolveDoctorHealthContributions().map((entry) => entry.id);
 
@@ -261,7 +269,7 @@ describe("doctor health contributions", () => {
     );
   });
 
-  it("keeps legacy positional shell completion out of the broad structured repair pass", async () => {
+  it("keeps core doctor repairs out of the extension repair pass", async () => {
     const contribution = requireDoctorContribution("doctor:structured-health-repairs");
     const ctx = {
       cfg: {},
@@ -278,7 +286,7 @@ describe("doctor health contributions", () => {
     await contribution.run(ctx);
 
     expect(mocks.runDoctorHealthRepairs).toHaveBeenCalledWith(expect.any(Object), {
-      checks: [{ id: "core/doctor/unrelated" }],
+      checks: [{ id: "plugin/example/unrelated", kind: "plugin" }],
     });
   });
 
