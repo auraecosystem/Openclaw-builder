@@ -472,6 +472,7 @@ function createStreamFnWithExtraParams(
     provider,
     typeof model?.api === "string" ? model.api : undefined,
     typeof model?.id === "string" ? model.id : undefined,
+    typeof model?.baseUrl === "string" ? model.baseUrl : undefined,
   );
   if (Object.keys(streamParams).length > 0 || initialCacheRetention) {
     const debugParams = initialCacheRetention
@@ -487,6 +488,7 @@ function createStreamFnWithExtraParams(
       provider,
       typeof callModel.api === "string" ? callModel.api : undefined,
       typeof callModel.id === "string" ? callModel.id : undefined,
+      typeof callModel.baseUrl === "string" ? callModel.baseUrl : undefined,
     );
     if (Object.keys(streamParams).length === 0 && !cacheRetention) {
       return underlying(callModel, context, options);
@@ -757,7 +759,10 @@ function applyPrePluginStreamWrappers(ctx: ApplyExtraParamsContext): void {
 function applyPostPluginStreamWrappers(
   ctx: ApplyExtraParamsContext & { providerWrapperHandled: boolean },
 ): void {
-  ctx.agent.streamFn = createOpenRouterSystemCacheWrapper(ctx.agent.streamFn);
+  ctx.agent.streamFn = createOpenRouterSystemCacheWrapper(
+    ctx.agent.streamFn,
+    ctx.effectiveExtraParams,
+  );
   ctx.agent.streamFn = createOpenAIStringContentWrapper(ctx.agent.streamFn);
   ctx.agent.streamFn = createOpenAICompletionsStrictMessageKeysWrapper(ctx.agent.streamFn);
   ctx.agent.streamFn = createOpenAICompletionsToolsCompatWrapper(ctx.agent.streamFn);
