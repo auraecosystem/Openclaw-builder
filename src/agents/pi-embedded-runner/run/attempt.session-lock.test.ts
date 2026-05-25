@@ -1167,6 +1167,144 @@ describe("embedded attempt session lock lifecycle", () => {
     expect(session["_extensionRunner"].hasHandlers).not.toHaveBeenCalledWith("tool_call");
   });
 
+  it("does not trip takeover when pi-style writes happen before beforeToolCall fires", async () => {
+    // Regression for #86572: when pi's stream iteration writes via direct
+    // appendFileSync between releaseForPrompt and the next external-hook
+    // lock acquisition, refreshBeforeLock must snap the current fingerprint
+    // so assertSessionFileFence doesn't misclassify the lane's own writes as
+    // external mutation. Verified to FAIL without refreshBeforeLock wired
+    // (test throws EmbeddedAttemptSessionTakeoverError on the beforeToolCall).
+    const sessionFile = await createTempSessionFile();
+    const release = vi.fn(async () => {});
+    const acquireSessionWriteLock = vi.fn(async () => ({ release }));
+    const controller = await createEmbeddedAttemptSessionLockController({
+      acquireSessionWriteLock,
+      lockOptions: { ...lockOptions, sessionFile },
+    });
+
+    const toolCallFired: string[] = [];
+    const session = {
+      agent: {
+        beforeToolCall: vi.fn(async () => {
+          toolCallFired.push("tool-call");
+        }),
+      },
+    };
+
+    installSessionExternalHookWriteLock({
+      session,
+      withSessionWriteLock: (op) => controller.withSessionWriteLock(op),
+      refreshBeforeLock: () => controller.refreshAfterOwnedSessionWrite(),
+    });
+
+    // Mimic the prompt-window lifecycle: release for prompt (captures F0),
+    // then pi's stream iteration writes directly via appendFileSync (F0->F1).
+    await controller.releaseForPrompt();
+    await fs.appendFile(sessionFile, '{"type":"message","id":"pi-stream-write"}\n', "utf8");
+
+    // beforeToolCall fires before any onMessagePersisted has refreshed the
+    // fence. With refreshBeforeLock wired, waitBeforeLock snaps F1 into the
+    // fence; without it, withSessionWriteLock's assertSessionFileFence would
+    // see F1 != F0 and throw.
+    await expect(session.agent.beforeToolCall()).resolves.toBeUndefined();
+    expect(toolCallFired).toEqual(["tool-call"]);
+    expect(controller.hasSessionTakeover()).toBe(false);
+  });
+
+  it("allows multiple prompt turns with pi-style direct writes per turn", async () => {
+    // Regression for #86572 multi-turn case: each continuation captures its
+    // own fenceFingerprint at releaseForPrompt; refreshBeforeLock must work
+    // independently per turn without leaking state across them.
+    const sessionFile = await createTempSessionFile();
+    const release = vi.fn(async () => {});
+    const acquireSessionWriteLock = vi.fn(async () => ({ release }));
+    const controller = await createEmbeddedAttemptSessionLockController({
+      acquireSessionWriteLock,
+      lockOptions: { ...lockOptions, sessionFile },
+    });
+    // Capture the original spy before installLockableFunction replaces
+    // session.agent.beforeToolCall with the lock wrapper.
+    const beforeToolCallSpy = vi.fn(async () => {});
+    const session = {
+      agent: { beforeToolCall: beforeToolCallSpy },
+    };
+    installSessionExternalHookWriteLock({
+      session,
+      withSessionWriteLock: (op) => controller.withSessionWriteLock(op),
+      refreshBeforeLock: () => controller.refreshAfterOwnedSessionWrite(),
+    });
+
+    for (let turn = 0; turn < 3; turn += 1) {
+      await controller.releaseForPrompt();
+      await fs.appendFile(sessionFile, `{"type":"message","id":"turn-${turn}"}\n`, "utf8");
+      await expect(session.agent.beforeToolCall()).resolves.toBeUndefined();
+      await controller.reacquireAfterPrompt();
+    }
+
+    expect(controller.hasSessionTakeover()).toBe(false);
+    expect(beforeToolCallSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not classify a different session file's writes as owned by this controller", async () => {
+    // Regression for #86572 cross-file isolation: refreshAfterOwnedSessionWrite
+    // is keyed to this controller's sessionFile. Writes to a DIFFERENT
+    // session file must not advance this controller's fence and must not be
+    // silently accepted on this controller's next lock acquisition.
+    const sessionFileA = await createTempSessionFile();
+    const sessionFileB = await createTempSessionFile();
+    const release = vi.fn(async () => {});
+    const acquireSessionWriteLock = vi.fn(async () => ({ release }));
+    const controllerA = await createEmbeddedAttemptSessionLockController({
+      acquireSessionWriteLock,
+      lockOptions: { ...lockOptions, sessionFile: sessionFileA },
+    });
+
+    await controllerA.releaseForPrompt();
+
+    // Write to file B only. File A is unchanged.
+    await fs.appendFile(sessionFileB, '{"type":"message","id":"file-b-write"}\n', "utf8");
+
+    // refreshAfterOwnedSessionWrite reads sessionFileA's stat. File A is
+    // unchanged, so the fence stays at F0(A). A subsequent owned-lock
+    // operation succeeds.
+    controllerA.refreshAfterOwnedSessionWrite();
+    await expect(controllerA.withSessionWriteLock(() => "a-1")).resolves.toBe("a-1");
+
+    // Now a genuine external write to file A must still trip the fence.
+    await fs.appendFile(sessionFileA, '{"type":"message","id":"external-a"}\n', "utf8");
+    await expect(controllerA.withSessionWriteLock(() => "a-2")).rejects.toBeInstanceOf(
+      EmbeddedAttemptSessionTakeoverError,
+    );
+    expect(controllerA.hasSessionTakeover()).toBe(true);
+  });
+
+  it("does not hang when reacquireAfterPrompt rejects after a pi-style direct write", async () => {
+    // Regression for #86572 abort/error path: if an unowned write does
+    // genuinely happen and reacquireAfterPrompt's fence trips, the cleanup
+    // path must still terminate without hangs or unresolved promises.
+    const sessionFile = await createTempSessionFile();
+    const release = vi.fn(async () => {});
+    const acquireSessionWriteLock = vi.fn(async () => ({ release }));
+    const controller = await createEmbeddedAttemptSessionLockController({
+      acquireSessionWriteLock,
+      lockOptions: { ...lockOptions, sessionFile },
+    });
+
+    await controller.releaseForPrompt();
+    // External (unowned) write — not from this lane.
+    await fs.appendFile(sessionFile, '{"type":"message","id":"external-write"}\n', "utf8");
+
+    await expect(controller.reacquireAfterPrompt()).rejects.toBeInstanceOf(
+      EmbeddedAttemptSessionTakeoverError,
+    );
+    expect(controller.hasSessionTakeover()).toBe(true);
+
+    // Cleanup must still terminate; acquireForCleanup returns a noop lock
+    // once takeover is detected, so .release() never blocks.
+    const cleanupLock = await controller.acquireForCleanup();
+    await expect(cleanupLock.release()).resolves.toBeUndefined();
+  });
+
   it("drains queued session events before locking a tool-call extension hook", async () => {
     const events: string[] = [];
     let resolveQueue!: () => void;

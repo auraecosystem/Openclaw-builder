@@ -572,36 +572,52 @@ export function installSessionEventWriteLock(params: {
 export function installSessionExternalHookWriteLock(params: {
   session: unknown;
   withSessionWriteLock: <T>(run: () => Promise<T> | T) => Promise<T>;
+  // Snap the session file's current fingerprint into the fence just before
+  // acquiring the write lock. Required for vanilla pi, where direct
+  // appendFileSync writes from `_handleAgentEvent` -> `_persist` can advance
+  // the file between successive onMessagePersisted callbacks; without this
+  // refresh, assertSessionFileFence sees the pre-write fingerprint and
+  // misclassifies the lane's own writes as external mutation. See #86572.
+  refreshBeforeLock?: () => void;
 }): void {
   const session = params.session as SessionWithExternalHooks;
   const agent = session.agent;
+  // Shared closure: drain any in-flight pi event queue first, then snap the
+  // current file fingerprint so the fence sees the post-write state when
+  // withSessionWriteLock calls assertSessionFileFence below. In vanilla pi
+  // the queue drain is a no-op (`_agentEventQueue` unset), but the fingerprint
+  // refresh is load-bearing.
+  const waitBeforeLock = async () => {
+    await waitForSessionEventQueue(session);
+    params.refreshBeforeLock?.();
+  };
   if (agent) {
     installLockableFunction({
       owner: agent as Record<string, unknown>,
       key: "beforeToolCall",
       shouldLock: () => true,
-      waitBeforeLock: () => waitForSessionEventQueue(session),
+      waitBeforeLock,
       withSessionWriteLock: params.withSessionWriteLock,
     });
     installLockableFunction({
       owner: agent as Record<string, unknown>,
       key: "afterToolCall",
       shouldLock: () => sessionHasExtensionHandlers(session, "tool_result"),
-      waitBeforeLock: () => waitForSessionEventQueue(session),
+      waitBeforeLock,
       withSessionWriteLock: params.withSessionWriteLock,
     });
     installLockableFunction({
       owner: agent as Record<string, unknown>,
       key: "onPayload",
       shouldLock: () => sessionHasExtensionHandlers(session, "before_provider_request"),
-      waitBeforeLock: () => waitForSessionEventQueue(session),
+      waitBeforeLock,
       withSessionWriteLock: params.withSessionWriteLock,
     });
     installLockableFunction({
       owner: agent as Record<string, unknown>,
       key: "onResponse",
       shouldLock: () => sessionHasExtensionHandlers(session, "after_provider_response"),
-      waitBeforeLock: () => waitForSessionEventQueue(session),
+      waitBeforeLock,
       withSessionWriteLock: params.withSessionWriteLock,
     });
   }
@@ -609,7 +625,7 @@ export function installSessionExternalHookWriteLock(params: {
     owner: session as Record<string, unknown>,
     key: "compact",
     shouldLock: () => true,
-    waitBeforeLock: () => waitForSessionEventQueue(session),
+    waitBeforeLock,
     withSessionWriteLock: params.withSessionWriteLock,
   });
 }

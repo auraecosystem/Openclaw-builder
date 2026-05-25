@@ -2592,6 +2592,13 @@ export async function runEmbeddedAttempt(
       installSessionExternalHookWriteLock({
         session: activeSession,
         withSessionWriteLock: (operation) => sessionLockController.withSessionWriteLock(operation),
+        // Synchronously snap the file fingerprint into the fence right before
+        // a hook acquires the write lock. Required because pi's _persist path
+        // uses appendFileSync directly and the onMessagePersisted callback
+        // can lag behind successive writes; without this snap, a hook firing
+        // between two rapid writes would see a stale fenceFingerprint and
+        // trip EmbeddedAttemptSessionTakeoverError. See #86572.
+        refreshBeforeLock: () => sessionLockController.refreshAfterOwnedSessionWrite(),
       });
       installMessageToolOnlyTerminalHook({
         agent: activeSession.agent,
