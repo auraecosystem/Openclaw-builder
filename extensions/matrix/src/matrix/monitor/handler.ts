@@ -1027,7 +1027,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
               timestamp: eventTs ?? undefined,
               messageId,
             };
-            roomHistoryTracker.recordPending(roomId, pendingEntry);
+            roomHistoryTracker.recordPending(roomId, pendingEntry, threadRootId);
           }
           logger.info("skipping room message", { roomId, reason: "no-mention" });
           await commitInboundEventIfClaimed();
@@ -1136,12 +1136,18 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         }
         const preparedTrigger =
           isRoom && historyLimit > 0
-            ? roomHistoryTracker.prepareTrigger(_route.agentId, roomId, historyLimit, {
-                sender: senderName,
-                body: bodyText,
-                timestamp: eventTs ?? undefined,
-                messageId,
-              })
+            ? roomHistoryTracker.prepareTrigger(
+                _route.agentId,
+                roomId,
+                historyLimit,
+                {
+                  sender: senderName,
+                  body: bodyText,
+                  timestamp: eventTs ?? undefined,
+                  messageId,
+                },
+                threadRootId,
+              )
             : undefined;
         const inboundHistory = preparedTrigger
           ? buildInboundHistoryFromEntries({
@@ -2241,7 +2247,13 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       // Only advance to the snapshot position — messages added during async processing remain
       // visible for the next trigger.
       if (isRoom && triggerSnapshot) {
-        roomHistoryTracker.consumeHistory(_route.agentId, roomId, triggerSnapshot, messageId);
+        roomHistoryTracker.consumeHistory(
+          _route.agentId,
+          roomId,
+          triggerSnapshot,
+          messageId,
+          threadRootId,
+        );
       }
       if (!hasFinalInboundReplyDispatch({ queuedFinal, counts })) {
         await commitInboundEventIfClaimed();
