@@ -31,7 +31,7 @@ import {
 } from "./persisted.js";
 import {
   clearRuntimeAuthProfileStoreSnapshots as clearRuntimeAuthProfileStoreSnapshotsImpl,
-  getRuntimeAuthProfileStoreSnapshot,
+  getRuntimeAuthProfileStoreSnapshot as getRuntimeAuthProfileStoreSnapshotImpl,
   hasRuntimeAuthProfileStoreSnapshot,
   replaceRuntimeAuthProfileStoreSnapshots as replaceRuntimeAuthProfileStoreSnapshotsImpl,
   setRuntimeAuthProfileStoreSnapshot,
@@ -146,8 +146,8 @@ function resolveRuntimeAuthProfileStore(
 ): AuthProfileStore | null {
   const mainKey = resolveAuthStorePath(undefined);
   const requestedKey = resolveAuthStorePath(agentDir);
-  const mainStore = getRuntimeAuthProfileStoreSnapshot(undefined);
-  const requestedStore = getRuntimeAuthProfileStoreSnapshot(agentDir);
+  const mainStore = getRuntimeAuthProfileStoreSnapshotImpl(undefined);
+  const requestedStore = getRuntimeAuthProfileStoreSnapshotImpl(agentDir);
 
   if (!agentDir || requestedKey === mainKey) {
     if (!mainStore) {
@@ -731,6 +731,12 @@ export function ensureAuthProfileStoreForLocalUpdate(agentDir?: string): AuthPro
 }
 
 export { hasAnyAuthProfileStoreSource } from "./source-check.js";
+
+export function getRuntimeAuthProfileStoreSnapshot(
+  agentDir?: string,
+): AuthProfileStore | undefined {
+  return getRuntimeAuthProfileStoreSnapshotImpl(agentDir);
+}
 
 export function replaceRuntimeAuthProfileStoreSnapshots(
   entries: Array<{ agentDir?: string; store: AuthProfileStore }>,

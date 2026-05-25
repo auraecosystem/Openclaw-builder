@@ -44,7 +44,7 @@ const hoisted = vi.hoisted(() => ({
   reloadEvents: [] as string[],
   resetModelCatalogCache: vi.fn(() => {}),
   clearCurrentProviderAuthState: vi.fn(() => {}),
-  warmCurrentProviderAuthState: vi.fn(async (_cfg: OpenClawConfig) => {}),
+  warmCurrentProviderAuthStateOffMainThread: vi.fn(async (_cfg: OpenClawConfig) => {}),
 }));
 
 vi.mock("../hooks/gmail-watcher.js", () => ({
@@ -112,9 +112,9 @@ vi.mock("../agents/model-provider-auth.js", () => ({
     hoisted.reloadEvents.push("clear-provider-auth");
     hoisted.clearCurrentProviderAuthState();
   },
-  warmCurrentProviderAuthState: async (cfg: OpenClawConfig) => {
+  warmCurrentProviderAuthStateOffMainThread: async (cfg: OpenClawConfig) => {
     hoisted.reloadEvents.push("warm-provider-auth");
-    await hoisted.warmCurrentProviderAuthState(cfg);
+    await hoisted.warmCurrentProviderAuthStateOffMainThread(cfg);
   },
 }));
 
@@ -165,7 +165,7 @@ afterEach(() => {
   hoisted.reloadEvents.length = 0;
   hoisted.resetModelCatalogCache.mockClear();
   hoisted.clearCurrentProviderAuthState.mockClear();
-  hoisted.warmCurrentProviderAuthState.mockClear();
+  hoisted.warmCurrentProviderAuthStateOffMainThread.mockClear();
 });
 
 describe("gateway hot reload model state", () => {
@@ -232,7 +232,7 @@ describe("gateway hot reload model state", () => {
       "clear-provider-auth",
       "warm-provider-auth",
     ]);
-    expect(hoisted.warmCurrentProviderAuthState).toHaveBeenCalledWith(nextConfig);
+    expect(hoisted.warmCurrentProviderAuthStateOffMainThread).toHaveBeenCalledWith(nextConfig);
   });
 });
 
