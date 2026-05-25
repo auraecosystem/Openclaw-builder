@@ -737,6 +737,20 @@ function stripNonDeliverableChannelForCompletionOrigin(
   return normalizeDeliveryContext(rest);
 }
 
+function buildRequesterWakeWithVisibleDeliveryFailure(params: {
+  error: string;
+}): SubagentAnnounceDeliveryResult {
+  return {
+    delivered: true,
+    path: "direct",
+    requesterWakeStatus: "delivered",
+    visibleDeliveryRequired: true,
+    visibleDeliveryStatus: "failed",
+    visibleDeliveryError: params.error,
+    error: params.error,
+  };
+}
+
 async function sendSubagentAnnounceDirectly(params: {
   requesterSessionKey: string;
   targetRequesterSessionKey: string;
@@ -1040,6 +1054,11 @@ async function sendSubagentAnnounceDirectly(params: {
       !hasGatewayAgentMessagingToolDeliveryEvidence(directAnnounceResponse) &&
       !hasIntentionalSilentGatewayAgentPayload(directAnnounceResponse)
     ) {
+      if (isSubagentCompletion && expectedMediaUrls.length === 0) {
+        return buildRequesterWakeWithVisibleDeliveryFailure({
+          error: "completion agent did not use the message tool for message-tool-only delivery",
+        });
+      }
       return {
         delivered: false,
         path: "direct",
