@@ -960,7 +960,7 @@ const MediaUnderstandingModelSchema = z
   .strict()
   .optional();
 
-const ToolsMediaUnderstandingSchema = z
+export const ToolsMediaUnderstandingSchema = z
   .object({
     enabled: z.boolean().optional(),
     scope: MediaUnderstandingScopeSchema,
