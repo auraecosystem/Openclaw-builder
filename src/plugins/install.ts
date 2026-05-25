@@ -201,6 +201,35 @@ function compareNpmSemver(a: string, b: string): number {
   return compareComparableSemver(parseComparableSemver(a), parseComparableSemver(b)) ?? 0;
 }
 
+// Guard against silent dependency downgrades during `openclaw update` (#85184).
+// When an update would install an OLDER version of a managed direct dependency
+// than the one already installed, preserve the newer installed version instead
+// of overwriting it. Scope is intentionally narrow: only the unambiguous
+// downgrade case during `update` is guarded. Non-downgrade pin rewrites and the
+// broader "respect every user pin" policy are left to maintainer decision.
+// Both versions must be concrete and comparable; otherwise the original
+// behavior is preserved (no guard) to avoid changing install/range semantics.
+export function shouldPreserveManagedDependencyAgainstDowngrade(params: {
+  mode: "install" | "update" | undefined;
+  installedVersion: string | undefined;
+  incomingVersion: string | undefined;
+}): boolean {
+  if (params.mode !== "update") {
+    return false;
+  }
+  if (!params.installedVersion || !params.incomingVersion) {
+    return false;
+  }
+  if (
+    !parseComparableSemver(params.installedVersion) ||
+    !parseComparableSemver(params.incomingVersion)
+  ) {
+    return false;
+  }
+  // Incoming older than installed => downgrade => preserve the installed version.
+  return compareNpmSemver(params.incomingVersion, params.installedVersion) < 0;
+}
+
 type TrustedOfficialPrereleaseResolution =
   | { kind: "stable"; resolution: NpmSpecResolution }
   | { kind: "prerelease-only"; resolution: NpmSpecResolution }
@@ -673,12 +702,33 @@ async function installPluginFromManagedNpmRoot(
       };
     }
   };
-  await upsertManagedNpmRootDependency({
+  // #85184: never silently downgrade a newer already-installed managed direct
+  // dependency during `openclaw update`. Compare the version recorded in the
+  // managed npm root lockfile against the version this update wants to install;
+  // if the update is older, keep the installed pin instead of overwriting it.
+  const installedManagedDependency = await readManagedNpmRootInstalledDependency({
     npmRoot,
     packageName: params.packageName,
-    dependencySpec: params.dependencySpec,
-    managedOverrides,
   });
+  const preserveAgainstDowngrade = shouldPreserveManagedDependencyAgainstDowngrade({
+    mode: effectiveMode,
+    installedVersion: installedManagedDependency?.version,
+    incomingVersion: params.npmResolution.version,
+  });
+  if (preserveAgainstDowngrade) {
+    logger.warn?.(
+      `Keeping ${params.packageName}@${installedManagedDependency?.version}: ` +
+        `update ${params.displaySpec} would downgrade it to ${params.npmResolution.version}. ` +
+        `Edit ${path.join(npmRoot, "package.json")} manually to override.`,
+    );
+  } else {
+    await upsertManagedNpmRootDependency({
+      npmRoot,
+      packageName: params.packageName,
+      dependencySpec: params.dependencySpec,
+      managedOverrides,
+    });
+  }
   const initialPeerSync = await syncManagedPeerDependenciesForInstall();
   if (!initialPeerSync.ok) {
     return await rollbackFailedManagedNpmInstall(initialPeerSync.error);
@@ -711,13 +761,15 @@ async function installPluginFromManagedNpmRoot(
       "npm rejected managed npm alias overrides; retrying plugin install without alias overrides for this npm version.",
     );
     omitUnsupportedManagedOverrides = true;
-    await upsertManagedNpmRootDependency({
-      npmRoot,
-      packageName: params.packageName,
-      dependencySpec: params.dependencySpec,
-      managedOverrides,
-      omitUnsupportedManagedOverrides: true,
-    });
+    if (!preserveAgainstDowngrade) {
+      await upsertManagedNpmRootDependency({
+        npmRoot,
+        packageName: params.packageName,
+        dependencySpec: params.dependencySpec,
+        managedOverrides,
+        omitUnsupportedManagedOverrides: true,
+      });
+    }
     const aliasRetryPeerSync = await syncManagedPeerDependenciesForInstall({
       omitUnsupportedManagedOverrides: true,
     });
@@ -857,9 +909,24 @@ async function installPluginFromManagedNpmRoot(
       error: `Failed to verify npm install metadata for ${params.packageName}: ${String(error)}`,
     };
   }
+  // #85184: when we deliberately preserved a newer installed dependency against
+  // a downgrade, the managed root still carries that newer version on purpose.
+  // Verify the install against the preserved version rather than the (older)
+  // incoming resolution, so the intentional skip does not look like a failed
+  // install and trigger a rollback that would remove the plugin.
+  const expectedNpmResolution: NpmSpecResolution =
+    preserveAgainstDowngrade && installedDependency?.version
+      ? {
+          ...params.npmResolution,
+          version: installedDependency.version,
+          ...(installedDependency.integrity
+            ? { integrity: installedDependency.integrity }
+            : { integrity: undefined }),
+        }
+      : params.npmResolution;
   const resolutionMismatch = resolveInstalledNpmResolutionMismatch({
     packageName: params.packageName,
-    expected: params.npmResolution,
+    expected: expectedNpmResolution,
     installed: installedDependency,
   });
   if (resolutionMismatch) {
@@ -905,7 +972,11 @@ async function installPluginFromManagedNpmRoot(
   }
   return {
     ...result,
-    npmResolution: params.npmResolution,
+    // #85184: when the downgrade guard preserved a newer installed dependency,
+    // report the preserved resolution (not the older incoming one) so that
+    // install records and config metadata match what is actually in the
+    // managed npm root.
+    npmResolution: expectedNpmResolution,
     ...(params.integrityDrift ? { integrityDrift: params.integrityDrift } : {}),
   };
 }
