@@ -330,6 +330,7 @@ import {
   buildAfterTurnRuntimeContextFromUsage,
   prependSystemPromptAddition,
   resolveAttemptFsWorkspaceOnly,
+  resolveAttemptPrependDynamicSystemContext,
   resolveAttemptPrependSystemContext,
   resolvePromptBuildHookResult,
   resolvePromptModeForSession,
@@ -424,6 +425,7 @@ export {
   mergeOrphanedTrailingUserPrompt,
   prependSystemPromptAddition,
   resolveAttemptFsWorkspaceOnly,
+  resolveAttemptPrependDynamicSystemContext,
   resolveAttemptPrependSystemContext,
   resolvePromptBuildHookResult,
   resolvePromptModeForSession,
@@ -3658,22 +3660,30 @@ export async function runEmbeddedAttempt(
             systemPromptText = legacySystemPrompt;
             log.debug(`hooks: applied systemPrompt override (${legacySystemPrompt.length} chars)`);
           }
+          const prependSystemContext = resolveAttemptPrependSystemContext({
+            hookPrependSystemContext: hookResult?.prependSystemContext,
+          });
+          const prependDynamicSystemContext = resolveAttemptPrependDynamicSystemContext({
+            sessionKey: params.sessionKey,
+            trigger: params.trigger,
+            hookPrependDynamicSystemContext: hookResult?.prependDynamicSystemContext,
+          });
           const prependedOrAppendedSystemPrompt = composeSystemPromptWithHookContext({
             baseSystemPrompt: systemPromptText,
-            prependSystemContext: resolveAttemptPrependSystemContext({
-              sessionKey: params.sessionKey,
-              trigger: params.trigger,
-              hookPrependSystemContext: hookResult?.prependSystemContext,
-            }),
+            prependSystemContext,
             appendSystemContext: hookResult?.appendSystemContext,
+            prependDynamicSystemContext,
+            appendDynamicSystemContext: hookResult?.appendDynamicSystemContext,
           });
           if (prependedOrAppendedSystemPrompt) {
-            const prependSystemLen = hookResult?.prependSystemContext?.trim().length ?? 0;
+            const prependSystemLen = prependSystemContext?.trim().length ?? 0;
             const appendSystemLen = hookResult?.appendSystemContext?.trim().length ?? 0;
+            const prependDynamicLen = prependDynamicSystemContext?.trim().length ?? 0;
+            const appendDynamicLen = hookResult?.appendDynamicSystemContext?.trim().length ?? 0;
             applySystemPromptOverrideToSession(activeSession, prependedOrAppendedSystemPrompt);
             systemPromptText = prependedOrAppendedSystemPrompt;
             log.debug(
-              `hooks: applied prependSystemContext/appendSystemContext (${prependSystemLen}+${appendSystemLen} chars)`,
+              `hooks: applied system context (${prependSystemLen}+${appendSystemLen} static, ${prependDynamicLen}+${appendDynamicLen} dynamic chars)`,
             );
           }
         }
@@ -3796,9 +3806,11 @@ export async function runEmbeddedAttempt(
           });
           const runtimeSystemContext = promptSubmission.runtimeSystemContext?.trim();
           if (promptSubmission.runtimeOnly && runtimeSystemContext) {
+            // Runtime context is per-turn volatile — route below the cache
+            // boundary via the dynamic field so the prefix stays byte-stable.
             const runtimeSystemPrompt = composeSystemPromptWithHookContext({
               baseSystemPrompt: systemPromptText,
-              appendSystemContext: runtimeSystemContext,
+              appendDynamicSystemContext: runtimeSystemContext,
             });
             if (runtimeSystemPrompt) {
               applySystemPromptOverrideToSession(activeSession, runtimeSystemPrompt);
@@ -3811,7 +3823,7 @@ export async function runEmbeddedAttempt(
           const runtimeSystemPromptForHook = runtimeContextForHook
             ? composeSystemPromptWithHookContext({
                 baseSystemPrompt: systemPromptText,
-                appendSystemContext: buildRuntimeContextSystemContext(runtimeContextForHook),
+                appendDynamicSystemContext: buildRuntimeContextSystemContext(runtimeContextForHook),
               })
             : undefined;
           if (systemPromptReport) {

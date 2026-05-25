@@ -7,7 +7,10 @@ vi.mock("../context-engine-capabilities.js", () => ({
 import type { OpenClawConfig } from "../../../config/config.js";
 import { addSession, resetProcessRegistryForTests } from "../../bash-process-registry.js";
 import { createProcessSessionFixture } from "../../bash-process-registry.test-helpers.js";
-import { SYSTEM_PROMPT_CACHE_BOUNDARY } from "../../system-prompt-cache-boundary.js";
+import {
+  stripSystemPromptCacheBoundary,
+  SYSTEM_PROMPT_CACHE_BOUNDARY,
+} from "../../system-prompt-cache-boundary.js";
 import { buildAgentSystemPrompt } from "../../system-prompt.js";
 import { resolveBootstrapContextTargets } from "./attempt-bootstrap-routing.js";
 import {
@@ -660,7 +663,10 @@ describe("composeSystemPromptWithHookContext", () => {
     expect(composeSystemPromptWithHookContext({ baseSystemPrompt: "base" })).toBeUndefined();
   });
 
-  it("builds prepend/base/append system prompt order", () => {
+  it("builds prepend/base/append system prompt order for static hook context", () => {
+    // Static hook system context stays in the cacheable prefix region; existing
+    // bundled-plugin callers (extensions/diffs, extensions/skill-workshop) pass
+    // static const guidance through these fields and rely on it being cached.
     expect(
       composeSystemPromptWithHookContext({
         baseSystemPrompt: "  base system  ",
@@ -670,7 +676,7 @@ describe("composeSystemPromptWithHookContext", () => {
     ).toBe("prepend\n\nbase system\n\nappend");
   });
 
-  it("normalizes hook system context line endings and trailing whitespace", () => {
+  it("normalizes static hook system context line endings and trailing whitespace", () => {
     expect(
       composeSystemPromptWithHookContext({
         baseSystemPrompt: "  base system  ",
@@ -678,6 +684,28 @@ describe("composeSystemPromptWithHookContext", () => {
         appendSystemContext: "  append  \t\r\n",
       }),
     ).toBe("prepend line\nsecond line\n\nbase system\n\nappend");
+  });
+
+  it("keeps appendSystemContext above the cache boundary when base prompt has marker", () => {
+    const stablePrefix = "agent system role + tool list + workspace";
+    const dynamicSuffix = "existing dynamic content";
+    const base = `${stablePrefix}${SYSTEM_PROMPT_CACHE_BOUNDARY}${dynamicSuffix}`;
+
+    const result = composeSystemPromptWithHookContext({
+      baseSystemPrompt: base,
+      prependSystemContext: "static prepend",
+      appendSystemContext: "static append",
+    });
+
+    expect(result).toBeDefined();
+    const markerIdx = result!.indexOf(SYSTEM_PROMPT_CACHE_BOUNDARY);
+    expect(markerIdx).toBeGreaterThan(-1);
+    const cacheablePrefix = result!.slice(0, markerIdx);
+    expect(cacheablePrefix).toContain("static prepend");
+    expect(cacheablePrefix).toContain(stablePrefix);
+    expect(cacheablePrefix).toContain("static append");
+    expect(result!.indexOf("static append")).toBeLessThan(markerIdx);
+    expect(result!.indexOf(dynamicSuffix)).toBeGreaterThan(markerIdx);
   });
 
   it("avoids blank separators when base system prompt is empty", () => {
@@ -706,6 +734,140 @@ describe("composeSystemPromptWithHookContext", () => {
     expect(composedSystemPrompt).toContain("Treat Project Context as partial");
     expect(composedSystemPrompt).toContain("hook system context");
     expect("hello").not.toContain("[Bootstrap truncation warning]");
+  });
+
+  it("routes prependDynamicSystemContext below the cache boundary in the dynamic-suffix region", () => {
+    const stablePrefix = "agent system role + tool list + workspace";
+    const dynamicSuffix = "existing dynamic content";
+    const base = `${stablePrefix}${SYSTEM_PROMPT_CACHE_BOUNDARY}${dynamicSuffix}`;
+
+    const result = composeSystemPromptWithHookContext({
+      baseSystemPrompt: base,
+      prependDynamicSystemContext: "per-turn context",
+    });
+
+    expect(result).toBeDefined();
+    const markerIdx = result!.indexOf(SYSTEM_PROMPT_CACHE_BOUNDARY);
+    expect(markerIdx).toBeGreaterThan(-1);
+    // Prefix above marker is unchanged from base.
+    expect(result!.slice(0, markerIdx)).toBe(stablePrefix);
+    // Dynamic addition lands between the marker and the existing suffix.
+    expect(result!.indexOf("per-turn context")).toBeGreaterThan(markerIdx);
+    expect(result!.indexOf("existing dynamic content")).toBeGreaterThan(
+      result!.indexOf("per-turn context"),
+    );
+  });
+
+  it("routes appendDynamicSystemContext below the cache boundary at the end of the suffix", () => {
+    const stablePrefix = "agent system role + tool list + workspace";
+    const dynamicSuffix = "existing dynamic content";
+    const base = `${stablePrefix}${SYSTEM_PROMPT_CACHE_BOUNDARY}${dynamicSuffix}`;
+
+    const result = composeSystemPromptWithHookContext({
+      baseSystemPrompt: base,
+      appendDynamicSystemContext: "runtime context",
+    });
+
+    expect(result).toBeDefined();
+    const markerIdx = result!.indexOf(SYSTEM_PROMPT_CACHE_BOUNDARY);
+    expect(result!.slice(0, markerIdx)).toBe(stablePrefix);
+    // Append lands AFTER the existing dynamic suffix.
+    expect(result!.indexOf("existing dynamic content")).toBeGreaterThan(markerIdx);
+    expect(result!.indexOf("runtime context")).toBeGreaterThan(
+      result!.indexOf("existing dynamic content"),
+    );
+  });
+
+  it("synthesizes a cache boundary when base lacks marker but only dynamic context is provided", () => {
+    const base = "user-supplied system prompt override without marker";
+    const result = composeSystemPromptWithHookContext({
+      baseSystemPrompt: base,
+      appendDynamicSystemContext: "runtimeContext=A",
+    });
+    expect(result).toBeDefined();
+    expect(result).toContain(SYSTEM_PROMPT_CACHE_BOUNDARY);
+    const markerIdx = result!.indexOf(SYSTEM_PROMPT_CACHE_BOUNDARY);
+    expect(result!.slice(0, markerIdx)).toBe(base);
+
+    // Provider sees the marker stripped to a single newline, so the visible
+    // bytes are `${base}\nruntimeContext=A` — not a naive `\n\n` join.
+    const stripped = stripSystemPromptCacheBoundary(result!);
+    expect(stripped).toBe(`${base}\nruntimeContext=A`);
+  });
+
+  it("combines static (above marker) and dynamic (below marker) hook context in one call", () => {
+    const stablePrefix = "agent system role";
+    const dynamicSuffix = "session state";
+    const base = `${stablePrefix}${SYSTEM_PROMPT_CACHE_BOUNDARY}${dynamicSuffix}`;
+
+    const result = composeSystemPromptWithHookContext({
+      baseSystemPrompt: base,
+      prependSystemContext: "static guidance",
+      appendDynamicSystemContext: "runtime context",
+    });
+
+    expect(result).toBeDefined();
+    const markerIdx = result!.indexOf(SYSTEM_PROMPT_CACHE_BOUNDARY);
+    expect(markerIdx).toBeGreaterThan(-1);
+    // Static prepend lands ABOVE the marker, becoming part of the stable prefix.
+    expect(result!.slice(0, markerIdx)).toContain("static guidance");
+    expect(result!.slice(0, markerIdx)).toContain(stablePrefix);
+    // Dynamic append lands BELOW the marker.
+    expect(result!.indexOf("runtime context")).toBeGreaterThan(markerIdx);
+  });
+});
+
+describe("composeSystemPromptWithHookContext cache prefix stability (#85203)", () => {
+  it("preserves byte-stable cache prefix when only volatile dynamic context changes across turns", () => {
+    const stablePrefix = "agent system role + tool list + workspace";
+    const dynamicSuffix = "session state";
+    const base = `${stablePrefix}${SYSTEM_PROMPT_CACHE_BOUNDARY}${dynamicSuffix}`;
+
+    const turn1 = composeSystemPromptWithHookContext({
+      baseSystemPrompt: base,
+      appendDynamicSystemContext: "runtimeContext=A trigger=user",
+    });
+    const turn2 = composeSystemPromptWithHookContext({
+      baseSystemPrompt: base,
+      appendDynamicSystemContext: "runtimeContext=B trigger=heartbeat",
+    });
+
+    expect(turn1).toBeDefined();
+    expect(turn2).toBeDefined();
+
+    const turn1Marker = turn1!.indexOf(SYSTEM_PROMPT_CACHE_BOUNDARY);
+    const turn2Marker = turn2!.indexOf(SYSTEM_PROMPT_CACHE_BOUNDARY);
+    expect(turn1Marker).toBeGreaterThan(-1);
+    expect(turn2Marker).toBeGreaterThan(-1);
+
+    // The cacheable prefix is byte-identical across turns even though the
+    // dynamic context differs — this is what lets the provider prefix cache hit.
+    expect(turn1!.slice(0, turn1Marker)).toBe(turn2!.slice(0, turn2Marker));
+  });
+
+  it("preserves byte-stable cache prefix when static hook context is constant across turns", () => {
+    // Documented case: a bundled plugin (e.g. extensions/diffs,
+    // extensions/skill-workshop) passes static const guidance through
+    // prependSystemContext. The static content joins the cacheable prefix so
+    // the prefix bytes are identical across turns and the cache hits.
+    const base = "agent system role + tool list + workspace";
+    const STATIC_GUIDANCE = "## Diffs Plugin\n- Always emit unified diffs.";
+
+    const turn1 = composeSystemPromptWithHookContext({
+      baseSystemPrompt: base,
+      prependSystemContext: STATIC_GUIDANCE,
+    });
+    const turn2 = composeSystemPromptWithHookContext({
+      baseSystemPrompt: base,
+      prependSystemContext: STATIC_GUIDANCE,
+    });
+
+    expect(turn1).toBeDefined();
+    expect(turn2).toBeDefined();
+    // Identical inputs produce identical outputs (no marker is synthesized
+    // when only static context is supplied).
+    expect(turn1).toBe(turn2);
+    expect(turn1).not.toContain(SYSTEM_PROMPT_CACHE_BOUNDARY);
   });
 });
 
