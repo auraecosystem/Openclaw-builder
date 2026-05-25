@@ -21,15 +21,19 @@ type OpenKeyedStoreMock = PluginRuntime["state"]["openKeyedStore"] & {
   callCount(): number;
 };
 
+const TEST_SIGNATURE_TIMESTAMP = Date.now();
+
 function createRequest(params: {
   body: string;
   signature?: string;
+  timestamp?: number | string;
   method?: string;
 }): IncomingMessage {
   const req = Readable.from([params.body]) as IncomingMessage;
   req.method = params.method ?? "POST";
   req.headers = {
     "content-type": "application/json",
+    "x-openclaw-broker-timestamp": String(params.timestamp ?? TEST_SIGNATURE_TIMESTAMP),
     ...(params.signature ? { "x-openclaw-broker-signature": params.signature } : {}),
   };
   return req;
@@ -58,8 +62,12 @@ function createResponse(): MockResponse {
   return res as MockResponse;
 }
 
-function sign(body: string, secret: string): string {
-  return `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+function sign(
+  body: string,
+  secret: string,
+  timestamp: number | string = TEST_SIGNATURE_TIMESTAMP,
+): string {
+  return `sha256=${createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex")}`;
 }
 
 function createMemoryKeyedStore<T>() {
@@ -464,6 +472,31 @@ describe("channel-broker HTTP routes", () => {
 
     expect(res.statusCode).toBe(401);
     expect(JSON.parse(res.body)).toMatchObject({ ok: false, error: "invalid_signature" });
+    expect(receiveInboundEvent).not.toHaveBeenCalled();
+  });
+
+  it("rejects stale inbound signatures before runtime dispatch", async () => {
+    const body = inboundBody();
+    const receiveInboundEvent = vi.fn();
+    setChannelBrokerRuntime({ receiveInboundEvent });
+    const res = createResponse();
+    const staleTimestamp = TEST_SIGNATURE_TIMESTAMP - 10 * 60 * 1000;
+
+    await handleChannelBrokerInboundHttpRequest({
+      cfg: brokerConfig(),
+      req: createRequest({
+        body,
+        signature: sign(body, "broker-secret", staleTimestamp),
+        timestamp: staleTimestamp,
+      }),
+      res,
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(JSON.parse(res.body)).toMatchObject({
+      ok: false,
+      error: "invalid_signature_timestamp",
+    });
     expect(receiveInboundEvent).not.toHaveBeenCalled();
   });
 
