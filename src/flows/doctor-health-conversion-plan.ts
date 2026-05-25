@@ -174,6 +174,12 @@ export const doctorHealthConversionRules = [
     rule: "Detect allowlist/catalog issues for hooks.gmail.model as config findings.",
   },
   {
+    contributionId: "doctor:wsl-environment",
+    conversion: "detect-only",
+    target: ["doctor-run/wsl-environment"],
+    rule: "Detect WSL2 systemd/resource/kernel issues as informational findings via note(); no repair (config changes live in Windows .wslconfig outside OpenClaw's control).",
+  },
+  {
     contributionId: "doctor:systemd-linger",
     conversion: "interactive-maintenance",
     target: ["core/doctor/systemd-linger"],
