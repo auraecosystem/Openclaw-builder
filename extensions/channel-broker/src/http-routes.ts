@@ -130,6 +130,8 @@ function inboundReceiveStatusCode(status: Awaited<ReturnType<typeof receiveBroke
     case "rejected":
       return 200;
   }
+  const unreachableStatus: never = status;
+  return unreachableStatus;
 }
 
 export async function handleChannelBrokerInboundHttpRequest(params: {
