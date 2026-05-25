@@ -592,8 +592,10 @@ describe("channel-broker conformance baseline", () => {
           constraints: {
             externalBridge: true,
             deviceBound: true,
+            macHostRequired: true,
+            messagesSignedIn: true,
           },
-          badges: ["external-bridge"],
+          badges: ["external-bridge", "mac-host", "device-bound"],
           native: { blueBubbles: true },
         },
       ],
@@ -603,12 +605,19 @@ describe("channel-broker conformance baseline", () => {
         capabilities: blueBubblesBackedProvider,
         platform: "imessage",
       })?.badges,
-    ).toEqual(["external-bridge"]);
+    ).toEqual(["external-bridge", "mac-host", "device-bound"]);
     expect(
       brokerPlatformSupports({
         capabilities: blueBubblesBackedProvider,
         platform: "imessage",
-        requirements: { constraints: { externalBridge: true, deviceBound: true } },
+        requirements: {
+          constraints: {
+            externalBridge: true,
+            deviceBound: true,
+            macHostRequired: true,
+            messagesSignedIn: true,
+          },
+        },
       }),
     ).toBe(true);
   });
