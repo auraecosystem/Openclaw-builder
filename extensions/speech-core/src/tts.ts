@@ -1887,6 +1887,7 @@ export async function maybeApplyTtsToPayload(params: {
     const payloadWithAudio = {
       ...nextPayload,
       mediaUrl: result.audioPath,
+      trustedLocalMedia: true,
       audioAsVoice: result.audioAsVoice || params.payload.audioAsVoice,
       spokenText: textForAudio,
       trustedLocalMedia: true,
