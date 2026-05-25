@@ -1100,6 +1100,72 @@ describe("embedded attempt session lock lifecycle", () => {
     await result;
   });
 
+  it("drains queued session events for async hook work spawned after event processing returns", async () => {
+    const events: string[] = [];
+    let releaseQueue!: () => void;
+    let spawnedHook!: Promise<void>;
+    const session = {
+      _agentEventQueue: new Promise<void>((resolve) => {
+        releaseQueue = resolve;
+      }).then(() => {
+        events.push("queue-drained");
+      }),
+      _processAgentEvent: vi.fn(async (event: { type?: string }) => {
+        events.push(`process:${event.type}`);
+        spawnedHook = new Promise<void>((resolve, reject) => {
+          setTimeout(() => {
+            session.agent.beforeToolCall().then(resolve, reject);
+          }, 0);
+        });
+        events.push("process:end");
+      }),
+      agent: {
+        beforeToolCall: vi.fn(async () => {
+          events.push("hook");
+        }),
+      },
+    };
+
+    installSessionEventWriteLock({
+      session,
+      withSessionWriteLock: async (run) => {
+        events.push("event-lock");
+        return await run();
+      },
+    });
+    installSessionExternalHookWriteLock({
+      session,
+      withSessionWriteLock: async (run) => {
+        events.push("hook-lock");
+        return await run();
+      },
+    });
+
+    await session["_processAgentEvent"]({ type: "tool_call" });
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+
+    const beforeQueueRelease = await Promise.race([
+      spawnedHook.then(() => "done"),
+      new Promise<string>((resolve) => {
+        setTimeout(() => resolve("waiting"), 25);
+      }),
+    ]);
+
+    expect(beforeQueueRelease).toBe("waiting");
+    expect(events).toEqual(["process:tool_call", "process:end"]);
+
+    releaseQueue();
+    await spawnedHook;
+
+    expect(events).toEqual([
+      "process:tool_call",
+      "process:end",
+      "queue-drained",
+      "hook-lock",
+      "hook",
+    ]);
+  });
+
   it("locks Pi extension hooks that can mutate the session outside agent events", async () => {
     const locked: string[] = [];
     const called: string[] = [];
