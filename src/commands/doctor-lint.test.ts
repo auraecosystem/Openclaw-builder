@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resetCoreHealthChecksForTest } from "../flows/doctor-core-checks.js";
-import { clearHealthChecksForTest } from "../flows/health-check-registry.js";
+import { clearHealthChecksForTest, registerHealthCheck } from "../flows/health-check-registry.js";
 import { runDoctorLintCli } from "./doctor-lint.js";
 
 const mocks = vi.hoisted(() => ({
@@ -22,7 +21,6 @@ describe("runDoctorLintCli", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearHealthChecksForTest();
-    resetCoreHealthChecksForTest();
   });
 
   it("bases exit code on the selected severity threshold", async () => {
@@ -136,6 +134,50 @@ describe("runDoctorLintCli", () => {
           },
         ],
       });
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+
+  it("runs core contribution checks plus registered extension checks", async () => {
+    mocks.readConfigFileSnapshot.mockResolvedValue({
+      exists: true,
+      valid: true,
+      config: {},
+      path: "/tmp/openclaw.json",
+    });
+    registerHealthCheck({
+      id: "plugin/example/lint",
+      kind: "plugin",
+      description: "example plugin lint check",
+      async detect() {
+        return [
+          {
+            checkId: "plugin/example/lint",
+            severity: "info",
+            message: "plugin finding",
+          },
+        ];
+      },
+    });
+
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      const exitCode = await runDoctorLintCli(runtime, {
+        json: true,
+        onlyIds: ["core/doctor/final-config-validation", "plugin/example/lint"],
+      });
+
+      expect(exitCode).toBe(1);
+      const payload = JSON.parse(String(stdout.mock.calls.at(-1)?.[0]));
+      expect(payload.checksRun).toBe(2);
+      expect(payload.findings).toEqual([
+        {
+          checkId: "plugin/example/lint",
+          severity: "info",
+          message: "plugin finding",
+        },
+      ]);
     } finally {
       stdout.mockRestore();
     }

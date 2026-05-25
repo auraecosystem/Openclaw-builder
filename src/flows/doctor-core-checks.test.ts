@@ -5,15 +5,7 @@ import {
   CORE_HEALTH_CHECKS,
   createCoreHealthChecks,
   type CoreHealthCheckDeps,
-  registerCoreHealthChecks,
-  resetCoreHealthChecksForTest,
 } from "./doctor-core-checks.js";
-import { doctorHealthConversionRules } from "./doctor-health-conversion-plan.js";
-import {
-  clearHealthChecksForTest,
-  listHealthChecks,
-  registerHealthCheck,
-} from "./health-check-registry.js";
 import type { HealthCheck } from "./health-checks.js";
 
 const runtime = { log() {}, error() {}, exit() {} };
@@ -78,63 +70,8 @@ function getCheck(checks: readonly HealthCheck[], id: string): HealthCheck {
   return check;
 }
 
-describe("registerCoreHealthChecks", () => {
-  beforeEach(() => {
-    clearHealthChecksForTest();
-    resetCoreHealthChecksForTest();
-  });
-
-  it("registers the built-in health checks once", () => {
-    registerCoreHealthChecks();
-    registerCoreHealthChecks();
-
-    expect(listHealthChecks().map((check) => check.id)).toEqual(
-      CORE_HEALTH_CHECKS.map((check) => check.id),
-    );
-  });
-
-  it("can retry after a duplicate registration failure is cleared", () => {
-    registerHealthCheck({
-      id: "core/doctor/gateway-config",
-      kind: "core",
-      description: "duplicate",
-      async detect() {
-        return [];
-      },
-    });
-
-    expect(() => registerCoreHealthChecks()).toThrow("health check already registered");
-
-    clearHealthChecksForTest();
-    registerCoreHealthChecks();
-
-    expect(listHealthChecks()).toHaveLength(CORE_HEALTH_CHECKS.length);
-  });
-
-  it("registers only implemented core health targets from the doctor conversion inventory", () => {
-    registerCoreHealthChecks();
-
-    const registeredIds = new Set(listHealthChecks().map((check) => check.id));
-    const coreTargets = new Set<string>(
-      doctorHealthConversionRules.flatMap((rule) =>
-        rule.target.filter((target) => target.startsWith("core/doctor/")),
-      ),
-    );
-    const plannedOnlyTargets = [
-      "core/doctor/auth-profiles/keychain",
-      "core/doctor/session-locks",
-      "core/doctor/gateway-daemon",
-    ];
-
-    for (const id of CORE_HEALTH_CHECKS.map((check) => check.id)) {
-      if (id === "core/doctor/browser-clawd-profile-residue") {
-        continue;
-      }
-      expect(coreTargets.has(id)).toBe(true);
-    }
-    for (const id of plannedOnlyTargets) {
-      expect(registeredIds.has(id)).toBe(false);
-    }
+describe("CORE_HEALTH_CHECKS", () => {
+  it("does not include placeholder health registry entries", () => {
     expect(
       CORE_HEALTH_CHECKS.some((check) =>
         check.description.endsWith("represented in the health registry."),
