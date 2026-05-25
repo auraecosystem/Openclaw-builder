@@ -168,6 +168,28 @@ function loadSessionMcpConfig(params: {
   };
 }
 
+export function resolveSessionMcpConfigSummary(params: {
+  workspaceDir: string;
+  cfg?: OpenClawConfig;
+}): { fingerprint: string; serverNames: string[] } {
+  const { loaded, fingerprint } = loadSessionMcpConfig({
+    workspaceDir: params.workspaceDir,
+    cfg: params.cfg,
+    logDiagnostics: false,
+  });
+  return {
+    fingerprint,
+    serverNames: Object.keys(loaded.mcpServers).toSorted((a, b) => a.localeCompare(b)),
+  };
+}
+
+export function resolveSessionMcpConfigFingerprint(params: {
+  workspaceDir: string;
+  cfg?: OpenClawConfig;
+}): string {
+  return resolveSessionMcpConfigSummary(params).fingerprint;
+}
+
 function createDisposedError(sessionId: string): Error {
   return new Error(`bundle-mcp runtime disposed for session ${sessionId}`);
 }
@@ -347,6 +369,9 @@ export function createSessionMcpRuntime(params: {
       };
     },
     getCatalog,
+    peekCatalog() {
+      return catalog;
+    },
     markUsed() {
       lastUsedAt = Date.now();
     },
@@ -537,6 +562,12 @@ function createSessionMcpRuntimeManager(
     resolveSessionId(sessionKey) {
       return sessionIdBySessionKey.get(sessionKey);
     },
+    peekSession(params) {
+      const sessionId =
+        params.sessionId ??
+        (params.sessionKey ? sessionIdBySessionKey.get(params.sessionKey) : undefined);
+      return sessionId ? runtimesBySessionId.get(sessionId) : undefined;
+    },
     async disposeSession(sessionId) {
       const inFlight = createInFlight.get(sessionId);
       createInFlight.delete(sessionId);
@@ -590,6 +621,18 @@ export async function getOrCreateSessionMcpRuntime(params: {
   cfg?: OpenClawConfig;
 }): Promise<SessionMcpRuntime> {
   return await getSessionMcpRuntimeManager().getOrCreate(params);
+}
+
+export function peekSessionMcpRuntime(params: {
+  sessionId?: string | null;
+  sessionKey?: string | null;
+}): SessionMcpRuntime | undefined {
+  const sessionId = normalizeOptionalString(params.sessionId);
+  const sessionKey = normalizeOptionalString(params.sessionKey);
+  return getSessionMcpRuntimeManager().peekSession({
+    ...(sessionId ? { sessionId } : {}),
+    ...(sessionKey ? { sessionKey } : {}),
+  });
 }
 
 export async function disposeSessionMcpRuntime(sessionId: string): Promise<void> {

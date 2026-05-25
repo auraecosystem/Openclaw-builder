@@ -506,7 +506,12 @@ export const ToolsEffectiveEntrySchema = Type.Object(
     label: NonEmptyString,
     description: Type.String(),
     rawDescription: Type.String(),
-    source: Type.Union([Type.Literal("core"), Type.Literal("plugin"), Type.Literal("channel")]),
+    source: Type.Union([
+      Type.Literal("core"),
+      Type.Literal("plugin"),
+      Type.Literal("channel"),
+      Type.Literal("mcp"),
+    ]),
     pluginId: Type.Optional(NonEmptyString),
     channelId: Type.Optional(NonEmptyString),
     risk: Type.Optional(
@@ -519,10 +524,29 @@ export const ToolsEffectiveEntrySchema = Type.Object(
 
 export const ToolsEffectiveGroupSchema = Type.Object(
   {
-    id: Type.Union([Type.Literal("core"), Type.Literal("plugin"), Type.Literal("channel")]),
+    id: Type.Union([
+      Type.Literal("core"),
+      Type.Literal("plugin"),
+      Type.Literal("channel"),
+      Type.Literal("mcp"),
+    ]),
     label: NonEmptyString,
-    source: Type.Union([Type.Literal("core"), Type.Literal("plugin"), Type.Literal("channel")]),
+    source: Type.Union([
+      Type.Literal("core"),
+      Type.Literal("plugin"),
+      Type.Literal("channel"),
+      Type.Literal("mcp"),
+    ]),
     tools: Type.Array(ToolsEffectiveEntrySchema),
+  },
+  { additionalProperties: false },
+);
+
+export const ToolsEffectiveNoticeSchema = Type.Object(
+  {
+    id: NonEmptyString,
+    severity: Type.Union([Type.Literal("info"), Type.Literal("warning")]),
+    message: NonEmptyString,
   },
   { additionalProperties: false },
 );
@@ -532,6 +556,7 @@ export const ToolsEffectiveResultSchema = Type.Object(
     agentId: NonEmptyString,
     profile: NonEmptyString,
     groups: Type.Array(ToolsEffectiveGroupSchema),
+    notices: Type.Optional(Type.Array(ToolsEffectiveNoticeSchema)),
   },
   { additionalProperties: false },
 );

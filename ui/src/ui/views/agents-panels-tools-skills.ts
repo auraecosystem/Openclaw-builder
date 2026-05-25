@@ -175,8 +175,29 @@ function handleRuntimeToolJump(event: Event, anchorId: string) {
   });
 }
 
+function renderEffectiveToolNotices(result: ToolsEffectiveResult | null) {
+  const notices = result?.notices ?? [];
+  if (notices.length === 0) {
+    return nothing;
+  }
+  return html`
+    <div class="agent-tools-notices">
+      ${notices.map(
+        (notice) => html`
+          <div
+            class="callout ${notice.severity === "warning" ? "warning" : "info"}"
+            style="margin-top: 12px"
+          >
+            ${notice.message}
+          </div>
+        `,
+      )}
+    </div>
+  `;
+}
+
 function renderEffectiveToolBadge(tool: {
-  source: "core" | "plugin" | "channel";
+  source: "core" | "plugin" | "channel" | "mcp";
   pluginId?: string;
   channelId?: string;
 }) {
@@ -189,6 +210,9 @@ function renderEffectiveToolBadge(tool: {
     return tool.channelId
       ? t("agentTools.channelSource", { id: tool.channelId })
       : t("agentTools.channel");
+  }
+  if (tool.source === "mcp") {
+    return "MCP";
   }
   return t("agentTools.builtIn");
 }
@@ -211,6 +235,7 @@ export function renderAgentTools(params: {
   onOverridesChange: (agentId: string, alsoAllow: string[], deny: string[]) => void;
   onConfigReload: () => void;
   onConfigSave: () => void;
+  onEffectiveToolsRefresh: () => void;
 }) {
   const config = resolveAgentConfig(params.configForm, params.agentId);
   const agentTools = config.entry?.tools ?? {};
@@ -411,6 +436,17 @@ export function renderAgentTools(params: {
               What this agent can use in the current chat session.
               <span class="mono">${params.runtimeSessionKey || "no session"}</span>
             </div>
+            <button
+              class="btn btn--sm"
+              style="margin-top: 10px"
+              ?disabled=${!params.runtimeSessionMatchesSelectedAgent ||
+              params.toolsEffectiveLoading ||
+              !params.runtimeSessionKey}
+              @click=${params.onEffectiveToolsRefresh}
+            >
+              ${params.toolsEffectiveLoading ? "Refreshing…" : "Refresh Available Tools"}
+            </button>
+            ${renderEffectiveToolNotices(params.toolsEffectiveResult)}
             ${!params.runtimeSessionMatchesSelectedAgent
               ? html`
                   <div class="callout info" style="margin-top: 12px">

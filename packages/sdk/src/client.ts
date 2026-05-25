@@ -781,6 +781,10 @@ export class ToolsNamespace extends RpcNamespace {
     return await this.call("effective", params);
   }
 
+  async refresh(params?: unknown): Promise<unknown> {
+    return await this.call("effective.refresh", params);
+  }
+
   async invoke(name: string, params?: ToolInvokeParams): Promise<ToolInvokeResult> {
     return await this.call("invoke", {
       name,

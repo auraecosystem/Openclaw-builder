@@ -226,7 +226,8 @@ of throwing for policy or approval refusals.
 
 ```typescript
 await oc.tools.list();
-await oc.tools.effective({ sessionKey: "main" });
+await oc.tools.effective({ sessionKey: "main" }); // read-only session inventory
+await oc.tools.refresh({ sessionKey: "main" }); // explicit live MCP discovery
 await oc.tools.invoke("tool-name", {
   args: { input: "value" },
   sessionKey: "main",

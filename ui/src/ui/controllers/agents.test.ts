@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadAgents, loadToolsCatalog, loadToolsEffective, saveAgentsConfig } from "./agents.ts";
+import {
+  loadAgents,
+  loadToolsCatalog,
+  loadToolsEffective,
+  refreshToolsEffective,
+  saveAgentsConfig,
+} from "./agents.ts";
 import type { AgentsConfigSaveState, AgentsState } from "./agents.ts";
 
 function createState(): { state: AgentsState; request: ReturnType<typeof vi.fn> } {
@@ -244,6 +250,34 @@ describe("loadToolsEffective", () => {
     await loadToolsEffective(state, { agentId: "main", sessionKey: "main" });
 
     expect(request).toHaveBeenCalledWith("tools.effective", {
+      agentId: "main",
+      sessionKey: "main",
+    });
+    expect(state.toolsEffectiveResult).toEqual(payload);
+    expect(state.toolsEffectiveResultKey).toBe("main:main:model=openai/gpt-5-mini");
+    expect(state.toolsEffectiveError).toBeNull();
+    expect(state.toolsEffectiveLoading).toBe(false);
+  });
+
+  it("refreshes effective tools through the explicit live-discovery method", async () => {
+    const { state, request } = createState();
+    const payload = {
+      agentId: "main",
+      profile: "coding",
+      groups: [],
+      notices: [
+        {
+          id: "mcp-not-yet-connected",
+          severity: "info",
+          message: "MCP servers are configured but not connected yet.",
+        },
+      ],
+    };
+    request.mockResolvedValue(payload);
+
+    await refreshToolsEffective(state, { agentId: "main", sessionKey: "main" });
+
+    expect(request).toHaveBeenCalledWith("tools.effective.refresh", {
       agentId: "main",
       sessionKey: "main",
     });

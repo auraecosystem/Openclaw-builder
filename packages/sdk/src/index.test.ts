@@ -355,6 +355,24 @@ describe("OpenClaw SDK", () => {
     expect(transport.calls).toStrictEqual([]);
   });
 
+  it("refreshes effective tools through the Gateway tools.effective.refresh method", async () => {
+    const transport = new FakeTransport({
+      "tools.effective.refresh": { groups: [], notices: [] },
+    });
+    const oc = new OpenClaw({ transport });
+
+    const result = await oc.tools.refresh({ sessionKey: "agent:main:main" });
+
+    expect(result).toEqual({ groups: [], notices: [] });
+    expect(transport.calls).toEqual([
+      {
+        method: "tools.effective.refresh",
+        params: { sessionKey: "agent:main:main" },
+        options: undefined,
+      },
+    ]);
+  });
+
   it("invokes tools through the Gateway tools.invoke method", async () => {
     const transport = new FakeTransport({
       "tools.invoke": { ok: true, toolName: "demo", output: { value: 1 }, source: "core" },

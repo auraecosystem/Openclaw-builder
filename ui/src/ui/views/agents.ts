@@ -105,6 +105,7 @@ export type AgentsProps = {
   onFileSave: (name: string) => void;
   onToolsProfileChange: (agentId: string, profile: string | null, clearAllow: boolean) => void;
   onToolsOverridesChange: (agentId: string, alsoAllow: string[], deny: string[]) => void;
+  onEffectiveToolsRefresh: () => void;
   onConfigReload: () => void;
   onConfigSave: () => void;
   onModelChange: (agentId: string, modelId: string | null) => void;
@@ -282,6 +283,7 @@ export function renderAgents(props: AgentsProps) {
                     onOverridesChange: props.onToolsOverridesChange,
                     onConfigReload: props.onConfigReload,
                     onConfigSave: props.onConfigSave,
+                    onEffectiveToolsRefresh: props.onEffectiveToolsRefresh,
                   })
                 : nothing}
               ${props.activePanel === "skills"

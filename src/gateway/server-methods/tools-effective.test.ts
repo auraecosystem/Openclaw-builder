@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { McpToolCatalog, SessionMcpRuntime } from "../../agents/pi-bundle-mcp-types.js";
+import { setPluginToolMeta } from "../../plugins/tools.js";
 import { ErrorCodes } from "../protocol/index.js";
 import { testing, toolsEffectiveHandlers } from "./tools-effective.js";
 
@@ -9,6 +11,11 @@ const runtimeMocks = vi.hoisted(() => ({
     accountId: "acct-1",
     threadId: "thread-2",
   })),
+  applyFinalEffectiveToolPolicy: vi.fn(
+    (params: { bundledTools: unknown[] }) => params.bundledTools,
+  ),
+  buildBundleMcpToolsFromCatalog: vi.fn(() => [] as unknown[]),
+  getOrCreateSessionMcpRuntime: vi.fn(async () => ({ sessionId: "session-1" })),
   listAgentIds: vi.fn(() => ["main"]),
   getRuntimeConfig: vi.fn(() => ({})),
   loadSessionEntry: vi.fn(() => ({
@@ -27,11 +34,21 @@ const runtimeMocks = vi.hoisted(() => ({
       chatType: "group",
       modelProvider: "openai",
       model: "gpt-4.1",
+      spawnedBy: "agent:main:telegram:group:parent-group",
     },
   })),
-  getActivePluginChannelRegistryVersion: vi.fn(() => 1),
-  getActivePluginRegistryVersion: vi.fn(() => 1),
-  resolveRuntimeConfigCacheKey: vi.fn(() => "runtime:1:test"),
+  materializeBundleMcpToolsForRun: vi.fn(async () => ({
+    tools: [] as unknown[],
+    dispose: vi.fn(async () => undefined),
+  })),
+  peekSessionMcpRuntime: vi.fn<
+    () => Pick<SessionMcpRuntime, "configFingerprint" | "peekCatalog"> | undefined
+  >(() => undefined),
+  resolveSessionMcpConfigSummary: vi.fn(() => ({
+    fingerprint: "mcp:1:test",
+    serverNames: [] as string[],
+  })),
+  resolveAgentWorkspaceDir: vi.fn(() => "/tmp/workspace-main"),
   resolveEffectiveToolInventory: vi.fn(() => ({
     agentId: "main",
     profile: "coding",
@@ -63,24 +80,29 @@ type RespondCall = [boolean, unknown?, { code: number; message: string }?];
 type ToolsEffectivePayload = {
   agentId?: string;
   profile?: string;
+  notices?: Array<{ id?: string; severity?: string; message?: string }>;
   groups?: Array<{
     id?: string;
+    label?: string;
     source?: string;
-    tools?: Array<{ id?: string; source?: string }>;
+    tools?: Array<{ id?: string; label?: string; source?: string; pluginId?: string }>;
   }>;
 };
 
-function createInvokeParams(params: Record<string, unknown>) {
+function createInvokeParams(
+  params: Record<string, unknown>,
+  method: "tools.effective" | "tools.effective.refresh" = "tools.effective",
+) {
   const respond = vi.fn();
   return {
     respond,
     invoke: async () =>
-      await toolsEffectiveHandlers["tools.effective"]({
+      await toolsEffectiveHandlers[method]({
         params,
         respond: respond as never,
         context: { getRuntimeConfig: () => ({}) } as never,
         client: null,
-        req: { type: "req", id: "req-1", method: "tools.effective" },
+        req: { type: "req", id: "req-1", method },
         isWebchatConnect: () => false,
       }),
   };
@@ -97,13 +119,38 @@ function firstRespondCall(respond: ReturnType<typeof vi.fn>): RespondCall | unde
   return respond.mock.calls[0] as RespondCall | undefined;
 }
 
+function makeMcpTool() {
+  const mcpTool = {
+    name: "reproProbe__probe_tool",
+    label: "Probe Tool",
+    description: "Probe from MCP",
+    parameters: { type: "object", properties: {} },
+    execute: vi.fn(),
+  };
+  setPluginToolMeta(mcpTool as never, { pluginId: "bundle-mcp", optional: false });
+  return mcpTool;
+}
+
 describe("tools.effective handler", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     testing.resetToolsEffectiveCacheForTest();
     testing.resetToolsEffectiveNowForTest();
-    runtimeMocks.getActivePluginChannelRegistryVersion.mockReturnValue(1);
-    runtimeMocks.getActivePluginRegistryVersion.mockReturnValue(1);
+    runtimeMocks.resolveAgentWorkspaceDir.mockReturnValue("/tmp/workspace-main");
+    runtimeMocks.resolveSessionMcpConfigSummary.mockReturnValue({
+      fingerprint: "mcp:1:test",
+      serverNames: [] as string[],
+    });
+    runtimeMocks.peekSessionMcpRuntime.mockReturnValue(undefined);
+    runtimeMocks.getOrCreateSessionMcpRuntime.mockResolvedValue({ sessionId: "session-1" });
+    runtimeMocks.materializeBundleMcpToolsForRun.mockResolvedValue({
+      tools: [] as unknown[],
+      dispose: vi.fn(async () => undefined),
+    });
+    runtimeMocks.buildBundleMcpToolsFromCatalog.mockReturnValue([]);
+    runtimeMocks.applyFinalEffectiveToolPolicy.mockImplementation(
+      (params: { bundledTools: unknown[] }) => params.bundledTools,
+    );
   });
 
   it("rejects invalid params", async () => {
@@ -161,7 +208,7 @@ describe("tools.effective handler", () => {
     expect(call?.[2]?.message).toContain('unknown session key "missing-session"');
   });
 
-  it("returns the effective runtime inventory", async () => {
+  it("returns the read-only effective runtime inventory without MCP startup", async () => {
     const { respond, invoke } = createInvokeParams({ sessionKey: "main:abc" });
     await invoke();
     const call = firstRespondCall(respond);
@@ -172,7 +219,8 @@ describe("tools.effective handler", () => {
     expect(payload?.groups?.[0]?.id).toBe("core");
     expect(payload?.groups?.[0]?.source).toBe("core");
     expect(payload?.groups?.[0]?.tools?.[0]?.id).toBe("exec");
-    expect(payload?.groups?.[0]?.tools?.[0]?.source).toBe("core");
+    expect(runtimeMocks.getOrCreateSessionMcpRuntime).not.toHaveBeenCalled();
+    expect(runtimeMocks.materializeBundleMcpToolsForRun).not.toHaveBeenCalled();
     const inventoryParams = resolveEffectiveToolInventoryArg();
     expect(inventoryParams?.currentChannelId).toBe("channel-1");
     expect(inventoryParams?.currentThreadTs).toBe("thread-2");
@@ -186,103 +234,165 @@ describe("tools.effective handler", () => {
     expect(inventoryParams?.modelId).toBe("gpt-4.1");
   });
 
-  it("serves repeated requests from the fresh inventory cache", async () => {
-    const first = createInvokeParams({ sessionKey: "main:abc" });
-    await first.invoke();
-    const second = createInvokeParams({ sessionKey: "main:abc" });
-    await second.invoke();
+  it("reports configured MCP servers as not connected without starting them", async () => {
+    runtimeMocks.resolveSessionMcpConfigSummary.mockReturnValueOnce({
+      fingerprint: "mcp:1:test",
+      serverNames: ["reproProbe"],
+    });
+    const { respond, invoke } = createInvokeParams({ sessionKey: "main:abc" });
+    await invoke();
 
-    expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledTimes(1);
-    expect(firstRespondCall(first.respond)?.[0]).toBe(true);
-    expect(firstRespondCall(second.respond)?.[0]).toBe(true);
+    const payload = firstRespondCall(respond)?.[1] as ToolsEffectivePayload | undefined;
+    expect(payload?.groups?.map((group) => group.id)).toEqual(["core"]);
+    expect(payload?.notices?.[0]?.id).toBe("mcp-not-yet-connected");
+    expect(payload?.notices?.[0]?.message).toContain("reproProbe");
+    expect(runtimeMocks.getOrCreateSessionMcpRuntime).not.toHaveBeenCalled();
+    expect(runtimeMocks.materializeBundleMcpToolsForRun).not.toHaveBeenCalled();
   });
 
-  it("invalidates the cache when only the channel registry version changes", async () => {
-    const first = createInvokeParams({ sessionKey: "main:abc" });
-    await first.invoke();
+  it("projects MCP tools from an already-populated session runtime catalog", async () => {
+    const mcpTool = makeMcpTool();
+    const catalog: McpToolCatalog = { version: 1, generatedAt: 1, servers: {}, tools: [] };
+    runtimeMocks.resolveSessionMcpConfigSummary.mockReturnValueOnce({
+      fingerprint: "mcp:1:test",
+      serverNames: ["reproProbe"],
+    });
+    runtimeMocks.peekSessionMcpRuntime.mockReturnValueOnce({
+      configFingerprint: "mcp:1:test",
+      peekCatalog: () => catalog,
+    });
+    runtimeMocks.buildBundleMcpToolsFromCatalog.mockReturnValueOnce([mcpTool]);
 
-    runtimeMocks.getActivePluginChannelRegistryVersion.mockReturnValue(2);
-    const second = createInvokeParams({ sessionKey: "main:abc" });
-    await second.invoke();
+    const { respond, invoke } = createInvokeParams({ sessionKey: "main:abc" });
+    await invoke();
 
-    expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledTimes(2);
-    expect(firstRespondCall(second.respond)?.[0]).toBe(true);
-  });
-
-  it("coalesces identical cache misses while inventory resolution is pending", async () => {
-    const first = createInvokeParams({ sessionKey: "main:abc" });
-    const second = createInvokeParams({ sessionKey: "main:abc" });
-
-    await Promise.all([first.invoke(), second.invoke()]);
-
-    expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledTimes(1);
-    expect(firstRespondCall(first.respond)?.[0]).toBe(true);
-    expect(firstRespondCall(second.respond)?.[0]).toBe(true);
-  });
-
-  it("returns stale cached inventory immediately while refreshing in the background", async () => {
-    let now = 1_000;
-    testing.setToolsEffectiveNowForTest(() => now);
-    const stalePayload = {
-      agentId: "main",
-      profile: "coding",
-      groups: [
+    const payload = firstRespondCall(respond)?.[1] as ToolsEffectivePayload | undefined;
+    expect(payload?.groups?.map((group) => group.id)).toEqual(["core", "mcp"]);
+    expect(payload?.groups?.[1]).toEqual({
+      id: "mcp",
+      label: "MCP server tools",
+      source: "mcp",
+      tools: [
         {
-          id: "core",
-          label: "Built-in tools",
-          source: "core",
-          tools: [
-            {
-              id: "read",
-              label: "Read",
-              description: "Read files",
-              rawDescription: "Read files",
-              source: "core",
-            },
-          ],
+          id: "reproProbe__probe_tool",
+          label: "Probe Tool",
+          description: "Probe from MCP",
+          rawDescription: "Probe from MCP",
+          source: "mcp",
+          pluginId: "bundle-mcp",
         },
       ],
-    };
-    const refreshedPayload = {
-      agentId: "main",
-      profile: "coding",
-      groups: [
-        {
-          id: "core",
-          label: "Built-in tools",
-          source: "core",
-          tools: [
-            {
-              id: "exec",
-              label: "Exec",
-              description: "Run shell commands",
-              rawDescription: "Run shell commands",
-              source: "core",
-            },
-          ],
-        },
-      ],
-    };
-    runtimeMocks.resolveEffectiveToolInventory
-      .mockReturnValueOnce(stalePayload)
-      .mockReturnValueOnce(refreshedPayload);
+    });
+    expect(runtimeMocks.buildBundleMcpToolsFromCatalog).toHaveBeenCalledWith({
+      catalog,
+      reservedToolNames: ["exec"],
+    });
+    expect(runtimeMocks.getOrCreateSessionMcpRuntime).not.toHaveBeenCalled();
+    expect(runtimeMocks.materializeBundleMcpToolsForRun).not.toHaveBeenCalled();
+  });
 
-    const initial = createInvokeParams({ sessionKey: "main:abc" });
-    await initial.invoke();
-    now += 11_000;
+  it("does not project stale MCP catalogs after config changes", async () => {
+    runtimeMocks.resolveSessionMcpConfigSummary.mockReturnValueOnce({
+      fingerprint: "mcp:2:test",
+      serverNames: ["reproProbe"],
+    });
+    runtimeMocks.peekSessionMcpRuntime.mockReturnValueOnce({
+      configFingerprint: "mcp:1:test",
+      peekCatalog: () => ({ version: 1, generatedAt: 1, servers: {}, tools: [] }),
+    });
 
-    const stale = createInvokeParams({ sessionKey: "main:abc" });
-    await stale.invoke();
+    const { respond, invoke } = createInvokeParams({ sessionKey: "main:abc" });
+    await invoke();
 
-    expect(firstRespondCall(stale.respond)?.[1]).toBe(stalePayload);
-    expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledTimes(1);
+    const payload = firstRespondCall(respond)?.[1] as ToolsEffectivePayload | undefined;
+    expect(payload?.groups?.map((group) => group.id)).toEqual(["core"]);
+    expect(payload?.notices?.[0]?.id).toBe("mcp-needs-refresh");
+    expect(runtimeMocks.buildBundleMcpToolsFromCatalog).not.toHaveBeenCalled();
+  });
 
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledTimes(2);
+  it("live-refreshes bundled MCP tools in a dedicated effective group", async () => {
+    const dispose = vi.fn(async () => undefined);
+    const mcpTool = makeMcpTool();
+    const runtime = { sessionId: "session-1" };
+    runtimeMocks.getOrCreateSessionMcpRuntime.mockResolvedValueOnce(runtime);
+    runtimeMocks.materializeBundleMcpToolsForRun.mockResolvedValueOnce({
+      tools: [mcpTool],
+      dispose,
+    });
 
-    const fresh = createInvokeParams({ sessionKey: "main:abc" });
-    await fresh.invoke();
-    expect(firstRespondCall(fresh.respond)?.[1]).toBe(refreshedPayload);
+    const { respond, invoke } = createInvokeParams(
+      { sessionKey: "main:abc" },
+      "tools.effective.refresh",
+    );
+    await invoke();
+
+    const payload = firstRespondCall(respond)?.[1] as ToolsEffectivePayload | undefined;
+    expect(payload?.groups?.map((group) => group.id)).toEqual(["core", "mcp"]);
+    expect(runtimeMocks.getOrCreateSessionMcpRuntime).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      sessionKey: "main:abc",
+      workspaceDir: "/tmp/workspace-main",
+      cfg: {},
+    });
+    expect(runtimeMocks.materializeBundleMcpToolsForRun).toHaveBeenCalledWith({
+      runtime,
+      reservedToolNames: ["exec"],
+    });
+    expect(runtimeMocks.applyFinalEffectiveToolPolicy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bundledTools: [mcpTool],
+        config: {},
+        sessionKey: "main:abc",
+        agentId: "main",
+        modelProvider: "openai",
+        modelId: "gpt-4.1",
+        messageProvider: "telegram",
+        agentAccountId: "acct-1",
+        groupId: "group-4",
+        groupChannel: "#ops",
+        groupSpace: "workspace-5",
+        spawnedBy: "agent:main:telegram:group:parent-group",
+      }),
+    );
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report refreshed MCP tools filtered out by final policy", async () => {
+    const dispose = vi.fn(async () => undefined);
+    const mcpTool = makeMcpTool();
+    runtimeMocks.materializeBundleMcpToolsForRun.mockResolvedValueOnce({
+      tools: [mcpTool],
+      dispose,
+    });
+    runtimeMocks.applyFinalEffectiveToolPolicy.mockReturnValueOnce([]);
+
+    const { respond, invoke } = createInvokeParams(
+      { sessionKey: "main:abc" },
+      "tools.effective.refresh",
+    );
+    await invoke();
+
+    const payload = firstRespondCall(respond)?.[1] as ToolsEffectivePayload | undefined;
+    expect(payload?.groups?.map((group) => group.id)).toEqual(["core"]);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a warning notice when refresh materialization fails", async () => {
+    runtimeMocks.resolveSessionMcpConfigSummary.mockReturnValueOnce({
+      fingerprint: "mcp:1:test",
+      serverNames: ["reproProbe"],
+    });
+    runtimeMocks.getOrCreateSessionMcpRuntime.mockRejectedValueOnce(new Error("boom"));
+
+    const { respond, invoke } = createInvokeParams(
+      { sessionKey: "main:abc" },
+      "tools.effective.refresh",
+    );
+    await invoke();
+
+    const payload = firstRespondCall(respond)?.[1] as ToolsEffectivePayload | undefined;
+    expect(payload?.groups?.map((group) => group.id)).toEqual(["core"]);
+    expect(payload?.notices?.[0]?.id).toBe("mcp-refresh-failed");
   });
 
   it("falls back to origin.threadId when delivery context omits thread metadata", async () => {

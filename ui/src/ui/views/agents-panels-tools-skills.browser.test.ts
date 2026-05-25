@@ -1,5 +1,5 @@
 import { render } from "lit";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderAgentTools } from "./agents-panels-tools-skills.ts";
 
 function createBaseParams(overrides: Partial<Parameters<typeof renderAgentTools>[0]> = {}) {
@@ -25,6 +25,7 @@ function createBaseParams(overrides: Partial<Parameters<typeof renderAgentTools>
     onOverridesChange: () => undefined,
     onConfigReload: () => undefined,
     onConfigSave: () => undefined,
+    onEffectiveToolsRefresh: () => undefined,
     ...overrides,
   };
 }
@@ -96,6 +97,21 @@ describe("agents tools panel (browser)", () => {
                   },
                 ],
               },
+              {
+                id: "mcp",
+                label: "MCP server tools",
+                source: "mcp",
+                tools: [
+                  {
+                    id: "reproProbe__probe_tool",
+                    label: "Probe Tool",
+                    description: "Probe from MCP",
+                    rawDescription: "Probe from MCP",
+                    source: "mcp",
+                    pluginId: "bundle-mcp",
+                  },
+                ],
+              },
             ],
           },
         }),
@@ -109,11 +125,16 @@ describe("agents tools panel (browser)", () => {
         label.textContent?.trim(),
       ),
     ).toEqual(["Available Right Now", "Quick Presets"]);
-    const runtimeChip = container.querySelector(".agent-tools-runtime-chip");
-    expect(runtimeChip?.querySelector(".mono")?.textContent?.trim()).toBe("Message Actions");
-    expect(runtimeChip?.querySelector(".agent-tools-runtime-chip__meta")?.textContent?.trim()).toBe(
-      "Channel: guildchat",
+    const runtimeChips = Array.from(container.querySelectorAll(".agent-tools-runtime-chip")).map(
+      (chip) => ({
+        label: chip.querySelector(".mono")?.textContent?.trim(),
+        meta: chip.querySelector(".agent-tools-runtime-chip__meta")?.textContent?.trim(),
+      }),
     );
+    expect(runtimeChips).toEqual([
+      { label: "Message Actions", meta: "Channel: guildchat" },
+      { label: "Probe Tool", meta: "MCP" },
+    ]);
     expect(
       Array.from(container.querySelectorAll(".agent-tools-group__title > .agent-pill")).map(
         (pill) => pill.textContent?.trim(),
@@ -149,6 +170,42 @@ describe("agents tools panel (browser)", () => {
     expect(container.querySelector(".callout.info")?.textContent?.trim()).toBe(
       "Could not load runtime tool catalog. Showing built-in fallback list instead.",
     );
+  });
+
+  it("renders effective tool notices and exposes explicit refresh", async () => {
+    const container = document.createElement("div");
+    const onEffectiveToolsRefresh = vi.fn();
+    render(
+      renderAgentTools(
+        createBaseParams({
+          onEffectiveToolsRefresh,
+          toolsEffectiveResult: {
+            agentId: "main",
+            profile: "full",
+            groups: [],
+            notices: [
+              {
+                id: "mcp-not-yet-connected",
+                severity: "info",
+                message: "MCP servers are configured but not connected yet.",
+              },
+            ],
+          },
+        }),
+      ),
+      container,
+    );
+    await Promise.resolve();
+
+    expect(container.querySelector(".agent-tools-notices .callout.info")?.textContent?.trim()).toBe(
+      "MCP servers are configured but not connected yet.",
+    );
+    const refreshButton = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent?.trim() === "Refresh Available Tools",
+    );
+    expect(refreshButton).toBeInstanceOf(HTMLButtonElement);
+    refreshButton?.click();
+    expect(onEffectiveToolsRefresh).toHaveBeenCalledTimes(1);
   });
 
   it("closes expanded tool rows when the parent group collapses", async () => {

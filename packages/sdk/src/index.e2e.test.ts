@@ -124,6 +124,7 @@ async function createFakeGateway(port = 0): Promise<FakeGateway> {
               "tasks.list",
               "tools.catalog",
               "tools.effective",
+              "tools.effective.refresh",
               "tools.invoke",
             ],
             events: ["agent", "sessions.changed"],
@@ -316,6 +317,11 @@ async function createFakeGateway(port = 0): Promise<FakeGateway> {
         return;
       }
 
+      if (frame.method === "tools.effective.refresh") {
+        reply({ tools: [{ name: "shell", enabled: true }], notices: [] });
+        return;
+      }
+
       if (frame.method === "tools.invoke") {
         reply({ ok: true, toolName: "shell", output: { ok: true } });
         return;
@@ -493,6 +499,11 @@ describe("OpenClaw SDK websocket e2e", () => {
         await oc.tools.effective({ sessionKey: "sdk-session" }),
       );
       expect(effectiveTools.tools).toEqual([{ name: "shell", enabled: true }]);
+      const refreshedTools = expectJsonObject(
+        await oc.tools.refresh({ sessionKey: "sdk-session" }),
+      );
+      expect(refreshedTools.tools).toEqual([{ name: "shell", enabled: true }]);
+      expect(refreshedTools.notices).toEqual([]);
       const toolResult = await oc.tools.invoke("shell", {
         args: { command: "pwd" },
         sessionKey: "sdk-session",
@@ -528,6 +539,7 @@ describe("OpenClaw SDK websocket e2e", () => {
         "models.authStatus",
         "tools.catalog",
         "tools.effective",
+        "tools.effective.refresh",
         "tools.invoke",
         "exec.approval.list",
         "exec.approval.resolve",
