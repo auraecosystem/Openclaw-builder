@@ -20,6 +20,10 @@ import {
   type GatewayUpdateAvailableEventPayload,
 } from "./events.js";
 import { STARTUP_UNAVAILABLE_GATEWAY_METHODS } from "./methods/core-descriptors.js";
+import {
+  resolveProviderAuthPrewarmOptions,
+  type ProviderAuthPrewarmOptions,
+} from "./provider-auth-prewarm-config.js";
 import type { refreshLatestUpdateRestartSentinel } from "./server-restart-sentinel.js";
 import type { logGatewayStartup } from "./server-startup-log.js";
 import type { startGatewayTailscaleExposure } from "./server-tailscale.js";
@@ -167,6 +171,7 @@ function schedulePostAttachUpdateSentinelRefresh(params: {
 
 function scheduleProviderAuthStatePrewarm(params: {
   getConfig: () => OpenClawConfig;
+  providerAuthPrewarm?: ProviderAuthPrewarmOptions;
   log: {
     info: (msg: string) => void;
     warn: (msg: string) => void;
@@ -180,6 +185,11 @@ function scheduleProviderAuthStatePrewarm(params: {
   let pendingRewarmReason: string | undefined;
   const isStopped = () => stopped;
   const delayMs = params.delayMs ?? PROVIDER_AUTH_PREWARM_START_DELAY_MS;
+  const shouldWarm = (cfg: OpenClawConfig): boolean =>
+    resolveProviderAuthPrewarmOptions({
+      cfg,
+      providerAuthPrewarm: params.providerAuthPrewarm,
+    }).enabled;
   void (async () => {
     const { clearCurrentProviderAuthState, warmCurrentProviderAuthState } =
       await import("../agents/model-provider-auth.js");
@@ -189,6 +199,9 @@ function scheduleProviderAuthStatePrewarm(params: {
         return;
       }
       const cfg = params.getConfig();
+      if (!shouldWarm(cfg)) {
+        return;
+      }
       rewarmInFlight = true;
       try {
         const metrics = await measureProviderAuthWarm(() =>
@@ -234,6 +247,10 @@ function scheduleProviderAuthStatePrewarm(params: {
       if (isStopped()) {
         return;
       }
+      const cfg = params.getConfig();
+      if (!shouldWarm(cfg)) {
+        return;
+      }
       clearCurrentProviderAuthState();
       scheduleAuthMapRewarm("auth-profile-failure");
     });
@@ -244,6 +261,9 @@ function scheduleProviderAuthStatePrewarm(params: {
             return;
           }
           const cfg = params.getConfig();
+          if (!shouldWarm(cfg)) {
+            return;
+          }
           const metrics = await measureProviderAuthWarm(() =>
             warmCurrentProviderAuthState(cfg, { isCancelled: isStopped }),
           );
@@ -854,11 +874,7 @@ export async function startGatewayPostAttachRuntime(
     isClosing?: () => boolean;
     startupTrace?: GatewayStartupTrace;
     deferSidecars?: boolean;
-    providerAuthPrewarm?: {
-      enabled?: boolean;
-      delayMs?: number;
-      getConfig?: () => OpenClawConfig;
-    };
+    providerAuthPrewarm?: ProviderAuthPrewarmOptions;
   },
   runtimeDeps: GatewayPostAttachRuntimeDeps = defaultGatewayPostAttachRuntimeDeps,
 ) {
@@ -972,12 +988,17 @@ export async function startGatewayPostAttachRuntime(
         }
         const postReadySidecars = [...result.postReadySidecars];
         const gatewayLifetimeSidecars: GatewayPostReadySidecarHandle[] = [];
-        if (params.providerAuthPrewarm?.enabled !== false) {
+        const providerAuthPrewarm = resolveProviderAuthPrewarmOptions({
+          cfg: params.cfgAtStart,
+          providerAuthPrewarm: params.providerAuthPrewarm,
+        });
+        if (providerAuthPrewarm.enabled) {
           gatewayLifetimeSidecars.push(
             scheduleProviderAuthStatePrewarm({
-              getConfig: params.providerAuthPrewarm?.getConfig ?? (() => params.cfgAtStart),
+              getConfig: providerAuthPrewarm.getConfig ?? (() => params.cfgAtStart),
+              providerAuthPrewarm: params.providerAuthPrewarm,
               log: params.log,
-              delayMs: params.providerAuthPrewarm?.delayMs,
+              delayMs: providerAuthPrewarm.delayMs,
             }),
           );
         }
@@ -1062,6 +1083,7 @@ export const testing = {
   hasRestartSentinelFileFast,
   refreshLatestUpdateRestartSentinelIfPresent,
   resolveGatewayMemoryStartupPolicy,
+  resolveProviderAuthPrewarmOptions,
   scheduleProviderAuthStatePrewarm,
   stopPostReadySidecarsAfterCloseStarted,
 };
