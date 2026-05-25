@@ -21,6 +21,7 @@ import {
   resolveSessionFilePathOptions,
   listConfiguredSessionStoreAgentIds,
   type SessionEntry,
+  type SessionCompactionCheckpoint,
   updateSessionStore,
 } from "../../config/sessions.js";
 import { resolveAgentMainSessionKey } from "../../config/sessions/main-session.js";
@@ -77,8 +78,7 @@ import {
 import { resolveSessionKeyForRun } from "../server-session-key.js";
 import {
   forkCompactionCheckpointTranscriptAsync,
-  getSessionCompactionCheckpoint,
-  listSessionCompactionCheckpoints,
+  listSessionCompactionCheckpointsWithFilesAsync,
 } from "../session-compaction-checkpoints.js";
 import { triggerSessionPatchHook } from "../session-patch-hooks.js";
 import {
@@ -399,6 +399,7 @@ function cloneCheckpointSessionEntry(params: {
   label?: string;
   parentSessionKey?: string;
   totalTokens?: number;
+  compactionCheckpoints?: SessionCompactionCheckpoint[];
   preserveCompactionCheckpoints?: boolean;
 }): SessionEntry {
   return {
@@ -428,7 +429,7 @@ function cloneCheckpointSessionEntry(params: {
     label: params.label ?? params.currentEntry.label,
     parentSessionKey: params.parentSessionKey ?? params.currentEntry.parentSessionKey,
     compactionCheckpoints: params.preserveCompactionCheckpoints
-      ? params.currentEntry.compactionCheckpoints
+      ? (params.compactionCheckpoints ?? params.currentEntry.compactionCheckpoints)
       : undefined,
   };
 }
@@ -1173,7 +1174,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     }
     respond(true, { ok: true, key: resolved.key }, undefined);
   },
-  "sessions.compaction.list": ({ params, respond }) => {
+  "sessions.compaction.list": async ({ params, respond }) => {
     if (
       !assertValidParams(
         params,
@@ -1188,18 +1189,22 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     if (!key) {
       return;
     }
-    const { entry, canonicalKey } = loadSessionEntry(key);
+    const { entry, canonicalKey, storePath } = loadSessionEntry(key);
     respond(
       true,
       {
         ok: true,
         key: canonicalKey,
-        checkpoints: listSessionCompactionCheckpoints(entry),
+        checkpoints: await listSessionCompactionCheckpointsWithFilesAsync({
+          entry,
+          sessionKey: canonicalKey,
+          storePath,
+        }),
       },
       undefined,
     );
   },
-  "sessions.compaction.get": ({ params, respond }) => {
+  "sessions.compaction.get": async ({ params, respond }) => {
     if (
       !assertValidParams(
         params,
@@ -1220,8 +1225,15 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "checkpointId required"));
       return;
     }
-    const { entry, canonicalKey } = loadSessionEntry(key);
-    const checkpoint = getSessionCompactionCheckpoint({ entry, checkpointId });
+    const { entry, canonicalKey, storePath } = loadSessionEntry(key);
+    const compactionCheckpoints = await listSessionCompactionCheckpointsWithFilesAsync({
+      entry,
+      sessionKey: canonicalKey,
+      storePath,
+    });
+    const checkpoint = compactionCheckpoints.find(
+      (candidate) => candidate.checkpointId === checkpointId,
+    );
     if (!checkpoint) {
       respond(
         false,
@@ -1544,7 +1556,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
     const loaded = loadSessionEntry(key);
-    const { cfg, entry, canonicalKey } = loaded;
+    const { cfg, entry, canonicalKey, storePath } = loaded;
     const target = resolveGatewaySessionStoreTarget({ cfg, key: canonicalKey });
     if (!entry?.sessionId) {
       respond(
@@ -1554,7 +1566,14 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const checkpoint = getSessionCompactionCheckpoint({ entry, checkpointId });
+    const compactionCheckpoints = await listSessionCompactionCheckpointsWithFilesAsync({
+      entry,
+      sessionKey: canonicalKey,
+      storePath,
+    });
+    const checkpoint = compactionCheckpoints.find(
+      (candidate) => candidate.checkpointId === checkpointId,
+    );
     if (!checkpoint?.preCompaction.sessionFile) {
       respond(
         false,
@@ -1653,7 +1672,14 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const checkpoint = getSessionCompactionCheckpoint({ entry, checkpointId });
+    const compactionCheckpoints = await listSessionCompactionCheckpointsWithFilesAsync({
+      entry,
+      sessionKey: canonicalKey,
+      storePath,
+    });
+    const checkpoint = compactionCheckpoints.find(
+      (candidate) => candidate.checkpointId === checkpointId,
+    );
     if (!checkpoint?.preCompaction.sessionFile) {
       respond(
         false,
@@ -1693,6 +1719,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       nextSessionId: restoredSession.sessionId,
       nextSessionFile: restoredSession.sessionFile,
       totalTokens: checkpoint.tokensBefore,
+      compactionCheckpoints,
       preserveCompactionCheckpoints: true,
     });
 

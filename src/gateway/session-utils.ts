@@ -47,9 +47,12 @@ import { resolveStateDir } from "../config/paths.js";
 import {
   buildGroupDisplayName,
   loadSessionStore,
+  parseCompactionCheckpointTranscriptFileName,
   resolveAllAgentSessionStoreTargetsSync,
   resolveAgentMainSessionKey,
   resolveFreshSessionTotalTokens,
+  resolveSessionFilePath,
+  resolveSessionFilePathOptions,
   resolveStorePath,
   type SessionEntry,
   type SessionStoreTarget,
@@ -255,12 +258,23 @@ function resolveNonNegativeNumber(value: number | null | undefined): number | un
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
+function normalizeFileTimestampMs(value: number): number | undefined {
+  if (!Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.trunc(value));
+}
+
 type SessionCompactionCheckpointEntry = NonNullable<SessionEntry["compactionCheckpoints"]>[number];
+
+function isPlainObjectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
 
 function isProjectableCompactionCheckpoint(
   value: unknown,
 ): value is SessionCompactionCheckpointEntry {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (!isPlainObjectRecord(value)) {
     return false;
   }
   const checkpoint = value as {
@@ -279,7 +293,7 @@ function isProjectableCompactionCheckpoint(
   );
 }
 
-function resolveProjectableCompactionCheckpoints(
+export function resolveProjectableCompactionCheckpoints(
   entry?: Pick<SessionEntry, "compactionCheckpoints"> | null,
 ): SessionCompactionCheckpointEntry[] {
   const checkpoints = entry?.compactionCheckpoints;
@@ -287,6 +301,35 @@ function resolveProjectableCompactionCheckpoints(
     return [];
   }
   return checkpoints.filter(isProjectableCompactionCheckpoint);
+}
+
+export function isFullyUsableCompactionCheckpoint(
+  value: unknown,
+): value is SessionCompactionCheckpointEntry {
+  if (!isProjectableCompactionCheckpoint(value)) {
+    return false;
+  }
+  const checkpoint = value as {
+    preCompaction?: unknown;
+    postCompaction?: unknown;
+  };
+  if (
+    !isPlainObjectRecord(checkpoint.preCompaction) ||
+    !isPlainObjectRecord(checkpoint.postCompaction)
+  ) {
+    return false;
+  }
+  return Boolean(normalizeOptionalString(checkpoint.preCompaction.sessionFile));
+}
+
+export function resolveFullyUsableCompactionCheckpoints(
+  entry?: Pick<SessionEntry, "compactionCheckpoints"> | null,
+): SessionCompactionCheckpointEntry[] {
+  const checkpoints = entry?.compactionCheckpoints;
+  if (!Array.isArray(checkpoints) || checkpoints.length === 0) {
+    return [];
+  }
+  return checkpoints.filter(isFullyUsableCompactionCheckpoint);
 }
 
 function resolveLatestCompactionCheckpoint(
@@ -342,6 +385,82 @@ function resolveModelCostConfigCached(
   const value = resolveModelCostConfig({ provider, model, config: cfg });
   rowContext.modelCostConfigByModelRef.set(key, value);
   return value;
+}
+
+function discoverDiskCompactionCheckpointPreviewsSync(params: {
+  key: string;
+  storePath: string;
+  entry?: Pick<SessionEntry, "sessionId" | "sessionFile" | "compactionCheckpoints">;
+  checkpointFileNamesByDir?: Map<string, string[] | null>;
+}): GatewaySessionRow["latestCompactionCheckpoint"][] {
+  if (!params.entry?.sessionId) {
+    return [];
+  }
+  const agentId = parseAgentSessionKey(params.key)?.agentId;
+  let sessionFile: string;
+  try {
+    sessionFile = resolveSessionFilePath(
+      params.entry.sessionId,
+      params.entry,
+      resolveSessionFilePathOptions({ storePath: params.storePath, agentId }),
+    );
+  } catch {
+    return [];
+  }
+  const sessionDir = path.dirname(sessionFile);
+  const checkpointTranscriptBase = path.parse(sessionFile).name;
+  const knownIds = new Set(
+    resolveProjectableCompactionCheckpoints(params.entry).map(
+      (checkpoint) => checkpoint.checkpointId,
+    ),
+  );
+  let fileNames: string[];
+  const cachedFileNames = params.checkpointFileNamesByDir?.get(sessionDir);
+  if (cachedFileNames !== undefined) {
+    if (cachedFileNames === null) {
+      return [];
+    }
+    fileNames = cachedFileNames;
+  } else {
+    try {
+      fileNames = fs.readdirSync(sessionDir);
+      params.checkpointFileNamesByDir?.set(sessionDir, fileNames);
+    } catch {
+      params.checkpointFileNamesByDir?.set(sessionDir, null);
+      return [];
+    }
+  }
+  const previews: GatewaySessionRow["latestCompactionCheckpoint"][] = [];
+  for (const fileName of fileNames) {
+    const parsed = parseCompactionCheckpointTranscriptFileName(fileName);
+    if (
+      !parsed ||
+      parsed.sessionId !== checkpointTranscriptBase ||
+      knownIds.has(parsed.checkpointId)
+    ) {
+      continue;
+    }
+    const checkpointFile = path.join(sessionDir, fileName);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(checkpointFile);
+    } catch {
+      continue;
+    }
+    if (!stat.isFile()) {
+      continue;
+    }
+    const createdAt = normalizeFileTimestampMs(stat.mtimeMs);
+    if (createdAt === undefined) {
+      continue;
+    }
+    previews.push({
+      checkpointId: parsed.checkpointId,
+      createdAt,
+      reason: "manual",
+    });
+  }
+  return previews;
 }
 
 function resolveEstimatedSessionCostUsd(params: {
@@ -437,6 +556,7 @@ type SessionListRowContext = {
   >;
   displayModelIdentityByKey: Map<string, { provider?: string; model?: string }>;
   modelCostConfigByModelRef: Map<string, ModelCostConfig | undefined>;
+  checkpointFileNamesByDir: Map<string, string[] | null>;
 };
 
 function resolveRuntimeChildSessionKeys(
@@ -557,6 +677,7 @@ function buildSessionListRowContext(params: {
     thinkingMetadataByModelRef: new Map(),
     displayModelIdentityByKey: new Map(),
     modelCostConfigByModelRef: new Map(),
+    checkpointFileNamesByDir: new Map(),
   };
 }
 
@@ -1811,12 +1932,36 @@ export function buildGatewaySessionRow(params: {
       )
     : resolveChildSessionKeys(key, store, now, rowContext?.subagentRuns);
   const compactionCheckpoints = resolveProjectableCompactionCheckpoints(entry);
-  const compactionCheckpointCount = Array.isArray(entry?.compactionCheckpoints)
-    ? compactionCheckpoints.length
-    : undefined;
-  const latestCompactionCheckpoint = buildCompactionCheckpointPreview(
-    resolveLatestCompactionCheckpoint(compactionCheckpoints),
+  const storedCompactionCheckpointPreviews = [
+    buildCompactionCheckpointPreview(resolveLatestCompactionCheckpoint(compactionCheckpoints)),
+  ].filter(
+    (checkpoint): checkpoint is NonNullable<GatewaySessionRow["latestCompactionCheckpoint"]> =>
+      Boolean(checkpoint),
   );
+  const diskCompactionCheckpointPreviews = discoverDiskCompactionCheckpointPreviewsSync({
+    key,
+    storePath,
+    entry,
+    checkpointFileNamesByDir: rowContext?.checkpointFileNamesByDir,
+  });
+  const compactionCheckpointPreviews = [
+    ...storedCompactionCheckpointPreviews,
+    ...diskCompactionCheckpointPreviews,
+  ].filter(
+    (checkpoint): checkpoint is NonNullable<GatewaySessionRow["latestCompactionCheckpoint"]> =>
+      Boolean(checkpoint),
+  );
+  const latestCompactionCheckpoint = compactionCheckpointPreviews.reduce<
+    GatewaySessionRow["latestCompactionCheckpoint"] | undefined
+  >(
+    (latest, checkpoint) =>
+      !latest || checkpoint.createdAt > latest.createdAt ? checkpoint : latest,
+    undefined,
+  );
+  const totalCompactionCheckpointCount =
+    compactionCheckpoints.length + diskCompactionCheckpointPreviews.length;
+  const compactionCheckpointCount =
+    totalCompactionCheckpointCount > 0 ? totalCompactionCheckpointCount : undefined;
   const selectedOrRuntimeModelProvider = selectedModel?.provider ?? modelProvider;
   const selectedOrRuntimeModel = selectedModel?.model ?? model;
   const rowModelIdentity = lightweight
