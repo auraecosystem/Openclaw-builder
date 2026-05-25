@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildNodeShellCommand } from "./node-shell.js";
+import { buildNodeShellCommand, buildNodeShellFallbackCommands } from "./node-shell.js";
 
 describe("buildNodeShellCommand", () => {
   it("uses cmd.exe for win-prefixed platform labels", () => {
@@ -32,5 +32,12 @@ describe("buildNodeShellCommand", () => {
     expect(buildNodeShellCommand("echo hi")).toEqual(["/bin/sh", "-lc", "echo hi"]);
     expect(buildNodeShellCommand("echo hi", null)).toEqual(["/bin/sh", "-lc", "echo hi"]);
     expect(buildNodeShellCommand("echo hi", "   ")).toEqual(["/bin/sh", "-lc", "echo hi"]);
+  });
+
+  it("provides fallback shell argv for /bin/sh spawn ENOENT", () => {
+    expect(buildNodeShellFallbackCommands(["/bin/sh", "-lc", "echo hi"])).toEqual([
+      ["/usr/bin/sh", "-lc", "echo hi"],
+    ]);
+    expect(buildNodeShellFallbackCommands(["cmd.exe", "/c", "echo hi"])).toEqual([]);
   });
 });
