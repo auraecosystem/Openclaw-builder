@@ -16,7 +16,7 @@ import {
 import {
   diffInstalledPluginIndexInvalidationReasons,
   extractPluginInstallRecordsFromInstalledPluginIndex,
-  hasLegacyInstalledPluginIndexConfigPathScopeGaps,
+  hasMissingConfigPathActivationMetadata,
   INSTALLED_PLUGIN_INDEX_WARNING,
   INSTALLED_PLUGIN_INDEX_VERSION,
   INSTALLED_PLUGIN_INDEX_MIGRATION_VERSION,
@@ -239,7 +239,7 @@ function canRefreshPersistedPolicyState(
     persisted.hostContractVersion !== resolveCompatibilityHostVersion(env) ||
     persisted.compatRegistryVersion !== resolveCompatRegistryVersion() ||
     persisted.migrationVersion !== INSTALLED_PLUGIN_INDEX_MIGRATION_VERSION ||
-    hasLegacyInstalledPluginIndexConfigPathScopeGaps(persisted)
+    hasMissingConfigPathActivationMetadata(persisted)
   ) {
     return false;
   }

@@ -22,6 +22,7 @@ import {
   collectConfiguredSpeechProviderIds,
   normalizeConfiguredSpeechProviderIdForStartup,
 } from "./gateway-startup-speech-providers.js";
+import { CONFIG_PATH_ACTIVATION_COMPAT_CODE } from "./installed-plugin-index-config-path-scope.js";
 import { hashJson } from "./installed-plugin-index-hash.js";
 import type { InstalledPluginIndex, InstalledPluginIndexRecord } from "./installed-plugin-index.js";
 import type { PluginManifestRecord, PluginManifestRegistry } from "./manifest-registry.js";
@@ -250,7 +251,7 @@ function hasConfiguredActivationPathPatterns(params: {
 function canUseInstalledIndexConfigPathActivationScope(index: InstalledPluginIndex): boolean {
   return index.plugins.every(
     (plugin) =>
-      !plugin.compat.includes("activation-config-path-hint") ||
+      !plugin.compat.includes(CONFIG_PATH_ACTIVATION_COMPAT_CODE) ||
       plugin.startup.configPaths !== undefined,
   );
 }

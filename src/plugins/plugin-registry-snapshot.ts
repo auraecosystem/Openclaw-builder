@@ -17,7 +17,7 @@ import {
 import {
   getInstalledPluginRecord,
   extractPluginInstallRecordsFromInstalledPluginIndex,
-  hasLegacyInstalledPluginIndexConfigPathScopeGaps,
+  hasMissingConfigPathActivationMetadata,
   isInstalledPluginEnabled,
   listInstalledPluginRecords,
   loadInstalledPluginIndex,
@@ -327,7 +327,7 @@ export function loadPluginRegistrySnapshotWithMetadata(
           message:
             "Persisted plugin registry contains diagnostics referencing missing paths; using derived plugin index. Run `openclaw plugins registry --refresh` to update the persisted registry.",
         });
-      } else if (hasLegacyInstalledPluginIndexConfigPathScopeGaps(persistedIndex)) {
+      } else if (hasMissingConfigPathActivationMetadata(persistedIndex)) {
         diagnostics.push({
           level: "warn",
           code: "persisted-registry-stale-source",

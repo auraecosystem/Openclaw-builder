@@ -1,32 +1,9 @@
+import { hasConfigPathActivationMetadataMigration } from "./installed-plugin-index-config-path-scope.js";
 import { hashJson } from "./installed-plugin-index-hash.js";
 import type {
   InstalledPluginIndex,
-  InstalledPluginIndexRecord,
   InstalledPluginIndexRefreshReason,
 } from "./installed-plugin-index-types.js";
-
-const CONFIG_PATH_SCOPE_COMPAT_CODE = "activation-config-path-hint";
-
-export function hasLegacyInstalledPluginIndexConfigPathScopeGaps(
-  index: InstalledPluginIndex,
-): boolean {
-  return index.plugins.some(
-    (plugin) =>
-      plugin.compat.includes(CONFIG_PATH_SCOPE_COMPAT_CODE) &&
-      plugin.startup.configPaths === undefined,
-  );
-}
-
-function hasLegacyConfigPathScopeGap(params: {
-  previous: InstalledPluginIndexRecord;
-  current: InstalledPluginIndexRecord;
-}): boolean {
-  return (
-    params.previous.compat.includes(CONFIG_PATH_SCOPE_COMPAT_CODE) &&
-    params.previous.startup.configPaths === undefined &&
-    params.current.startup.configPaths !== undefined
-  );
-}
 
 export function diffInstalledPluginIndexInvalidationReasons(
   previous: InstalledPluginIndex,
@@ -70,7 +47,12 @@ export function diffInstalledPluginIndexInvalidationReasons(
     if (previousPlugin.enabled !== currentPlugin.enabled) {
       reasons.add("policy-changed");
     }
-    if (hasLegacyConfigPathScopeGap({ previous: previousPlugin, current: currentPlugin })) {
+    if (
+      hasConfigPathActivationMetadataMigration({
+        previous: previousPlugin,
+        current: currentPlugin,
+      })
+    ) {
       reasons.add("migration");
     }
     if (previousPlugin.manifestHash !== currentPlugin.manifestHash) {
