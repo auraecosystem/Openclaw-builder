@@ -265,7 +265,11 @@ function assertGatewayLiveDidNotSkipAllDueToTimeout(params: {
   timeoutSkippedCount: number;
   total: number;
 }): void {
-  if (params.total === 0 || params.skippedCount !== params.total || params.timeoutSkippedCount === 0) {
+  if (
+    params.total === 0 ||
+    params.skippedCount !== params.total ||
+    params.timeoutSkippedCount === 0
+  ) {
     return;
   }
   throw new Error(

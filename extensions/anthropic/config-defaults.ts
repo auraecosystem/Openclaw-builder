@@ -348,12 +348,18 @@ export function applyAnthropicConfigDefaults(params: {
       modelsMutated = true;
     }
 
-    const primary = resolveKnownAnthropicModelRef(
-      resolveModelPrimaryValue(
-        defaults.model as string | { primary?: string; fallbacks?: string[] } | undefined,
-      ),
+    const rawPrimary = resolveModelPrimaryValue(
+      defaults.model as string | { primary?: string; fallbacks?: string[] } | undefined,
     );
-    if (primary) {
+    const primaryRefs = new Set<string>();
+    if (rawPrimary) {
+      primaryRefs.add(rawPrimary);
+      const canonicalPrimary = resolveKnownAnthropicModelRef(rawPrimary);
+      if (canonicalPrimary) {
+        primaryRefs.add(canonicalPrimary);
+      }
+    }
+    for (const primary of primaryRefs) {
       const parsedPrimary = parseProviderModelRef(primary, "anthropic");
       if (parsedPrimary && isAnthropicCacheRetentionTarget(parsedPrimary)) {
         const key = `${parsedPrimary.provider}/${parsedPrimary.model}`;

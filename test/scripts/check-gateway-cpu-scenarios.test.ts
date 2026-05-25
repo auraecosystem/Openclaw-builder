@@ -52,11 +52,7 @@ describe("gateway CPU scenario guard", () => {
   it("does not run the startup bench when the startup build fails", async () => {
     const outputDir = makeTempRoot();
     const calls: string[][] = [];
-    const options = testing.parseArgs([
-      "--output-dir",
-      outputDir,
-      "--skip-qa",
-    ]);
+    const options = testing.parseArgs(["--output-dir", outputDir, "--skip-qa"]);
 
     const result = await testing.runGatewayCpuScenarios(options, {
       silent: true,

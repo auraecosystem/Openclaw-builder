@@ -42,15 +42,13 @@ describe("install.sh", () => {
   it("installs Node.js with apk on Alpine before falling back to NodeSource", () => {
     expect(script).toContain("finish_linux_node_install()");
     expect(script).toContain('ui_info "Installing Node.js via apk (Alpine Linux detected)"');
-    expect(script).toContain(
-      'run_quiet_step "Installing Node.js" apk add --no-cache nodejs npm',
-    );
+    expect(script).toContain('run_quiet_step "Installing Node.js" apk add --no-cache nodejs npm');
     expect(script).toContain(
       'run_quiet_step "Installing Node.js" sudo apk add --no-cache nodejs npm',
     );
-    expect(script).toContain('if ! node_is_at_least_required; then');
+    expect(script).toContain("if ! node_is_at_least_required; then");
 
-    const apkIndex = script.indexOf('if command -v apk &> /dev/null; then');
+    const apkIndex = script.indexOf("if command -v apk &> /dev/null; then");
     const nodeSourceIndex = script.indexOf('ui_info "Installing Node.js via NodeSource"');
     expect(apkIndex).toBeGreaterThan(-1);
     expect(nodeSourceIndex).toBeGreaterThan(apkIndex);

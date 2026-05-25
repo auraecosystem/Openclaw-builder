@@ -1310,6 +1310,7 @@ async function agentCommandInternal(
             });
           },
           fallbacksOverride: effectiveFallbacksOverride,
+          exposeNextCandidateToRun: true,
           onFallbackStep: (step) => {
             fallbackTrajectoryRecorder?.recordEvent("model.fallback_step", step);
           },
@@ -1346,6 +1347,7 @@ async function agentCommandInternal(
               providerOverride,
               modelOverride,
               modelFallbacksOverride: effectiveFallbacksOverride,
+              nextModelFallbackCandidate: runOptions?.nextCandidate,
               originalProvider: provider,
               cfg,
               sessionEntry: attemptSessionEntry,
