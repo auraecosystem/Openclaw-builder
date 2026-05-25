@@ -83,6 +83,7 @@ export type PluginHookName =
   | "inbound_claim"
   | "message_received"
   | "message_sending"
+  | "reply_payload_sending"
   | "message_sent"
   | "before_tool_call"
   | "after_tool_call"
@@ -123,6 +124,7 @@ export const PLUGIN_HOOK_NAMES = [
   "inbound_claim",
   "message_received",
   "message_sending",
+  "reply_payload_sending",
   "message_sent",
   "before_tool_call",
   "after_tool_call",
@@ -426,6 +428,29 @@ export type PluginHookReplyDispatchResult = {
   handled: boolean;
   queuedFinal: boolean;
   counts: Record<ReplyDispatchKind, number>;
+};
+
+export type PluginHookReplyPayloadSendingEvent = {
+  payload: ReplyPayload;
+  kind: ReplyDispatchKind;
+  channel?: string;
+  sessionKey?: string;
+  runId?: string;
+};
+
+export type PluginHookReplyPayloadSendingContext = {
+  channelId?: string;
+  accountId?: string;
+  conversationId?: string;
+  sessionKey?: string;
+  senderId?: string;
+  runId?: string;
+};
+
+export type PluginHookReplyPayloadSendingResult = {
+  payload?: ReplyPayload;
+  cancel?: boolean;
+  reason?: string;
 };
 
 export type PluginHookToolKind = "code_mode_exec";
@@ -974,6 +999,13 @@ export type PluginHookHandlerMap = {
     event: PluginHookReplyDispatchEvent,
     ctx: PluginHookReplyDispatchContext,
   ) => Promise<PluginHookReplyDispatchResult | void> | PluginHookReplyDispatchResult | void;
+  reply_payload_sending: (
+    event: PluginHookReplyPayloadSendingEvent,
+    ctx: PluginHookReplyPayloadSendingContext,
+  ) =>
+    | Promise<PluginHookReplyPayloadSendingResult | void>
+    | PluginHookReplyPayloadSendingResult
+    | void;
   message_received: (
     event: PluginHookMessageReceivedEvent,
     ctx: PluginHookMessageContext,

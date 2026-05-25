@@ -320,6 +320,60 @@ function buildMessageSendingBeforeDeliver(
   };
 }
 
+function buildReplyPayloadSendingBeforeDeliver(
+  ctx: MsgContext | FinalizedMsgContext,
+  opts?: { runId?: string },
+): ReplyDispatchBeforeDeliver | undefined {
+  const hookRunner = getGlobalHookRunner();
+  if (!hookRunner?.hasHooks("reply_payload_sending")) {
+    return undefined;
+  }
+
+  const finalized = finalizeInboundContext(ctx);
+  const hookCtx = deriveInboundMessageHookContext(finalized);
+
+  return async (payload: ReplyPayload, info): Promise<ReplyPayload | null> => {
+    const result = await hookRunner.runReplyPayloadSending(
+      {
+        payload,
+        kind: info.kind,
+        channel: finalized.Surface ?? finalized.Provider,
+        sessionKey: finalized.SessionKey,
+        runId: opts?.runId,
+      },
+      {
+        ...toPluginMessageContext(hookCtx),
+        runId: opts?.runId,
+      },
+    );
+
+    if (result?.cancel) {
+      return null;
+    }
+    return result?.payload ?? payload;
+  };
+}
+
+function combineBeforeDeliverHooks(
+  ...hooks: Array<ReplyDispatchBeforeDeliver | undefined>
+): ReplyDispatchBeforeDeliver | undefined {
+  const activeHooks = hooks.filter((hook): hook is ReplyDispatchBeforeDeliver => Boolean(hook));
+  if (activeHooks.length === 0) {
+    return undefined;
+  }
+
+  return async (payload, info) => {
+    let current: ReplyPayload | null = payload;
+    for (const hook of activeHooks) {
+      if (!current) {
+        return null;
+      }
+      current = await hook(current, info);
+    }
+    return current;
+  };
+}
+
 function buildDispatchTimelineAttributes(ctx: MsgContext | FinalizedMsgContext) {
   const commandTurn = resolveCommandTurnContext(ctx);
   return {
@@ -434,8 +488,13 @@ export async function dispatchInboundMessageWithBufferedDispatcher(params: {
   const finalized = finalizeInboundContext(params.ctx);
   const foregroundReplyFence = beginForegroundReplyFence(finalized);
   const silentReplyContext = resolveDispatcherSilentReplyContext(finalized, params.cfg);
-  const configuredBeforeDeliver =
-    params.dispatcherOptions.beforeDeliver ?? buildMessageSendingBeforeDeliver(finalized);
+  const globalBeforeDeliver = combineBeforeDeliverHooks(
+    buildMessageSendingBeforeDeliver(finalized),
+    buildReplyPayloadSendingBeforeDeliver(finalized, { runId: params.replyOptions?.runId }),
+  );
+  const configuredBeforeDeliver = params.dispatcherOptions.beforeDeliver
+    ? combineBeforeDeliverHooks(params.dispatcherOptions.beforeDeliver, globalBeforeDeliver)
+    : globalBeforeDeliver;
   const beforeDeliver: ReplyDispatchBeforeDeliver | undefined =
     foregroundReplyFence || configuredBeforeDeliver
       ? async (payload, info) => {
@@ -510,10 +569,16 @@ export async function dispatchInboundMessageWithDispatcher(params: {
   replyResolver?: GetReplyFromConfig;
 }): Promise<DispatchInboundResult> {
   const silentReplyContext = resolveDispatcherSilentReplyContext(params.ctx, params.cfg);
+  const globalBeforeDeliver = combineBeforeDeliverHooks(
+    buildMessageSendingBeforeDeliver(params.ctx),
+    buildReplyPayloadSendingBeforeDeliver(params.ctx, { runId: params.replyOptions?.runId }),
+  );
+  const composedBeforeDeliver = params.dispatcherOptions.beforeDeliver
+    ? combineBeforeDeliverHooks(params.dispatcherOptions.beforeDeliver, globalBeforeDeliver)
+    : globalBeforeDeliver;
   const dispatcher = createReplyDispatcher({
     ...params.dispatcherOptions,
-    beforeDeliver:
-      params.dispatcherOptions.beforeDeliver ?? buildMessageSendingBeforeDeliver(params.ctx),
+    beforeDeliver: composedBeforeDeliver,
     silentReplyContext: params.dispatcherOptions.silentReplyContext ?? silentReplyContext,
   });
   return await dispatchInboundMessage({
