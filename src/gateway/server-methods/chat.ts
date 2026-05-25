@@ -146,6 +146,7 @@ type TranscriptAppendResult = {
   ok: boolean;
   messageId?: string;
   message?: Record<string, unknown>;
+  deduped?: boolean;
   error?: string;
 };
 
@@ -1559,6 +1560,9 @@ async function appendAssistantTranscriptMessage(params: {
   agentId?: string;
   createIfMissing?: boolean;
   idempotencyKey?: string;
+  command?: boolean;
+  interactive?: Record<string, unknown>;
+  channelData?: Record<string, unknown>;
   abortMeta?: {
     aborted: true;
     origin: AbortOrigin;
@@ -1599,8 +1603,13 @@ async function appendAssistantTranscriptMessage(params: {
       params.idempotencyKey,
     );
     return existing
-      ? { ok: true, messageId: existing.messageId, message: existing.message }
-      : { ok: true };
+      ? {
+          ok: true,
+          deduped: true,
+          messageId: existing.messageId,
+          message: existing.message,
+        }
+      : { ok: true, deduped: true };
   }
 
   return await appendInjectedAssistantMessageToTranscript({
@@ -1609,6 +1618,9 @@ async function appendAssistantTranscriptMessage(params: {
     label: params.label,
     content: params.content,
     idempotencyKey: params.idempotencyKey,
+    command: params.command,
+    interactive: params.interactive,
+    channelData: params.channelData,
     abortMeta: params.abortMeta,
     ttsSupplement: params.ttsSupplement,
     config: params.cfg,
@@ -3629,6 +3641,10 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionKey: string;
       message: string;
       label?: string;
+      idempotencyKey?: string;
+      command?: boolean;
+      interactive?: Record<string, unknown>;
+      channelData?: Record<string, unknown>;
     };
 
     // Load session to find transcript file
@@ -3648,8 +3664,16 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionFile: entry?.sessionFile,
       agentId: resolveSessionAgentId({ sessionKey, config: cfg }),
       createIfMissing: true,
+      idempotencyKey: p.idempotencyKey,
+      command: p.command,
+      interactive: p.interactive,
+      channelData: p.channelData,
       cfg,
     });
+    if (appended.ok && appended.deduped) {
+      respond(true, { ok: true, deduped: true });
+      return;
+    }
     if (!appended.ok || !appended.messageId || !appended.message) {
       respond(
         false,
