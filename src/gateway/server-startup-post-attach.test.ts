@@ -47,7 +47,9 @@ const hoisted = vi.hoisted(() => {
     inCatalog: true,
   }));
   const clearCurrentProviderAuthState = vi.fn();
-  const warmCurrentProviderAuthState = vi.fn(async (_cfg?: unknown, _options?: unknown) => {});
+  const warmCurrentProviderAuthStateOffMainThread = vi.fn(
+    async (_cfg?: unknown, _options?: unknown) => {},
+  );
   const setAuthProfileFailureHook = vi.fn();
   return {
     startPluginServices,
@@ -74,7 +76,7 @@ const hoisted = vi.hoisted(() => {
     loadModelCatalog,
     getModelRefStatus,
     clearCurrentProviderAuthState,
-    warmCurrentProviderAuthState,
+    warmCurrentProviderAuthStateOffMainThread,
     setAuthProfileFailureHook,
   };
 });
@@ -166,7 +168,7 @@ vi.mock("../agents/model-selection.js", () => ({
 
 vi.mock("../agents/model-provider-auth.js", () => ({
   clearCurrentProviderAuthState: hoisted.clearCurrentProviderAuthState,
-  warmCurrentProviderAuthState: hoisted.warmCurrentProviderAuthState,
+  warmCurrentProviderAuthStateOffMainThread: hoisted.warmCurrentProviderAuthStateOffMainThread,
 }));
 
 vi.mock("../agents/auth-profiles.js", async () => {
@@ -274,8 +276,8 @@ describe("startGatewayPostAttachRuntime", () => {
       inCatalog: true,
     });
     hoisted.clearCurrentProviderAuthState.mockClear();
-    hoisted.warmCurrentProviderAuthState.mockReset();
-    hoisted.warmCurrentProviderAuthState.mockResolvedValue(undefined);
+    hoisted.warmCurrentProviderAuthStateOffMainThread.mockReset();
+    hoisted.warmCurrentProviderAuthStateOffMainThread.mockResolvedValue(undefined);
     hoisted.setAuthProfileFailureHook.mockClear();
   });
 
@@ -809,11 +811,11 @@ describe("startGatewayPostAttachRuntime", () => {
       await vi.waitFor(() => {
         expect(hoisted.setAuthProfileFailureHook).toHaveBeenCalledTimes(1);
       });
-      expect(hoisted.warmCurrentProviderAuthState).not.toHaveBeenCalled();
+      expect(hoisted.warmCurrentProviderAuthStateOffMainThread).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(1_000);
       await vi.waitFor(() => {
-        expect(hoisted.warmCurrentProviderAuthState).toHaveBeenCalledTimes(1);
+        expect(hoisted.warmCurrentProviderAuthStateOffMainThread).toHaveBeenCalledTimes(1);
       });
     } finally {
       vi.useRealTimers();
@@ -871,17 +873,17 @@ describe("startGatewayPostAttachRuntime", () => {
 
       await vi.advanceTimersByTimeAsync(1_000);
       await vi.waitFor(() => {
-        expect(hoisted.warmCurrentProviderAuthState).toHaveBeenCalledTimes(1);
+        expect(hoisted.warmCurrentProviderAuthStateOffMainThread).toHaveBeenCalledTimes(1);
       });
 
       const hook = hoisted.setAuthProfileFailureHook.mock.calls[0]?.[0] as (() => void) | undefined;
       hook?.();
       expect(hoisted.clearCurrentProviderAuthState).toHaveBeenCalledTimes(1);
-      expect(hoisted.warmCurrentProviderAuthState).toHaveBeenCalledTimes(1);
+      expect(hoisted.warmCurrentProviderAuthStateOffMainThread).toHaveBeenCalledTimes(1);
 
       await vi.advanceTimersByTimeAsync(1_000);
       await vi.waitFor(() => {
-        expect(hoisted.warmCurrentProviderAuthState).toHaveBeenCalledTimes(2);
+        expect(hoisted.warmCurrentProviderAuthStateOffMainThread).toHaveBeenCalledTimes(2);
       });
     } finally {
       vi.useRealTimers();
@@ -905,12 +907,12 @@ describe("startGatewayPostAttachRuntime", () => {
 
       sidecar.stop();
       await vi.advanceTimersByTimeAsync(1_000);
-      expect(hoisted.warmCurrentProviderAuthState).not.toHaveBeenCalled();
+      expect(hoisted.warmCurrentProviderAuthStateOffMainThread).not.toHaveBeenCalled();
 
       const hook = hoisted.setAuthProfileFailureHook.mock.calls[0]?.[0] as (() => void) | undefined;
       hook?.();
       expect(hoisted.clearCurrentProviderAuthState).not.toHaveBeenCalled();
-      expect(hoisted.warmCurrentProviderAuthState).not.toHaveBeenCalled();
+      expect(hoisted.warmCurrentProviderAuthStateOffMainThread).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -937,7 +939,7 @@ describe("startGatewayPostAttachRuntime", () => {
       });
       await vi.advanceTimersByTimeAsync(0);
       await vi.waitFor(() => {
-        expect(hoisted.warmCurrentProviderAuthState).toHaveBeenCalledTimes(1);
+        expect(hoisted.warmCurrentProviderAuthStateOffMainThread).toHaveBeenCalledTimes(1);
       });
 
       const hook = hoisted.setAuthProfileFailureHook.mock.calls[0]?.[0] as (() => void) | undefined;
@@ -948,15 +950,19 @@ describe("startGatewayPostAttachRuntime", () => {
       hook();
       currentCfg = afterFailureCfg;
       hook();
-      expect(hoisted.warmCurrentProviderAuthState).toHaveBeenCalledTimes(1);
+      expect(hoisted.warmCurrentProviderAuthStateOffMainThread).toHaveBeenCalledTimes(1);
       expect(hoisted.clearCurrentProviderAuthState).toHaveBeenCalledTimes(2);
 
       await vi.advanceTimersByTimeAsync(1_000);
       await vi.waitFor(() => {
-        expect(hoisted.warmCurrentProviderAuthState).toHaveBeenCalledTimes(2);
+        expect(hoisted.warmCurrentProviderAuthStateOffMainThread).toHaveBeenCalledTimes(2);
       });
-      expect(hoisted.warmCurrentProviderAuthState.mock.calls[0]?.[0]).toBe(reloadedCfg);
-      expect(hoisted.warmCurrentProviderAuthState.mock.calls[1]?.[0]).toBe(afterFailureCfg);
+      expect(hoisted.warmCurrentProviderAuthStateOffMainThread.mock.calls[0]?.[0]).toBe(
+        reloadedCfg,
+      );
+      expect(hoisted.warmCurrentProviderAuthStateOffMainThread.mock.calls[1]?.[0]).toBe(
+        afterFailureCfg,
+      );
     } finally {
       vi.useRealTimers();
     }
