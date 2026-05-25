@@ -668,7 +668,11 @@ export async function resolveProviderUsageAuthWithPlugin(params: {
   env?: NodeJS.ProcessEnv;
   context: ProviderResolveUsageAuthContext;
 }) {
-  return await resolveProviderRuntimePlugin(params)?.resolveUsageAuth?.(params.context);
+  const plugin = resolveProviderRuntimePlugin(params);
+  if (!plugin?.resolveUsageAuth) {
+    return undefined;
+  }
+  return (await plugin.resolveUsageAuth(params.context)) ?? null;
 }
 
 export async function resolveProviderUsageSnapshotWithPlugin(params: {
