@@ -94,6 +94,9 @@ function isFinalizedOpenAIResponsesToolCall(block: RawToolCallBlock): boolean {
 }
 
 function isInterruptedAssistantTurn(message: AgentMessage): boolean {
+  if (message.role !== "assistant" || !("stopReason" in message)) {
+    return false;
+  }
   return message.stopReason === "aborted" || message.stopReason === "error";
 }
 
