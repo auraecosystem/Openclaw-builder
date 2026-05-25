@@ -918,6 +918,7 @@ function renderPinnedSection(
                         requestUpdate();
                       }}
                       title="Unpin"
+                      aria-label="Unpin"
                     >
                       ${icons.x}
                     </button>
