@@ -643,9 +643,10 @@ export async function runEmbeddedPiAgent(
         agentDir,
         params.config,
         {
-          // Plugin dynamic model hooks can resolve explicit model refs without
-          // first generating PI models.json. This keeps one-shot model runs from
-          // blocking on unrelated provider discovery.
+          // Plugin dynamic model hooks and bundled static catalogs can resolve
+          // explicit model refs without first generating PI models.json. This
+          // keeps one-shot model runs from blocking on unrelated provider discovery.
+          allowBundledStaticCatalogFallback: true,
           skipPiDiscovery: true,
           workspaceDir: resolvedWorkspace,
         },
