@@ -2,13 +2,23 @@ import fs from "node:fs";
 import path from "node:path";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 
-export function normalizeWindowsArgv(argv: string[]): string[] {
-  if (process.platform !== "win32") {
+export function normalizeWindowsArgv(
+  argv: string[],
+  options: {
+    platform?: NodeJS.Platform;
+    execPath?: string;
+    pathExists?: (path: string) => boolean;
+  } = {},
+): string[] {
+  const platform = options.platform ?? process.platform;
+  if (platform !== "win32") {
     return argv;
   }
   if (argv.length < 2) {
     return argv;
   }
+  const pathModule = path.win32;
+  const pathExists = options.pathExists ?? fs.existsSync;
 
   const stripControlChars = (value: string): string => {
     let out = "";
@@ -28,9 +38,9 @@ export function normalizeWindowsArgv(argv: string[]): string[] {
   const normalizeCandidate = (value: string): string =>
     normalizeArg(value).replace(/^\\\\\\?\\/, "");
 
-  const execPath = normalizeCandidate(process.execPath);
+  const execPath = normalizeCandidate(options.execPath ?? process.execPath);
   const execPathLower = normalizeLowercaseStringOrEmpty(execPath);
-  const execBase = normalizeLowercaseStringOrEmpty(path.basename(execPath));
+  const execBase = normalizeLowercaseStringOrEmpty(pathModule.basename(execPath));
   const isExecPath = (value: string | undefined): boolean => {
     if (!value) {
       return false;
@@ -42,11 +52,11 @@ export function normalizeWindowsArgv(argv: string[]): string[] {
     const lower = normalizeLowercaseStringOrEmpty(normalized);
     return (
       lower === execPathLower ||
-      path.basename(lower) === execBase ||
+      pathModule.basename(lower) === execBase ||
       lower.endsWith("\\node.exe") ||
       lower.endsWith("/node.exe") ||
       lower.includes("node.exe") ||
-      (path.basename(lower) === "node.exe" && fs.existsSync(normalized))
+      (pathModule.basename(lower) === "node.exe" && pathExists(normalized))
     );
   };
 
