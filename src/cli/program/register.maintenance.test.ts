@@ -119,6 +119,7 @@ describe("registerMaintenanceCommands doctor action", () => {
     expect(doctorCommand).not.toHaveBeenCalled();
     expect(runDoctorLintCli).toHaveBeenCalledWith(runtime, {
       json: true,
+      deep: false,
       severityMin: "error",
       skipIds: ["a"],
       onlyIds: ["b"],
