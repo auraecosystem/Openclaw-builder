@@ -65,6 +65,8 @@ function shouldFallbackAfterHarnessCompaction(
 
 const DEFERRED_CONTEXT_ENGINE_COMPACTION_REASON =
   "deferred to background context-engine maintenance";
+const DEFERRED_CONTEXT_ENGINE_COMPACTION_SCHEDULE_FAILURE_REASON =
+  "failed to schedule background context-engine maintenance";
 
 function shouldDeferOwningContextEngineBudgetCompaction(params: {
   compactParams: CompactEmbeddedPiSessionParams;
@@ -121,12 +123,22 @@ async function deferOwningContextEngineBudgetCompaction(params: {
 
   if (!deferredScheduled) {
     await disposeContextEngine(params.contextEngine);
+    log.warn(
+      `[compaction] failed to schedule context-engine-owned budget compaction background maintenance ` +
+        `(sessionKey=${params.compactParams.sessionKey ?? params.compactParams.sessionId})`,
+    );
+    return {
+      ok: false,
+      compacted: false,
+      reason: DEFERRED_CONTEXT_ENGINE_COMPACTION_SCHEDULE_FAILURE_REASON,
+      failure: { reason: "deferred_compaction_not_scheduled" },
+    };
   }
 
   log.info(
     `[compaction] deferred context-engine-owned budget compaction to background maintenance ` +
       `(sessionKey=${params.compactParams.sessionKey ?? params.compactParams.sessionId} ` +
-      `scheduled=${deferredScheduled})`,
+      `scheduled=${String(deferredScheduled)})`,
   );
   return {
     ok: true,
