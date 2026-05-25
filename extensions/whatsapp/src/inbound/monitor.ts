@@ -43,6 +43,7 @@ import {
   describeReplyContext,
   extractLocationData,
   extractContactContext,
+  extractInteractiveListContext,
   extractMediaPlaceholder,
   extractMentionedJids,
   extractText,
@@ -847,6 +848,7 @@ export async function attachWebInboxToSocket(
     body: string;
     location?: ReturnType<typeof extractLocationData>;
     contactContext?: ReturnType<typeof extractContactContext>;
+    interactiveListContext?: ReturnType<typeof extractInteractiveListContext>;
     replyContext?: ReturnType<typeof describeReplyContext>;
     mediaPath?: string;
     mediaType?: string;
@@ -857,6 +859,7 @@ export async function attachWebInboxToSocket(
     const location = extractLocationData(msg.message ?? undefined);
     const locationText = location ? formatLocationText(location) : undefined;
     const contactContext = extractContactContext(msg.message ?? undefined);
+    const interactiveListContext = extractInteractiveListContext(msg.message ?? undefined);
     let body = extractText(msg.message ?? undefined);
     if (locationText) {
       body = [body, locationText].filter(Boolean).join("\n").trim();
@@ -901,6 +904,7 @@ export async function attachWebInboxToSocket(
       body,
       location: location ?? undefined,
       contactContext,
+      interactiveListContext,
       replyContext,
       mediaPath,
       mediaType,
@@ -952,12 +956,37 @@ export async function attachWebInboxToSocket(
     const timestamp = inbound.messageTimestampMs;
     const mentionedJids = extractMentionedJids(msg.message as proto.IMessage | undefined);
     const senderName = msg.pushName ?? undefined;
+    const structuredContext = [
+      ...(enriched.contactContext
+        ? [
+            {
+              label: "WhatsApp contact",
+              source: "whatsapp",
+              type: enriched.contactContext.kind,
+              payload: enriched.contactContext,
+            },
+          ]
+        : []),
+      ...(enriched.interactiveListContext
+        ? [
+            {
+              label: "WhatsApp list",
+              source: "whatsapp",
+              type: enriched.interactiveListContext.kind,
+              payload: enriched.interactiveListContext,
+            },
+          ]
+        : []),
+    ];
+    const logBody = enriched.interactiveListContext
+      ? `WhatsApp ${enriched.interactiveListContext.kind} (${enriched.interactiveListContext.rows.length} options)`
+      : enriched.body;
 
     inboundLogger.info(
       {
         from: inbound.from,
         to: self.e164 ?? "me",
-        body: enriched.body,
+        body: logBody,
         mediaPath: enriched.mediaPath,
         mediaType: enriched.mediaType,
         mediaFileName: enriched.mediaFileName,
@@ -1001,16 +1030,7 @@ export async function attachWebInboxToSocket(
       selfE164: self.e164 ?? undefined,
       fromMe: Boolean(msg.key?.fromMe),
       location: enriched.location ?? undefined,
-      untrustedStructuredContext: enriched.contactContext
-        ? [
-            {
-              label: "WhatsApp contact",
-              source: "whatsapp",
-              type: enriched.contactContext.kind,
-              payload: enriched.contactContext,
-            },
-          ]
-        : undefined,
+      untrustedStructuredContext: structuredContext.length > 0 ? structuredContext : undefined,
       sendComposing,
       reply,
       sendMedia,
@@ -1035,6 +1055,7 @@ export async function attachWebInboxToSocket(
           inboundMessage.chatType === "direct" ? inboundMessage.senderE164 : undefined,
         body: inboundMessage.body,
         fromMe: inboundMessage.fromMe,
+        interactiveListType: enriched.interactiveListContext?.listType,
       });
     }
     try {
