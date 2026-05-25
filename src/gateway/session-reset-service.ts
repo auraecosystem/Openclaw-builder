@@ -11,6 +11,7 @@ import { clearAllCliSessions } from "../agents/cli-session.js";
 import { retireSessionMcpRuntime } from "../agents/pi-bundle-mcp-tools.js";
 import { abortEmbeddedPiRun, waitForEmbeddedPiRunEnd } from "../agents/pi-embedded.js";
 import { stopSubagentsForRequester } from "../auto-reply/reply/abort.js";
+import { forceClearReplyRunBySessionId } from "../auto-reply/reply/reply-run-registry.js";
 import {
   buildSessionEndHookPayload,
   buildSessionStartHookPayload,
@@ -389,6 +390,7 @@ async function ensureSessionRuntimeCleanup(params: {
     return undefined;
   }
   abortEmbeddedPiRun(params.sessionId);
+  forceClearReplyRunBySessionId(params.sessionId, new Error("session-reset-cleanup"));
   const ended = await waitForEmbeddedPiRunEnd(params.sessionId, 15_000);
   clearBootstrapSnapshot(params.target.canonicalKey);
   if (ended) {
