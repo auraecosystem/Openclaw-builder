@@ -93,6 +93,17 @@ import {
   withResolvedTelegramForumFlag,
 } from "./bot/helpers.js";
 import type { TelegramContext, TelegramGetChat } from "./bot/types.js";
+import {
+  buildCodexComputerUseMenuPayload,
+  buildCodexFastMenuPayload,
+  buildCodexPermissionsMenuPayload,
+  buildCodexPluginNamePickerEmptyText,
+  buildCodexPluginNamePickerPayload,
+  buildCodexPluginsMenuPayload,
+  buildCodexTopPickerPayload,
+  parseCodexCallbackData,
+  type CodexPluginEntry,
+} from "./codex-picker-buttons.js";
 import { buildCommandsPaginationKeyboard, buildTelegramModelsMenuButtons } from "./command-ui.js";
 import {
   resolveTelegramConversationBaseSessionKey,
@@ -2625,6 +2636,80 @@ export const registerTelegramHandlers = ({
           return;
         }
 
+        return;
+      }
+
+      // Codex picker in-place navigation. Tapping a navigation button on a /codex
+      // picker fires `cdx_*` callback_data; we edit the current message rather than
+      // sending a new reply. Leaf actions (specific verbs) stay on the `tgcmd:` path
+      // below so they still fire as native chat commands and produce a confirmation.
+      const codexCallback = parseCodexCallbackData(data);
+      if (codexCallback) {
+        let payload: {
+          text: string;
+          inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+        } | null = null;
+        let emptyText: string | null = null;
+        switch (codexCallback.type) {
+          case "top":
+            payload = buildCodexTopPickerPayload();
+            break;
+          case "plugins_menu":
+            payload = buildCodexPluginsMenuPayload();
+            break;
+          case "perm_menu":
+            payload = buildCodexPermissionsMenuPayload();
+            break;
+          case "fast_menu":
+            payload = buildCodexFastMenuPayload();
+            break;
+          case "cuse_menu":
+            payload = buildCodexComputerUseMenuPayload();
+            break;
+          case "picker": {
+            // Pull the live codex sub-plugin list out of the runtime config so the
+            // dynamic picker reflects what /codex plugins list would show.
+            const cfg = telegramDeps.getRuntimeConfig() as {
+              plugins?: {
+                entries?: {
+                  codex?: {
+                    config?: {
+                      codexPlugins?: { plugins?: Record<string, CodexPluginEntry> };
+                    };
+                  };
+                };
+              };
+            };
+            const plugins = cfg?.plugins?.entries?.codex?.config?.codexPlugins?.plugins ?? {};
+            const pickerPayload = buildCodexPluginNamePickerPayload(codexCallback.verb, plugins);
+            if (pickerPayload) {
+              payload = pickerPayload;
+            } else {
+              emptyText = buildCodexPluginNamePickerEmptyText(codexCallback.verb);
+            }
+            break;
+          }
+        }
+        try {
+          if (payload) {
+            await editCallbackMessage(payload.text, {
+              reply_markup: { inline_keyboard: payload.inline_keyboard },
+            });
+          } else if (emptyText) {
+            await editCallbackMessage(emptyText, {
+              reply_markup: {
+                inline_keyboard: [[{ text: "← back", callback_data: "cdx_plugins_menu" }]],
+              },
+            });
+          }
+        } catch (editErr) {
+          const errStr = String(editErr);
+          // Telegram returns this when the new content is identical to the old.
+          // Safe to swallow; the user clicked but nothing changed.
+          if (!errStr.includes("message is not modified")) {
+            throw new TelegramRetryableCallbackError(editErr);
+          }
+        }
         return;
       }
 

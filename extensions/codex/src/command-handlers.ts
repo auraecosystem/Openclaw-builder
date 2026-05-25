@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { resolveAgentDir, resolveSessionAgentIds } from "openclaw/plugin-sdk/agent-runtime";
+import type { MessagePresentation } from "openclaw/plugin-sdk/interactive-runtime";
 import type { PluginCommandContext, PluginCommandResult } from "openclaw/plugin-sdk/plugin-entry";
 import { CODEX_CONTROL_METHODS, type CodexControlMethod } from "./app-server/capabilities.js";
 import {
@@ -237,12 +238,209 @@ export function resetCodexDiagnosticsFeedbackStateForTests(): void {
   pendingCodexDiagnosticsConfirmationTokensByScope.clear();
 }
 
+/**
+ * No-arg `/codex` picker. Top-level entry into the codex chat surface; renders
+ * a 2x2 button grid (plugins / permissions / account / help) plus a text
+ * fallback for channels that don't render buttons. On Telegram, the picker
+ * navigation buttons use `cdx_*` callback_data so bot-handlers can editMessage
+ * in place; leaf actions stay on `tgcmd:` so they fire as real chat commands
+ * and produce confirmation replies.
+ */
+function buildCodexSubcommandPickerReply(): PluginCommandResult {
+  const verbs: Array<{ label: string; command: string }> = [
+    { label: "plugins", command: "/codex plugins menu" },
+    { label: "permissions", command: "/codex permissions menu" },
+    { label: "account", command: "/codex account" },
+    { label: "help", command: "/codex help" },
+  ];
+
+  const fallbackTextLines = [
+    "Codex commands. Pick a category or type:",
+    "",
+    ...verbs.map((v, i) => `  ${i + 1}. ${v.command}`),
+    "",
+    "Tap 'help' (or type /codex help) for the full list of typeable verbs",
+    "including threads, mcp, binding, detach, skills, resume, bind, steer,",
+    "model, diagnostics, compact, review, computer-use.",
+    "",
+    "Top-level shortcuts cover everyday operations: /status, /fast, /help, /stop, /models.",
+  ];
+
+  const presentation: MessagePresentation = {
+    title: "Codex commands",
+    blocks: [
+      { type: "text", text: "Pick a Codex subcommand:" },
+      {
+        type: "buttons",
+        buttons: verbs.map((v) => ({
+          label: v.label,
+          value: v.command,
+        })),
+      },
+    ],
+  };
+
+  const telegramNavCallback: Record<string, string> = {
+    "/codex plugins menu": "cdx_plugins_menu",
+    "/codex permissions menu": "cdx_perm_menu",
+  };
+  const telegramRows: Array<Array<{ text: string; callback_data: string }>> = [];
+  for (let i = 0; i < verbs.length; i += 2) {
+    const left = verbs[i];
+    const right = verbs[i + 1];
+    if (!left) {
+      continue;
+    }
+    const leftCb = telegramNavCallback[left.command] ?? `tgcmd:${left.command}`;
+    const row: Array<{ text: string; callback_data: string }> = [
+      { text: left.label, callback_data: leftCb },
+    ];
+    if (right) {
+      const rightCb = telegramNavCallback[right.command] ?? `tgcmd:${right.command}`;
+      row.push({ text: right.label, callback_data: rightCb });
+    }
+    telegramRows.push(row);
+  }
+
+  return {
+    text: fallbackTextLines.join("\n"),
+    presentation,
+    channelData: {
+      telegram: {
+        buttons: telegramRows,
+      },
+    },
+  };
+}
+
+/** Sub-picker for `/codex fast menu` (on / off / status). */
+function buildCodexFastMenuReply(): PluginCommandResult {
+  const modes = ["on", "off", "status"] as const;
+  const fallbackTextLines = [
+    "Codex fast mode. Pick one or type /codex fast <mode>:",
+    "",
+    ...modes.map((m, i) => `  ${i + 1}. /codex fast ${m}`),
+    "",
+    "Type '/codex' to go back to the main menu.",
+  ];
+  const presentation: MessagePresentation = {
+    title: "Codex fast mode",
+    blocks: [
+      { type: "text", text: "Pick a Codex fast mode:" },
+      {
+        type: "buttons",
+        buttons: [
+          ...modes.map((m) => ({ label: m, value: `/codex fast ${m}` })),
+          { label: "← back", value: "/codex" },
+        ],
+      },
+    ],
+  };
+  return {
+    text: fallbackTextLines.join("\n"),
+    presentation,
+    channelData: {
+      telegram: {
+        buttons: [
+          ...modes.map((m) => [{ text: m, callback_data: `tgcmd:/codex fast ${m}` }]),
+          [{ text: "← back", callback_data: "cdx_top" }],
+        ],
+      },
+    },
+  };
+}
+
+/** Sub-picker for `/codex permissions menu` (default / yolo / status). */
+function buildCodexPermissionsMenuReply(): PluginCommandResult {
+  const modes = ["default", "yolo", "status"] as const;
+  const fallbackTextLines = [
+    "Codex permissions. Pick one or type /codex permissions <mode>:",
+    "",
+    ...modes.map((m, i) => `  ${i + 1}. /codex permissions ${m}`),
+    "",
+    "Type '/codex' to go back to the main menu.",
+  ];
+  const presentation: MessagePresentation = {
+    title: "Codex permissions",
+    blocks: [
+      { type: "text", text: "Pick a Codex permissions mode:" },
+      {
+        type: "buttons",
+        buttons: [
+          ...modes.map((m) => ({ label: m, value: `/codex permissions ${m}` })),
+          { label: "← back", value: "/codex" },
+        ],
+      },
+    ],
+  };
+  return {
+    text: fallbackTextLines.join("\n"),
+    presentation,
+    channelData: {
+      telegram: {
+        buttons: [
+          ...modes.map((m) => [{ text: m, callback_data: `tgcmd:/codex permissions ${m}` }]),
+          [{ text: "← back", callback_data: "cdx_top" }],
+        ],
+      },
+    },
+  };
+}
+
+/** Sub-picker for `/codex computer-use menu` (status / install). */
+function buildCodexComputerUseMenuReply(): PluginCommandResult {
+  const actions = ["status", "install"] as const;
+  const fallbackTextLines = [
+    "Codex computer-use. Pick one or type /codex computer-use <action>:",
+    "",
+    ...actions.map((a, i) => `  ${i + 1}. /codex computer-use ${a}`),
+    "",
+    "Flag-driven invocations (--source, --marketplace-path, --marketplace) are not in the picker. Type '/codex computer-use' or read '/codex help' for the full surface.",
+    "",
+    "Type '/codex plugins menu' to go back to the plugins menu.",
+  ];
+  const presentation: MessagePresentation = {
+    title: "Codex computer-use",
+    blocks: [
+      { type: "text", text: "Pick a Codex computer-use action:" },
+      {
+        type: "buttons",
+        buttons: [
+          ...actions.map((a) => ({ label: a, value: `/codex computer-use ${a}` })),
+          { label: "← back", value: "/codex plugins menu" },
+        ],
+      },
+    ],
+  };
+  return {
+    text: fallbackTextLines.join("\n"),
+    presentation,
+    channelData: {
+      telegram: {
+        buttons: [
+          ...actions.map((a) => [{ text: a, callback_data: `tgcmd:/codex computer-use ${a}` }]),
+          [{ text: "← back", callback_data: "cdx_plugins_menu" }],
+        ],
+      },
+    },
+  };
+}
+
+/** Returns true when the rest-args are exactly `["menu"]` (case-insensitive). */
+function isMenuVerb(rest: readonly string[]): boolean {
+  return rest.length === 1 && (rest[0] ?? "").trim().toLowerCase() === "menu";
+}
+
 export async function handleCodexSubcommand(
   ctx: PluginCommandContext,
   options: { pluginConfig?: unknown; deps?: Partial<CodexCommandDeps> },
 ): Promise<PluginCommandResult> {
   const deps: CodexCommandDeps = { ...defaultCodexCommandDeps, ...options.deps };
-  const [subcommand = "status", ...rest] = splitArgs(ctx.args);
+  const args = splitArgs(ctx.args);
+  if (args.length === 0) {
+    return buildCodexSubcommandPickerReply();
+  }
+  const [subcommand = "status", ...rest] = args;
   const normalized = subcommand.toLowerCase();
   if (normalized === "help") {
     return { text: buildHelp() };
@@ -318,9 +516,15 @@ export async function handleCodexSubcommand(
     return { text: await setConversationModel(deps, ctx, options.pluginConfig, rest) };
   }
   if (normalized === "fast") {
+    if (isMenuVerb(rest)) {
+      return buildCodexFastMenuReply();
+    }
     return { text: await setConversationFastMode(deps, ctx, options.pluginConfig, rest) };
   }
   if (normalized === "permissions") {
+    if (isMenuVerb(rest)) {
+      return buildCodexPermissionsMenuReply();
+    }
     return { text: await setConversationPermissions(deps, ctx, options.pluginConfig, rest) };
   }
   if (normalized === "compact") {
@@ -357,6 +561,9 @@ export async function handleCodexSubcommand(
     );
   }
   if (normalized === "computer-use" || normalized === "computeruse") {
+    if (isMenuVerb(rest)) {
+      return buildCodexComputerUseMenuReply();
+    }
     return {
       text: await handleComputerUseCommand(deps, options.pluginConfig, rest),
     };
