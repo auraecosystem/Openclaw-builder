@@ -16,7 +16,7 @@ import {
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { OpenClawConfig } from "../api.js";
 import { assessClaimFreshness, isClaimContestedStatus } from "./claim-health.js";
-import type { ResolvedMemoryWikiConfig, WikiSearchBackend, WikiSearchCorpus } from "./config.js";
+import type { ResolvedMemoryWikiConfig, WikiSearchBackend, WikiSearchCorpus, WikiPageGroup } from "./config.js";
 import {
   parseWikiMarkdown,
   toWikiPageSummary,
@@ -26,7 +26,6 @@ import {
 } from "./markdown.js";
 import { initializeMemoryWikiVault } from "./vault.js";
 
-const QUERY_DIRS = ["entities", "concepts", "sources", "syntheses", "reports"] as const;
 const AGENT_DIGEST_PATH = ".openclaw-wiki/cache/agent-digest.json";
 const CLAIMS_DIGEST_PATH = ".openclaw-wiki/cache/claims.jsonl";
 const RELATED_BLOCK_PATTERN =
@@ -230,10 +229,13 @@ function mergeWikiSearchCorpusResults(params: {
   return sortWikiSearchResults(selected).slice(0, params.maxResults);
 }
 
-async function listWikiMarkdownFiles(rootDir: string): Promise<string[]> {
+async function listWikiMarkdownFiles(
+  rootDir: string,
+  pageGroupDirs: string[],
+): Promise<string[]> {
   const files = (
     await Promise.all(
-      QUERY_DIRS.map(async (relativeDir) => {
+      pageGroupDirs.map(async (relativeDir) => {
         const dirPath = path.join(rootDir, relativeDir);
         const entries = await fs.readdir(dirPath, { withFileTypes: true }).catch(() => []);
         return entries
@@ -247,20 +249,25 @@ async function listWikiMarkdownFiles(rootDir: string): Promise<string[]> {
   return files.toSorted((left, right) => left.localeCompare(right));
 }
 
-export async function readQueryableWikiPages(rootDir: string): Promise<QueryableWikiPage[]> {
-  const files = await listWikiMarkdownFiles(rootDir);
-  return readQueryableWikiPagesByPaths(rootDir, files);
+export async function readQueryableWikiPages(
+  rootDir: string,
+  config?: { pageGroups: WikiPageGroup[] },
+): Promise<QueryableWikiPage[]> {
+  const pageGroupDirs = config?.pageGroups?.map((g) => g.dir) ?? [];
+  const files = await listWikiMarkdownFiles(rootDir, pageGroupDirs);
+  return readQueryableWikiPagesByPaths(rootDir, files, config?.pageGroups);
 }
 
 async function readQueryableWikiPagesByPaths(
   rootDir: string,
   files: string[],
+  pageGroups?: WikiPageGroup[],
 ): Promise<QueryableWikiPage[]> {
   const pages = await Promise.all(
     files.map(async (relativePath) => {
       const absolutePath = path.join(rootDir, relativePath);
       const raw = await fs.readFile(absolutePath, "utf8");
-      const summary = toWikiPageSummary({ absolutePath, relativePath, raw });
+      const summary = toWikiPageSummary({ absolutePath, relativePath, raw, pageGroups });
       return summary ? { ...summary, raw } : null;
     }),
   );
@@ -1381,6 +1388,7 @@ async function searchWikiCorpus(params: {
   query: string;
   maxResults: number;
   mode: WikiSearchMode;
+  pageGroups?: WikiPageGroup[];
 }): Promise<WikiSearchResult[]> {
   const digest = await readQueryDigestBundle(params.rootDir);
   const candidatePaths = digest
@@ -1394,7 +1402,7 @@ async function searchWikiCorpus(params: {
   const seenPaths = new Set<string>();
   const candidatePages =
     candidatePaths.length > 0
-      ? await readQueryableWikiPagesByPaths(params.rootDir, candidatePaths)
+      ? await readQueryableWikiPagesByPaths(params.rootDir, candidatePaths, [])
       : await readQueryableWikiPages(params.rootDir);
   for (const page of candidatePages) {
     seenPaths.add(page.relativePath);
@@ -1407,10 +1415,10 @@ async function searchWikiCorpus(params: {
     return results;
   }
 
-  const remainingPaths = (await listWikiMarkdownFiles(params.rootDir)).filter(
+  const remainingPaths = (await listWikiMarkdownFiles(params.rootDir, [])).filter(
     (relativePath) => !seenPaths.has(relativePath),
   );
-  const remainingPages = await readQueryableWikiPagesByPaths(params.rootDir, remainingPaths);
+  const remainingPages = await readQueryableWikiPagesByPaths(params.rootDir, remainingPaths, []);
   return [
     ...results,
     ...remainingPages
@@ -1473,6 +1481,7 @@ export async function searchMemoryWiki(params: {
         query: params.query,
         maxResults,
         mode,
+        pageGroups: effectiveConfig.pageGroups,
       })
     : [];
 
@@ -1539,12 +1548,12 @@ export async function getMemoryWikiPage(params: {
     const digestClaimPagePath = digest ? resolveDigestClaimLookup(digest, params.lookup) : null;
     const digestLookupPage = digestClaimPagePath
       ? ((
-          await readQueryableWikiPagesByPaths(effectiveConfig.vault.path, [digestClaimPagePath])
+          await readQueryableWikiPagesByPaths(effectiveConfig.vault.path, [digestClaimPagePath], effectiveConfig.pageGroups)
         )[0] ?? null)
       : null;
     const pages = digestLookupPage
       ? [digestLookupPage]
-      : await readQueryableWikiPages(effectiveConfig.vault.path);
+      : await readQueryableWikiPages(effectiveConfig.vault.path, { pageGroups: effectiveConfig.pageGroups });
     const page = digestLookupPage ?? resolveQueryableWikiPageByLookup(pages, params.lookup);
     if (page) {
       const parsed = parseWikiMarkdown(page.raw);

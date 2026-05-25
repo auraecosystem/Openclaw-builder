@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { listActiveMemoryPublicArtifacts } from "openclaw/plugin-sdk/memory-host-core";
-import { pathExists } from "openclaw/plugin-sdk/security-runtime";
 import type { OpenClawConfig } from "../api.js";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
+import { findDirForKind } from "./config.js";
 import { inferWikiPageKind, toWikiPageSummary, type WikiPageKind } from "./markdown.js";
 import { probeObsidianCli } from "./obsidian.js";
 
@@ -66,7 +66,19 @@ type ResolveMemoryWikiStatusDeps = {
   resolveCommand?: (command: string) => Promise<string | null>;
 };
 
-async function collectVaultCounts(vaultPath: string): Promise<{
+async function pathExists(inputPath: string): Promise<boolean> {
+  try {
+    await fs.access(inputPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function collectVaultCounts(
+  vaultPath: string,
+  config: ResolvedMemoryWikiConfig,
+): Promise<{
   pageCounts: Record<WikiPageKind, number>;
   sourceCounts: MemoryWikiStatus["sourceCounts"];
 }> {
@@ -84,7 +96,7 @@ async function collectVaultCounts(vaultPath: string): Promise<{
     unsafeLocal: 0,
     other: 0,
   };
-  const dirs = ["entities", "concepts", "sources", "syntheses", "reports"] as const;
+  const dirs = config.pageGroups.map((g) => g.dir);
   for (const dir of dirs) {
     const entries = await fs
       .readdir(path.join(vaultPath, dir), { withFileTypes: true })
@@ -93,11 +105,12 @@ async function collectVaultCounts(vaultPath: string): Promise<{
       if (!entry.isFile() || !entry.name.endsWith(".md") || entry.name === "index.md") {
         continue;
       }
-      const kind = inferWikiPageKind(path.join(dir, entry.name));
+      const relativePath = dir === "." ? entry.name : path.join(dir, entry.name);
+      const kind = inferWikiPageKind(relativePath, config.pageGroups);
       if (kind) {
         pageCounts[kind] += 1;
       }
-      if (dir === "sources") {
+      if (dir === (findDirForKind(config.pageGroups, "source") ?? "sources")) {
         const absolutePath = path.join(vaultPath, dir, entry.name);
         const raw = await fs.readFile(absolutePath, "utf8").catch(() => null);
         if (!raw) {
@@ -219,7 +232,7 @@ export async function resolveMemoryWikiStatus(
       : null;
   const obsidianProbe = await probeObsidianCli({ resolveCommand: deps?.resolveCommand });
   const counts = vaultExists
-    ? await collectVaultCounts(config.vault.path)
+    ? await collectVaultCounts(config.vault.path, config)
     : {
         pageCounts: {
           entity: 0,

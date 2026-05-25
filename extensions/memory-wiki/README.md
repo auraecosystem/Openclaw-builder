@@ -71,6 +71,39 @@ Put config under `plugins.entries.memory-wiki.config`:
 }
 ```
 
+### Custom page groups (v2)
+
+Starting with v2, the plugin supports custom `pageGroups` to control which directories are
+scanned, indexed, and displayed in the vault. Pages groups are **not** defined in
+`openclaw.json` — they live in a standalone config file inside the vault root:
+
+```json
+{
+  "pageGroups": [
+    { "kind": "source", "dir": "sources", "heading": "Sources" },
+    { "kind": "entity", "dir": "entities", "heading": "Entities" },
+    { "kind": "concept", "dir": "concepts", "heading": "Concepts" },
+    { "kind": "synthesis", "dir": "syntheses", "heading": "Syntheses" },
+    { "kind": "synthesis", "dir": "views", "heading": "Views" },
+    { "kind": "synthesis", "dir": "templates", "heading": "Templates" }
+  ]
+}
+```
+
+- `kind` — one of `entity`, `concept`, `source`, `synthesis`
+- `dir` — relative path from vault root (`"."` for vault root itself)
+- `heading` — optional display heading in index; auto-derived from dir name if omitted
+
+**Merge priority:** `openclaw.json` → `.wiki-page-groups.json` → built-in defaults.
+
+If the file is missing or malformed, the plugin silently falls back to the default
+four directories (`sources/entities/concepts/syntheses`).
+
+> ⚠️ The `openclaw.plugin.json` configSchema also accepts a `pageGroups` field
+directly in `plugins.entries.memory-wiki.config`. However, doing so will cause
+Gateway JSON Schema validation to reject the config on older plugin builds.
+The standalone file is the recommended approach for v2.
+
 ## Vault shape
 
 The plugin initializes a vault like this:

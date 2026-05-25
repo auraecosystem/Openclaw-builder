@@ -4,8 +4,9 @@ import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
   normalizeSingleOrTrimmedStringList,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+} from "openclaw/plugin-sdk/text-runtime";
 import YAML from "yaml";
+import type { WikiPageGroup } from "./config.js";
 
 const WIKI_PAGE_KINDS = ["entity", "concept", "source", "synthesis", "report"] as const;
 export const WIKI_RELATED_START_MARKER = "<!-- openclaw:wiki:related:start -->";
@@ -109,11 +110,8 @@ const RELATED_BLOCK_PATTERN = new RegExp(
 );
 const MAX_WIKI_SEGMENT_BYTES = 240;
 const MAX_WIKI_FILENAME_COMPONENT_BYTES = 255;
-const FS_SAFE_PINNED_WRITE_TEMP_SUFFIX = ".00000000-0000-4000-8000-000000000000.fallback.tmp";
 const MAX_WIKI_SAFE_WRITE_FILENAME_COMPONENT_BYTES =
-  MAX_WIKI_FILENAME_COMPONENT_BYTES -
-  Buffer.byteLength(FS_SAFE_PINNED_WRITE_TEMP_SUFFIX) -
-  Buffer.byteLength(".");
+  MAX_WIKI_FILENAME_COMPONENT_BYTES - Buffer.byteLength(".fallback.tmp") - 1;
 const WIKI_SEGMENT_HASH_BYTES = 12;
 
 function truncateUtf8CodePointSafe(value: string, maxBytes: number): string {
@@ -412,23 +410,25 @@ export function renderMarkdownFence(content: string, infoString = "text"): strin
   return `${fence}${infoString}\n${content}\n${fence}`;
 }
 
-export function inferWikiPageKind(relativePath: string): WikiPageKind | null {
+export function inferWikiPageKind(
+  relativePath: string,
+  pageGroups?: WikiPageGroup[],
+): WikiPageKind | null {
   const normalized = relativePath.split(path.sep).join("/");
-  if (normalized.startsWith("entities/")) {
-    return "entity";
+
+  if (pageGroups) {
+    const sorted = pageGroups.toSorted((a, b) => b.dir.length - a.dir.length);
+    for (const group of sorted) {
+      if (group.dir === "." && !normalized.includes("/")) {
+        return group.kind;
+      }
+      if (normalized === group.dir || normalized.startsWith(group.dir + "/")) {
+        return group.kind;
+      }
+    }
   }
-  if (normalized.startsWith("concepts/")) {
-    return "concept";
-  }
-  if (normalized.startsWith("sources/")) {
-    return "source";
-  }
-  if (normalized.startsWith("syntheses/")) {
-    return "synthesis";
-  }
-  if (normalized.startsWith("reports/")) {
-    return "report";
-  }
+
+  // reports/ prefix is no longer hardcoded — report kind comes from pageGroups
   return null;
 }
 
@@ -436,8 +436,9 @@ export function toWikiPageSummary(params: {
   absolutePath: string;
   relativePath: string;
   raw: string;
+  pageGroups?: WikiPageGroup[];
 }): WikiPageSummary | null {
-  const kind = inferWikiPageKind(params.relativePath);
+  const kind = inferWikiPageKind(params.relativePath, params.pageGroups);
   if (!kind) {
     return null;
   }
