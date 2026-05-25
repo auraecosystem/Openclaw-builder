@@ -15,8 +15,10 @@ function writePackage(packageDir: string, version: string) {
   );
 }
 
-function writeFakeNpm(binDir: string) {
+function writeFakeNpm(binDir: string, record: string) {
   mkdirSync(binDir, { recursive: true });
+  process.env.OPENCLAW_PLUGIN_NPM_MANIFEST_OVERLAY_NPM = join(binDir, "npm");
+  process.env.OPENCLAW_TEST_NPM_RECORD = record;
   writeFileSync(
     join(binDir, "npm"),
     `#!/usr/bin/env bash
@@ -100,8 +102,10 @@ function withFixture(testBody: (fixture: Fixture) => void) {
     const binDir = join(root, "bin");
     const packageDir = join(root, "package");
     const record = join(root, "record.txt");
-    writeFakeNpm(binDir);
+    writeFakeNpm(binDir, record);
     testBody({ root, binDir, packageDir, record });
+    delete process.env.OPENCLAW_PLUGIN_NPM_MANIFEST_OVERLAY_NPM;
+    delete process.env.OPENCLAW_TEST_NPM_RECORD;
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

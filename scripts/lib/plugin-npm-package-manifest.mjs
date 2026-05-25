@@ -137,6 +137,10 @@ function listConfiguredBundledDependencyNames(packageJson) {
 }
 
 function npmInvocation() {
+  const testNpmCommand = process.env.OPENCLAW_PLUGIN_NPM_MANIFEST_OVERLAY_NPM;
+  if (testNpmCommand) {
+    return { args: [], command: testNpmCommand };
+  }
   if (process.platform !== "win32") {
     return { args: [], command: "npm" };
   }
