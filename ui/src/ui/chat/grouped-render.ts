@@ -380,6 +380,7 @@ export function renderMessageGroup(
   group: MessageGroup,
   opts: {
     onOpenSidebar?: (content: SidebarContent) => void;
+    sessionKey?: string;
     showReasoning: boolean;
     showToolCalls?: boolean;
     autoExpandToolCalls?: boolean;
@@ -451,6 +452,7 @@ export function renderMessageGroup(
             item.key,
             {
               isStreaming: group.isStreaming && index === group.messages.length - 1,
+              sessionKey: opts.sessionKey,
               duplicateCount: item.duplicateCount ?? 1,
               showReasoning: opts.showReasoning,
               showToolCalls: opts.showToolCalls ?? true,
@@ -1347,6 +1349,7 @@ function renderInlineToolCards(
   toolCards: ToolCard[],
   opts: {
     messageKey: string;
+    sessionKey?: string;
     onOpenSidebar?: (content: SidebarContent) => void;
     isToolExpanded?: (toolCardId: string) => boolean;
     onToggleToolExpanded?: (toolCardId: string) => void;
@@ -1363,6 +1366,7 @@ function renderInlineToolCards(
           onToggleExpanded: opts.onToggleToolExpanded
             ? () => opts.onToggleToolExpanded?.(`${opts.messageKey}:toolcard:${index}`)
             : () => undefined,
+          sessionKey: opts.sessionKey,
           onOpenSidebar: opts.onOpenSidebar,
           canvasPluginSurfaceUrl: opts.canvasPluginSurfaceUrl,
           embedSandboxMode: opts.embedSandboxMode ?? "scripts",
@@ -1418,14 +1422,34 @@ function jsonSummaryLabel(parsed: unknown): string {
   return "JSON";
 }
 
-function renderExpandButton(markdown: string, onOpenSidebar: (content: SidebarContent) => void) {
+function renderExpandButton(
+  markdown: string,
+  onOpenSidebar: (content: SidebarContent) => void,
+  options?: {
+    sessionKey?: string;
+    messageId?: string;
+  },
+) {
   return html`
     <button
       class="btn btn--xs chat-expand-btn"
       type="button"
       title="Open in canvas"
       aria-label="Open in canvas"
-      @click=${() => onOpenSidebar({ kind: "markdown", content: markdown })}
+      @click=${() =>
+        onOpenSidebar({
+          kind: "markdown",
+          content: markdown,
+          ...(options?.sessionKey && options?.messageId
+            ? {
+                fullMessageRequest: {
+                  sessionKey: options.sessionKey,
+                  messageId: options.messageId,
+                  kind: "assistant_message" as const,
+                },
+              }
+            : {}),
+        })}
     >
       <span class="chat-expand-btn__icon" aria-hidden="true">${icons.panelRightOpen}</span>
     </button>
@@ -1437,6 +1461,7 @@ function renderGroupedMessage(
   messageKey: string,
   opts: {
     isStreaming: boolean;
+    sessionKey?: string;
     duplicateCount?: number;
     showReasoning: boolean;
     showToolCalls?: boolean;
@@ -1501,6 +1526,16 @@ function renderGroupedMessage(
   const canCopyMarkdown = role === "assistant" && Boolean(markdown?.trim());
   const canExpand = role === "assistant" && Boolean(onOpenSidebar && markdown?.trim());
   const hasActions = canCopyMarkdown || canExpand;
+  const transcriptMeta =
+    m["__openclaw"] && typeof m["__openclaw"] === "object" && !Array.isArray(m["__openclaw"])
+      ? (m["__openclaw"] as Record<string, unknown>)
+      : null;
+  const sidebarMessageId =
+    typeof transcriptMeta?.id === "string"
+      ? transcriptMeta.id
+      : typeof m.messageId === "string"
+        ? m.messageId
+        : undefined;
 
   // Detect pure-JSON messages and render as collapsible block
   const jsonResult = markdown && !opts.isStreaming ? detectJson(markdown) : null;
@@ -1571,7 +1606,12 @@ function renderGroupedMessage(
       ${renderReplyPill(normalizedMessage.replyTarget)}
       ${hasActions
         ? html`<div class="chat-bubble-actions">
-            ${canExpand ? renderExpandButton(markdown!, onOpenSidebar!) : nothing}
+            ${canExpand
+              ? renderExpandButton(markdown!, onOpenSidebar!, {
+                  sessionKey: opts.sessionKey,
+                  messageId: sidebarMessageId,
+                })
+              : nothing}
             ${canCopyMarkdown ? renderCopyAsMarkdownButton(markdown!) : nothing}
           </div>`
         : nothing}
@@ -1634,6 +1674,7 @@ function renderGroupedMessage(
                         ? singleToolCard && !markdown && !hasImages
                           ? renderExpandedToolCardContent(
                               singleToolCard,
+                              opts.sessionKey,
                               onOpenSidebar,
                               opts.canvasPluginSurfaceUrl,
                               opts.embedSandboxMode ?? "scripts",
@@ -1641,6 +1682,7 @@ function renderGroupedMessage(
                             )
                           : renderInlineToolCards(toolCards, {
                               messageKey,
+                              sessionKey: opts.sessionKey,
                               onOpenSidebar,
                               isToolExpanded: opts.isToolExpanded,
                               onToggleToolExpanded: opts.onToggleToolExpanded,
@@ -1695,6 +1737,7 @@ function renderGroupedMessage(
             ${hasToolCards
               ? renderInlineToolCards(toolCards, {
                   messageKey,
+                  sessionKey: opts.sessionKey,
                   onOpenSidebar,
                   isToolExpanded: opts.isToolExpanded,
                   onToggleToolExpanded: opts.onToggleToolExpanded,

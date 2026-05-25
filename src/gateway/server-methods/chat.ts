@@ -109,14 +109,16 @@ import {
   validateChatAbortParams,
   validateChatHistoryParams,
   validateChatInjectParams,
+  validateChatMessageGetParams,
   validateChatSendParams,
 } from "../protocol/index.js";
 import { CHAT_SEND_SESSION_KEY_MAX_LENGTH } from "../protocol/schema/primitives.js";
-import { getMaxChatHistoryMessagesBytes } from "../server-constants.js";
+import { getMaxChatHistoryMessagesBytes, MAX_PAYLOAD_BYTES } from "../server-constants.js";
 import { readSessionTranscriptIndex } from "../session-transcript-index.fs.js";
 import {
   capArrayByJsonBytes,
   loadSessionEntry,
+  readSessionMessageByIdAsync,
   resolveGatewayModelSupportsImages,
   resolveGatewaySessionThinkingDefault,
   resolveDeletedAgentIdFromSessionKey,
@@ -2180,6 +2182,65 @@ export const chatHandlers: GatewayRequestHandlers = {
       thinkingLevel,
       fastMode: entry?.fastMode,
       verboseLevel,
+    });
+  },
+  "chat.message.get": async ({ params, respond }) => {
+    if (!validateChatMessageGetParams(params)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `invalid chat.message.get params: ${formatValidationErrors(validateChatMessageGetParams.errors)}`,
+        ),
+      );
+      return;
+    }
+    const { sessionKey, messageId, maxChars } = params as {
+      sessionKey: string;
+      messageId: string;
+      maxChars?: number;
+    };
+    const { cfg, storePath, entry } = loadSessionEntry(sessionKey);
+    const sessionId = entry?.sessionId;
+    if (!sessionId) {
+      respond(true, { ok: false, unavailableReason: "not_found" });
+      return;
+    }
+
+    const resolved = await readSessionMessageByIdAsync(
+      sessionId,
+      storePath,
+      entry?.sessionFile,
+      messageId,
+    );
+    if (!resolved.found) {
+      respond(true, { ok: false, unavailableReason: "not_found" });
+      return;
+    }
+    if (resolved.oversized) {
+      respond(true, { ok: false, unavailableReason: "oversized" });
+      return;
+    }
+
+    const effectiveMaxChars =
+      typeof maxChars === "number" ? maxChars : Math.min(MAX_PAYLOAD_BYTES, 1_000_000);
+    const projectedMessage = resolved.message
+      ? projectChatDisplayMessage(resolved.message, {
+          maxChars: effectiveMaxChars,
+        })
+      : undefined;
+    const projected = projectedMessage
+      ? augmentChatHistoryWithCanvasBlocks([projectedMessage])[0]
+      : undefined;
+    if (!projected) {
+      respond(true, { ok: false, unavailableReason: "not_visible" });
+      return;
+    }
+
+    respond(true, {
+      ok: true,
+      message: projected,
     });
   },
   "chat.abort": async ({ params, respond, context, client }) => {

@@ -127,6 +127,8 @@ import {
   type ChatEvent,
   ChatEventSchema,
   ChatHistoryParamsSchema,
+  ChatMessageGetResultSchema,
+  ChatMessageGetParamsSchema,
   type ChatInjectParams,
   ChatInjectParamsSchema,
   ChatSendParamsSchema,
@@ -818,10 +820,12 @@ export const validateExecApprovalsNodeSetParams = lazyCompile<ExecApprovalsNodeS
 );
 export const validateLogsTailParams = lazyCompile<LogsTailParams>(LogsTailParamsSchema);
 export const validateChatHistoryParams = lazyCompile(ChatHistoryParamsSchema);
+export const validateChatMessageGetParams = lazyCompile(ChatMessageGetParamsSchema);
 export const validateChatSendParams = lazyCompile(ChatSendParamsSchema);
 export const validateChatAbortParams = lazyCompile<ChatAbortParams>(ChatAbortParamsSchema);
 export const validateChatInjectParams = lazyCompile<ChatInjectParams>(ChatInjectParamsSchema);
 export const validateChatEvent = lazyCompile(ChatEventSchema);
+export const validateChatMessageGetResult = lazyCompile(ChatMessageGetResultSchema);
 export const validateUpdateStatusParams = lazyCompile<UpdateStatusParams>(UpdateStatusParamsSchema);
 export const validateUpdateRunParams = lazyCompile<UpdateRunParams>(UpdateRunParamsSchema);
 export const validateWebLoginStartParams =

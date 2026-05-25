@@ -1242,6 +1242,7 @@ export function renderChat(props: ChatProps) {
               }
               return renderMessageGroup(item, {
                 onOpenSidebar: props.onOpenSidebar,
+                sessionKey: props.sessionKey,
                 showReasoning,
                 showToolCalls: props.showToolCalls,
                 autoExpandToolCalls: Boolean(props.autoExpandToolCalls),

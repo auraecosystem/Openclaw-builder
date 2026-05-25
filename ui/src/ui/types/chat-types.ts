@@ -77,6 +77,8 @@ export type ToolCard = {
   args?: unknown;
   inputText?: string;
   outputText?: string;
+  messageId?: string;
+  sessionKey?: string;
   preview?: {
     kind: "canvas";
     surface: "assistant_message";

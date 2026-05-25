@@ -1,7 +1,15 @@
+export type SidebarFullMessageRequest = {
+  sessionKey: string;
+  messageId: string;
+  kind: "assistant_message" | "tool_output";
+};
+
 export type MarkdownSidebarContent = {
   kind: "markdown";
   content: string;
   rawText?: string | null;
+  fullMessageRequest?: SidebarFullMessageRequest;
+  unavailableReason?: "not_found" | "oversized" | "not_visible" | null;
 };
 
 export type CanvasSidebarContent = {
@@ -11,6 +19,8 @@ export type CanvasSidebarContent = {
   entryUrl: string;
   preferredHeight?: number;
   rawText?: string | null;
+  fullMessageRequest?: SidebarFullMessageRequest;
+  unavailableReason?: "not_found" | "oversized" | "not_visible" | null;
 };
 
 export type SidebarContent = MarkdownSidebarContent | CanvasSidebarContent;
