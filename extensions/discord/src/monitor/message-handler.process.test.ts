@@ -16,6 +16,11 @@ const sendMocks = vi.hoisted(() => ({
     (channelId: string, messageId: string, emoji: string, opts?: unknown) => Promise<void>
   >(async () => {}),
 }));
+const typingMocks = vi.hoisted(() => ({
+  sendTyping: vi.fn<(params: { rest: unknown; channelId: string }) => Promise<void>>(
+    async () => {},
+  ),
+}));
 function createMockDraftStream() {
   let messageId: string | undefined = "preview-1";
   return {
@@ -71,6 +76,10 @@ vi.mock("../send.js", () => ({
   },
 }));
 
+vi.mock("./typing.js", () => ({
+  sendTyping: (params: { rest: unknown; channelId: string }) => typingMocks.sendTyping(params),
+}));
+
 const discordTargetMocks = vi.hoisted(() => ({
   resolveDiscordTargetChannelId: vi.fn(async (target: string, _opts?: unknown) => ({
     channelId: target === "user:u1" ? "dm-u1" : target,
@@ -102,6 +111,7 @@ type DispatchInboundParams = {
     waitForIdle: () => Promise<void>;
   };
   replyOptions?: {
+    onReplyStart?: () => Promise<void> | void;
     onReasoningStream?: (payload?: { text?: string }) => Promise<void> | void;
     onReasoningEnd?: () => Promise<void> | void;
     onToolStart?: (payload: {
@@ -138,7 +148,6 @@ type DispatchInboundParams = {
       modified?: string[];
       deleted?: string[];
     }) => Promise<void> | void;
-    onReplyStart?: () => Promise<void> | void;
     sourceReplyDeliveryMode?: "automatic" | "message_tool_only";
     disableBlockStreaming?: boolean;
     suppressDefaultToolProgressMessages?: boolean;
@@ -381,6 +390,7 @@ beforeEach(() => {
   vi.useRealTimers();
   sendMocks.reactMessageDiscord.mockClear();
   sendMocks.removeReactionDiscord.mockClear();
+  typingMocks.sendTyping.mockClear();
   discordTargetMocks.resolveDiscordTargetChannelId.mockClear();
   editMessageDiscord.mockClear();
   deliverDiscordReply.mockClear();
@@ -650,6 +660,48 @@ function expectSinglePreviewEdit() {
   expectPreviewEditContent("Hello\nWorld");
   expect(deliverDiscordReply).not.toHaveBeenCalled();
 }
+
+describe("processDiscordMessage typing feedback", () => {
+  it("reuses accepted typing feedback for the reply dispatcher", async () => {
+    const replyTypingFeedback = {
+      onReplyStart: vi.fn(async () => {}),
+      onIdle: vi.fn(),
+      onCleanup: vi.fn(),
+      updateChannelId: vi.fn(),
+      getChannelId: vi.fn(() => "c1"),
+    };
+    const ctx = await createBaseContext({ replyTypingFeedback });
+    dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
+      await params?.replyOptions?.onReplyStart?.();
+      return createNoQueuedDispatchResult();
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    expect(replyTypingFeedback.updateChannelId).toHaveBeenCalledWith("c1");
+    expect(replyTypingFeedback.onReplyStart).toHaveBeenCalledTimes(1);
+    expect(replyTypingFeedback.onCleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start a nested Discord typing keepalive from channel callbacks", async () => {
+    vi.useFakeTimers();
+    try {
+      dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
+        await params?.replyOptions?.onReplyStart?.();
+        await vi.advanceTimersByTimeAsync(3_500);
+        return createNoQueuedDispatchResult();
+      });
+
+      const ctx = await createAutomaticSourceDeliveryContext();
+
+      await runProcessDiscordMessage(ctx);
+
+      expect(typingMocks.sendTyping).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe("processDiscordMessage ack reactions", () => {
   it("drops bot-loop-suppressed messages before Discord side effects", async () => {
