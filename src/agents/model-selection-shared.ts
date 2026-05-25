@@ -104,6 +104,8 @@ export function inferUniqueProviderFromConfiguredModels(
       }
       const parsed = parseModelRef(ref, DEFAULT_PROVIDER, {
         allowPluginNormalization: false,
+        config: params.cfg,
+        manifestPlugins: params.manifestPlugins,
       });
       if (!parsed) {
         continue;
@@ -130,6 +132,7 @@ export function inferUniqueProviderFromConfiguredModels(
         }
         const normalizedModelId = normalizeConfiguredProviderCatalogModelId(providerId, modelId, {
           manifestPlugins: params.manifestPlugins,
+          config: params.cfg,
         });
         if (
           modelId === model ||
@@ -220,6 +223,7 @@ function resolveConfiguredOpenRouterCompatFreeRef(
       allowManifestNormalization: params.allowManifestNormalization,
       allowPluginNormalization: params.allowPluginNormalization,
       manifestPlugins: params.manifestPlugins,
+      config: params.cfg,
     });
     if (parsed && isConcreteOpenRouterFreeModelRef(parsed)) {
       return parsed;
@@ -239,6 +243,7 @@ function resolveConfiguredOpenRouterCompatFreeRef(
       allowManifestNormalization: params.allowManifestNormalization,
       allowPluginNormalization: params.allowPluginNormalization,
       manifestPlugins: params.manifestPlugins,
+      config: params.cfg,
     });
   }
 
@@ -260,6 +265,7 @@ export function resolveConfiguredOpenRouterCompatAlias(
       allowManifestNormalization: params.allowManifestNormalization,
       allowPluginNormalization: params.allowPluginNormalization,
       manifestPlugins: params.manifestPlugins,
+      config: params.cfg,
     });
   }
   if (normalized !== OPENROUTER_COMPAT_FREE_ALIAS || !params.cfg) {
@@ -271,6 +277,7 @@ export function resolveConfiguredOpenRouterCompatAlias(
     allowManifestNormalization: params.allowManifestNormalization,
     allowPluginNormalization: params.allowPluginNormalization,
     manifestPlugins: params.manifestPlugins,
+    config: params.cfg,
   });
 }
 
@@ -290,6 +297,7 @@ function parseModelRefWithCompatAlias(
       allowManifestNormalization: params.allowManifestNormalization,
       allowPluginNormalization: params.allowPluginNormalization,
       manifestPlugins: params.manifestPlugins,
+      config: params.cfg,
     })
   );
 }
@@ -333,10 +341,12 @@ function resolveExactConfiguredProviderRef(
       normalizeStaticProviderModelId(provider, modelRaw.trim(), {
         allowManifestNormalization: params.allowManifestNormalization,
         manifestPlugins: params.manifestPlugins,
+        config: params.cfg,
       }),
       {
         allowManifestNormalization: params.allowManifestNormalization,
         manifestPlugins: params.manifestPlugins,
+        config: params.cfg,
       },
     ),
   };
@@ -967,7 +977,10 @@ export function buildConfiguredModelCatalog(params: {
     for (const model of provider.models) {
       const rawId = normalizeOptionalString(model?.id) ?? "";
       const id = rawId
-        ? normalizeConfiguredProviderCatalogModelId(providerId, rawId, { manifestPlugins })
+        ? normalizeConfiguredProviderCatalogModelId(providerId, rawId, {
+            manifestPlugins,
+            config: params.cfg,
+          })
         : "";
       if (!id) {
         continue;
@@ -1100,6 +1113,7 @@ export function resolveAllowedModelSelection(
 ): ModelRef | null {
   const current = normalizeModelRef(params.provider, params.model, {
     manifestPlugins: params.manifestPlugins,
+    config: params.config,
   });
   if (
     params.allowAny ||
@@ -1113,6 +1127,7 @@ export function resolveAllowedModelSelection(
   }
   return normalizeModelRef(fallback.provider, fallback.id, {
     manifestPlugins: params.manifestPlugins,
+    config: params.config,
   });
 }
 
@@ -1191,6 +1206,7 @@ export function createModelVisibilityPolicyWithFallbacks(
         allowedKeys: allowed.allowedKeys,
         allowedCatalog: allowed.allowedCatalog,
         manifestPlugins: params.manifestPlugins,
+        config: params.cfg,
       }),
     visibleCatalog: ({ catalog, defaultVisibleCatalog, view }) => {
       if (view === "all") {
