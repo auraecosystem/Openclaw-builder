@@ -1038,6 +1038,7 @@ async function compactEmbeddedPiSessionDirectOnce(
         provider,
         modelId,
         model,
+        promptMode,
       });
       const resourceLoader = createEmbeddedPiResourceLoader({
         cwd: resolvedWorkspace,
