@@ -15,6 +15,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Cron/gateway: annotate fast successful main-session `systemEvent` jobs using `wakeMode="next-heartbeat"` with a persisted `possible-main-next-heartbeat-ghost-run` warning, making heartbeat handoff runs visible without changing scheduler delivery semantics. Fixes #63106. (#72677) Thanks .
 - Agents/media: send direct fallback for generated media still missing after an active requester wake fails. (#85489) Thanks @fuller-stack-dev.
 - Agents: derive overflow compaction budgets from provider-reported and synthetic over-budget token counts so confirmed context overflows compact before retrying. (#70473) Thanks @fuller-stack-dev.
 - Agents/Codex: recover Codex context-window prompt errors through overflow compaction and surface reset guidance when recovery is exhausted. (#85542) Thanks @fuller-stack-dev.
