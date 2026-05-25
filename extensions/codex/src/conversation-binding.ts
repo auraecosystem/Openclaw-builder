@@ -1,4 +1,4 @@
-import { formatErrorMessage } from "openclaw/plugin-sdk/agent-harness-runtime";
+import { embeddedAgentLog, formatErrorMessage } from "openclaw/plugin-sdk/agent-harness-runtime";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type {
   PluginConversationBindingResolvedEvent,
@@ -48,6 +48,7 @@ import { buildCodexConversationTurnInput } from "./conversation-turn-input.js";
 import { resumeCodexCliSessionOnNode } from "./node-cli-sessions.js";
 
 const DEFAULT_BOUND_TURN_TIMEOUT_MS = 20 * 60_000;
+const BOUND_TURN_UNSUBSCRIBE_TIMEOUT_MS = 5_000;
 
 export {
   createCodexCliNodeConversationBindingData,
@@ -492,8 +493,33 @@ async function runBoundTurn(params: {
       },
     };
   } finally {
-    notificationCleanup();
-    requestCleanup();
+    try {
+      await unsubscribeBoundCodexThreadBestEffort(client, {
+        threadId,
+        timeoutMs: BOUND_TURN_UNSUBSCRIBE_TIMEOUT_MS,
+      });
+    } finally {
+      notificationCleanup();
+      requestCleanup();
+    }
+  }
+}
+
+async function unsubscribeBoundCodexThreadBestEffort(
+  client: Awaited<ReturnType<typeof getSharedCodexAppServerClient>>,
+  params: { threadId: string; timeoutMs: number },
+): Promise<void> {
+  try {
+    await client.request(
+      "thread/unsubscribe",
+      { threadId: params.threadId },
+      { timeoutMs: params.timeoutMs },
+    );
+  } catch (error) {
+    embeddedAgentLog.debug("codex conversation bound thread unsubscribe cleanup failed", {
+      threadId: params.threadId,
+      error,
+    });
   }
 }
 
