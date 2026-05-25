@@ -12,6 +12,10 @@ Docs: https://docs.openclaw.ai
 - Migrate: import supported Hermes, OpenCode, and Codex auth credentials into OpenClaw auth profiles when credential migration is selected, with explicit opt-out and non-interactive controls. (#85667) Thanks @fuller-stack-dev.
 - iOS: improve Talk mode with direct realtime voice sessions, compact toolbar status, and responsive voice waveform feedback. (#86355) Thanks @ngutman.
 
+### Tests
+
+- Tests: add focused coverage for openclaw node CLI daemon (install port validation, runtime gate, force reinstall, TLS inheritance, status JSON/error paths) and the node CLI command registry (install/status/stop/restart/uninstall option forwarding). (#83924)
+
 ### Fixes
 
 - Agents/heartbeat: stop heartbeat turns after the first valid `heartbeat_respond` so repeated response loops do not burn tokens. (#86357) Thanks @udaymanish6.
