@@ -14,7 +14,7 @@ import {
   shouldUseSecretsHelpFastPath,
   shouldUseSetupOnboardConfigureHelpFastPath,
 } from "./run-main-policy.js";
-import { isGatewayRunFastPathArgv } from "./run-main.js";
+import { isGatewayRunFastPathArgv, resolveLocalAgentCliStartupHardTimeoutMs } from "./run-main.js";
 
 const memoryWikiCommandAliasRegistry: PluginManifestCommandAliasRegistry = {
   plugins: [
@@ -71,6 +71,70 @@ describe("isGatewayRunFastPathArgv", () => {
     expect(isGatewayRunFastPathArgv(["node", "openclaw", "gateway", "--help"])).toBe(false);
     expect(isGatewayRunFastPathArgv(["node", "openclaw", "gateway", "--port"])).toBe(false);
     expect(isGatewayRunFastPathArgv(["node", "openclaw", "gateway", "--unknown"])).toBe(false);
+  });
+});
+
+describe("resolveLocalAgentCliStartupHardTimeoutMs", () => {
+  it("arms only for local agent commands", () => {
+    expect(
+      resolveLocalAgentCliStartupHardTimeoutMs([
+        "node",
+        "openclaw",
+        "agent",
+        "--local",
+        "--timeout",
+        "1",
+      ]),
+    ).toBe(31_000);
+    expect(
+      resolveLocalAgentCliStartupHardTimeoutMs([
+        "node",
+        "openclaw",
+        "--profile",
+        "work",
+        "agent",
+        "--local",
+        "--timeout=2",
+      ]),
+    ).toBe(32_000);
+  });
+
+  it("uses the configured local agent timeout when --timeout is omitted", () => {
+    expect(
+      resolveLocalAgentCliStartupHardTimeoutMs(["node", "openclaw", "agent", "--local"], {
+        agents: { defaults: { timeoutSeconds: 7 } },
+      }),
+    ).toBe(37_000);
+    expect(
+      resolveLocalAgentCliStartupHardTimeoutMs(
+        ["node", "openclaw", "agent", "--local", "--timeout", "1"],
+        { agents: { defaults: { timeoutSeconds: 7 } } },
+      ),
+    ).toBe(31_000);
+    expect(
+      resolveLocalAgentCliStartupHardTimeoutMs(["node", "openclaw", "agent", "--local"], {
+        agents: { defaults: { timeoutSeconds: 0 } },
+      }),
+    ).toBeUndefined();
+  });
+
+  it("skips help, gateway dispatch, and disabled timeouts", () => {
+    expect(
+      resolveLocalAgentCliStartupHardTimeoutMs(["node", "openclaw", "agent", "--local", "--help"]),
+    ).toBeUndefined();
+    expect(
+      resolveLocalAgentCliStartupHardTimeoutMs(["node", "openclaw", "agent", "--timeout", "1"]),
+    ).toBeUndefined();
+    expect(
+      resolveLocalAgentCliStartupHardTimeoutMs([
+        "node",
+        "openclaw",
+        "agent",
+        "--local",
+        "--timeout",
+        "0",
+      ]),
+    ).toBeUndefined();
   });
 });
 
