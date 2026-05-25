@@ -74,7 +74,16 @@ export const splitTrailingDirective = (
   //    without a preceding `consume("", { final: true })`.
   const lastNewline = text.lastIndexOf("\n");
   const lastLine = lastNewline < 0 ? text : text.slice(lastNewline + 1);
-  if (/^\s*MEDIA:/i.test(lastLine)) {
+  // Skip buffering when the line looks like indented code (4+ spaces or
+  // tab), preceded by a blank line (or start-of-text), possibly with other
+  // indented-code lines in between.  The final parser in
+  // splitMediaFromOutput tracks indented-code state across consecutive
+  // lines, so the streaming guard must match to prevent tail-buffer drops.
+  const isIndentedCodeLine =
+    /^(?:[ ]{4,}|\t)/.test(lastLine) &&
+    (lastNewline < 0 ||
+      /(?:^|\n)[ \t]*\n(?:(?:[ ]{4,}|\t)[^\n]*\n)*[ \t]*$/.test(text.slice(0, lastNewline + 1)));
+  if (!isIndentedCodeLine && /^\s*MEDIA:/i.test(lastLine)) {
     const mediaLineStart = lastNewline < 0 ? 0 : lastNewline + 1;
     if (mediaLineStart < bufferStart) {
       bufferStart = mediaLineStart;
