@@ -2060,11 +2060,11 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       respond(false, undefined, result.error);
       return;
     }
-    respond(true, { ok: true, key: result.key, entry: result.entry }, undefined);
     emitSessionsChanged(context, {
-      sessionKey: result.key,
       reason,
+      sessionKey: result.key,
     });
+    respond(true, { ok: true, key: result.key, entry: result.entry }, undefined);
   },
   "sessions.delete": async ({ params, respond, client, isWebchatConnect, context }) => {
     if (!assertValidParams(params, validateSessionsDeleteParams, "sessions.delete", respond)) {
