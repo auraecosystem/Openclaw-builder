@@ -1247,6 +1247,12 @@ Current builds no longer include the TCP bridge. Nodes connect over the Gateway 
       maxBytes: "2mb", // default 2_000_000 bytes
       keepLines: 2000, // default 2000
     },
+    modelPreflight: {
+      timeoutMs: 2500, // default per-attempt timeout
+      maxAttempts: 1, // default probe attempts before skipped
+      retryDelayMs: 0, // default delay between attempts
+      // worst-case window is limited to 55s so preflight stays below cron's setup watchdog
+    },
   },
 }
 ```
@@ -1254,6 +1260,7 @@ Current builds no longer include the TCP bridge. Nodes connect over the Gateway 
 - `sessionRetention`: how long to keep completed isolated cron run sessions before pruning from `sessions.json`. Also controls cleanup of archived deleted cron transcripts. Default: `24h`; set `false` to disable.
 - `runLog.maxBytes`: max size per run log file (`cron/runs/<jobId>.jsonl`) before pruning. Default: `2_000_000` bytes.
 - `runLog.keepLines`: newest lines retained when run-log pruning is triggered. Default: `2000`.
+- `modelPreflight`: local model-provider preflight controls for isolated cron agent turns. Increase `maxAttempts`, `retryDelayMs`, or `timeoutMs` when a sleeping Ollama/vLLM/LM Studio host needs a short wake-up window before cron marks the run skipped. The worst-case window (`timeoutMs * maxAttempts + retryDelayMs * (maxAttempts - 1)`) must stay at or below 55s so preflight remains below cron's isolated-agent setup watchdog.
 - `webhookToken`: bearer token used for cron webhook POST delivery (`delivery.mode = "webhook"`), if omitted no auth header is sent.
 - `webhook`: deprecated legacy fallback webhook URL (http/https) used only for stored jobs that still have `notify: true`.
 
