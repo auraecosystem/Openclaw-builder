@@ -33,6 +33,7 @@ import {
   matchesFormatErrorPattern,
 } from "./failover-matches.js";
 import {
+  classifyProviderPluginError,
   classifyProviderSpecificError,
   matchesProviderContextOverflow,
 } from "./provider-error-patterns.js";
@@ -263,6 +264,7 @@ type PaymentRequiredFailoverReason = Extract<FailoverReason, "billing" | "rate_l
 export type FailoverSignal = {
   status?: number;
   code?: string;
+  errorType?: string;
   message?: string;
   provider?: string;
 };
@@ -945,6 +947,21 @@ export function classifyFailoverSignal(signal: FailoverSignal): FailoverClassifi
   const messageClassification = signal.message
     ? classifyFailoverClassificationFromMessage(signal.message, signal.provider)
     : null;
+  const providerPluginReason =
+    messageClassification?.kind !== "context_overflow" &&
+    signal.provider &&
+    (signal.message || signal.code || signal.errorType || inferredStatus !== undefined)
+      ? classifyProviderPluginError({
+          errorMessage: signal.message ?? "",
+          provider: signal.provider,
+          status: inferredStatus,
+          code: signal.code,
+          errorType: signal.errorType,
+        })
+      : null;
+  if (providerPluginReason) {
+    return toReasonClassification(providerPluginReason);
+  }
   const codeReason = classifyFailoverReasonFromCode(signal.code);
   if (codeReason === "auth_permanent") {
     return toReasonClassification(codeReason);

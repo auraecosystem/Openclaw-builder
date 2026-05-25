@@ -54,6 +54,7 @@ import type {
   ProviderDefaultThinkingPolicyContext,
   ProviderFetchUsageSnapshotContext,
   ProviderFailoverErrorContext,
+  ProviderErrorClassification,
   ProviderNormalizeToolSchemasContext,
   ProviderNormalizeConfigContext,
   ProviderNormalizeModelIdContext,
@@ -704,6 +705,52 @@ export function matchesProviderContextOverflowWithPlugin(params: {
   return false;
 }
 
+function normalizeProviderErrorClassification(
+  classification: ProviderErrorClassification | null | undefined,
+): ProviderErrorClassification | undefined {
+  if (!classification) {
+    return undefined;
+  }
+  if (typeof classification === "string") {
+    return classification;
+  }
+  return classification.reason ? classification : undefined;
+}
+
+function getProviderErrorDescriptorReason(classification: ProviderErrorClassification | undefined) {
+  if (!classification) {
+    return undefined;
+  }
+  return typeof classification === "string" ? classification : classification.reason;
+}
+
+export function classifyProviderErrorWithPlugin(params: {
+  provider?: string;
+  config?: OpenClawConfig;
+  workspaceDir?: string;
+  env?: NodeJS.ProcessEnv;
+  context: ProviderFailoverErrorContext;
+}): ProviderErrorClassification | undefined {
+  const plugins = params.provider
+    ? [resolveProviderHookPlugin({ ...params, provider: params.provider })].filter(
+        (plugin): plugin is ProviderPlugin => Boolean(plugin),
+      )
+    : resolveProviderPluginsForHooks(params);
+  for (const plugin of plugins) {
+    const classification = normalizeProviderErrorClassification(
+      plugin.classifyProviderError?.(params.context),
+    );
+    if (classification) {
+      return classification;
+    }
+    const reason = plugin.classifyFailoverReason?.(params.context);
+    if (reason) {
+      return reason;
+    }
+  }
+  return undefined;
+}
+
 export function classifyProviderFailoverReasonWithPlugin(params: {
   provider?: string;
   config?: OpenClawConfig;
@@ -711,18 +758,7 @@ export function classifyProviderFailoverReasonWithPlugin(params: {
   env?: NodeJS.ProcessEnv;
   context: ProviderFailoverErrorContext;
 }) {
-  const plugins = params.provider
-    ? [resolveProviderHookPlugin({ ...params, provider: params.provider })].filter(
-        (plugin): plugin is ProviderPlugin => Boolean(plugin),
-      )
-    : resolveProviderPluginsForHooks(params);
-  for (const plugin of plugins) {
-    const reason = plugin.classifyFailoverReason?.(params.context);
-    if (reason) {
-      return reason;
-    }
-  }
-  return undefined;
+  return getProviderErrorDescriptorReason(classifyProviderErrorWithPlugin(params));
 }
 
 export function formatProviderAuthProfileApiKeyWithPlugin(params: {

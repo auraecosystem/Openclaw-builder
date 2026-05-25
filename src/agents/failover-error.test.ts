@@ -576,6 +576,12 @@ describe("failover-error", () => {
         message: "prompt is too long: 150000 tokens > 128000 maximum",
       }),
     ).toEqual({ kind: "context_overflow" });
+    expect(
+      classifyFailoverSignal({
+        status: 429,
+        message: "prompt is too long: 150000 tokens > 128000 maximum",
+      }),
+    ).toEqual({ kind: "reason", reason: "rate_limit" });
   });
 
   it("treats invalid-model HTTP 400 payloads as model_not_found instead of format", () => {

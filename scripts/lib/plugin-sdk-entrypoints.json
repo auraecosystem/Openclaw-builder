@@ -273,6 +273,7 @@
   "provider-catalog-shared",
   "provider-entry",
   "provider-env-vars",
+  "provider-errors",
   "provider-http",
   "provider-model-types",
   "provider-model-shared",

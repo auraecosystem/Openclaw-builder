@@ -1191,6 +1191,10 @@
       "types": "./dist/plugin-sdk/provider-env-vars.d.ts",
       "default": "./dist/plugin-sdk/provider-env-vars.js"
     },
+    "./plugin-sdk/provider-errors": {
+      "types": "./dist/plugin-sdk/provider-errors.d.ts",
+      "default": "./dist/plugin-sdk/provider-errors.js"
+    },
     "./plugin-sdk/provider-http": {
       "types": "./dist/plugin-sdk/provider-http.d.ts",
       "default": "./dist/plugin-sdk/provider-http.js"
