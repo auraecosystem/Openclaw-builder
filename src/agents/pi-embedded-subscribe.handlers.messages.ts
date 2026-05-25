@@ -37,6 +37,7 @@ import {
   extractThinkingFromTaggedText,
   promoteThinkingTagsToBlocks,
 } from "./pi-embedded-utils.js";
+import { ANNOUNCE_SKIP_TOKEN, REPLY_SKIP_TOKEN } from "./tools/sessions-send-tokens.js";
 
 function shouldSuppressAssistantVisibleOutput(message: AgentMessage | undefined): boolean {
   return resolveAssistantMessagePhase(message) === "commentary";
@@ -684,8 +685,28 @@ export function handleMessageEnd(
   });
   warnIfAssistantEmittedToolText(ctx, assistantMessage);
 
+  const strippedAssistantText = ctx.stripBlockTags(
+    rawVisibleText,
+    { thinking: false, final: false },
+    { final: true },
+  );
+  const trimmedStrippedAssistantText = strippedAssistantText.trim();
+  if (ctx.state.lastToolError) {
+    const ackToken = isSilentReplyText(trimmedStrippedAssistantText, SILENT_REPLY_TOKEN)
+      ? SILENT_REPLY_TOKEN
+      : trimmedStrippedAssistantText === REPLY_SKIP_TOKEN
+        ? REPLY_SKIP_TOKEN
+        : trimmedStrippedAssistantText === ANNOUNCE_SKIP_TOKEN
+          ? ANNOUNCE_SKIP_TOKEN
+          : null;
+    if (ackToken) {
+      ctx.log.warn(
+        `agent silently acked after tool error: tool=${ctx.state.lastToolError.toolName} ack=${ackToken}`,
+      );
+    }
+  }
   const text = resolveSilentReplyFallbackText({
-    text: ctx.stripBlockTags(rawVisibleText, { thinking: false, final: false }, { final: true }),
+    text: strippedAssistantText,
     messagingToolSentTexts: ctx.state.messagingToolSentTexts,
   });
   const rawThinking =
