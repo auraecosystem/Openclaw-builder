@@ -1008,6 +1008,13 @@ describe("channel-broker plugin", () => {
       type: "group",
     },
     {
+      label: "WeChat plugin alias",
+      target: "broker:openclaw-weixin:direct:wxid_friend",
+      platform: "wechat",
+      id: "wxid_friend",
+      type: "direct",
+    },
+    {
       label: "Feishu group",
       target: "broker:feishu:group:oc_123",
       platform: "feishu",
