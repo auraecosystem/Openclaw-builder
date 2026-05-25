@@ -822,8 +822,8 @@ export async function runPreparedReply(
       modelState.resolveDefaultThinkingLevel(),
     );
   }
-  let thinkingCatalog =
-    modelState.allowedModelCatalog.length > 0 ? modelState.allowedModelCatalog : undefined;
+  const allowedThinkingCatalog = modelState.allowedModelCatalog ?? [];
+  let thinkingCatalog = allowedThinkingCatalog.length > 0 ? allowedThinkingCatalog : undefined;
   let thinkingLevelSupported = isThinkingLevelSupported({
     provider,
     model,
