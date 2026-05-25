@@ -316,7 +316,7 @@ describe("exec approvals safe bins", () => {
     expect(ok).toBe(testCase.expected);
   });
 
-  it("supports injected trusted safe-bin dirs for tests/callers", () => {
+  it("supports injected trusted safe-bin dirs for tests/callers", async () => {
     if (process.platform === "win32") {
       return;
     }
@@ -333,7 +333,7 @@ describe("exec approvals safe bins", () => {
     expect(ok).toBe(true);
   });
 
-  it("checks safe-bin trusted dirs against the real executable identity", () => {
+  it("checks safe-bin trusted dirs against the real executable identity", async () => {
     if (process.platform === "win32") {
       return;
     }
@@ -371,7 +371,7 @@ describe("exec approvals safe bins", () => {
     ).toBe(false);
   });
 
-  it("supports injected platform for deterministic safe-bin checks", () => {
+  it("supports injected platform for deterministic safe-bin checks", async () => {
     const ok = isSafeBinUsage({
       argv: ["jq", ".foo"],
       resolution: {
@@ -385,7 +385,7 @@ describe("exec approvals safe bins", () => {
     expect(ok).toBe(false);
   });
 
-  it("supports injected trusted path checker for deterministic callers", () => {
+  it("supports injected trusted path checker for deterministic callers", async () => {
     if (process.platform === "win32") {
       return;
     }
@@ -412,7 +412,7 @@ describe("exec approvals safe bins", () => {
     ).toBe(false);
   });
 
-  it("keeps safe-bin profile fixtures aligned with compiled profiles", () => {
+  it("keeps safe-bin profile fixtures aligned with compiled profiles", async () => {
     for (const [name, fixture] of Object.entries(SAFE_BIN_PROFILE_FIXTURES)) {
       const profile = SAFE_BIN_PROFILES[name];
       if (profile === undefined) {
@@ -429,18 +429,18 @@ describe("exec approvals safe bins", () => {
     }
   });
 
-  it("does not include sort/grep in default safeBins", () => {
+  it("does not include sort/grep in default safeBins", async () => {
     const defaults = resolveSafeBins(undefined);
     expect(defaults.has("jq")).toBe(false);
     expect(defaults.has("sort")).toBe(false);
     expect(defaults.has("grep")).toBe(false);
   });
 
-  it("does not auto-allow unprofiled safe-bin entries", () => {
+  it("does not auto-allow unprofiled safe-bin entries", async () => {
     if (process.platform === "win32") {
       return;
     }
-    const result = evaluateShellAllowlist({
+    const result = await evaluateShellAllowlist({
       command: "python3 -c \"print('owned')\"",
       allowlist: [],
       safeBins: normalizeSafeBins(["python3"]),
@@ -450,7 +450,7 @@ describe("exec approvals safe bins", () => {
     expect(result.allowlistSatisfied).toBe(false);
   });
 
-  it("allows caller-defined custom safe-bin profiles", () => {
+  it("allows caller-defined custom safe-bin profiles", async () => {
     if (process.platform === "win32") {
       return;
     }
@@ -483,7 +483,7 @@ describe("exec approvals safe bins", () => {
     expect(deny).toBe(false);
   });
 
-  it("blocks sort output flags independent of file existence", () => {
+  it("blocks sort output flags independent of file existence", async () => {
     if (process.platform === "win32") {
       return;
     }
@@ -515,7 +515,7 @@ describe("exec approvals safe bins", () => {
     expect(longFlag).toBe(false);
   });
 
-  it("threads trusted safe-bin dirs through allowlist evaluation", () => {
+  it("threads trusted safe-bin dirs through allowlist evaluation", async () => {
     if (process.platform === "win32") {
       return;
     }
@@ -535,7 +535,7 @@ describe("exec approvals safe bins", () => {
         },
       ],
     };
-    const denied = evaluateExecAllowlist({
+    const denied = await evaluateExecAllowlist({
       analysis,
       allowlist: [],
       safeBins: normalizeSafeBins(["jq"]),
@@ -544,7 +544,7 @@ describe("exec approvals safe bins", () => {
     });
     expect(denied.allowlistSatisfied).toBe(false);
 
-    const allowed = evaluateExecAllowlist({
+    const allowed = await evaluateExecAllowlist({
       analysis,
       allowlist: [],
       safeBins: normalizeSafeBins(["jq"]),
@@ -554,7 +554,7 @@ describe("exec approvals safe bins", () => {
     expect(allowed.allowlistSatisfied).toBe(true);
   });
 
-  it("does not auto-trust PATH-shadowed safe bins without explicit trusted dirs", () => {
+  it("does not auto-trust PATH-shadowed safe bins without explicit trusted dirs", async () => {
     if (process.platform === "win32") {
       return;
     }
@@ -565,7 +565,7 @@ describe("exec approvals safe bins", () => {
     fs.writeFileSync(fakeHead, "#!/bin/sh\nexit 0\n");
     fs.chmodSync(fakeHead, 0o755);
 
-    const result = evaluateShellAllowlist({
+    const result = await evaluateShellAllowlist({
       command: "head -n 1",
       allowlist: [],
       safeBins: normalizeSafeBins(["head"]),
@@ -578,11 +578,11 @@ describe("exec approvals safe bins", () => {
     expect(result.segments[0]?.resolution?.execution.resolvedPath).toBe(fakeHead);
   });
 
-  it("fails closed for semantic env wrappers in allowlist mode", () => {
+  it("fails closed for semantic env wrappers in allowlist mode", async () => {
     if (process.platform === "win32") {
       return;
     }
-    const result = evaluateShellAllowlist({
+    const result = await evaluateShellAllowlist({
       command: "env -S 'sh -c \"echo pwned\"' tr",
       allowlist: [{ pattern: "/usr/bin/tr" }],
       safeBins: normalizeSafeBins(["tr"]),

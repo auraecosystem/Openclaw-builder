@@ -70,7 +70,7 @@ describe("exec approvals policy helpers", () => {
     { raw: "NODE", expected: "node" },
     { raw: "", expected: null },
     { raw: "ssh", expected: null },
-  ])("normalizes exec host value %j", ({ raw, expected }) => {
+  ])("normalizes exec host value %j", async ({ raw, expected }) => {
     expect(normalizeExecHost(raw)).toBe(expected);
   });
 
@@ -80,11 +80,11 @@ describe("exec approvals policy helpers", () => {
     { raw: "NODE", expected: "node" },
     { raw: "", expected: null },
     { raw: "ssh", expected: null },
-  ])("normalizes exec target value %j", ({ raw, expected }) => {
+  ])("normalizes exec target value %j", async ({ raw, expected }) => {
     expect(normalizeExecTarget(raw)).toBe(expected);
   });
 
-  it("requires direct exec target requests to use the closed host set", () => {
+  it("requires direct exec target requests to use the closed host set", async () => {
     expect(requireValidExecTarget(" gateway ")).toBe("gateway");
     expect(requireValidExecTarget("")).toBe(null);
     expect(requireValidExecTarget(undefined)).toBe(null);
@@ -100,7 +100,7 @@ describe("exec approvals policy helpers", () => {
     { raw: " allowlist ", expected: "allowlist" },
     { raw: "FULL", expected: "full" },
     { raw: "unknown", expected: null },
-  ])("normalizes exec security value %j", ({ raw, expected }) => {
+  ])("normalizes exec security value %j", async ({ raw, expected }) => {
     expect(normalizeExecSecurity(raw)).toBe(expected);
   });
 
@@ -108,7 +108,7 @@ describe("exec approvals policy helpers", () => {
     { raw: " on-miss ", expected: "on-miss" },
     { raw: "ALWAYS", expected: "always" },
     { raw: "maybe", expected: null },
-  ])("normalizes exec ask value %j", ({ raw, expected }) => {
+  ])("normalizes exec ask value %j", async ({ raw, expected }) => {
     expect(normalizeExecAsk(raw)).toBe(expected);
   });
 
@@ -124,7 +124,7 @@ describe("exec approvals policy helpers", () => {
       right: "allowlist" as const,
       expected: "allowlist" as const,
     },
-  ])("minSecurity picks the more restrictive value for %j", ({ left, right, expected }) => {
+  ])("minSecurity picks the more restrictive value for %j", async ({ left, right, expected }) => {
     expect(minSecurity(left, right)).toBe(expected);
   });
 
@@ -132,7 +132,7 @@ describe("exec approvals policy helpers", () => {
     { left: "off" as const, right: "always" as const, expected: "always" as const },
     { left: "on-miss" as const, right: "off" as const, expected: "on-miss" as const },
     { left: "always" as const, right: "on-miss" as const, expected: "always" as const },
-  ])("maxAsk picks the more aggressive ask mode for %j", ({ left, right, expected }) => {
+  ])("maxAsk picks the more aggressive ask mode for %j", async ({ left, right, expected }) => {
     expect(maxAsk(left, right)).toBe(expected);
   });
 
@@ -180,11 +180,14 @@ describe("exec approvals policy helpers", () => {
       allowlistSatisfied: false,
       expected: false,
     },
-  ])("requiresExecApproval respects ask mode and allowlist satisfaction for %j", (testCase) => {
-    expect(requiresExecApproval(testCase)).toBe(testCase.expected);
-  });
+  ])(
+    "requiresExecApproval respects ask mode and allowlist satisfaction for %j",
+    async (testCase) => {
+      expect(requiresExecApproval(testCase)).toBe(testCase.expected);
+    },
+  );
 
-  it("treats exact-command allow-always approvals as durable trust", () => {
+  it("treats exact-command allow-always approvals as durable trust", async () => {
     expect(
       hasDurableExecApproval({
         analysisOk: false,
@@ -200,7 +203,7 @@ describe("exec approvals policy helpers", () => {
     ).toBe(true);
   });
 
-  it("treats fully allow-always-matched segments as durable trust", () => {
+  it("treats fully allow-always-matched segments as durable trust", async () => {
     expect(
       hasDurableExecApproval({
         analysisOk: true,
@@ -213,13 +216,13 @@ describe("exec approvals policy helpers", () => {
     ).toBe(true);
   });
 
-  it("marks policy-blocked segments as non-durable allowlist entries", () => {
+  it("marks policy-blocked segments as non-durable allowlist entries", async () => {
     const executable = makeMockExecutableResolution({
       rawExecutable: "/usr/bin/echo",
       resolvedPath: "/usr/bin/echo",
       executableName: "echo",
     });
-    const result = evaluateExecAllowlist({
+    const result = await evaluateExecAllowlist({
       analysis: {
         ok: true,
         segments: [
@@ -263,7 +266,7 @@ describe("exec approvals policy helpers", () => {
     ).toBe(false);
   });
 
-  it("explains stricter host security and ask precedence", () => {
+  it("explains stricter host security and ask precedence", async () => {
     const summary = resolveExecPolicyScopeSummary({
       approvals: {
         version: 1,
@@ -301,7 +304,7 @@ describe("exec approvals policy helpers", () => {
     });
   });
 
-  it("uses the actual approvals path when reporting host sources", () => {
+  it("uses the actual approvals path when reporting host sources", async () => {
     const summary = resolveExecPolicyScopeSummary({
       approvals: {
         version: 1,
@@ -328,7 +331,7 @@ describe("exec approvals policy helpers", () => {
     });
   });
 
-  it("does not let host ask=off suppress a stricter requested ask", () => {
+  it("does not let host ask=off suppress a stricter requested ask", async () => {
     const summary = resolveExecPolicyScopeSummary({
       approvals: {
         version: 1,
@@ -351,7 +354,7 @@ describe("exec approvals policy helpers", () => {
     });
   });
 
-  it("clamps askFallback to the effective security", () => {
+  it("clamps askFallback to the effective security", async () => {
     const summary = resolveExecPolicyScopeSummary({
       approvals: {
         version: 1,
@@ -375,19 +378,19 @@ describe("exec approvals policy helpers", () => {
     });
   });
 
-  it("skips malformed host fields when attributing their source", () => {
+  it("skips malformed host fields when attributing their source", async () => {
     expectMalformedAgentAskUsesDefaults("foo");
   });
 
-  it("ignores malformed non-string host fields when attributing their source", () => {
+  it("ignores malformed non-string host fields when attributing their source", async () => {
     expectMalformedAgentAskUsesDefaults(true);
   });
 
-  it("does not credit mixed-case host fields that resolution ignores", () => {
+  it("does not credit mixed-case host fields that resolution ignores", async () => {
     expectMalformedAgentAskUsesDefaults("Always");
   });
 
-  it("attributes host policy to wildcard agent entries before defaults", () => {
+  it("attributes host policy to wildcard agent entries before defaults", async () => {
     const summary = resolveExecPolicyScopeSummary({
       approvals: {
         version: 1,
@@ -427,7 +430,7 @@ describe("exec approvals policy helpers", () => {
     });
   });
 
-  it("inherits requested agent policy from global tools.exec config", () => {
+  it("inherits requested agent policy from global tools.exec config", async () => {
     const summary = resolveExecPolicyScopeSummary({
       approvals: {
         version: 1,
@@ -461,7 +464,7 @@ describe("exec approvals policy helpers", () => {
     });
   });
 
-  it("reports askFallback from the OpenClaw default when approvals omit it", () => {
+  it("reports askFallback from the OpenClaw default when approvals omit it", async () => {
     const summary = resolveExecPolicyScopeSummary({
       approvals: {
         version: 1,
@@ -477,7 +480,7 @@ describe("exec approvals policy helpers", () => {
     });
   });
 
-  it("collects global, configured-agent, and approvals-only agent scopes", () => {
+  it("collects global, configured-agent, and approvals-only agent scopes", async () => {
     const snapshots = collectExecPolicyScopeSnapshots({
       cfg: {
         tools: {
@@ -522,7 +525,7 @@ describe("exec approvals policy helpers", () => {
     });
   });
 
-  it("avoids a duplicate default-agent scope when main only appears in approvals", () => {
+  it("avoids a duplicate default-agent scope when main only appears in approvals", async () => {
     const snapshots = collectExecPolicyScopeSnapshots({
       cfg: {
         tools: {
@@ -554,7 +557,7 @@ describe("exec approvals policy helpers", () => {
     });
   });
 
-  it("keeps the default agent scope when main has an explicit exec override", () => {
+  it("keeps the default agent scope when main has an explicit exec override", async () => {
     const snapshots = collectExecPolicyScopeSnapshots({
       cfg: {
         tools: {

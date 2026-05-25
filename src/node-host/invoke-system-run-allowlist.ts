@@ -1,6 +1,5 @@
 import {
   analyzeArgvCommand,
-  buildSafeBinsShellCommand,
   evaluateExecAllowlist,
   evaluateShellAllowlist,
   resolvePlannedSegmentArgv,
@@ -11,6 +10,7 @@ import {
   type ExecSecurity,
   type SkillBinTrustEntry,
 } from "../infra/exec-approvals.js";
+import { buildAuthorizedShellCommandFromPlan } from "../infra/exec-authorization-render.js";
 import { resolveExecSafeBinRuntimePolicy } from "../infra/exec-safe-bin-runtime-policy.js";
 import {
   normalizeExecutableToken,
@@ -32,9 +32,10 @@ type SystemRunAllowlistAnalysis = {
   segments: ExecCommandSegment[];
   segmentAllowlistEntries: Array<ExecAllowlistEntry | null>;
   segmentSatisfiedBy: ExecSegmentSatisfiedBy[];
+  authorizationPlan?: import("../infra/exec-approvals.js").ExecAuthorizationPlan;
 };
 
-export function evaluateSystemRunAllowlist(params: {
+export async function evaluateSystemRunAllowlist(params: {
   shellCommand: string | null;
   argv: string[];
   approvals: ReturnType<typeof resolveExecApprovals>;
@@ -46,9 +47,9 @@ export function evaluateSystemRunAllowlist(params: {
   env: Record<string, string> | undefined;
   skillBins: SkillBinTrustEntry[];
   autoAllowSkills: boolean;
-}): SystemRunAllowlistAnalysis {
+}): Promise<SystemRunAllowlistAnalysis> {
   if (params.shellCommand) {
-    const allowlistEval = evaluateShellAllowlist({
+    const allowlistEval = await evaluateShellAllowlist({
       command: params.shellCommand,
       allowlist: params.approvals.allowlist,
       safeBins: params.safeBins,
@@ -70,11 +71,12 @@ export function evaluateSystemRunAllowlist(params: {
       segments: allowlistEval.segments,
       segmentAllowlistEntries: allowlistEval.segmentAllowlistEntries,
       segmentSatisfiedBy: allowlistEval.segmentSatisfiedBy,
+      authorizationPlan: allowlistEval.authorizationPlan,
     };
   }
 
   const analysis = analyzeArgvCommand({ argv: params.argv, cwd: params.cwd, env: params.env });
-  const allowlistEval = evaluateExecAllowlist({
+  const allowlistEval = await evaluateExecAllowlist({
     analysis,
     allowlist: params.approvals.allowlist,
     safeBins: params.safeBins,
@@ -89,9 +91,10 @@ export function evaluateSystemRunAllowlist(params: {
     allowlistMatches: allowlistEval.allowlistMatches,
     allowlistSatisfied:
       params.security === "allowlist" && analysis.ok ? allowlistEval.allowlistSatisfied : false,
-    segments: analysis.segments,
+    segments: allowlistEval.segments ?? analysis.segments,
     segmentAllowlistEntries: allowlistEval.segmentAllowlistEntries,
     segmentSatisfiedBy: allowlistEval.segmentSatisfiedBy,
+    authorizationPlan: allowlistEval.authorizationPlan,
   };
 }
 
@@ -123,12 +126,6 @@ export function resolveSystemRunExecArgv(params: {
   plannedAllowlistArgv: string[] | undefined;
   argv: string[];
   security: ExecSecurity;
-  approvals: ReturnType<typeof resolveExecApprovals>;
-  safeBins: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["safeBins"];
-  safeBinProfiles: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["safeBinProfiles"];
-  trustedSafeBinDirs: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["trustedSafeBinDirs"];
-  skillBins: SkillBinTrustEntry[];
-  autoAllowSkills: boolean;
   isWindows: boolean;
   policy: {
     approvedByAsk: boolean;
@@ -138,6 +135,7 @@ export function resolveSystemRunExecArgv(params: {
   shellCommand: string | null;
   segments: ExecCommandSegment[];
   segmentSatisfiedBy: ExecSegmentSatisfiedBy[];
+  authorizationPlan?: import("../infra/exec-approvals.js").ExecAuthorizationPlan;
   cwd: string | undefined;
   env: Record<string, string> | undefined;
 }): string[] | null {
@@ -164,13 +162,16 @@ export function resolveSystemRunExecArgv(params: {
     params.segmentSatisfiedBy.some((entry) => entry === "safeBins" || entry === "inlineChain") &&
     isPosixShellInlineCommandTransport(params.argv)
   ) {
-    const rebuilt = buildSafeBinsShellCommand({
-      command: params.shellCommand,
-      segments: params.segments,
+    if (!params.authorizationPlan) {
+      return null;
+    }
+    if (params.authorizationPlan.originalCommand !== params.shellCommand) {
+      return null;
+    }
+    const rebuilt = buildAuthorizedShellCommandFromPlan({
+      plan: params.authorizationPlan,
+      mode: "safeBins",
       segmentSatisfiedBy: params.segmentSatisfiedBy,
-      cwd: params.cwd,
-      env: params.env,
-      platform: process.platform,
     });
     if (!rebuilt.ok || !rebuilt.command) {
       return null;
@@ -181,22 +182,6 @@ export function resolveSystemRunExecArgv(params: {
       nextCommand: rebuilt.command,
     });
     if (!rewrittenArgv) {
-      return null;
-    }
-    const rebuiltAllowlist = evaluateSystemRunAllowlist({
-      shellCommand: rebuilt.command,
-      argv: rewrittenArgv,
-      approvals: params.approvals,
-      security: params.security,
-      safeBins: params.safeBins,
-      safeBinProfiles: params.safeBinProfiles,
-      trustedSafeBinDirs: params.trustedSafeBinDirs,
-      cwd: params.cwd,
-      env: params.env,
-      skillBins: params.skillBins,
-      autoAllowSkills: params.autoAllowSkills,
-    });
-    if (!rebuiltAllowlist.analysisOk || !rebuiltAllowlist.allowlistSatisfied) {
       return null;
     }
     execArgv = rewrittenArgv;

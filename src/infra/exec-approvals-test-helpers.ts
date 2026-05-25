@@ -64,17 +64,6 @@ export function makeMockCommandResolution(params: {
   });
 }
 
-type ShellParserParityFixtureCase = {
-  id: string;
-  command: string;
-  ok: boolean;
-  executables: string[];
-};
-
-type ShellParserParityFixture = {
-  cases: ShellParserParityFixtureCase[];
-};
-
 type WrapperResolutionParityFixtureCase = {
   id: string;
   argv: string[];
@@ -84,17 +73,6 @@ type WrapperResolutionParityFixtureCase = {
 type WrapperResolutionParityFixture = {
   cases: WrapperResolutionParityFixtureCase[];
 };
-
-export function loadShellParserParityFixtureCases(): ShellParserParityFixtureCase[] {
-  const fixturePath = path.join(
-    process.cwd(),
-    "test",
-    "fixtures",
-    "exec-allowlist-shell-parser-parity.json",
-  );
-  const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8")) as ShellParserParityFixture;
-  return fixture.cases;
-}
 
 export function loadWrapperResolutionParityFixtureCases(): WrapperResolutionParityFixtureCase[] {
   const fixturePath = path.join(

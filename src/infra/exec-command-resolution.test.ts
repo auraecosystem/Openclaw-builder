@@ -25,7 +25,11 @@ function buildNestedEnvShellCommand(params: {
   return [...Array(params.depth).fill(params.envExecutable), "/bin/sh", "-c", params.payload];
 }
 
-function analyzeEnvWrapperAllowlist(params: { argv: string[]; envPath: string; cwd: string }) {
+async function analyzeEnvWrapperAllowlist(params: {
+  argv: string[];
+  envPath: string;
+  cwd: string;
+}) {
   const analysis = {
     ok: true as const,
     segments: [
@@ -40,7 +44,7 @@ function analyzeEnvWrapperAllowlist(params: { argv: string[]; envPath: string; c
       },
     ],
   };
-  const allowlistEval = evaluateExecAllowlist({
+  const allowlistEval = await evaluateExecAllowlist({
     analysis,
     allowlist: [{ pattern: params.envPath }],
     safeBins: normalizeSafeBins([]),
@@ -160,7 +164,7 @@ describe("exec-command-resolution", () => {
     });
   });
 
-  it("unwraps transparent env and nice wrappers to the effective executable", () => {
+  it("unwraps transparent env and nice wrappers to the effective executable", async () => {
     const fixture = createPathExecutableFixture();
 
     const envResolution = resolveCommandResolutionFromArgv(
@@ -189,7 +193,7 @@ describe("exec-command-resolution", () => {
     expect(timeResolution?.execution.executableName).toBe(fixture.exeName);
   });
 
-  it("keeps shell multiplexer wrappers as a separate policy target", () => {
+  it("keeps shell multiplexer wrappers as a separate policy target", async () => {
     if (process.platform === "win32") {
       return;
     }
@@ -208,7 +212,7 @@ describe("exec-command-resolution", () => {
     expect(resolution?.execution.executableName.toLowerCase()).toContain("sh");
   });
 
-  it("exposes canonical trust paths separately from display candidate paths", () => {
+  it("exposes canonical trust paths separately from display candidate paths", async () => {
     const resolution = {
       execution: {
         rawExecutable: "rg",
@@ -237,7 +241,7 @@ describe("exec-command-resolution", () => {
     );
   });
 
-  it("does not satisfy inner-shell allowlists when invoked through busybox wrappers", () => {
+  it("does not satisfy inner-shell allowlists when invoked through busybox wrappers", async () => {
     if (process.platform === "win32") {
       return;
     }
@@ -250,7 +254,7 @@ describe("exec-command-resolution", () => {
     expect(shellResolution?.execution.resolvedPath).toMatch(/sh$/);
 
     const wrappedResolution = resolveCommandResolutionFromArgv([busybox, "sh", "-lc", "echo hi"]);
-    const evalResult = evaluateExecAllowlist({
+    const evalResult = await evaluateExecAllowlist({
       analysis: {
         ok: true,
         segments: [
@@ -269,7 +273,7 @@ describe("exec-command-resolution", () => {
     expect(evalResult.allowlistSatisfied).toBe(false);
   });
 
-  it("blocks semantic env wrappers, env -S, and deep transparent-wrapper chains", () => {
+  it("blocks env wrappers with shell parsing flags and deep transparent-wrapper chains", async () => {
     const blockedEnv = resolveCommandResolutionFromArgv([
       "/usr/bin/env",
       "FOO=bar",
@@ -291,7 +295,7 @@ describe("exec-command-resolution", () => {
     fs.writeFileSync(envPath, "#!/bin/sh\n");
     fs.chmodSync(envPath, 0o755);
 
-    const envS = analyzeEnvWrapperAllowlist({
+    const envS = await analyzeEnvWrapperAllowlist({
       argv: [envPath, "-S", 'sh -c "echo pwned"'],
       envPath,
       cwd: dir,
@@ -299,7 +303,7 @@ describe("exec-command-resolution", () => {
     expect(envS.analysis.segments[0]?.resolution?.policyBlocked).toBe(true);
     expect(envS.allowlistEval.allowlistSatisfied).toBe(false);
 
-    const deep = analyzeEnvWrapperAllowlist({
+    const deep = await analyzeEnvWrapperAllowlist({
       argv: buildNestedEnvShellCommand({
         envExecutable: envPath,
         depth: 5,
@@ -313,7 +317,7 @@ describe("exec-command-resolution", () => {
     expect(deep.allowlistEval.allowlistSatisfied).toBe(false);
   });
 
-  it("resolves allowlist candidate paths from unresolved raw executables", () => {
+  it("resolves allowlist candidate paths from unresolved raw executables", async () => {
     expect(
       resolveExecutionTargetCandidatePath(
         {
@@ -373,7 +377,7 @@ describe("exec-command-resolution", () => {
       allowlistSatisfied: true,
     },
     {
-      name: "semantic env wrapper",
+      name: "env wrapper with assignment",
       argvFactory: ({ envPath }: { envPath: string }) => [envPath, "FOO=bar", "rg", "-n", "needle"],
       envFactory: ({ binDir }: { binDir: string }) => makePathEnv(binDir),
       expectedExecutionPathFactory: ({ envPath }: { envPath: string }) => envPath,
@@ -399,7 +403,7 @@ describe("exec-command-resolution", () => {
     },
   ] as const)(
     "keeps execution and policy targets coherent across wrapper classes: $name",
-    (testCase) => {
+    async (testCase) => {
       const dir = makeTempDir();
       const binDir = path.join(dir, "bin");
       fs.mkdirSync(binDir, { recursive: true });
@@ -429,7 +433,7 @@ describe("exec-command-resolution", () => {
       expect(resolvePlannedSegmentArgv(segment), `${testCase.name} planned argv`).toEqual(
         testCase.expectedPlannedArgvFactory(fixture),
       );
-      const evaluation = evaluateExecAllowlist({
+      const evaluation = await evaluateExecAllowlist({
         analysis: { ok: true, segments: [segment] },
         allowlist: [{ pattern: testCase.allowlistPatternFactory(fixture) }],
         safeBins: normalizeSafeBins([]),
@@ -442,7 +446,7 @@ describe("exec-command-resolution", () => {
     },
   );
 
-  it("normalizes argv tokens for short clusters, long options, and special sentinels", () => {
+  it("normalizes argv tokens for short clusters, long options, and special sentinels", async () => {
     expect(parseExecArgvToken("")).toEqual({ kind: "empty", raw: "" });
     expect(parseExecArgvToken("--")).toEqual({ kind: "terminator", raw: "--" });
     expect(parseExecArgvToken("-")).toEqual({ kind: "stdin", raw: "-" });
@@ -463,7 +467,7 @@ describe("exec-command-resolution", () => {
     }
   });
 
-  it("does not synthesize cwd-joined allowlist candidates from drive-less windows roots", () => {
+  it("does not synthesize cwd-joined allowlist candidates from drive-less windows roots", async () => {
     if (process.platform !== "win32") {
       return;
     }

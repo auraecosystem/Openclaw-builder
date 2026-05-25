@@ -507,12 +507,13 @@ describe("exec approvals", () => {
     if (process.platform !== "win32") {
       await fs.chmod(exePath, 0o755);
     }
+    const exeTrustPath = await fs.realpath(exePath);
     const approvalsFile = {
       version: 1,
       defaults: { security: "allowlist", ask: "on-miss", askFallback: "deny" },
       agents: {
         main: {
-          allowlist: [{ pattern: exePath }],
+          allowlist: [{ pattern: exeTrustPath }],
         },
       },
     };

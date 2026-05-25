@@ -7,7 +7,7 @@ import {
 import { evaluateExecAllowlist, type ExecAllowlistEntry } from "./exec-approvals.js";
 
 describe("exec approvals allowlist evaluation", () => {
-  function evaluateAutoAllowSkills(params: {
+  async function evaluateAutoAllowSkills(params: {
     analysis: {
       ok: boolean;
       segments: Array<{
@@ -18,7 +18,7 @@ describe("exec approvals allowlist evaluation", () => {
     };
     resolvedPath: string;
   }) {
-    return evaluateExecAllowlist({
+    return await evaluateExecAllowlist({
       analysis: params.analysis,
       allowlist: [],
       safeBins: new Set(),
@@ -28,12 +28,14 @@ describe("exec approvals allowlist evaluation", () => {
     });
   }
 
-  function expectAutoAllowSkillsMiss(result: ReturnType<typeof evaluateExecAllowlist>): void {
+  function expectAutoAllowSkillsMiss(
+    result: Awaited<ReturnType<typeof evaluateExecAllowlist>>,
+  ): void {
     expect(result.allowlistSatisfied).toBe(false);
     expect(result.segmentSatisfiedBy).toEqual([null]);
   }
 
-  it("satisfies allowlist on exact match", () => {
+  it("satisfies allowlist on exact match", async () => {
     const analysis = {
       ok: true,
       segments: [
@@ -51,7 +53,7 @@ describe("exec approvals allowlist evaluation", () => {
       ],
     };
     const allowlist: ExecAllowlistEntry[] = [{ pattern: "/usr/bin/tool" }];
-    const result = evaluateExecAllowlist({
+    const result = await evaluateExecAllowlist({
       analysis,
       allowlist,
       safeBins: new Set(),
@@ -61,7 +63,7 @@ describe("exec approvals allowlist evaluation", () => {
     expect(result.allowlistMatches.map((entry) => entry.pattern)).toEqual(["/usr/bin/tool"]);
   });
 
-  it("satisfies allowlist via safe bins", () => {
+  it("satisfies allowlist via safe bins", async () => {
     const analysis = {
       ok: true,
       segments: [
@@ -78,7 +80,7 @@ describe("exec approvals allowlist evaluation", () => {
         },
       ],
     };
-    const result = evaluateExecAllowlist({
+    const result = await evaluateExecAllowlist({
       analysis,
       allowlist: [],
       safeBins: normalizeSafeBins(["jq"]),
@@ -93,7 +95,7 @@ describe("exec approvals allowlist evaluation", () => {
     expect(result.allowlistMatches).toStrictEqual([]);
   });
 
-  it("satisfies allowlist via auto-allow skills", () => {
+  it("satisfies allowlist via auto-allow skills", async () => {
     const analysis = {
       ok: true,
       segments: [
@@ -110,14 +112,14 @@ describe("exec approvals allowlist evaluation", () => {
         },
       ],
     };
-    const result = evaluateAutoAllowSkills({
+    const result = await evaluateAutoAllowSkills({
       analysis,
       resolvedPath: "/opt/skills/skill-bin",
     });
     expect(result.allowlistSatisfied).toBe(true);
   });
 
-  it("matches auto-allow skill bins against the executable trust realpath", () => {
+  it("matches auto-allow skill bins against the executable trust realpath", async () => {
     const analysis = {
       ok: true,
       segments: [
@@ -136,20 +138,20 @@ describe("exec approvals allowlist evaluation", () => {
       ],
     };
 
-    const trustedRealPath = evaluateAutoAllowSkills({
+    const trustedRealPath = await evaluateAutoAllowSkills({
       analysis,
       resolvedPath: "/opt/skills/skill-bin",
     });
     expect(trustedRealPath.allowlistSatisfied).toBe(true);
 
-    const trustedSymlinkPath = evaluateAutoAllowSkills({
+    const trustedSymlinkPath = await evaluateAutoAllowSkills({
       analysis,
       resolvedPath: "/tmp/symlink-bin/skill-bin",
     });
     expectAutoAllowSkillsMiss(trustedSymlinkPath);
   });
 
-  it("does not satisfy auto-allow skills for explicit relative paths", () => {
+  it("does not satisfy auto-allow skills for explicit relative paths", async () => {
     const analysis = {
       ok: true,
       segments: [
@@ -166,14 +168,14 @@ describe("exec approvals allowlist evaluation", () => {
         },
       ],
     };
-    const result = evaluateAutoAllowSkills({
+    const result = await evaluateAutoAllowSkills({
       analysis,
       resolvedPath: "/tmp/skill-bin",
     });
     expectAutoAllowSkillsMiss(result);
   });
 
-  it("does not satisfy auto-allow skills when command resolution is missing", () => {
+  it("does not satisfy auto-allow skills when command resolution is missing", async () => {
     const analysis = {
       ok: true,
       segments: [
@@ -189,14 +191,14 @@ describe("exec approvals allowlist evaluation", () => {
         },
       ],
     };
-    const result = evaluateAutoAllowSkills({
+    const result = await evaluateAutoAllowSkills({
       analysis,
       resolvedPath: "/opt/skills/skill-bin",
     });
     expectAutoAllowSkillsMiss(result);
   });
 
-  it("returns empty segment details for chain misses", () => {
+  it("returns empty segment details for chain misses", async () => {
     const segment = {
       raw: "tool",
       argv: ["tool"],
@@ -213,7 +215,7 @@ describe("exec approvals allowlist evaluation", () => {
       segments: [segment],
       chains: [[segment]],
     };
-    const result = evaluateExecAllowlist({
+    const result = await evaluateExecAllowlist({
       analysis,
       allowlist: [{ pattern: "/usr/bin/other" }],
       safeBins: new Set(),
@@ -224,7 +226,7 @@ describe("exec approvals allowlist evaluation", () => {
     expect(result.segmentSatisfiedBy).toStrictEqual([]);
   });
 
-  it("aggregates segment satisfaction across chains", () => {
+  it("aggregates segment satisfaction across chains", async () => {
     const allowlistSegment = {
       raw: "tool",
       argv: ["tool"],
@@ -252,7 +254,7 @@ describe("exec approvals allowlist evaluation", () => {
       segments: [allowlistSegment, safeBinSegment],
       chains: [[allowlistSegment], [safeBinSegment]],
     };
-    const result = evaluateExecAllowlist({
+    const result = await evaluateExecAllowlist({
       analysis,
       allowlist: [{ pattern: "/usr/bin/tool" }],
       safeBins: normalizeSafeBins(["jq"]),

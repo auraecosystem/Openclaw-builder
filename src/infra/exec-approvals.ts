@@ -12,11 +12,13 @@ import type { CommandExplanationSummary } from "./command-analysis/explain.js";
 import { resolveAllowAlwaysPatternEntries } from "./exec-approvals-allowlist.js";
 import type { ExecCommandSegment } from "./exec-approvals-analysis.js";
 import type { ExecAllowlistEntry } from "./exec-approvals.types.js";
+import type { ExecAuthorizationPlan } from "./exec-authorization-plan.js";
 import { assertNoSymlinkParentsSync } from "./fs-safe-advanced.js";
 import { expandHomePrefix, resolveRequiredHomeDir } from "./home-dir.js";
 import { requestJsonlSocket } from "./jsonl-socket.js";
 export * from "./exec-approvals-analysis.js";
 export * from "./exec-approvals-allowlist.js";
+export type { ExecAuthorizationPlan } from "./exec-authorization-plan.js";
 export type { ExecAllowlistEntry } from "./exec-approvals.types.js";
 
 export type ExecHost = "sandbox" | "gateway" | "node";
@@ -1197,6 +1199,7 @@ export function persistAllowAlwaysPatterns(params: {
   approvals: ExecApprovalsFile;
   agentId: string | undefined;
   segments: ExecCommandSegment[];
+  authorizationPlan?: ExecAuthorizationPlan;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   platform?: string | null;
@@ -1204,6 +1207,7 @@ export function persistAllowAlwaysPatterns(params: {
 }): ReturnType<typeof resolveAllowAlwaysPatternEntries> {
   const patterns = resolveAllowAlwaysPatternEntries({
     segments: params.segments,
+    authorizationPlan: params.authorizationPlan,
     cwd: params.cwd,
     env: params.env,
     platform: params.platform,

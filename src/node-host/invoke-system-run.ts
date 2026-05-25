@@ -119,6 +119,7 @@ type SystemRunPolicyPhase = SystemRunParsePhase & {
   skillBins: SkillBinTrustEntry[];
   autoAllowSkills: boolean;
   segments: ExecCommandSegment[];
+  authorizationPlan?: import("../infra/exec-approvals.js").ExecAuthorizationPlan;
   segmentSatisfiedBy: ExecSegmentSatisfiedBy[];
   plannedAllowlistArgv: string[] | undefined;
   isWindows: boolean;
@@ -402,9 +403,10 @@ async function evaluateSystemRunPolicyPhase(
     allowlistMatches,
     allowlistSatisfied,
     segments,
+    authorizationPlan,
     segmentAllowlistEntries,
     segmentSatisfiedBy,
-  } = evaluateSystemRunAllowlist({
+  } = await evaluateSystemRunAllowlist({
     shellCommand: parsed.shellPayload,
     argv: parsed.argv,
     approvals,
@@ -536,6 +538,7 @@ async function evaluateSystemRunPolicyPhase(
     skillBins: bins,
     autoAllowSkills,
     segments,
+    authorizationPlan,
     segmentSatisfiedBy,
     plannedAllowlistArgv: plannedAllowlistArgv ?? undefined,
     isWindows,
@@ -601,17 +604,12 @@ async function executeSystemRunPhase(
     plannedAllowlistArgv: phase.plannedAllowlistArgv,
     argv: phase.argv,
     security: phase.security,
-    approvals: phase.approvals,
-    safeBins: phase.safeBins,
-    safeBinProfiles: phase.safeBinProfiles,
-    trustedSafeBinDirs: phase.trustedSafeBinDirs,
-    skillBins: phase.skillBins,
-    autoAllowSkills: phase.autoAllowSkills,
     isWindows: phase.isWindows,
     policy: phase.policy,
     shellCommand: phase.shellPayload,
     segments: phase.segments,
     segmentSatisfiedBy: phase.segmentSatisfiedBy,
+    authorizationPlan: phase.authorizationPlan,
     cwd: phase.cwd,
     env: phase.env,
   });
@@ -669,6 +667,7 @@ async function executeSystemRunPhase(
           approvals: phase.approvals.file,
           agentId: phase.agentId,
           segments: phase.segments,
+          authorizationPlan: phase.authorizationPlan,
           cwd: phase.cwd,
           env: phase.env,
           platform: process.platform,

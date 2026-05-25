@@ -130,6 +130,22 @@ describe("approval and confirmation modals", () => {
     expect(spans).toEqual(["ls", "python -c"]);
   });
 
+  it("hides Allow Always when the approval request does not allow it", async () => {
+    const request = createExecRequest();
+    request.request.allowedDecisions = ["allow-once", "deny"];
+
+    render(renderExecApprovalPrompt(createExecState({ execApprovalQueue: [request] })), container);
+
+    await getRenderedDialog();
+
+    const buttonTexts = [...container.querySelectorAll("button")].map((button) =>
+      button.textContent?.trim(),
+    );
+    expect(buttonTexts).toContain("Allow once");
+    expect(buttonTexts).toContain("Deny");
+    expect(buttonTexts).not.toContain("Always Allow");
+  });
+
   it("maps Escape to exec denial when approval is idle", async () => {
     const handleExecApprovalDecision = vi.fn(async () => undefined);
     render(renderExecApprovalPrompt(createExecState({ handleExecApprovalDecision })), container);
@@ -139,6 +155,26 @@ describe("approval and confirmation modals", () => {
 
     expect(handleExecApprovalDecision).toHaveBeenCalledTimes(1);
     expect(handleExecApprovalDecision).toHaveBeenCalledWith("deny");
+  });
+
+  it("does not submit deny from Escape when deny is unavailable", async () => {
+    const request = createExecRequest();
+    request.request.allowedDecisions = ["allow-once"];
+    const handleExecApprovalDecision = vi.fn(async () => undefined);
+    render(
+      renderExecApprovalPrompt(
+        createExecState({
+          execApprovalQueue: [request],
+          handleExecApprovalDecision,
+        }),
+      ),
+      container,
+    );
+
+    const { dialog } = await getRenderedDialog();
+    dispatchEscape(dialog);
+
+    expect(handleExecApprovalDecision).not.toHaveBeenCalled();
   });
 
   it("does not dispatch an extra exec decision from Escape while busy", async () => {
