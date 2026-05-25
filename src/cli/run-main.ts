@@ -229,6 +229,31 @@ async function disposeCliAgentHarnesses(): Promise<void> {
   }
 }
 
+const DEFERRED_TURN_MAINTENANCE_CLI_EXIT_HOOK_KEY = Symbol.for(
+  "openclaw.contextEngineTurnMaintenanceCliExitHook",
+);
+type DeferredTurnMaintenanceCliExitHookState = {
+  cancelForCliExit?: () => Promise<void> | void;
+};
+type DeferredTurnMaintenanceGlobal = typeof globalThis & {
+  [DEFERRED_TURN_MAINTENANCE_CLI_EXIT_HOOK_KEY]?: DeferredTurnMaintenanceCliExitHookState;
+};
+
+async function cancelCliDeferredContextEngineMaintenance(): Promise<void> {
+  const hook = (globalThis as DeferredTurnMaintenanceGlobal)[
+    DEFERRED_TURN_MAINTENANCE_CLI_EXIT_HOOK_KEY
+  ]?.cancelForCliExit;
+  if (!hook) {
+    return;
+  }
+  try {
+    await hook();
+  } catch {
+    // Best-effort teardown for short-lived CLI commands. Deferred maintenance
+    // must not hide the command's real outcome.
+  }
+}
+
 const UNCONFIGURED_CONFIG_IGNORED_KEYS = new Set(["$schema", "meta"]);
 
 function isUnconfiguredConfigSnapshot(
@@ -534,6 +559,7 @@ export async function runCli(argv: string[] = process.argv) {
   let onSigterm: (() => void) | null = null;
   let onSigint: (() => void) | null = null;
   let onExit: (() => void) | null = null;
+  let shouldCancelDeferredMaintenanceOnExit = false;
   if (proxyHandle) {
     const shutdown = (exitCode: number) => {
       if (onSigterm) {
@@ -703,8 +729,14 @@ export async function runCli(argv: string[] = process.argv) {
     }
 
     const { tryRouteCli } = await startupTrace.measure("route-import", () => import("./route.js"));
-    if (await startupTrace.measure("route", () => tryRouteCli(normalizedArgv))) {
-      return;
+    try {
+      if (await startupTrace.measure("route", () => tryRouteCli(normalizedArgv))) {
+        shouldCancelDeferredMaintenanceOnExit = true;
+        return;
+      }
+    } catch (error) {
+      shouldCancelDeferredMaintenanceOnExit = true;
+      throw error;
     }
 
     const { createCliProgress } = await import("./progress.js");
@@ -850,6 +882,7 @@ export async function runCli(argv: string[] = process.argv) {
       stopStartupProgress();
 
       try {
+        shouldCancelDeferredMaintenanceOnExit = true;
         await startupTrace.measure("parse", () => program.parseAsync(parseArgv));
       } catch (error) {
         if (!isCommanderParseExit(error)) {
@@ -871,6 +904,9 @@ export async function runCli(argv: string[] = process.argv) {
       process.off("exit", onExit);
     }
     await stopStartedProxy();
+    if (shouldCancelDeferredMaintenanceOnExit) {
+      await cancelCliDeferredContextEngineMaintenance();
+    }
     await disposeCliAgentHarnesses();
     await closeCliMemoryManagers();
     pauseNonTtyStdinForCliExit();

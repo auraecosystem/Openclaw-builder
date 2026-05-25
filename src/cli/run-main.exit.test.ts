@@ -20,6 +20,9 @@ const closeActiveMemorySearchManagersMock = vi.hoisted(() => vi.fn(async () => {
 const hasMemoryRuntimeMock = vi.hoisted(() => vi.fn(() => false));
 const listAgentHarnessIdsMock = vi.hoisted(() => vi.fn((): string[] => []));
 const disposeRegisteredAgentHarnessesMock = vi.hoisted(() => vi.fn(async () => {}));
+const cancelActiveDeferredTurnMaintenanceRunsForCliExitMock = vi.hoisted(() =>
+  vi.fn(async () => {}),
+);
 const ensureTaskRegistryReadyMock = vi.hoisted(() => vi.fn());
 const startTaskRegistryMaintenanceMock = vi.hoisted(() => vi.fn());
 const outputRootHelpMock = vi.hoisted(() => vi.fn());
@@ -75,6 +78,15 @@ const maybeRunCliInContainerMock = vi.hoisted(() =>
     (argv: string[]) => { handled: true; exitCode: number } | { handled: false; argv: string[] }
   >((argv: string[]) => ({ handled: false, argv })),
 );
+const deferredMaintenanceCliExitHookKey = Symbol.for(
+  "openclaw.contextEngineTurnMaintenanceCliExitHook",
+);
+
+function installDeferredMaintenanceCliExitHook() {
+  (globalThis as Record<PropertyKey, unknown>)[deferredMaintenanceCliExitHookKey] = {
+    cancelForCliExit: cancelActiveDeferredTurnMaintenanceRunsForCliExitMock,
+  };
+}
 
 function requireRunCrestodianOptions(index = 0): { onReady?: unknown } {
   const call = runCrestodianMock.mock.calls[index];
@@ -319,6 +331,7 @@ describe("runCli exit behavior", () => {
     loadConfigMock.mockReturnValue({});
     startProxyMock.mockResolvedValue(null);
     stopProxyMock.mockResolvedValue(undefined);
+    Reflect.deleteProperty(globalThis, deferredMaintenanceCliExitHookKey);
     getProgramContextMock.mockReturnValue(null);
     resolvePluginCliRootOwnerIdsMock.mockImplementation(
       ({ primaryCommand }: { primaryCommand?: string }) =>
@@ -332,7 +345,7 @@ describe("runCli exit behavior", () => {
     loggingState.forceConsoleToStderr = false;
   });
 
-  it("does not force process.exit after successful routed command", async () => {
+  it("skips deferred maintenance cleanup when no hook was registered for routed command", async () => {
     tryRouteCliMock.mockResolvedValueOnce(true);
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`unexpected process.exit(${String(code)})`);
@@ -344,13 +357,35 @@ describe("runCli exit behavior", () => {
     expect(tryRouteCliMock).toHaveBeenCalledWith(["node", "openclaw", "status"]);
     expect(closeActiveMemorySearchManagersMock).not.toHaveBeenCalled();
     expect(disposeRegisteredAgentHarnessesMock).not.toHaveBeenCalled();
+    expect(cancelActiveDeferredTurnMaintenanceRunsForCliExitMock).not.toHaveBeenCalled();
     expect(ensureTaskRegistryReadyMock).not.toHaveBeenCalled();
     expect(startTaskRegistryMaintenanceMock).not.toHaveBeenCalled();
     expect(exitSpy).not.toHaveBeenCalled();
     exitSpy.mockRestore();
   });
 
+  it("cancels deferred maintenance after successful routed command when hook is registered", async () => {
+    installDeferredMaintenanceCliExitHook();
+    tryRouteCliMock.mockResolvedValueOnce(true);
+
+    await runCli(["node", "openclaw", "models", "status", "--probe"]);
+
+    expect(cancelActiveDeferredTurnMaintenanceRunsForCliExitMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels deferred maintenance after routed command failure", async () => {
+    installDeferredMaintenanceCliExitHook();
+    tryRouteCliMock.mockRejectedValueOnce(new Error("routed command failed"));
+
+    await expect(runCli(["node", "openclaw", "models", "status", "--probe"])).rejects.toThrow(
+      "routed command failed",
+    );
+
+    expect(cancelActiveDeferredTurnMaintenanceRunsForCliExitMock).toHaveBeenCalledTimes(1);
+  });
+
   it("disposes registered harnesses after full CLI command completion", async () => {
+    installDeferredMaintenanceCliExitHook();
     listAgentHarnessIdsMock.mockReturnValueOnce(["codex"]);
     tryRouteCliMock.mockResolvedValueOnce(false);
     const parseAsync = vi.fn().mockResolvedValueOnce(undefined);
@@ -362,6 +397,27 @@ describe("runCli exit behavior", () => {
     await runCli(["node", "openclaw", "agent", "--local"]);
 
     expect(parseAsync).toHaveBeenCalledWith(["node", "openclaw", "agent", "--local"]);
+    expect(cancelActiveDeferredTurnMaintenanceRunsForCliExitMock).toHaveBeenCalledTimes(1);
+    expect(disposeRegisteredAgentHarnessesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues CLI cleanup when deferred maintenance cancellation fails", async () => {
+    installDeferredMaintenanceCliExitHook();
+    listAgentHarnessIdsMock.mockReturnValueOnce(["codex"]);
+    cancelActiveDeferredTurnMaintenanceRunsForCliExitMock.mockRejectedValueOnce(
+      new Error("maintenance cleanup failed"),
+    );
+    tryRouteCliMock.mockResolvedValueOnce(false);
+    const parseAsync = vi.fn().mockResolvedValueOnce(undefined);
+    buildProgramMock.mockReturnValueOnce({
+      commands: [{ name: () => "agent", aliases: () => [] }],
+      parseAsync,
+    });
+
+    await runCli(["node", "openclaw", "agent", "--local"]);
+
+    expect(parseAsync).toHaveBeenCalledWith(["node", "openclaw", "agent", "--local"]);
+    expect(cancelActiveDeferredTurnMaintenanceRunsForCliExitMock).toHaveBeenCalledTimes(1);
     expect(disposeRegisteredAgentHarnessesMock).toHaveBeenCalledTimes(1);
   });
 
