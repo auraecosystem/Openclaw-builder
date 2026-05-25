@@ -1008,6 +1008,73 @@ describe("getApiKeyForModel", () => {
     ).rejects.toThrow(/Inline API key for provider "demo-local" is temporarily disabled/);
   });
 
+  it("blocks configured env-marker apiKey while its inline provider cooldown is active", async () => {
+    const usageId = resolveInlineProviderApiKeyUsageId("demo-local");
+    await withEnvAsync({ DEMO_LOCAL_API_KEY: "env-demo-key" }, async () => {
+      const store = {
+        version: 1 as const,
+        profiles: {},
+        usageStats: {
+          [usageId]: {
+            disabledUntil: Date.now() + 60_000,
+            disabledReason: "billing" as const,
+          },
+        },
+      };
+      const cfg = buildDemoLocalProviderCfg("DEMO_LOCAL_API_KEY");
+
+      await expect(
+        resolveApiKeyForProvider({
+          provider: "demo-local",
+          store,
+          cfg,
+        }),
+      ).rejects.toThrow(/Inline API key for provider "demo-local" is temporarily disabled/);
+      await expect(
+        hasAvailableAuthForProvider({ provider: "demo-local", store, cfg }),
+      ).resolves.toBe(false);
+    });
+  });
+
+  it("blocks configured env SecretRef apiKey while its inline provider cooldown is active", async () => {
+    const usageId = resolveInlineProviderApiKeyUsageId("demo-local");
+    await withEnvAsync({ DEMO_LOCAL_API_KEY: "env-demo-key" }, async () => {
+      const store = {
+        version: 1 as const,
+        profiles: {},
+        usageStats: {
+          [usageId]: {
+            disabledUntil: Date.now() + 60_000,
+            disabledReason: "billing" as const,
+          },
+        },
+      };
+      const cfg: OpenClawConfig = {
+        models: {
+          providers: {
+            "demo-local": {
+              baseUrl: "https://local-provider.example",
+              api: "openai-completions",
+              apiKey: { source: "env", provider: "default", id: "DEMO_LOCAL_API_KEY" },
+              models: [],
+            },
+          },
+        },
+      };
+
+      await expect(
+        resolveApiKeyForProvider({
+          provider: "demo-local",
+          store,
+          cfg,
+        }),
+      ).rejects.toThrow(/Inline API key for provider "demo-local" is temporarily disabled/);
+      await expect(
+        hasAvailableAuthForProvider({ provider: "demo-local", store, cfg }),
+      ).resolves.toBe(false);
+    });
+  });
+
   it("falls back to the stored synthetic local profile when no real auth exists", async () => {
     const resolved = await resolveDemoLocalApiKey({
       envApiKey: undefined,

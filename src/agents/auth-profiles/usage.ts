@@ -866,6 +866,16 @@ export async function markInlineProviderApiKeyFailure(params: {
         now: updateTime,
       });
     }
+    try {
+      onAuthProfileFailureHook?.();
+    } catch (err) {
+      // Hook errors must not break failure recording; log and continue.
+      authProfileUsageLog.warn("auth profile failure hook threw", {
+        event: "auth_profile_failure_hook_error",
+        tags: ["error_handling", "auth_profiles"],
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     return;
   }
 
@@ -889,6 +899,16 @@ export async function markInlineProviderApiKeyFailure(params: {
     next: nextStats,
     now,
   });
+  try {
+    onAuthProfileFailureHook?.();
+  } catch (err) {
+    // Hook errors must not break failure recording; log and continue.
+    authProfileUsageLog.warn("auth profile failure hook threw", {
+      event: "auth_profile_failure_hook_error",
+      tags: ["error_handling", "auth_profiles"],
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 export async function markAuthProfileBlockedUntil(params: {

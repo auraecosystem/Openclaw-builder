@@ -268,11 +268,27 @@ export function isInlineProviderApiKeyAuth(auth: ResolvedProviderAuth | null | u
   if (!auth || auth.mode !== "api-key") {
     return false;
   }
+  return isInlineProviderApiKeySource(auth.source);
+}
+
+function isInlineProviderApiKeySource(source: string): boolean {
   return (
-    auth.source === "models.json" ||
-    auth.source.endsWith(" (models.json secretref)") ||
-    auth.source.endsWith(" (models.json marker)")
+    source === "models.json" ||
+    source.endsWith(" (models.json secretref)") ||
+    source.endsWith(" (models.json marker)")
   );
+}
+
+function isConfigBackedInlineProviderApiKey(params: {
+  cfg: OpenClawConfig | undefined;
+  provider: string;
+  source: string;
+}): boolean {
+  if (isInlineProviderApiKeySource(params.source)) {
+    return true;
+  }
+  const providerConfig = resolveProviderConfig(params.cfg, params.provider);
+  return Boolean(providerConfig && hasExplicitProviderApiKeyConfig(providerConfig));
 }
 
 function assertInlineProviderApiKeyUsable(params: {
@@ -782,6 +798,18 @@ export async function resolveApiKeyForProvider(params: {
       const resolvedMode: ResolvedProviderAuth["mode"] = envResolved.source.includes("OAUTH_TOKEN")
         ? "oauth"
         : "api-key";
+      if (
+        resolvedMode === "api-key" &&
+        isConfigBackedInlineProviderApiKey({ cfg, provider, source: envResolved.source })
+      ) {
+        scopedStore ??= resolveScopedAuthProfileStore({
+          agentDir: params.agentDir,
+          cfg,
+          provider,
+          preferredProfile,
+        });
+        assertInlineProviderApiKeyUsable({ store: scopedStore, provider });
+      }
       return {
         apiKey: envResolved.apiKey,
         source: envResolved.source,
@@ -874,6 +902,12 @@ export async function resolveApiKeyForProvider(params: {
     const resolvedMode: ResolvedProviderAuth["mode"] = envResolved.source.includes("OAUTH_TOKEN")
       ? "oauth"
       : "api-key";
+    if (
+      resolvedMode === "api-key" &&
+      isConfigBackedInlineProviderApiKey({ cfg, provider, source: envResolved.source })
+    ) {
+      assertInlineProviderApiKeyUsable({ store, provider });
+    }
     const result: ResolvedProviderAuth = {
       apiKey: envResolved.apiKey,
       source: envResolved.source,
@@ -1026,9 +1060,6 @@ export async function hasAvailableAuthForProvider(params: {
   if (authOverride === "aws-sdk") {
     return true;
   }
-  if (resolveConfigAwareEnvApiKey(cfg, provider, params.workspaceDir)) {
-    return true;
-  }
   const store =
     params.store ??
     resolveScopedAuthProfileStore({
@@ -1038,10 +1069,16 @@ export async function hasAvailableAuthForProvider(params: {
       preferredProfile,
     });
   const inlineUnusableUntil = resolveInlineProviderApiKeyUnusableUntil(store, provider);
-  if (
-    resolveUsableCustomProviderApiKey({ cfg, provider }) &&
-    (typeof inlineUnusableUntil !== "number" || inlineUnusableUntil <= Date.now())
-  ) {
+  const inlineProviderApiKeyUsable =
+    typeof inlineUnusableUntil !== "number" || inlineUnusableUntil <= Date.now();
+  const envResolved = resolveConfigAwareEnvApiKey(cfg, provider, params.workspaceDir);
+  if (envResolved) {
+    return (
+      !isConfigBackedInlineProviderApiKey({ cfg, provider, source: envResolved.source }) ||
+      inlineProviderApiKeyUsable
+    );
+  }
+  if (resolveUsableCustomProviderApiKey({ cfg, provider }) && inlineProviderApiKeyUsable) {
     return true;
   }
   if (resolveSyntheticLocalProviderAuth({ cfg, provider })) {

@@ -419,6 +419,24 @@ describe("markAuthProfileFailure", () => {
     });
   });
 
+  it("fires the auth profile failure hook for inline provider api key failures", async () => {
+    await withAuthProfileStore(async ({ agentDir, store }) => {
+      const hook = vi.fn();
+      setAuthProfileFailureHook(hook);
+      try {
+        await markInlineProviderApiKeyFailure({
+          store,
+          provider: "anthropic",
+          reason: "billing",
+          agentDir,
+        });
+        expect(hook).toHaveBeenCalledTimes(1);
+      } finally {
+        setAuthProfileFailureHook(undefined);
+      }
+    });
+  });
+
   it("does not break failure recording when the hook throws", async () => {
     await withAuthProfileStore(async ({ agentDir, store }) => {
       const throwingHook = vi.fn(() => {
