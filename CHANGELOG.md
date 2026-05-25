@@ -115,6 +115,7 @@ Docs: https://docs.openclaw.ai
 - Tests: fail Docker resource-ceiling checks when stats samples or configured limits are invalid instead of silently reporting zero peaks.
 - Agents: fail closed when provider-less session models match multiple provider-prefixed runtime policies so CLI runtime routing no longer depends on config order. (#85970) Thanks @potterdigital.
 - Control UI/agents: keep collapsed tool rows readable without early ellipses, preserve raw expanded tool details, and make post-compaction AGENTS.md reinjection opt-in to avoid duplicated project context. Fixes #45649 and #45488. Thanks @BunsDev.
+- CLI/config: render `meta.lastTouchedAt` and Docker `setupCommand` in the Control UI config form instead of falling back to "Unsupported schema node — Use Raw mode". Public config schema generation now uses the Zod input schema for transform-backed fields, preserving accepted input shapes without narrowing generic JSON Schema unions. (#67328) Thanks @ScientificProgrammer.
 
 ## 2026.5.24
 

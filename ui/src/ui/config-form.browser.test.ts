@@ -372,6 +372,31 @@ describe("config form renderer", () => {
     let analysis = analyzeConfigSchema(renderableUnionSchema);
     expect(analysis.unsupportedPaths).toEqual([]);
 
+    const typedWithAnyBranchSchema = {
+      type: "object",
+      properties: {
+        lastTouchedAt: {
+          title: "Config Last Touched At",
+          description: "ISO timestamp of the last config write.",
+          anyOf: [{ type: "string" }, {}],
+        },
+      },
+    };
+    analysis = analyzeConfigSchema(typedWithAnyBranchSchema);
+    expect(analysis.unsupportedPaths).toEqual(["lastTouchedAt"]);
+
+    const nullableSingleBranchSchema = {
+      type: "object",
+      properties: {
+        note: {
+          anyOf: [{ type: "string", nullable: true }],
+        },
+      },
+    };
+    analysis = analyzeConfigSchema(nullableSingleBranchSchema);
+    expect(analysis.unsupportedPaths).toEqual([]);
+    expect(analysis.schema?.properties?.note?.nullable).toBe(true);
+
     const nullableSchema = {
       type: "object",
       properties: {

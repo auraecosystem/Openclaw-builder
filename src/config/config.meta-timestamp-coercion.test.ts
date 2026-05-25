@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
+import { computeBaseConfigSchemaResponse } from "./schema-base.js";
 import { validateConfigObject } from "./validation.js";
+
+type TestJsonSchema = {
+  anyOf?: Array<TestJsonSchema & { items?: TestJsonSchema }>;
+  items?: TestJsonSchema;
+  properties?: Record<string, TestJsonSchema>;
+  type?: unknown;
+};
+
+function schemaAt(schema: TestJsonSchema, path: string[]): TestJsonSchema {
+  return path.reduce((node, key) => node.properties?.[key] ?? {}, schema);
+}
 
 describe("meta.lastTouchedAt numeric timestamp coercion", () => {
   it("accepts a numeric Unix timestamp and coerces it to an ISO string", () => {
@@ -57,5 +69,34 @@ describe("meta.lastTouchedAt numeric timestamp coercion", () => {
       },
     });
     expect(res.ok).toBe(true);
+  });
+
+  it("generates public JSON Schema for transform-backed input branches", () => {
+    const schema = computeBaseConfigSchemaResponse({
+      generatedAt: "2026-05-05T00:00:00.000Z",
+    }).schema as TestJsonSchema;
+    const cases = [
+      { path: ["meta", "lastTouchedAt"], types: ["number", "string"] },
+      {
+        path: ["agents", "defaults", "sandbox", "docker", "setupCommand"],
+        types: ["array", "string"],
+        arrayItemsType: "string",
+      },
+    ];
+
+    for (const entry of cases) {
+      const branches = schemaAt(schema, entry.path).anyOf ?? [];
+      expect(
+        branches
+          .map((branch) => branch.type)
+          .toSorted((left, right) => String(left).localeCompare(String(right))),
+      ).toEqual(entry.types);
+      expect(branches.every((branch) => Object.keys(branch).length > 0)).toBe(true);
+      if (entry.arrayItemsType) {
+        expect(branches.find((branch) => branch.type === "array")?.items?.type).toBe(
+          entry.arrayItemsType,
+        );
+      }
+    }
   });
 });
