@@ -34,6 +34,7 @@ import {
   isProfileInCooldown,
   markAuthProfileFailure,
   markAuthProfileSuccess,
+  markInlineProviderApiKeyFailure,
   resolveAuthProfileEligibility,
 } from "../auth-profiles.js";
 import { listActiveProcessSessionReferences } from "../bash-process-references.js";
@@ -58,6 +59,7 @@ import {
   applyLocalNoAuthHeaderOverride,
   ensureAuthProfileStore,
   ensureAuthProfileStoreWithoutExternalProfiles,
+  isInlineProviderApiKeyAuth,
   type ResolvedProviderAuth,
   resolveAuthProfileOrder,
   shouldPreferExplicitConfigApiKeyAuth,
@@ -1150,12 +1152,27 @@ export async function runEmbeddedPiAgent(
         modelId?: string;
       }) => {
         const { profileId, reason } = failure;
-        if (!profileId || !reason) {
+        if (!reason || reason === "timeout") {
           return;
         }
-        await markAuthProfileFailure({
-          store: profileFailureStore,
-          profileId,
+        if (profileId) {
+          await markAuthProfileFailure({
+            store: profileFailureStore,
+            profileId,
+            reason,
+            cfg: params.config,
+            agentDir,
+            runId: params.runId,
+            modelId: failure.modelId,
+          });
+          return;
+        }
+        if (!isInlineProviderApiKeyAuth(apiKeyInfo)) {
+          return;
+        }
+        await markInlineProviderApiKeyFailure({
+          store: authStore,
+          provider,
           reason,
           cfg: params.config,
           agentDir,
@@ -2399,7 +2416,7 @@ export async function runEmbeddedPiAgent(
               promptFailoverDecision.action === "rotate_profile" &&
               (await advanceAttemptAuthProfile())
             ) {
-              if (failedPromptProfileId && promptProfileFailureReason) {
+              if (promptProfileFailureReason) {
                 void maybeMarkAuthProfileFailure({
                   profileId: failedPromptProfileId,
                   reason: promptProfileFailureReason,
@@ -2434,7 +2451,7 @@ export async function runEmbeddedPiAgent(
                 profileRotated: true,
               });
             }
-            if (failedPromptProfileId && promptProfileFailureReason) {
+            if (promptProfileFailureReason) {
               try {
                 await maybeMarkAuthProfileFailure({
                   profileId: failedPromptProfileId,
@@ -3109,7 +3126,7 @@ export async function runEmbeddedPiAgent(
               replayInvalid,
               livenessState,
             });
-            if (lastProfileId) {
+            if (resolveRunAuthProfileFailureReason(assistantFailoverReason)) {
               await maybeMarkAuthProfileFailure({
                 profileId: lastProfileId,
                 reason: assistantProfileFailureReason,
@@ -3220,7 +3237,7 @@ export async function runEmbeddedPiAgent(
 
             // Mark the failing profile for cooldown so multi-profile setups
             // rotate away from the exhausted credential on the next turn.
-            if (lastProfileId) {
+            if (resolveRunAuthProfileFailureReason(assistantFailoverReason)) {
               await maybeMarkAuthProfileFailure({
                 profileId: lastProfileId,
                 reason: assistantProfileFailureReason,
