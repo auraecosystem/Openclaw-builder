@@ -253,12 +253,35 @@ describe("runPostCorePluginConvergence", () => {
     expect(result.installRecords).toEqual({ brave: baseline.brave });
   });
 
-  it("flags errored=true and surfaces actionable guidance when repair warns", async () => {
+  it("surfaces non-fatal repair warnings without marking convergence errored", async () => {
+    mocks.repairMissingConfiguredPluginInstalls.mockResolvedValue({
+      changes: [],
+      warnings: ["ClawHub beta lookup failed; continuing with npm fallback."],
+      records: {},
+    });
+    const result = await runPostCorePluginConvergence({
+      cfg: {
+        plugins: { entries: { discord: { enabled: true } } },
+      } as unknown as OpenClawConfig,
+      env: {},
+    });
+    expect(result.errored).toBe(false);
+    expect(result.warnings).toStrictEqual([
+      {
+        reason: "ClawHub beta lookup failed; continuing with npm fallback.",
+        message: "ClawHub beta lookup failed; continuing with npm fallback.",
+        guidance: ["Run `openclaw doctor --fix` to retry plugin repair."],
+      },
+    ]);
+  });
+
+  it("marks convergence errored when repair reports failed plugin ids", async () => {
     mocks.repairMissingConfiguredPluginInstalls.mockResolvedValue({
       changes: [],
       warnings: [
         'Failed to install missing configured plugin "discord" from @openclaw/discord: ENETUNREACH.',
       ],
+      failedPluginIds: ["discord"],
       records: {},
     });
     const result = await runPostCorePluginConvergence({
