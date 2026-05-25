@@ -52,6 +52,7 @@ import {
 import {
   applyImageModelConfigDefaults,
   buildTextToolResult,
+  resolveMediaToolInboundRoots,
   resolveMediaToolLocalRoots,
   resolveRemoteMediaSsrfPolicy,
   resolvePromptAndModelOverride,
@@ -314,10 +315,7 @@ function resolveCompressionModelCandidates(params: {
 }
 
 function imageCompressionPolicyHasDimensionLimit(policy: ImageCompressionModelPolicy): boolean {
-  return (
-    typeof policy.maxSidePx === "number" ||
-    typeof policy.maxPixels === "number"
-  );
+  return typeof policy.maxSidePx === "number" || typeof policy.maxPixels === "number";
 }
 
 function mergeImageCompressionPolicies(params: {
@@ -638,6 +636,9 @@ export function createImageTool(options?: {
   workspaceDir?: string;
   sandbox?: ImageSandboxConfig;
   fsPolicy?: ToolFsPolicy;
+  agentChannel?: string | null;
+  agentAccountId?: string | null;
+  currentChannelId?: string | null;
   /** If true, the model has native vision capability and images in the prompt are auto-injected */
   modelHasVision?: boolean;
   /**
@@ -870,9 +871,18 @@ export function createImageTool(options?: {
           options?.workspaceDir,
           {
             workspaceOnly: options?.fsPolicy?.workspaceOnly === true,
+            cfg: options?.config,
+            channelId: options?.agentChannel ?? options?.currentChannelId,
+            accountId: options?.agentAccountId,
           },
           resolvedPath ? [resolvedPath] : undefined,
         );
+        const mediaInboundRoots = resolveMediaToolInboundRoots({
+          workspaceOnly: options?.fsPolicy?.workspaceOnly === true,
+          cfg: options?.config,
+          channelId: options?.agentChannel ?? options?.currentChannelId,
+          accountId: options?.agentAccountId,
+        });
 
         const media = isDataUrl
           ? await (async () => {
@@ -894,6 +904,7 @@ export function createImageTool(options?: {
             : await loadWebMedia(resolvedPath ?? resolvedImage, {
                 maxBytes,
                 localRoots: mediaLocalRoots,
+                inboundRoots: mediaInboundRoots,
                 ssrfPolicy: remoteMediaSsrfPolicy,
                 imageCompression,
               });
