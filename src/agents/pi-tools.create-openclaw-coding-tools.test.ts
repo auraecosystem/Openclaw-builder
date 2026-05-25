@@ -106,6 +106,9 @@ function applyRuntimeToolsAllow<T extends { name: string }>(tools: T[], toolsAll
 }
 
 type OpenClawCodingTool = ReturnType<typeof createOpenClawCodingTools>[number];
+type CreateOpenClawCodingToolsOptions = NonNullable<
+  Parameters<typeof createOpenClawCodingTools>[0]
+>;
 type OpenClawToolsOptions = NonNullable<Parameters<typeof createOpenClawTools>[0]>;
 
 function toolNameList(tools: readonly { name: string }[]): string[] {
@@ -354,6 +357,73 @@ describe("createOpenClawCodingTools", () => {
     expect(createOpenClawToolsMock).toHaveBeenCalledTimes(1);
     const options = latestCreateOpenClawToolsOptions();
     expectListIncludes(options.pluginToolAllowlist, ["memory_search", "memory_get"]);
+    expect(options.coreToolAllowlist).toStrictEqual(["memory_search", "memory_get"]);
+  });
+
+  it("lets construction planning override the runtime core factory allowlist", () => {
+    const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
+    createOpenClawToolsMock.mockClear();
+
+    createOpenClawCodingTools({
+      config: testConfig,
+      runtimeToolAllowlist: [],
+      coreToolAllowlist: ["message"],
+      toolConstructionPlan: {
+        includeBaseCodingTools: false,
+        includeShellTools: false,
+        includeChannelTools: false,
+        includeOpenClawTools: true,
+        includePluginTools: false,
+      },
+    });
+
+    expect(createOpenClawToolsMock).toHaveBeenCalledTimes(1);
+    expect(latestCreateOpenClawToolsOptions().coreToolAllowlist).toStrictEqual(["message"]);
+  });
+
+  it("keeps forced message in runtime-derived core factory allowlists", () => {
+    const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
+    createOpenClawToolsMock.mockClear();
+
+    createOpenClawCodingTools({
+      config: testConfig,
+      runtimeToolAllowlist: ["memory_search"],
+      sourceReplyDeliveryMode: "message_tool_only",
+      toolConstructionPlan: {
+        includeBaseCodingTools: false,
+        includeShellTools: false,
+        includeChannelTools: true,
+        includeOpenClawTools: true,
+        includePluginTools: true,
+      },
+    });
+
+    expect(createOpenClawToolsMock).toHaveBeenCalledTimes(1);
+    expect(latestCreateOpenClawToolsOptions().coreToolAllowlist).toStrictEqual([
+      "memory_search",
+      "message",
+    ]);
+  });
+
+  it("keeps forced message when runtime allowlist is explicitly empty", () => {
+    const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
+    createOpenClawToolsMock.mockClear();
+
+    createOpenClawCodingTools({
+      config: testConfig,
+      runtimeToolAllowlist: [],
+      forceMessageTool: true,
+      toolConstructionPlan: {
+        includeBaseCodingTools: false,
+        includeShellTools: false,
+        includeChannelTools: false,
+        includeOpenClawTools: true,
+        includePluginTools: false,
+      },
+    });
+
+    expect(createOpenClawToolsMock).toHaveBeenCalledTimes(1);
+    expect(latestCreateOpenClawToolsOptions().coreToolAllowlist).toStrictEqual(["message"]);
   });
 
   it("preserves runtime-allowed message through restrictive profiles", () => {
@@ -629,6 +699,27 @@ describe("createOpenClawCodingTools", () => {
     expect(inheritedAllow?.includes("process")).toBe(false);
   });
 
+  it("reuses caller-resolved effective tool policy", () => {
+    const effectiveToolPolicy = {
+      agentId: undefined,
+      globalPolicy: { allow: ["message"] },
+      globalProviderPolicy: undefined,
+      agentPolicy: undefined,
+      agentProviderPolicy: undefined,
+      profile: undefined,
+      providerProfile: undefined,
+      profileAlsoAllow: undefined,
+      providerProfileAlsoAllow: undefined,
+    } satisfies CreateOpenClawCodingToolsOptions["effectiveToolPolicy"];
+
+    const tools = createOpenClawCodingTools({
+      config: { tools: { allow: ["read"] } },
+      effectiveToolPolicy,
+    });
+
+    expect(toolNameList(tools)).toEqual(["message"]);
+  });
+
   it("records core tool-prep stages for hot-path diagnostics", () => {
     const stages: string[] = [];
 
@@ -638,6 +729,12 @@ describe("createOpenClawCodingTools", () => {
     });
 
     expectListIncludes(stages, [
+      "tool-policy:effective",
+      "tool-policy:group",
+      "tool-policy:sender",
+      "tool-policy:profile",
+      "tool-policy:runtime-allow",
+      "tool-policy:subagent",
       "tool-policy",
       "workspace-policy",
       "base-coding-tools",
@@ -652,6 +749,20 @@ describe("createOpenClawCodingTools", () => {
       "abort-wrappers",
       "deferred-followup-descriptions",
     ]);
+    expect(stages.indexOf("tool-policy:effective")).toBeLessThan(
+      stages.indexOf("tool-policy:group"),
+    );
+    expect(stages.indexOf("tool-policy:group")).toBeLessThan(stages.indexOf("tool-policy:sender"));
+    expect(stages.indexOf("tool-policy:sender")).toBeLessThan(
+      stages.indexOf("tool-policy:profile"),
+    );
+    expect(stages.indexOf("tool-policy:profile")).toBeLessThan(
+      stages.indexOf("tool-policy:runtime-allow"),
+    );
+    expect(stages.indexOf("tool-policy:runtime-allow")).toBeLessThan(
+      stages.indexOf("tool-policy:subagent"),
+    );
+    expect(stages.indexOf("tool-policy:subagent")).toBeLessThan(stages.indexOf("tool-policy"));
     expect(stages.indexOf("tool-policy")).toBeLessThan(stages.indexOf("workspace-policy"));
     expect(stages.indexOf("workspace-policy")).toBeLessThan(stages.indexOf("base-coding-tools"));
     expect(stages.indexOf("openclaw-tools:test-helper")).toBeLessThan(

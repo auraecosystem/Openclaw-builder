@@ -11,9 +11,17 @@ import {
 import { emitAgentPlanEvent } from "../../infra/agent-events.js";
 import { sleepWithAbort } from "../../infra/backoff.js";
 import { freezeDiagnosticTraceContext } from "../../infra/diagnostic-trace-context.js";
+import {
+  emitDiagnosticsTimelineEvent,
+  getActiveDiagnosticsTimelineSpan,
+} from "../../infra/diagnostics-timeline.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { buildAgentHookContextChannelFields } from "../../plugins/hook-agent-context.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
+import {
+  resolveProviderRuntimePluginHandle,
+  type ProviderRuntimePluginHandle,
+} from "../../plugins/provider-hook-runtime.js";
 import { resolveProviderAuthProfileId } from "../../plugins/provider-runtime.js";
 import { enqueueCommandInLane } from "../../process/command-queue.js";
 import type { CommandQueueEnqueueOptions } from "../../process/command-queue.types.js";
@@ -126,6 +134,7 @@ import {
   createEmbeddedRunStageTracker,
   EMBEDDED_RUN_ATTEMPT_DISPATCH_STAGE,
   formatEmbeddedRunStageSummary,
+  type EmbeddedRunStageTiming,
   shouldWarnEmbeddedRunStageSummary,
 } from "./run/attempt-stage-timing.js";
 import { forgetPromptBuildDrainCacheForRun } from "./run/attempt.prompt-helpers.js";
@@ -206,6 +215,35 @@ const MID_TURN_PRECHECK_CONTINUATION_PROMPT =
 const COMPACTION_CONTINUATION_RETRY_INSTRUCTION =
   "The previous attempt compacted the conversation context before producing a final user-visible answer. Continue from the compacted transcript and produce the final answer now. Do not restart from scratch, do not repeat completed work, and do not rerun tools unless the transcript clearly lacks required evidence.";
 type EmbeddedRunAttemptForRunner = Awaited<ReturnType<typeof runEmbeddedAttemptWithBackend>>;
+
+function emitEmbeddedRunStageMark(params: {
+  config?: RunEmbeddedPiAgentParams["config"];
+  group: "startup";
+  stage: EmbeddedRunStageTiming;
+  trigger: RunEmbeddedPiAgentParams["trigger"];
+  provider: string | undefined;
+  model: string | undefined;
+}): void {
+  const activeSpan = getActiveDiagnosticsTimelineSpan();
+  emitDiagnosticsTimelineEvent(
+    {
+      type: "mark",
+      name: "embedded_run.stage",
+      phase: activeSpan?.phase ?? "agent-turn",
+      parentSpanId: activeSpan?.spanId,
+      durationMs: params.stage.durationMs,
+      attributes: {
+        group: params.group,
+        stage: params.stage.name,
+        elapsedMs: params.stage.elapsedMs,
+        trigger: params.trigger ?? "",
+        provider: params.provider ?? "",
+        model: params.model ?? "",
+      },
+    },
+    { config: params.config },
+  );
+}
 
 function resolveAttemptDispatchApiKey(params: {
   apiKeyInfo: ApiKeyInfo | null;
@@ -482,7 +520,19 @@ export async function runEmbeddedPiAgent(
     return enqueueGlobal(async () => {
       throwIfAborted();
       const started = Date.now();
-      const startupStages = createEmbeddedRunStageTracker();
+      let provider = (params.provider ?? DEFAULT_PROVIDER).trim() || DEFAULT_PROVIDER;
+      let modelId = (params.model ?? DEFAULT_MODEL).trim() || DEFAULT_MODEL;
+      const startupStages = createEmbeddedRunStageTracker({
+        onMark: (stage) =>
+          emitEmbeddedRunStageMark({
+            config: params.config,
+            group: "startup",
+            stage,
+            trigger: params.trigger,
+            provider,
+            model: modelId,
+          }),
+      });
       let startupStagesEmitted = false;
       const notifyExecutionPhase = (
         phase: Parameters<NonNullable<RunEmbeddedPiAgentParams["onExecutionPhase"]>>[0]["phase"],
@@ -547,8 +597,6 @@ export async function runEmbeddedPiAgent(
       startupStages.mark("runtime-plugins");
       notifyExecutionPhase("runtime_plugins");
 
-      let provider = (params.provider ?? DEFAULT_PROVIDER).trim() || DEFAULT_PROVIDER;
-      let modelId = (params.model ?? DEFAULT_MODEL).trim() || DEFAULT_MODEL;
       const agentDir =
         params.agentDir ?? resolveAgentDir(params.config ?? {}, workspaceResolution.agentId);
       const normalizedSessionKey = params.sessionKey?.trim();
@@ -770,6 +818,7 @@ export async function runEmbeddedPiAgent(
         }
         const resolvedOrder = resolveAuthProfileOrder({
           cfg: params.config,
+          workspaceDir: resolvedWorkspace,
           store: attemptAuthProfileStore,
           provider: harnessAuthProvider,
         }).filter(isForwardablePluginHarnessAuthProfile);
@@ -821,6 +870,7 @@ export async function runEmbeddedPiAgent(
       if (lockedProfileId && !pluginHarnessOwnsTransport) {
         const eligibility = resolveAuthProfileEligibility({
           cfg: params.config,
+          workspaceDir: resolvedWorkspace,
           store: authStore,
           provider,
           profileId: lockedProfileId,
@@ -841,6 +891,7 @@ export async function runEmbeddedPiAgent(
               }).flatMap((authProvider) =>
                 resolveAuthProfileOrder({
                   cfg: params.config,
+                  workspaceDir: resolvedWorkspace,
                   store: authStore,
                   provider: authProvider,
                   preferredProfile: preferredProfileId,
@@ -848,12 +899,29 @@ export async function runEmbeddedPiAgent(
               ),
             ),
           ];
+      const providerRuntimeHandles = new Map<string, ProviderRuntimePluginHandle>();
+      const resolveProviderRuntimeHandle = (
+        targetProvider: string,
+      ): ProviderRuntimePluginHandle => {
+        const cached = providerRuntimeHandles.get(targetProvider);
+        if (cached) {
+          return cached;
+        }
+        const handle = resolveProviderRuntimePluginHandle({
+          provider: targetProvider,
+          config: params.config,
+          workspaceDir: resolvedWorkspace,
+        });
+        providerRuntimeHandles.set(targetProvider, handle);
+        return handle;
+      };
       const providerPreferredProfileId = lockedProfileId
         ? undefined
         : resolveProviderAuthProfileId({
             provider,
             config: params.config,
             workspaceDir: resolvedWorkspace,
+            runtimeHandle: resolveProviderRuntimeHandle(provider),
             context: {
               config: params.config,
               agentDir,
@@ -1374,6 +1442,7 @@ export async function runEmbeddedPiAgent(
               : undefined,
             config: params.config,
             workspaceDir: resolvedWorkspace,
+            providerRuntimeHandle: resolveProviderRuntimeHandle(provider),
             agentDir,
             agentId: workspaceResolution.agentId,
             thinkingLevel: thinkLevel,

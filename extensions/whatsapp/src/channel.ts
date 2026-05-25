@@ -25,7 +25,6 @@ import {
   resolveWhatsAppGroupRequireMention,
   resolveWhatsAppGroupToolPolicy,
 } from "./group-policy.js";
-import { checkWhatsAppHeartbeatReady } from "./heartbeat.js";
 import {
   isWhatsAppGroupJid,
   isWhatsAppNewsletterJid,
@@ -35,7 +34,6 @@ import {
   normalizeWhatsAppTarget,
 } from "./normalize.js";
 import { getWhatsAppRuntime } from "./runtime.js";
-import { sendTypingWhatsApp } from "./send.js";
 import { resolveWhatsAppOutboundSessionRoute } from "./session-route.js";
 import { whatsappSetupAdapter } from "./setup-core.js";
 import {
@@ -43,13 +41,14 @@ import {
   loadWhatsAppChannelRuntime,
   whatsappSetupWizardProxy,
 } from "./shared.js";
-import { detectWhatsAppLegacyStateMigrations } from "./state-migrations.js";
 import { collectWhatsAppStatusIssues } from "./status-issues.js";
 
 const loadWhatsAppDirectoryConfig = createLazyRuntimeModule(() => import("./directory-config.js"));
 const loadWhatsAppChannelReactAction = createLazyRuntimeModule(
   () => import("./channel-react-action.js"),
 );
+const loadWhatsAppHeartbeat = createLazyRuntimeModule(() => import("./heartbeat.js"));
+const loadWhatsAppSend = createLazyRuntimeModule(() => import("./send.js"));
 
 function resolveWhatsAppTargetInfo(raw: string) {
   const normalized = normalizeWhatsAppTarget(raw);
@@ -191,14 +190,22 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> =
         },
       },
       lifecycle: {
-        detectLegacyStateMigrations: ({ oauthDir }) =>
-          detectWhatsAppLegacyStateMigrations({ oauthDir }),
+        detectLegacyStateMigrations: async ({ oauthDir }) =>
+          (await import("./state-migrations.js")).detectWhatsAppLegacyStateMigrations({ oauthDir }),
       },
       heartbeat: {
         checkReady: async ({ cfg, accountId, deps }) =>
-          await checkWhatsAppHeartbeatReady({ cfg, accountId: accountId ?? undefined, deps }),
+          await (
+            await loadWhatsAppHeartbeat()
+          ).checkWhatsAppHeartbeatReady({
+            cfg,
+            accountId: accountId ?? undefined,
+            deps,
+          }),
         sendTyping: async ({ cfg, to, accountId }) => {
-          await sendTypingWhatsApp(to, {
+          await (
+            await loadWhatsAppSend()
+          ).sendTypingWhatsApp(to, {
             cfg,
             ...(accountId ? { accountId } : {}),
           });

@@ -31,6 +31,7 @@ const LIVE_DOCKER_AUTH_SHELL_TARGETS = [
 const SHRINKWRAP_POLICY_PATH_RE =
   /^(?:npm-shrinkwrap\.json|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|scripts\/generate-npm-shrinkwrap\.mjs|extensions\/[^/]+\/(?:package\.json|npm-shrinkwrap\.json))$/u;
 let corepackPnpmShimDir;
+let corepackPnpmHomeDir;
 
 export function createChangedCheckChildEnv(baseEnv = process.env) {
   const resolvedBaseEnv = resolveLocalHeavyCheckEnv(baseEnv);
@@ -378,28 +379,40 @@ async function runPlanCommand(command, timings) {
 
 export function createPnpmManagedCommand(command, env = process.env) {
   const commandEnv = command.env ?? resolveLocalHeavyCheckEnv(env);
-  if (
-    isTruthyEnvFlag(commandEnv.OPENCLAW_TESTBOX_REMOTE_RUN) ||
-    isTruthyEnvFlag(commandEnv.CI) ||
-    isTruthyEnvFlag(commandEnv.GITHUB_ACTIONS)
-  ) {
+  if (shouldUseCorepackPnpmShim(commandEnv)) {
     const shimmedEnv = prependCorepackPnpmShim(commandEnv);
     return {
       ...command,
-      bin: "corepack",
-      args: ["pnpm", ...command.args],
+      bin: "pnpm",
       env: shimmedEnv,
     };
   }
   return { ...command, bin: "pnpm", env: commandEnv };
 }
 
+function shouldUseCorepackPnpmShim(env) {
+  return (
+    isTruthyEnvFlag(env.OPENCLAW_TESTBOX_REMOTE_RUN) ||
+    isTruthyEnvFlag(env.CI) ||
+    isTruthyEnvFlag(env.GITHUB_ACTIONS) ||
+    isTruthyEnvFlag(env.ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE)
+  );
+}
+
 function prependCorepackPnpmShim(env) {
   const shimDir = ensureCorepackPnpmShimDir();
+  const { npm_execpath: _npmExecPath, ...sanitizedEnv } = env;
   return {
-    ...env,
+    ...sanitizedEnv,
+    COREPACK_ENABLE_DOWNLOAD_PROMPT: sanitizedEnv.COREPACK_ENABLE_DOWNLOAD_PROMPT ?? "0",
+    COREPACK_HOME: sanitizedEnv.COREPACK_HOME ?? ensureCorepackPnpmHomeDir(),
     PATH: [shimDir, env.PATH ?? env.Path ?? ""].filter(Boolean).join(path.delimiter),
   };
+}
+
+function ensureCorepackPnpmHomeDir() {
+  corepackPnpmHomeDir ??= mkdtempSync(path.join(tmpdir(), "openclaw-corepack-home-"));
+  return corepackPnpmHomeDir;
 }
 
 function ensureCorepackPnpmShimDir() {

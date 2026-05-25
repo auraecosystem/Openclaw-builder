@@ -189,6 +189,22 @@ describe("web outbound", () => {
     );
   });
 
+  it("does not block outbound delivery on composing presence failures", async () => {
+    sendComposingTo.mockRejectedValueOnce(new Error("presence timeout"));
+
+    const result = await sendMessageWhatsApp("+1555", "hi", {
+      verbose: false,
+      cfg: WHATSAPP_TEST_CFG,
+    });
+
+    expect(result).toEqual({
+      messageId: "msg123",
+      toJid: "1555@s.whatsapp.net",
+    });
+    expect(sendComposingTo).toHaveBeenCalledWith("+1555");
+    expect(sendMessage).toHaveBeenCalledWith("+1555", "hi", undefined, undefined);
+  });
+
   it("uses configured defaultAccount when outbound accountId is omitted", async () => {
     hoisted.controllerListeners.clear();
     hoisted.controllerListeners.set("work", {

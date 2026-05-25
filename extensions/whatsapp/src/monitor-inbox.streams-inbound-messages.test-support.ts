@@ -56,6 +56,27 @@ function createSocketRef(): NonNullable<InboxMonitorOptions["socketRef"]> {
   return { current: null };
 }
 
+const GROUP_HYDRATION_CONFIG = {
+  channels: {
+    whatsapp: {
+      allowFrom: ["*"],
+      groupPolicy: "open" as const,
+    },
+  },
+};
+
+const ACCOUNT_GROUP_HYDRATION_CONFIG = {
+  channels: {
+    whatsapp: {
+      accounts: {
+        default: {
+          groupPolicy: "open" as const,
+        },
+      },
+    },
+  },
+};
+
 function inboundMessage(onMessage: ReturnType<typeof vi.fn>, index = 0): Record<string, unknown> {
   const msg = onMessage.mock.calls[index]?.[0];
   expect(msg).toBeDefined();
@@ -323,19 +344,97 @@ describe("web monitor inbox", () => {
     await listener.close();
   });
 
-  it("hydrates participating groups once after connect", async () => {
+  it("skips participating group hydration when group traffic is not configured", async () => {
     const { listener, sock } = await startInboxMonitor(vi.fn(async () => {}) as InboxOnMessage);
+
+    expect(sock.groupFetchAllParticipating).not.toHaveBeenCalled();
+
+    await listener.close();
+  });
+
+  it("writes redacted QA trace events when requested", async () => {
+    const previousTrace = process.env.OPENCLAW_QA_WHATSAPP_TRACE;
+    const previousTracePath = process.env.OPENCLAW_QA_WHATSAPP_TRACE_PATH;
+    const tracePath = path.join(getAuthDir(), "whatsapp-qa-trace.jsonl");
+    process.env.OPENCLAW_QA_WHATSAPP_TRACE_PATH = tracePath;
+    const onMessage = vi.fn(async (msg) => {
+      await msg.reply("pong");
+    });
+    const { listener, sock } = await startInboxMonitor(onMessage as InboxOnMessage);
+    try {
+      sock.ev.emit(
+        "messages.upsert",
+        buildNotifyMessageUpsert({
+          id: nextMessageId("qa-trace"),
+          remoteJid: "999@s.whatsapp.net",
+          text: "ping",
+          timestamp: 1_700_000_000,
+          pushName: "Tester",
+        }),
+      );
+      await waitForMessageCalls(onMessage, 1);
+
+      await vi.waitFor(() => {
+        const trace = fsSync.readFileSync(tracePath, "utf8");
+        const phases = trace
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line).phase);
+        expect(phases).toEqual(
+          expect.arrayContaining([
+            "messages_upsert",
+            "inbound_enqueue",
+            "on_message_start",
+            "outbound_send_start",
+            "outbound_send_done",
+            "on_message_done",
+          ]),
+        );
+        expect(trace).not.toContain("999@s.whatsapp.net");
+        expect(trace).not.toContain("ping");
+      });
+    } finally {
+      if (previousTrace === undefined) {
+        delete process.env.OPENCLAW_QA_WHATSAPP_TRACE;
+      } else {
+        process.env.OPENCLAW_QA_WHATSAPP_TRACE = previousTrace;
+      }
+      if (previousTracePath === undefined) {
+        delete process.env.OPENCLAW_QA_WHATSAPP_TRACE_PATH;
+      } else {
+        process.env.OPENCLAW_QA_WHATSAPP_TRACE_PATH = previousTracePath;
+      }
+      await listener.close();
+    }
+  });
+
+  it("hydrates participating groups once after connect when group traffic is configured", async () => {
+    const { listener, sock } = await startInboxMonitor(vi.fn(async () => {}) as InboxOnMessage, {
+      cfg: GROUP_HYDRATION_CONFIG as never,
+    });
 
     expect(sock.groupFetchAllParticipating).toHaveBeenCalledTimes(1);
 
     await listener.close();
   });
 
-  it("continues when group hydration fails on connect", async () => {
+  it("hydrates participating groups for account-scoped group traffic", async () => {
+    const { listener, sock } = await startInboxMonitor(vi.fn(async () => {}) as InboxOnMessage, {
+      cfg: ACCOUNT_GROUP_HYDRATION_CONFIG as never,
+    });
+
+    expect(sock.groupFetchAllParticipating).toHaveBeenCalledTimes(1);
+
+    await listener.close();
+  });
+
+  it("continues when configured group hydration fails on connect", async () => {
     const sock = getSock();
     sock.groupFetchAllParticipating.mockRejectedValueOnce(new Error("no groups"));
 
-    const { listener } = await startInboxMonitor(vi.fn(async () => {}) as InboxOnMessage);
+    const { listener } = await startInboxMonitor(vi.fn(async () => {}) as InboxOnMessage, {
+      cfg: GROUP_HYDRATION_CONFIG as never,
+    });
 
     expect(sock.groupFetchAllParticipating).toHaveBeenCalledTimes(1);
     expect(sock.sendPresenceUpdate).toHaveBeenNthCalledWith(1, "available");
@@ -360,6 +459,7 @@ describe("web monitor inbox", () => {
     });
     const first = await startInboxMonitor(onMessage as InboxOnMessage, {
       groupMetadataCache,
+      cfg: GROUP_HYDRATION_CONFIG as never,
     });
     await vi.waitFor(() => {
       expect(groupMetadataCache.get("123@g.us")?.subject).toBe("Recovered Group");
@@ -371,6 +471,7 @@ describe("web monitor inbox", () => {
 
     const second = await startInboxMonitor(onMessage as InboxOnMessage, {
       groupMetadataCache,
+      cfg: GROUP_HYDRATION_CONFIG as never,
     });
     second.sock.groupMetadata.mockRejectedValueOnce(new Error("408 timed out"));
     second.sock.ev.emit(
@@ -414,6 +515,7 @@ describe("web monitor inbox", () => {
 
     const { listener } = await startInboxMonitor(vi.fn(async () => {}) as InboxOnMessage, {
       groupMetadataCache,
+      cfg: GROUP_HYDRATION_CONFIG as never,
     });
 
     await vi.waitFor(() => {
@@ -438,7 +540,9 @@ describe("web monitor inbox", () => {
       return;
     });
 
-    const { listener } = await startInboxMonitor(onMessage as InboxOnMessage);
+    const { listener } = await startInboxMonitor(onMessage as InboxOnMessage, {
+      cfg: GROUP_HYDRATION_CONFIG as never,
+    });
     sock.ev.emit(
       "messages.upsert",
       buildNotifyMessageUpsert({

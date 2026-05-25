@@ -7,6 +7,7 @@ vi.mock("../context-engine-capabilities.js", () => ({
 import type { OpenClawConfig } from "../../../config/config.js";
 import { addSession, resetProcessRegistryForTests } from "../../bash-process-registry.js";
 import { createProcessSessionFixture } from "../../bash-process-registry.test-helpers.js";
+import type { resolveEffectiveToolPolicy } from "../../pi-tools.policy.js";
 import { SYSTEM_PROMPT_CACHE_BOUNDARY } from "../../system-prompt-cache-boundary.js";
 import { buildAgentSystemPrompt } from "../../system-prompt.js";
 import { resolveBootstrapContextTargets } from "./attempt-bootstrap-routing.js";
@@ -14,6 +15,8 @@ import {
   buildContextEnginePromptCacheInfo,
   buildAutoAddedToolSearchControlNamesForAllowlistCheck,
   buildCallableToolNamesForEmptyAllowlistCheck,
+  resolveAttemptConstructionToolsAllow,
+  shouldUseMinimalPromptForAttemptTools,
   buildToolSearchRunPlan,
   buildAfterTurnRuntimeContext,
   buildAfterTurnRuntimeContextFromUsage,
@@ -33,6 +36,7 @@ import {
   resolveAttemptToolPolicyMessageProvider,
   resolvePromptBuildHookResult,
   resolvePromptModeForSession,
+  resolveAttemptSystemPromptReportSkillsPrompt,
   shouldWarnOnOrphanedUserRepair,
   wrapStreamFnRepairMalformedToolCallArguments,
   wrapStreamFnSanitizeMalformedToolCalls,
@@ -140,6 +144,142 @@ describe("resolveEmbeddedAttemptSessionWriteLockOptions", () => {
     });
 
     expect(options.maxHoldMs).toBe(720_000);
+  });
+});
+
+describe("resolveAttemptConstructionToolsAllow", () => {
+  it("uses the active messaging profile to prune construction before tool factories run", () => {
+    const config: OpenClawConfig = {
+      tools: {
+        profile: "messaging",
+        deny: ["bundle-mcp", "session_status", "sessions_*"],
+      },
+    };
+
+    expect(
+      resolveAttemptConstructionToolsAllow({
+        config,
+        modelProvider: "openai",
+        modelId: "gpt-5.5",
+      }),
+    ).toEqual(["message"]);
+  });
+
+  it("keeps runtime toolsAllow authoritative", () => {
+    expect(
+      resolveAttemptConstructionToolsAllow({
+        config: { tools: { profile: "messaging" } },
+        runtimeToolsAllow: ["read"],
+      }),
+    ).toEqual(["read"]);
+  });
+
+  it("reuses a precomputed effective policy for construction allowlists", () => {
+    const effectiveToolPolicy = {
+      agentId: undefined,
+      globalPolicy: undefined,
+      globalProviderPolicy: undefined,
+      agentPolicy: undefined,
+      agentProviderPolicy: undefined,
+      profile: "messaging",
+      providerProfile: undefined,
+      profileAlsoAllow: undefined,
+      providerProfileAlsoAllow: undefined,
+    } satisfies ReturnType<typeof resolveEffectiveToolPolicy>;
+
+    expect(
+      resolveAttemptConstructionToolsAllow({
+        config: { tools: { profile: "coding" } },
+        effectiveToolPolicy,
+      }),
+    ).toEqual([
+      "sessions_list",
+      "sessions_history",
+      "sessions_send",
+      "session_status",
+      "message",
+      "bundle-mcp",
+    ]);
+  });
+
+  it("keeps no-profile runs unrestricted when message delivery is forced", () => {
+    expect(
+      resolveAttemptConstructionToolsAllow({
+        sourceReplyDeliveryMode: "message_tool_only",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("keeps forced message delivery tools in profile-derived construction allowlists", () => {
+    expect(
+      resolveAttemptConstructionToolsAllow({
+        config: { tools: { profile: "coding" } },
+        sourceReplyDeliveryMode: "message_tool_only",
+      }),
+    ).toEqual(expect.arrayContaining(["message"]));
+  });
+
+  it("keeps forced heartbeat tools in profile-derived construction allowlists", () => {
+    expect(
+      resolveAttemptConstructionToolsAllow({
+        config: {
+          messages: { visibleReplies: "message_tool" },
+          tools: { profile: "coding" },
+        },
+        trigger: "heartbeat",
+      }),
+    ).toEqual(expect.arrayContaining(["heartbeat_respond"]));
+  });
+});
+
+describe("shouldUseMinimalPromptForAttemptTools", () => {
+  it("preserves the explicit runtime toolsAllow prompt-slimming behavior", () => {
+    expect(
+      shouldUseMinimalPromptForAttemptTools({
+        promptMode: "none",
+        runtimeToolsAllow: ["read"],
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps explicit empty runtime allowlists out of minimal prompt mode", () => {
+    expect(
+      shouldUseMinimalPromptForAttemptTools({
+        promptMode: "full",
+        runtimeToolsAllow: [],
+        constructionToolsAllow: ["message"],
+      }),
+    ).toBe(false);
+  });
+
+  it("uses minimal prompt mode for resolved delivery-only tool surfaces", () => {
+    expect(
+      shouldUseMinimalPromptForAttemptTools({
+        promptMode: "full",
+        constructionToolsAllow: ["message", "heartbeat_respond"],
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps raw model runs and broader tool surfaces on their requested prompt mode", () => {
+    expect(
+      shouldUseMinimalPromptForAttemptTools({
+        promptMode: "none",
+        constructionToolsAllow: ["message"],
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseMinimalPromptForAttemptTools({
+        promptMode: "full",
+        constructionToolsAllow: ["message", "sessions_list"],
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseMinimalPromptForAttemptTools({
+        promptMode: "full",
+        constructionToolsAllow: ["*"],
+      }),
+    ).toBe(false);
   });
 });
 
@@ -1116,6 +1256,26 @@ describe("resolveEmbeddedAgentStreamFn", () => {
     });
 
     expect(streamFn).not.toBe(currentStreamFn);
+  });
+});
+
+describe("resolveAttemptSystemPromptReportSkillsPrompt", () => {
+  it("omits skipped skills from message-only minimal prompt reports", () => {
+    expect(
+      resolveAttemptSystemPromptReportSkillsPrompt({
+        minimalPromptForTools: true,
+        skillsPrompt: "<skill><name>slow</name></skill>",
+      }),
+    ).toBe("");
+  });
+
+  it("keeps skills in reports when they are rendered into the prompt", () => {
+    expect(
+      resolveAttemptSystemPromptReportSkillsPrompt({
+        minimalPromptForTools: false,
+        skillsPrompt: "<skill><name>needed</name></skill>",
+      }),
+    ).toBe("<skill><name>needed</name></skill>");
   });
 });
 

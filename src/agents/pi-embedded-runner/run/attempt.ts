@@ -7,6 +7,7 @@ import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-ag
 import { isAcpRuntimeSpawnAvailable } from "../../../acp/runtime/availability.js";
 import { buildHierarchyReinforcementMessage } from "../../../auto-reply/handoff-summarizer.js";
 import { filterHeartbeatTranscriptArtifacts } from "../../../auto-reply/heartbeat-filter.js";
+import { HEARTBEAT_RESPONSE_TOOL_NAME } from "../../../auto-reply/heartbeat-tool-response.js";
 import { stripInboundMetadata } from "../../../auto-reply/reply/strip-inbound-meta.js";
 import { getRuntimeConfig, type OpenClawConfig } from "../../../config/config.js";
 import { resolveStorePath } from "../../../config/sessions/paths.js";
@@ -31,6 +32,10 @@ import {
   createDiagnosticTraceContextFromActiveScope,
   freezeDiagnosticTraceContext,
 } from "../../../infra/diagnostic-trace-context.js";
+import {
+  emitDiagnosticsTimelineEvent,
+  getActiveDiagnosticsTimelineSpan,
+} from "../../../infra/diagnostics-timeline.js";
 import { isEmbeddedMode } from "../../../infra/embedded-mode.js";
 import { formatErrorMessage } from "../../../infra/errors.js";
 import { resolveHeartbeatSummaryForAgent } from "../../../infra/heartbeat-summary.js";
@@ -186,13 +191,19 @@ import { resolveSystemPromptOverride } from "../../system-prompt-override.js";
 import { buildSystemPromptParams } from "../../system-prompt-params.js";
 import { buildSystemPromptReport } from "../../system-prompt-report.js";
 import { appendModelIdentitySystemPrompt } from "../../system-prompt.js";
+import type { PromptMode } from "../../system-prompt.types.js";
 import { resolveAgentTimeoutMs } from "../../timeout.js";
 import {
   buildEmptyExplicitToolAllowlistError,
   collectExplicitToolAllowlistSources,
 } from "../../tool-allowlist-guard.js";
 import { UNKNOWN_TOOL_THRESHOLD } from "../../tool-loop-detection.js";
-import { normalizeToolName } from "../../tool-policy.js";
+import { isToolAllowedByPolicyName } from "../../tool-policy-match.js";
+import {
+  mergeAlsoAllowPolicy,
+  normalizeToolName,
+  resolveToolProfilePolicy,
+} from "../../tool-policy.js";
 import {
   addClientToolsToToolSearchCatalog,
   applyToolSearchCatalog,
@@ -308,6 +319,7 @@ import { configureEmbeddedAttemptHttpRuntime } from "./attempt-http-runtime.js";
 import {
   createEmbeddedRunStageTracker,
   formatEmbeddedRunStageSummary,
+  type EmbeddedRunStageTiming,
   shouldWarnEmbeddedRunStageSummary,
 } from "./attempt-stage-timing.js";
 import { buildAttemptSystemPrompt } from "./attempt-system-prompt.js";
@@ -1126,6 +1138,37 @@ export function resolveAttemptToolPolicyMessageProvider(params: {
   return params.messageProvider ?? params.messageChannel;
 }
 
+function emitEmbeddedAttemptStageMark(params: {
+  config?: EmbeddedRunAttemptParams["config"];
+  group: "prep" | "core-plugin-tools" | "system-prompt" | "session-resource-loader";
+  stage: EmbeddedRunStageTiming;
+  trigger: EmbeddedRunAttemptParams["trigger"];
+  provider: string;
+  modelId: string;
+  messageChannel?: string;
+}): void {
+  const activeSpan = getActiveDiagnosticsTimelineSpan();
+  emitDiagnosticsTimelineEvent(
+    {
+      type: "mark",
+      name: "embedded_run.stage",
+      phase: activeSpan?.phase ?? "agent-turn",
+      parentSpanId: activeSpan?.spanId,
+      durationMs: params.stage.durationMs,
+      attributes: {
+        group: params.group,
+        stage: params.stage.name,
+        elapsedMs: params.stage.elapsedMs,
+        trigger: params.trigger ?? "",
+        provider: params.provider,
+        model: params.modelId,
+        messageChannel: params.messageChannel ?? "",
+      },
+    },
+    { config: params.config },
+  );
+}
+
 function collectAttemptExplicitToolAllowlistSources(params: {
   config?: EmbeddedRunAttemptParams["config"];
   sessionKey?: string;
@@ -1145,8 +1188,10 @@ function collectAttemptExplicitToolAllowlistSources(params: {
   senderE164?: string | null;
   sandboxToolPolicy?: { allow?: string[]; deny?: string[] };
   toolsAllow?: string[];
+  effectiveToolPolicy?: ReturnType<typeof resolveEffectiveToolPolicy>;
 }) {
-  const { agentId, globalPolicy, globalProviderPolicy, agentPolicy, agentProviderPolicy } =
+  const effectiveToolPolicy =
+    params.effectiveToolPolicy ??
     resolveEffectiveToolPolicy({
       config: params.config,
       sessionKey: params.sessionKey,
@@ -1154,6 +1199,8 @@ function collectAttemptExplicitToolAllowlistSources(params: {
       modelProvider: params.modelProvider,
       modelId: params.modelId,
     });
+  const { agentId, globalPolicy, globalProviderPolicy, agentPolicy, agentProviderPolicy } =
+    effectiveToolPolicy;
   const groupPolicy = resolveGroupToolPolicy({
     config: params.config,
     sessionKey: params.sessionKey,
@@ -1222,6 +1269,97 @@ function throwIfAttemptAbortSignalFired(signal: AbortSignal | undefined): void {
   }
 }
 
+export function resolveAttemptConstructionToolsAllow(params: {
+  config?: EmbeddedRunAttemptParams["config"];
+  sessionKey?: string;
+  agentId?: string;
+  modelProvider?: string;
+  modelId?: string;
+  effectiveToolPolicy?: ReturnType<typeof resolveEffectiveToolPolicy>;
+  runtimeToolsAllow?: string[];
+  sourceReplyDeliveryMode?: EmbeddedRunAttemptParams["sourceReplyDeliveryMode"];
+  trigger?: EmbeddedRunAttemptParams["trigger"];
+  forceMessageTool?: boolean;
+  enableHeartbeatTool?: boolean;
+  forceHeartbeatTool?: boolean;
+}): string[] | undefined {
+  if (params.runtimeToolsAllow !== undefined) {
+    return params.runtimeToolsAllow;
+  }
+  const policy =
+    params.effectiveToolPolicy ??
+    resolveEffectiveToolPolicy({
+      config: params.config,
+      sessionKey: params.sessionKey,
+      agentId: params.agentId,
+      modelProvider: params.modelProvider,
+      modelId: params.modelId,
+    });
+  const shouldForceMessageTool =
+    params.forceMessageTool === true || params.sourceReplyDeliveryMode === "message_tool_only";
+  const shouldForceHeartbeatTool =
+    params.forceHeartbeatTool === true ||
+    params.enableHeartbeatTool === true ||
+    (params.trigger === "heartbeat" && params.config?.messages?.visibleReplies === "message_tool");
+  const profileAllow = [
+    ...(mergeAlsoAllowPolicy(resolveToolProfilePolicy(policy.profile), policy.profileAlsoAllow)
+      ?.allow ?? []),
+    ...(mergeAlsoAllowPolicy(
+      resolveToolProfilePolicy(policy.providerProfile),
+      policy.providerProfileAlsoAllow,
+    )?.allow ?? []),
+  ]
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (profileAllow.length === 0 || profileAllow.some((entry) => normalizeToolName(entry) === "*")) {
+    return undefined;
+  }
+  const allow = [
+    ...profileAllow,
+    ...(shouldForceMessageTool ? ["message"] : []),
+    ...(shouldForceHeartbeatTool ? [HEARTBEAT_RESPONSE_TOOL_NAME] : []),
+  ];
+  const deny = [
+    ...(policy.globalPolicy?.deny ?? []),
+    ...(policy.globalProviderPolicy?.deny ?? []),
+    ...(policy.agentPolicy?.deny ?? []),
+    ...(policy.agentProviderPolicy?.deny ?? []),
+  ];
+  const filtered = deny.length
+    ? allow.filter((entry) => isToolAllowedByPolicyName(entry, { deny }))
+    : allow;
+  return [...new Set(filtered)];
+}
+
+const MINIMAL_PROMPT_ONLY_TOOL_NAMES = new Set(["message", HEARTBEAT_RESPONSE_TOOL_NAME]);
+
+export function shouldUseMinimalPromptForAttemptTools(params: {
+  promptMode: PromptMode;
+  runtimeToolsAllow?: string[];
+  constructionToolsAllow?: string[];
+}): boolean {
+  if (params.runtimeToolsAllow !== undefined) {
+    return params.runtimeToolsAllow.length > 0;
+  }
+  if (params.promptMode === "none") {
+    return false;
+  }
+  const constructionAllow = params.constructionToolsAllow
+    ?.map((entry) => normalizeToolName(entry))
+    .filter(Boolean);
+  if (!constructionAllow?.length || constructionAllow.includes("*")) {
+    return false;
+  }
+  return constructionAllow.every((entry) => MINIMAL_PROMPT_ONLY_TOOL_NAMES.has(entry));
+}
+
+export function resolveAttemptSystemPromptReportSkillsPrompt(params: {
+  minimalPromptForTools: boolean;
+  skillsPrompt: string;
+}): string {
+  return params.minimalPromptForTools ? "" : params.skillsPrompt;
+}
+
 export async function runEmbeddedAttempt(
   params: EmbeddedRunAttemptParams,
 ): Promise<EmbeddedRunAttemptResult> {
@@ -1232,7 +1370,18 @@ export async function runEmbeddedAttempt(
   log.debug(
     `embedded run start: runId=${params.runId} sessionId=${params.sessionId} provider=${params.provider} model=${params.modelId} thinking=${params.thinkLevel} messageChannel=${params.messageChannel ?? params.messageProvider ?? "unknown"}`,
   );
-  const prepStages = createEmbeddedRunStageTracker();
+  const prepStages = createEmbeddedRunStageTracker({
+    onMark: (stage) =>
+      emitEmbeddedAttemptStageMark({
+        config: params.config,
+        group: "prep",
+        stage,
+        trigger: params.trigger,
+        provider: params.provider,
+        modelId: params.modelId,
+        messageChannel: params.messageChannel ?? params.messageProvider,
+      }),
+  });
   throwIfAttemptAbortSignalFired(params.abortSignal);
   const emitPrepStageSummary = (phase: string) => {
     const summary = prepStages.snapshot();
@@ -1266,6 +1415,30 @@ export async function runEmbeddedAttempt(
     }
     const message = formatEmbeddedRunStageSummary(
       `[trace:embedded-run] core-plugin-tool stages: runId=${params.runId} sessionId=${params.sessionId} phase=${phase}`,
+      summary,
+    );
+    if (shouldWarn) {
+      log.warn(message);
+    } else {
+      log.trace(message);
+    }
+  };
+  const emitPrepSubstageSummary = (
+    group: "system-prompt" | "session-resource-loader",
+    summary: ReturnType<typeof prepStages.snapshot>,
+  ) => {
+    if (summary.stages.length === 0) {
+      return;
+    }
+    const shouldWarn = shouldWarnEmbeddedRunStageSummary(summary, {
+      totalThresholdMs: 5_000,
+      stageThresholdMs: 2_000,
+    });
+    if (!shouldWarn && !log.isEnabled("trace")) {
+      return;
+    }
+    const message = formatEmbeddedRunStageSummary(
+      `[trace:embedded-run] ${group} stages: runId=${params.runId} sessionId=${params.sessionId}`,
       summary,
     );
     if (shouldWarn) {
@@ -1506,19 +1679,56 @@ export async function runEmbeddedAttempt(
         ...(err && outcome !== "blocked" ? { errorCategory: diagnosticErrorCategory(err) } : {}),
       });
     };
-    const corePluginToolStages = createEmbeddedRunStageTracker();
+    const corePluginToolStages = createEmbeddedRunStageTracker({
+      onMark: (stage) =>
+        emitEmbeddedAttemptStageMark({
+          config: params.config,
+          group: "core-plugin-tools",
+          stage,
+          trigger: params.trigger,
+          provider: params.provider,
+          modelId: params.modelId,
+          messageChannel: params.messageChannel ?? params.messageProvider,
+        }),
+    });
     const toolsAllowWithForcedRuntimeTools = mergeForcedEmbeddedAttemptToolsAllow(
       params.toolsAllow,
       {
         forceMessageTool:
           params.forceMessageTool === true ||
           params.sourceReplyDeliveryMode === "message_tool_only",
+        forceHeartbeatTool:
+          params.forceHeartbeatTool === true ||
+          params.enableHeartbeatTool === true ||
+          (params.trigger === "heartbeat" &&
+            params.config?.messages?.visibleReplies === "message_tool"),
       },
     );
+    const constructionEffectiveToolPolicy = resolveEffectiveToolPolicy({
+      config: params.config,
+      sessionKey: sandboxSessionKey,
+      agentId: sessionAgentId,
+      modelProvider: params.provider,
+      modelId: params.modelId,
+    });
+    const constructionToolsAllow = resolveAttemptConstructionToolsAllow({
+      config: params.config,
+      sessionKey: sandboxSessionKey,
+      agentId: sessionAgentId,
+      modelProvider: params.provider,
+      modelId: params.modelId,
+      effectiveToolPolicy: constructionEffectiveToolPolicy,
+      runtimeToolsAllow: toolsAllowWithForcedRuntimeTools,
+      sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
+      trigger: params.trigger,
+      forceMessageTool: params.forceMessageTool,
+      enableHeartbeatTool: params.enableHeartbeatTool,
+      forceHeartbeatTool: params.forceHeartbeatTool,
+    });
     const toolConstructionPlan = resolveEmbeddedAttemptToolConstructionPlan({
       disableTools: params.disableTools,
       isRawModelRun,
-      toolsAllow: toolsAllowWithForcedRuntimeTools,
+      toolsAllow: constructionToolsAllow,
     });
     const toolsEnabled = supportsModelTools(params.model);
     const codeModeConfig = resolveCodeModeConfig(params.config, sessionAgentId);
@@ -1535,15 +1745,13 @@ export async function runEmbeddedAttempt(
       params.toolsAllow?.length !== 0 &&
       !codeModeControlsEnabledForRun &&
       resolveToolSearchConfig(params.config).enabled;
+    const toolSearchBaseToolsAllow = constructionToolsAllow ?? toolsAllowWithForcedRuntimeTools;
     const effectiveToolsAllow =
-      toolSearchControlsEnabledForRun && toolsAllowWithForcedRuntimeTools
-        ? [
-            ...new Set([
-              ...toolsAllowWithForcedRuntimeTools,
-              ...TOOL_SEARCH_CONTROL_ALLOWLIST_NAMES,
-            ]),
-          ]
-        : toolsAllowWithForcedRuntimeTools;
+      toolSearchControlsEnabledForRun &&
+      toolSearchBaseToolsAllow !== undefined &&
+      toolSearchBaseToolsAllow.length > 0
+        ? [...new Set([...toolSearchBaseToolsAllow, ...TOOL_SEARCH_CONTROL_ALLOWLIST_NAMES])]
+        : toolSearchBaseToolsAllow;
     const shouldConstructTools =
       toolConstructionPlan.constructTools ||
       toolSearchControlsEnabledForRun ||
@@ -1603,6 +1811,7 @@ export async function runEmbeddedAttempt(
             abortSignal: runAbortController.signal,
             modelProvider: params.provider,
             modelId: params.modelId,
+            effectiveToolPolicy: constructionEffectiveToolPolicy,
             modelCompat: extractModelCompat(params.model),
             modelApi: params.model.api,
             modelContextWindowTokens: params.model.contextWindow,
@@ -1621,6 +1830,7 @@ export async function runEmbeddedAttempt(
               return toolSearchCatalogExecutor(toolParams);
             },
             toolConstructionPlan: toolConstructionPlan.codingToolConstructionPlan,
+            coreToolAllowlist: constructionToolsAllow,
             replyToMode: params.replyToMode,
             hasRepliedRef: params.hasRepliedRef,
             modelHasVision: params.model.input?.includes("image") ?? false,
@@ -1821,7 +2031,7 @@ export async function runEmbeddedAttempt(
     const bundleMcpEnabled = shouldCreateBundleMcpRuntimeForAttempt({
       toolsEnabled,
       disableTools: params.disableTools || isRawModelRun,
-      toolsAllow: params.toolsAllow,
+      toolsAllow: constructionToolsAllow,
     });
     const bundleMcpSessionRuntime = bundleMcpEnabled
       ? await getOrCreateSessionMcpRuntime({
@@ -1843,7 +2053,7 @@ export async function runEmbeddedAttempt(
     const bundleLspEnabled = shouldCreateBundleLspRuntimeForAttempt({
       toolsEnabled,
       disableTools: params.disableTools || isRawModelRun,
-      toolsAllow: params.toolsAllow,
+      toolsAllow: constructionToolsAllow,
     });
     bundleLspRuntime = bundleLspEnabled
       ? await createBundleLspToolRuntime({
@@ -1864,6 +2074,7 @@ export async function runEmbeddedAttempt(
       agentId: sessionAgentId,
       modelProvider: params.provider,
       modelId: params.modelId,
+      effectiveToolPolicy: constructionEffectiveToolPolicy,
       messageProvider: resolveAttemptToolPolicyMessageProvider(params),
       agentAccountId: params.agentAccountId,
       groupId: params.groupId,
@@ -1968,6 +2179,18 @@ export async function runEmbeddedAttempt(
       );
     }
     prepStages.mark("bundle-tools");
+    const systemPromptStages = createEmbeddedRunStageTracker({
+      onMark: (stage) =>
+        emitEmbeddedAttemptStageMark({
+          config: params.config,
+          group: "system-prompt",
+          stage,
+          trigger: params.trigger,
+          provider: params.provider,
+          modelId: params.modelId,
+          messageChannel: params.messageChannel ?? params.messageProvider,
+        }),
+    });
     const explicitToolAllowlistSources = collectAttemptExplicitToolAllowlistSources({
       config: params.config,
       sessionKey: params.sessionKey,
@@ -1987,6 +2210,7 @@ export async function runEmbeddedAttempt(
       senderE164: params.senderE164,
       sandboxToolPolicy: sandbox?.tools,
       toolsAllow: params.toolsAllow,
+      effectiveToolPolicy: constructionEffectiveToolPolicy,
     });
     const toolSearchRunPlan = buildToolSearchRunPlan({
       visibleTools: effectiveTools,
@@ -2000,6 +2224,7 @@ export async function runEmbeddedAttempt(
         : undefined,
       explicitAllowlistSources: explicitToolAllowlistSources,
     });
+    systemPromptStages.mark("tool-run-plan");
     const allowedToolNames = toolSearchRunPlan.visibleAllowedToolNames;
     const replayAllowedToolNames = toolSearchRunPlan.replayAllowedToolNames;
     const emptyExplicitToolAllowlistError = buildEmptyExplicitToolAllowlistError({
@@ -2019,8 +2244,16 @@ export async function runEmbeddedAttempt(
       modelApi: params.model.api,
       model: params.model,
     });
+    systemPromptStages.mark("tool-diagnostics");
 
-    const machineName = await getMachineDisplayName();
+    const machineNamePromise = getMachineDisplayName();
+    const openClawReferencesPromise = resolveOpenClawReferencePaths({
+      workspaceDir: effectiveWorkspace,
+      argv1: process.argv[1],
+      cwd: effectiveWorkspace,
+      moduleUrl: import.meta.url,
+    });
+    const machineName = await machineNamePromise;
     const runtimeChannel = normalizeMessageChannel(params.messageChannel ?? params.messageProvider);
     const runtimeCapabilities = collectRuntimeChannelCapabilities({
       cfg: params.config,
@@ -2044,6 +2277,7 @@ export async function runEmbeddedAttempt(
       modelApi: params.model.api,
       model: params.model,
     });
+    systemPromptStages.mark("runtime-facts");
     // Resolve channel-specific message actions for system prompt
     const channelActions = runtimeChannel
       ? listChannelSupportedActions(
@@ -2069,6 +2303,7 @@ export async function runEmbeddedAttempt(
           accountId: params.agentAccountId,
         })
       : undefined;
+    systemPromptStages.mark("channel-guidance");
 
     const defaultModelRef = resolveDefaultModelForAgent({
       cfg: params.config ?? {},
@@ -2106,15 +2341,20 @@ export async function runEmbeddedAttempt(
       (isRawModelRun ? "none" : resolvePromptModeForSession(params.sessionKey));
     const promptSurface = resolveAgentPromptSurfaceForSessionKey(params.sessionKey);
 
-    // When toolsAllow is set, use minimal prompt and strip skills catalog
-    const effectivePromptMode = params.toolsAllow?.length ? ("minimal" as const) : promptMode;
-    const effectiveSkillsPrompt = params.toolsAllow?.length ? undefined : skillsPrompt;
-    const openClawReferences = await resolveOpenClawReferencePaths({
-      workspaceDir: effectiveWorkspace,
-      argv1: process.argv[1],
-      cwd: effectiveWorkspace,
-      moduleUrl: import.meta.url,
+    const minimalPromptForTools = shouldUseMinimalPromptForAttemptTools({
+      promptMode,
+      runtimeToolsAllow: params.toolsAllow,
+      constructionToolsAllow,
     });
+    const effectivePromptMode = minimalPromptForTools ? ("minimal" as const) : promptMode;
+    const effectiveSkillsPrompt = minimalPromptForTools ? undefined : skillsPrompt;
+    const reportSkillsPrompt = resolveAttemptSystemPromptReportSkillsPrompt({
+      minimalPromptForTools,
+      skillsPrompt,
+    });
+    systemPromptStages.mark("prompt-params");
+    const openClawReferences = await openClawReferencesPromise;
+    systemPromptStages.mark("reference-paths");
     const heartbeatPrompt = shouldInjectHeartbeatPrompt({
       config: params.config,
       agentId: sessionAgentId,
@@ -2148,6 +2388,7 @@ export async function runEmbeddedAttempt(
         workspaceDir: effectiveWorkspace,
         context: promptContributionContext,
       });
+    systemPromptStages.mark("prompt-contribution");
 
     const bootstrapTruncationNotice = buildBootstrapPromptWarningNotice(
       bootstrapPromptWarning.lines,
@@ -2216,6 +2457,7 @@ export async function runEmbeddedAttempt(
         },
       },
     });
+    systemPromptStages.mark("build-attempt-prompt");
     const appendPrompt = attemptSystemPrompt.systemPrompt;
     const systemPromptReport = buildSystemPromptReport({
       source: "run",
@@ -2242,14 +2484,29 @@ export async function runEmbeddedAttempt(
       systemPrompt: appendPrompt,
       bootstrapFiles: hookAdjustedBootstrapFiles,
       injectedFiles: contextFiles,
-      skillsPrompt,
+      skillsPrompt: reportSkillsPrompt,
       tools: effectiveTools,
     });
+    systemPromptStages.mark("build-report");
     const systemPromptOverride = attemptSystemPrompt.systemPromptOverride;
     let systemPromptText = systemPromptOverride();
+    systemPromptStages.mark("override");
     prepStages.mark("system-prompt");
+    emitPrepSubstageSummary("system-prompt", systemPromptStages.snapshot());
 
     const compactionTimeoutMs = resolveCompactionTimeoutMs(params.config);
+    const resourceLoaderStages = createEmbeddedRunStageTracker({
+      onMark: (stage) =>
+        emitEmbeddedAttemptStageMark({
+          config: params.config,
+          group: "session-resource-loader",
+          stage,
+          trigger: params.trigger,
+          provider: params.provider,
+          modelId: params.modelId,
+          messageChannel: params.messageChannel ?? params.messageProvider,
+        }),
+    });
     const sessionWriteLockOptions = resolveEmbeddedAttemptSessionWriteLockOptions({
       config: params.config,
       compactionTimeoutMs,
@@ -2264,6 +2521,7 @@ export async function runEmbeddedAttempt(
     });
     releaseRetainedSessionLock = () => sessionLockController.dispose();
     armExternalAbortSignal();
+    resourceLoaderStages.mark("session-lock");
     await throwIfAttemptAbortSignalFiredAfterPrepCleanup();
 
     let sessionManager: ReturnType<typeof guardSessionManager> | undefined;
@@ -2284,6 +2542,7 @@ export async function runEmbeddedAttempt(
         .stat(params.sessionFile)
         .then(() => true)
         .catch(() => false);
+      resourceLoaderStages.mark("session-file");
       await throwIfAttemptAbortSignalFiredAfterPrepCleanup();
 
       const transcriptPolicy = resolveAttemptTranscriptPolicy({
@@ -2326,6 +2585,7 @@ export async function runEmbeddedAttempt(
         },
       });
       trackSessionManagerAccess(params.sessionFile);
+      resourceLoaderStages.mark("session-manager");
       await throwIfAttemptAbortSignalFiredAfterPrepCleanup();
 
       await runAttemptContextEngineBootstrap({
@@ -2357,6 +2617,7 @@ export async function runEmbeddedAttempt(
           }),
         warn: (message) => log.warn(message),
       });
+      resourceLoaderStages.mark("context-engine");
       await throwIfAttemptAbortSignalFiredAfterPrepCleanup();
 
       await prepareSessionManagerForRun({
@@ -2366,6 +2627,7 @@ export async function runEmbeddedAttempt(
         sessionId: params.sessionId,
         cwd: effectiveWorkspace,
       });
+      resourceLoaderStages.mark("session-prepare");
       await throwIfAttemptAbortSignalFiredAfterPrepCleanup();
 
       const settingsManager = createPreparedEmbeddedPiSettingsManager({
@@ -2397,6 +2659,7 @@ export async function runEmbeddedAttempt(
         modelId: params.modelId,
         model: params.model,
       });
+      resourceLoaderStages.mark("settings-resource-init");
       const resourceLoader = createEmbeddedPiResourceLoader({
         cwd: resolvedWorkspace,
         agentDir,
@@ -2404,6 +2667,7 @@ export async function runEmbeddedAttempt(
         extensionFactories,
       });
       await resourceLoader.reload();
+      resourceLoaderStages.mark("resource-loader-reload");
       await throwIfAttemptAbortSignalFiredAfterPrepCleanup();
       // DefaultResourceLoader.reload() rehydrates settings from disk and can drop OpenClaw
       // compaction overrides applied in createPreparedEmbeddedPiSettingsManager — same
@@ -2415,7 +2679,9 @@ export async function runEmbeddedAttempt(
         contextTokenBudget: params.contextTokenBudget,
       });
       applyPiAutoCompactionGuard(piAutoCompactionGuardArgs);
+      resourceLoaderStages.mark("compaction-guards");
       prepStages.mark("session-resource-loader");
+      emitPrepSubstageSummary("session-resource-loader", resourceLoaderStages.snapshot());
 
       // Get hook runner early so it's available when creating tools
       const hookRunner = getGlobalHookRunner();

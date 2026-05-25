@@ -108,6 +108,21 @@ function isOpenAIProvider(provider?: string) {
 
 const MEMORY_FLUSH_ALLOWED_TOOL_NAMES = new Set(["read", "write"]);
 
+function mergeCoreToolAllowlistWithForcedTools(
+  allowlist: string[] | undefined,
+  forcedTools: readonly string[],
+): string[] | undefined {
+  if (forcedTools.length === 0 || allowlist === undefined) {
+    return allowlist;
+  }
+  if (allowlist.some((entry) => normalizeToolName(entry) === "*")) {
+    return allowlist;
+  }
+  const normalized = new Set(allowlist.map((entry) => normalizeToolName(entry)));
+  const missingForcedTools = forcedTools.filter((toolName) => !normalized.has(toolName));
+  return missingForcedTools.length === 0 ? allowlist : [...allowlist, ...missingForcedTools];
+}
+
 type GuardContainerMount = {
   containerRoot: string;
   hostRoot: string;
@@ -343,6 +358,8 @@ export type OpenClawCodingToolConstructionPlan = {
   includePluginTools: boolean;
 };
 
+type EffectiveToolPolicy = ReturnType<typeof resolveEffectiveToolPolicy>;
+
 export function createOpenClawCodingTools(options?: {
   agentId?: string;
   exec?: ExecToolDefaults & ProcessToolDefaults;
@@ -433,6 +450,10 @@ export function createOpenClawCodingTools(options?: {
   allowGatewaySubagentBinding?: boolean;
   /** Runtime-scoped explicit allowlist used to materialize matching plugin tools. */
   runtimeToolAllowlist?: string[];
+  /** Runtime-scoped allowlist used to avoid materializing discarded core tool factories. */
+  coreToolAllowlist?: string[];
+  /** Effective tool policy already resolved by the caller for this run. */
+  effectiveToolPolicy?: EffectiveToolPolicy;
   /** If true, the model has native vision capability */
   modelHasVision?: boolean;
   /** Require explicit message targets (no implicit last-route sends). */
@@ -480,6 +501,15 @@ export function createOpenClawCodingTools(options?: {
   const memoryFlushWritePath = isMemoryFlushRun ? options.memoryFlushWritePath : undefined;
   const cronSelfRemoveOnlyJobId =
     options?.trigger === "cron" && options.jobId?.trim() ? options.jobId.trim() : undefined;
+  const effectiveToolPolicy =
+    options?.effectiveToolPolicy ??
+    resolveEffectiveToolPolicy({
+      config: options?.config,
+      sessionKey: options?.sessionKey,
+      agentId: options?.agentId,
+      modelProvider: options?.modelProvider,
+      modelId: options?.modelId,
+    });
   const {
     agentId,
     globalPolicy,
@@ -490,13 +520,8 @@ export function createOpenClawCodingTools(options?: {
     providerProfile,
     profileAlsoAllow,
     providerProfileAlsoAllow,
-  } = resolveEffectiveToolPolicy({
-    config: options?.config,
-    sessionKey: options?.sessionKey,
-    agentId: options?.agentId,
-    modelProvider: options?.modelProvider,
-    modelId: options?.modelId,
-  });
+  } = effectiveToolPolicy;
+  options?.recordToolPrepStage?.("tool-policy:effective");
   // Prefer the already-resolved sandbox context policy. Recomputing from
   // sessionKey/config can lose the real sandbox agent when callers pass a
   // legacy alias like `main` instead of an agent session key.
@@ -515,6 +540,7 @@ export function createOpenClawCodingTools(options?: {
     senderUsername: options?.senderUsername,
     senderE164: options?.senderE164,
   });
+  options?.recordToolPrepStage?.("tool-policy:group");
   const senderPolicy = resolveSenderToolPolicy({
     config: options?.config,
     agentId,
@@ -524,8 +550,10 @@ export function createOpenClawCodingTools(options?: {
     senderUsername: options?.senderUsername,
     senderE164: options?.senderE164,
   });
+  options?.recordToolPrepStage?.("tool-policy:sender");
   const profilePolicy = resolveToolProfilePolicy(profile);
   const providerProfilePolicy = resolveToolProfilePolicy(providerProfile);
+  options?.recordToolPrepStage?.("tool-policy:profile");
 
   const enableHeartbeatTool =
     options?.enableHeartbeatTool === true ||
@@ -560,6 +588,12 @@ export function createOpenClawCodingTools(options?: {
     ...(forceHeartbeatTool ? [HEARTBEAT_RESPONSE_TOOL_NAME] : []),
     ...toolSearchControlAllowlist,
   ];
+  const coreToolFactoryAllowlist = mergeCoreToolAllowlistWithForcedTools(
+    options?.coreToolAllowlist ?? options?.runtimeToolAllowlist,
+    runtimeProfileAlsoAllow.filter(
+      (toolName) => toolName === "message" || toolName === HEARTBEAT_RESPONSE_TOOL_NAME,
+    ),
+  );
   const profilePolicyWithAlsoAllow = mergeAlsoAllowPolicy(profilePolicy, [
     ...(profileAlsoAllow ?? []),
     ...runtimeProfileAlsoAllow,
@@ -568,6 +602,7 @@ export function createOpenClawCodingTools(options?: {
     ...(providerProfileAlsoAllow ?? []),
     ...runtimeProfileAlsoAllow,
   ]);
+  options?.recordToolPrepStage?.("tool-policy:runtime-allow");
   // Prefer sessionKey for process isolation scope to prevent cross-session process visibility/killing.
   // Fallback to agentId if no sessionKey is available (e.g. legacy or global contexts).
   const scopeKey = resolveProcessToolScopeKey({
@@ -596,6 +631,7 @@ export function createOpenClawCodingTools(options?: {
       store: subagentStore,
     },
   );
+  options?.recordToolPrepStage?.("tool-policy:subagent");
   const globalPolicyWithToolSearchControls = mergeToolSearchControlAllowlist(globalPolicy);
   const globalProviderPolicyWithToolSearchControls =
     mergeToolSearchControlAllowlist(globalProviderPolicy);
@@ -943,6 +979,7 @@ export function createOpenClawCodingTools(options?: {
           config: options?.config,
           pluginToolAllowlist,
           pluginToolDenylist,
+          coreToolAllowlist: coreToolFactoryAllowlist,
           currentChannelId: options?.currentChannelId,
           currentThreadTs: options?.currentThreadTs,
           currentMessageId: options?.currentMessageId,

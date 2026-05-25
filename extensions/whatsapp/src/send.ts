@@ -210,7 +210,9 @@ export async function sendMessageWhatsApp(
     outboundLog.info(`Sending message -> ${redactedJid}${hasMedia ? " (media)" : ""}`);
     logger.info({ jid: redactedJid, hasMedia }, "sending message");
     if (!isWhatsAppNewsletterJid(jid)) {
-      await active.sendComposingTo(to);
+      void active.sendComposingTo(to).catch((err) => {
+        logger.warn({ err: String(err), jid: redactedJid }, "failed to send composing presence");
+      });
     }
     const hasExplicitAccountId = Boolean(options.accountId?.trim());
     const accountId = hasExplicitAccountId ? resolvedAccountId : undefined;

@@ -4,6 +4,7 @@ import { resolveContextTokensForModel } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import { resolveAgentHarnessPolicy } from "../../agents/harness/selection.js";
 import type { ModelCatalogEntry } from "../../agents/model-catalog.js";
+import type { ModelManifestNormalizationContext } from "../../agents/model-selection-normalize.js";
 import { parseConfiguredModelVisibilityEntries } from "../../agents/model-selection-shared.js";
 import {
   buildConfiguredModelCatalog,
@@ -87,28 +88,31 @@ function loadSessionStoreRuntime() {
   return sessionStoreRuntimeLoader.load();
 }
 
-export async function createModelSelectionState(params: {
-  cfg: OpenClawConfig;
-  agentId?: string;
-  agentCfg: NonNullable<NonNullable<OpenClawConfig["agents"]>["defaults"]> | undefined;
-  sessionEntry?: SessionEntry;
-  sessionStore?: Record<string, SessionEntry>;
-  sessionKey?: string;
-  parentSessionKey?: string;
-  storePath?: string;
-  defaultProvider: string;
-  defaultModel: string;
-  primaryProvider?: string;
-  primaryModel?: string;
-  provider: string;
-  model: string;
-  hasModelDirective: boolean;
-  skipStoredModelOverride?: boolean;
-  /** True when heartbeat.model was explicitly resolved for this run.
-   *  In that case, skip session-stored overrides so the heartbeat selection wins. */
-  hasResolvedHeartbeatModelOverride?: boolean;
-  isHeartbeat?: boolean;
-}): Promise<ModelSelectionState> {
+export async function createModelSelectionState(
+  params: {
+    cfg: OpenClawConfig;
+    agentId?: string;
+    agentCfg: NonNullable<NonNullable<OpenClawConfig["agents"]>["defaults"]> | undefined;
+    sessionEntry?: SessionEntry;
+    sessionStore?: Record<string, SessionEntry>;
+    sessionKey?: string;
+    parentSessionKey?: string;
+    storePath?: string;
+    defaultProvider: string;
+    defaultModel: string;
+    primaryProvider?: string;
+    primaryModel?: string;
+    provider: string;
+    model: string;
+    hasModelDirective: boolean;
+    hasOneTurnModelOverride?: boolean;
+    skipStoredModelOverride?: boolean;
+    /** True when heartbeat.model was explicitly resolved for this run.
+     *  In that case, skip session-stored overrides so the heartbeat selection wins. */
+    hasResolvedHeartbeatModelOverride?: boolean;
+    isHeartbeat?: boolean;
+  } & ModelManifestNormalizationContext,
+): Promise<ModelSelectionState> {
   const timingEnabled = shouldLogModelSelectionTiming();
   const startMs = timingEnabled ? Date.now() : 0;
   const logStage = (stage: string, extra?: string) => {
@@ -136,13 +140,17 @@ export async function createModelSelectionState(params: {
   let model = params.model;
   const primaryProvider = params.primaryProvider ?? defaultProvider;
   const primaryModel = params.primaryModel ?? defaultModel;
+  const hasOneTurnModelOverride = params.hasOneTurnModelOverride === true;
 
   const hasAllowlist = agentCfg?.models && Object.keys(agentCfg.models).length > 0;
   const visibility = parseConfiguredModelVisibilityEntries({ cfg });
   const defaultProviderVisibleByWildcard = visibility.providerWildcards.has(
     normalizeProviderId(defaultProvider),
   );
-  const configuredModelCatalog = buildConfiguredModelCatalog({ cfg });
+  const configuredModelCatalog = buildConfiguredModelCatalog({
+    cfg,
+    manifestPlugins: params.manifestPlugins,
+  });
   const needsModelCatalog =
     params.hasModelDirective ||
     Boolean(
@@ -157,6 +165,7 @@ export async function createModelSelectionState(params: {
     defaultProvider,
     defaultModel,
     agentId: params.agentId,
+    manifestPlugins: params.manifestPlugins,
   });
   let modelCatalog: ModelCatalog | null = null;
   let resetModelOverride = false;
@@ -182,7 +191,12 @@ export async function createModelSelectionState(params: {
   });
 
   if (needsModelCatalog) {
-    modelCatalog = await (await loadModelCatalogRuntime()).loadModelCatalog({ config: cfg });
+    modelCatalog = await (
+      await loadModelCatalogRuntime()
+    ).loadModelCatalog({
+      config: cfg,
+      metadataSnapshot: params.pluginMetadataSnapshot,
+    });
     logStage("catalog-loaded", `entries=${modelCatalog.length}`);
     visibilityPolicy = createModelVisibilityPolicy({
       cfg,
@@ -190,6 +204,7 @@ export async function createModelSelectionState(params: {
       defaultProvider,
       defaultModel,
       agentId: params.agentId,
+      manifestPlugins: params.manifestPlugins,
     });
     allowedModelCatalog = visibilityPolicy.allowedCatalog;
     allowedModelKeys = visibilityPolicy.allowedKeys;
@@ -204,6 +219,7 @@ export async function createModelSelectionState(params: {
       defaultProvider,
       defaultModel,
       agentId: params.agentId,
+      manifestPlugins: params.manifestPlugins,
     });
     allowedModelCatalog = visibilityPolicy.allowedCatalog;
     allowedModelKeys = visibilityPolicy.allowedKeys;
@@ -215,10 +231,17 @@ export async function createModelSelectionState(params: {
     logStage("configured-catalog-ready", `entries=${configuredModelCatalog.length}`);
   }
 
-  if (sessionEntry && sessionStore && sessionKey && directStoredOverride) {
+  if (
+    sessionEntry &&
+    sessionStore &&
+    sessionKey &&
+    directStoredOverride &&
+    !hasOneTurnModelOverride
+  ) {
     const normalizedOverride = normalizeModelRef(
       directStoredOverride.provider,
       directStoredOverride.model,
+      { manifestPlugins: params.manifestPlugins },
     );
     const key = modelKey(normalizedOverride.provider, normalizedOverride.model);
     if (staleHeartbeatAutoFallbackOverride || !visibilityPolicy.allowsKey(key)) {
@@ -244,13 +267,17 @@ export async function createModelSelectionState(params: {
     }
   }
   if (staleHeartbeatAutoFallbackOverride) {
-    const normalizedCurrentSelection = normalizeModelRef(provider, model);
+    const normalizedCurrentSelection = normalizeModelRef(provider, model, {
+      manifestPlugins: params.manifestPlugins,
+    });
     const currentSelectionKey = modelKey(
       normalizedCurrentSelection.provider,
       normalizedCurrentSelection.model,
     );
     const normalizedDirectOverride = directStoredOverride
-      ? normalizeModelRef(directStoredOverride.provider, directStoredOverride.model)
+      ? normalizeModelRef(directStoredOverride.provider, directStoredOverride.model, {
+          manifestPlugins: params.manifestPlugins,
+        })
       : null;
     const directStoredOverrideKey = normalizedDirectOverride
       ? modelKey(normalizedDirectOverride.provider, normalizedDirectOverride.model)
@@ -274,6 +301,7 @@ export async function createModelSelectionState(params: {
   // configured default.
   const skipStoredOverride =
     params.skipStoredModelOverride === true ||
+    hasOneTurnModelOverride ||
     params.hasResolvedHeartbeatModelOverride === true ||
     (staleHeartbeatAutoFallbackOverride && storedOverride?.source === "session");
 
@@ -281,6 +309,7 @@ export async function createModelSelectionState(params: {
     const normalizedStoredOverride = normalizeModelRef(
       storedOverride.provider || defaultProvider,
       storedOverride.model,
+      { manifestPlugins: params.manifestPlugins },
     );
     const key = modelKey(normalizedStoredOverride.provider, normalizedStoredOverride.model);
     if (visibilityPolicy.allowsKey(key)) {
@@ -289,7 +318,7 @@ export async function createModelSelectionState(params: {
     }
   }
 
-  if (!params.hasModelDirective) {
+  if (!params.hasModelDirective && !hasOneTurnModelOverride) {
     const allowedInitialSelection = visibilityPolicy.resolveSelection({
       provider,
       model,
@@ -352,7 +381,12 @@ export async function createModelSelectionState(params: {
     const shouldHydrateRuntimeCatalog =
       !modelCatalog && (!selectedCatalogEntry || selectedCatalogEntry.reasoning === undefined);
     if (shouldHydrateRuntimeCatalog) {
-      modelCatalog = await (await loadModelCatalogRuntime()).loadModelCatalog({ config: cfg });
+      modelCatalog = await (
+        await loadModelCatalogRuntime()
+      ).loadModelCatalog({
+        config: cfg,
+        metadataSnapshot: params.pluginMetadataSnapshot,
+      });
       logStage("catalog-loaded-for-thinking", `entries=${modelCatalog.length}`);
       const runtimeSelectedEntry = modelCatalog.find(
         (entry) => entry.provider === provider && entry.id === model,
@@ -394,7 +428,12 @@ export async function createModelSelectionState(params: {
   const resolveDefaultReasoningLevel = async (): Promise<"on" | "off"> => {
     let catalogForReasoning = modelCatalog ?? allowedModelCatalog;
     if (!catalogForReasoning || catalogForReasoning.length === 0) {
-      modelCatalog = await (await loadModelCatalogRuntime()).loadModelCatalog({ config: cfg });
+      modelCatalog = await (
+        await loadModelCatalogRuntime()
+      ).loadModelCatalog({
+        config: cfg,
+        metadataSnapshot: params.pluginMetadataSnapshot,
+      });
       logStage("catalog-loaded-for-reasoning", `entries=${modelCatalog.length}`);
       catalogForReasoning = modelCatalog;
     }

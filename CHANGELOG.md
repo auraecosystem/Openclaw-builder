@@ -18,6 +18,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- QA-Lab/WhatsApp: keep GitHub live lanes on CI Convex leases and quarantine logged-out WhatsApp leases during a run so retries do not immediately reacquire the same bad account.
 - Logging: exit cleanly on broken stdout/stderr pipes without masking existing failure exit codes. (#80059) Thanks @pavelzak.
 - Gateway/security: escape transcript metadata field names while extracting oversized session line prefixes. (#85934) Thanks @SebTardif.
 - Plugins/security: validate manifest model pattern regexes with the safe-regex compiler so unsafe patterns are ignored before matching. (#86046) Thanks @SebTardif.
@@ -350,6 +351,8 @@ Docs: https://docs.openclaw.ai
 - Memory/doctor: report missing or unusable QMD workspace directories as workspace failures instead of generic binary failures. (#63167) Thanks @sercada.
 - Debug proxy: record CONNECT client-socket errors and destroy the paired upstream socket so abrupt client disconnects no longer leak tunnel resources. (#82444) Thanks @SebTardif.
 - Diffs: continue hydrating later diff cards when one card fails so a single broken card no longer blanks the whole diff viewer. (#84775) Thanks @cosmopolitan033.
+- CI/Testbox: strip stale runner `npm_execpath` values from Corepack-routed changed-check children so remote `pnpm check:changed` does not jump to a deleted global pnpm store.
+- CI/Testbox: detect Blacksmith runner shells when remote changed gates are launched directly through Crabbox, keeping child `pnpm` scripts on the Corepack shim.
 - Mac app: use the native settings sidebar window chrome so the sidebar toggle stays on the left and content no longer clips under oversized titlebar padding.
 - QA-Lab/Codex: bundle auth/plugin fixture imports for flow scenarios and let terminal async media tools end Codex app-server turns without timing out. (#80397, refs #80323) Thanks @100yenadmin.
 - WhatsApp: persist inbound message delivery state through plugin state before dispatch and delay read receipts until handler completion, so retryable failures can redeliver without adding a plugin-local disk cache. Thanks @samzong.
@@ -370,6 +373,12 @@ Docs: https://docs.openclaw.ai
 - Agents: bound embedded auto-compaction session write-lock watchdogs to the compaction timeout instead of the full run timeout, so stuck compaction cannot hold the live session lock for the whole run window. (#84949) Thanks @luoyanglang.
 - Gateway/agents: return phase-aware `agent.wait` timeout attribution and only cool auth profiles on provider-started timeouts. Refs #65504. Thanks @100yenadmin.
 - Gateway/systemd: launch managed update handoff helpers in a transient user scope so systemd-supervised Update Now flows survive the gateway unit restart. Fixes #84068.
+- QA-Lab: use the lightweight Gateway health RPC for child readiness so live transport canaries do not load the full config schema during startup checks.
+- QA-Lab: release logged-out WhatsApp Convex credentials before retrying so a bad lease does not exhaust the live credential pool.
+- QA-Lab: skip WhatsApp Convex credentials rejected earlier in the same run when the broker returns them again, making stale pools fail with clear artifacts instead of relaunching the same logged-out session.
+- QA-Lab: include redacted WhatsApp driver/SUT auth fingerprints in live artifacts and label driver-auth logout failures so refreshed Convex credentials can be verified without exposing secrets.
+- WhatsApp: send composing presence best-effort before outbound replies so slow or failed typing indicators no longer delay message delivery.
+- WhatsApp: register the channel runtime through a narrow setter entrypoint so gateway startup no longer imports the broad WhatsApp runtime barrel before live message handling.
 - Gateway: defer provider auth-state prewarm until after startup readiness so early gateway tool/session requests are not blocked by provider auth discovery. (#85272) Thanks @dutifulbob.
 - Gateway/models: coalesce provider auth-state rewarms after auth-profile failures and log event-loop delay for warm/rewarm work, so provider auth bursts no longer stack full auth sweeps behind channel replies.
 - Gateway/models: stop cancelled provider auth-state prewarms from continuing full provider sweeps, so reload and auth-failure bursts no longer keep startup busy.
@@ -427,6 +436,7 @@ Docs: https://docs.openclaw.ai
 - Agents/heartbeat: route single-owner `session.dmScope=main` direct-message exec and cron event wakes back to the agent main session so async completions no longer strand context in orphan direct-DM queues. Fixes #71581. (#83743) Thanks @Kaspre.
 - Agents/code-mode: expose outer code-mode `exec` source through the `command` hook alias with `toolKind`/`toolInputKind` discriminators so exec-shaped policies can distinguish code-mode cells. (#83483) Thanks @Kaspre.
 - Agents/code mode: return structured timeout and runtime-unavailable error codes for known worker failures. Fixes #83389. (#83444) Thanks @Kaspre.
+- QA-Lab: apply outbound wait cursors before filtering mixed inbound/outbound transcripts so restart scenarios do not miss valid replies after prior traffic.
 - QA-Lab: isolate multi-scenario suite workers when scenarios need startup config patches, preventing message-routing config from leaking into unrelated scenarios.
 - QA-Lab: make the commitments heartbeat-target-none scenario request an immediate heartbeat instead of waiting for the next scheduled heartbeat.
 - Codex/Plugin SDK: deliver Codex-native subagent completions through a generic harness task runtime so harness-backed plugins can mirror durable task lifecycle and completion delivery without Codex-specific SDK imports. (#83445) Thanks @bryanpearson.
@@ -748,6 +758,35 @@ Docs: https://docs.openclaw.ai
 - Memory/QMD: keep archived session transcript hits visible after QMD export while preserving normal `.md` session ids that only resemble archive names. (#83518; fixes #83506) Thanks @tanshanshan.
 - Codex app-server: preserve network access for sandboxed Codex code-mode turns when the OpenClaw sandbox allows outbound egress. Fixes #83347. Thanks @YusukeIt0.
 - Codex app-server: honor writable Docker bind mounts for sandboxed workspace-write turns while disabling native Code Mode when container-path aliases or read-only bind shadows cannot be represented safely host-side. Fixes #83737. (#83849) Thanks @joshavant.
+- Agents/QA-Lab: prune embedded-run tool construction, reuse effective tool policy for prompt prep, workspace-scoped auth alias metadata, core factory setup, OpenClaw reference lookup, and skipped skills report parsing from message-only runs, split policy prep diagnostics, preserve forced message and heartbeat response tools, and keep the WhatsApp RTT canary from scanning unused skills or loading bundled MCP tools.
+- Agents/QA-Lab: load only OpenClaw's inline Pi extensions in embedded message runs so WhatsApp RTT probes avoid Pi package/resource discovery during reply prep.
+- Agents/QA-Lab: overlap reply auth-profile resolution, agent-runner loading, and system-prompt runtime facts, and reuse provider runtime handles and embedded tool-policy resolution during Pi dispatch so WhatsApp RTT probes avoid duplicate provider metadata scans.
+- Agents: emit embedded-run startup, prep, system-prompt, and resource-loader stage marks into diagnostics timelines so live RTT artifacts expose sub-second runner setup costs.
+- Replies: reuse per-turn manifest model-normalization metadata across reply default-model and model-selection paths to avoid repeated request-time plugin metadata scans.
+- Replies: reuse per-turn plugin metadata snapshots during reply model-catalog hydration so WhatsApp RTT turns avoid rescanning plugin metadata for thinking and reasoning defaults.
+- Plugins: reuse the Gateway's current metadata snapshot for agent workspaces without local plugins, avoiding repeated request-time manifest scans while preserving workspace plugin overrides.
+- QA-Lab: disable background agent heartbeats in WhatsApp live probes so RTT artifacts measure the canary reply lane without heartbeat contention.
+- QA-Lab: add an explicit `whatsapp-canary-rtt` live scenario id so repeated WhatsApp RTT proof runs can target the canary lane directly.
+- QA-Lab: include a redacted WhatsApp credential fingerprint in live RTT artifacts so maintainers can correlate logged-out Convex leases without exposing credential ids.
+- QA-Lab: settle WhatsApp live heap checkpoints before starting RTT timing so heap snapshots do not inflate the measured ping/pong send path.
+- Crabbox: exclude local `.tmp` captures from OpenClaw syncs so heapdump and trace analysis artifacts do not bloat remote proof uploads.
+- WhatsApp: extend QA trace phases through inbound processing and buffered reply dispatch so RTT artifacts isolate the remaining pre-send delay.
+- WhatsApp: keep raw session identifiers out of QA trace phase logs while preserving reply-path timing instrumentation.
+- WhatsApp: lazy-load outbound send helpers from the channel plugin so registration avoids loading runtime send/media code before the first outbound action.
+- WhatsApp: keep channel outbound registration on a light descriptor and defer media, quote-cache, and send runtimes until outbound delivery.
+- WhatsApp: defer heartbeat readiness runtime from channel registration so the descriptor does not pull auth-state helpers until heartbeat checks run.
+- WhatsApp: lazy-load doctor-only security repair code so channel registration avoids config-repair imports on normal startup.
+- WhatsApp: lazy-load legacy state migration checks so channel registration avoids filesystem repair helpers until migration scanning runs.
+- Plugins: hash large SDK alias-map cache keys so plugin loader caches do not retain full alias-path JSON strings in memory.
+- Replies: skip provider thinking-catalog hydration when thinking is off so messaging replies avoid unnecessary model-runtime setup before dispatch.
+- Providers: reuse already-loaded provider runtime hooks for synthetic auth before falling back to provider discovery loads.
+- QA-Lab: include the gateway diagnostic timeline in WhatsApp live trace artifacts so RTT probes expose reply setup, compaction, and model-run phase costs.
+- QA-Lab: shorten WhatsApp Convex credential leases in live CI and wait long enough for the reduced TTL so cancelled RTT probes recover the credential pool instead of blocking the next run for the default 20-minute lease.
+- QA-Lab: hold logged-out WhatsApp Convex credentials while trying alternate pooled leases so live canaries report stale credential pools instead of reacquiring the same session.
+- QA-Lab: disable web search and deny session-management tools in WhatsApp live exact-marker runs so RTT probes measure reply delivery without unused model tool payload.
+- Gateway/plugins: preload provider owner plugins for configured PI agent models during gateway startup so first live replies avoid lazy provider-runtime activation.
+- QA-Lab: run WhatsApp live QA through the Pi runtime with messaging-only tools, skip agent workspace bootstrap, force thinking and reasoning off for exact-marker canaries, and emit/preserve model transport timings, per-scenario phase timings, RSS samples, complete gateway heap checkpoints, and redacted gateway traces so channel RTT artifacts isolate send, wait, startup, readiness, model, and retained-memory cost.
+- WhatsApp: skip eager participating-group metadata hydration for DM-only sessions so reconnects avoid unnecessary startup memory and RTT pressure.
 - QA-Lab: keep the OTLP smoke decoder independent of removed OpenTelemetry generated-root internals.
 - Messages: default group/channel visible replies to automatic final delivery again, keeping `message_tool` opt-in for ambient/shared rooms and tool-reliable models.
 - CLI/TUI: force standalone `/exit` runs to terminate after `runTui` returns so onboarding-launched TUI children do not stay alive invisibly. (#83501) Thanks @fuller-stack-dev.

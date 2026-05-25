@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { testing } from "./whatsapp-live.runtime.js";
 
 const execFileAsync = promisify(execFile);
@@ -95,6 +95,18 @@ describe("WhatsApp QA live runtime", () => {
     ]);
   });
 
+  it("hashes credential ids for redacted QA artifact correlation", () => {
+    expect(testing.toCredentialFingerprint("cred-frc")).toBe("7e9678a23fc4");
+    expect(testing.toCredentialFingerprint("")).toBeUndefined();
+    expect(testing.toCredentialFingerprint(undefined)).toBeUndefined();
+  });
+
+  it("hashes credential auth material for redacted QA artifact correlation", () => {
+    expect(testing.toCredentialMaterialFingerprint("driver-archive")).toBe("5c9734c563eb");
+    expect(testing.toCredentialMaterialFingerprint("")).toBeUndefined();
+    expect(testing.toCredentialMaterialFingerprint(undefined)).toBeUndefined();
+  });
+
   it("unpacks auth archives into a caller-provided temp directory", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-wa-qa-test-"));
     try {
@@ -124,9 +136,25 @@ describe("WhatsApp QA live runtime", () => {
     expect(() => testing.assertSafeArchiveEntries(["/tmp/creds.json"])).toThrow("unsafe entry");
   });
 
-  it("registers the WhatsApp canary and pairing scenarios", () => {
-    const scenarios = testing.findScenarios(["whatsapp-canary", "whatsapp-pairing-block"]);
-    expect(scenarios.map(({ id }) => id)).toEqual(["whatsapp-canary", "whatsapp-pairing-block"]);
+  it("registers the WhatsApp canary, RTT, and pairing scenarios", () => {
+    const scenarios = testing.findScenarios([
+      "whatsapp-canary",
+      "whatsapp-canary-rtt",
+      "whatsapp-pairing-block",
+    ]);
+    expect(scenarios.map(({ id }) => id)).toEqual([
+      "whatsapp-canary",
+      "whatsapp-canary-rtt",
+      "whatsapp-pairing-block",
+    ]);
+
+    const rttRun = scenarios.find(({ id }) => id === "whatsapp-canary-rtt")?.buildRun();
+    expect(rttRun).toMatchObject({
+      configMode: "allowlist",
+      expectReply: true,
+      target: "dm",
+    });
+    expect(rttRun?.input).toContain("Reply with only this exact marker:");
   });
 
   it("uses automatic visible replies for WhatsApp group mention gating", () => {
@@ -136,7 +164,25 @@ describe("WhatsApp QA live runtime", () => {
     expect(scenarioRun.input).not.toContain("visible reply tool check");
 
     const cfg = testing.buildWhatsAppQaConfig(
-      {},
+      {
+        agents: {
+          defaults: {
+            models: {
+              "openai/gpt-5.5": {
+                params: {
+                  thinking: "high",
+                },
+              },
+            },
+          },
+          list: [{ id: "qa", tools: { profile: "coding" } }],
+        },
+        tools: {
+          profile: "coding",
+          deny: ["exec"],
+          web: { fetch: { enabled: true }, search: { enabled: true, maxResults: 4 } },
+        },
+      },
       {
         allowFrom: ["+15550000001"],
         authDir: "/tmp/openclaw-whatsapp-qa-auth",
@@ -145,8 +191,168 @@ describe("WhatsApp QA live runtime", () => {
         sutAccountId: "sut",
       },
     );
+    expect(cfg.agents?.defaults?.skipBootstrap).toBe(true);
+    expect(cfg.agents?.defaults?.heartbeat?.every).toBe("0m");
+    expect(cfg.agents?.defaults?.skills).toEqual([]);
+    expect(cfg.agents?.defaults?.thinkingDefault).toBe("off");
+    expect(cfg.agents?.defaults?.models?.["openai/gpt-5.5"]?.agentRuntime).toEqual({ id: "pi" });
+    expect(cfg.agents?.defaults?.models?.["openai/gpt-5.5"]?.params?.thinking).toBe("off");
+    expect(cfg.tools?.profile).toBe("messaging");
+    expect(cfg.tools?.deny).toEqual([
+      "exec",
+      "bundle-mcp",
+      "session_status",
+      "sessions_*",
+      "web_search",
+    ]);
+    expect(cfg.tools?.web?.fetch?.enabled).toBe(true);
+    expect(cfg.tools?.web?.search?.enabled).toBe(false);
+    expect(cfg.tools?.web?.search?.maxResults).toBe(4);
+    expect(cfg.agents?.list?.[0]?.heartbeat?.every).toBe("0m");
+    expect(cfg.agents?.list?.[0]?.skills).toEqual([]);
+    expect(cfg.agents?.list?.[0]?.tools?.profile).toBe("messaging");
+    expect(cfg.agents?.list?.[0]?.tools?.deny).toEqual([
+      "bundle-mcp",
+      "session_status",
+      "sessions_*",
+      "web_search",
+    ]);
     expect(cfg.messages?.groupChat?.visibleReplies).toBe("automatic");
     expect(cfg.messages?.groupChat?.mentionPatterns).toContain("\\bopenclawqa\\b");
+  });
+
+  it("renders WhatsApp live phase timings in the QA report", () => {
+    const report = testing.renderWhatsAppQaMarkdown({
+      cleanupIssues: [],
+      credentialFingerprint: "7e9678a23fc4",
+      credentialMaterialFingerprints: {
+        driverAuthArchive: "driver123456",
+        sutAuthArchive: "sut123456789",
+      },
+      credentialSource: "convex",
+      finishedAt: "2026-05-18T10:00:05.000Z",
+      redactMetadata: true,
+      scenarios: [
+        {
+          id: "whatsapp-canary",
+          title: "WhatsApp DM canary",
+          status: "pass",
+          details: "reply matched in 3210ms",
+          rttMs: 3210,
+          timings: {
+            gatewayStartMs: 1200,
+            channelReadyMs: 21000,
+            sendTextMs: 450,
+            waitForReplyMs: 2760,
+          },
+        },
+      ],
+      startedAt: "2026-05-18T10:00:00.000Z",
+    });
+
+    expect(report).toContain(
+      "- Timing: gatewayStart=1200ms, channelReady=21000ms, sendText=450ms, waitForReply=2760ms",
+    );
+    expect(report).toContain("- Credential fingerprint: `7e9678a23fc4`");
+    expect(report).toContain("- Driver auth fingerprint: `driver123456`");
+    expect(report).toContain("- SUT auth fingerprint: `sut123456789`");
+  });
+
+  it("arms WhatsApp gateway diagnostics only when requested", () => {
+    expect(
+      testing.buildWhatsAppGatewayRuntimeEnvPatch({
+        env: {
+          OPENCLAW_QA_GATEWAY_HEAP_CHECKPOINTS: "0",
+          OPENCLAW_QA_WHATSAPP_MODEL_TRANSPORT_DEBUG: "0",
+          OPENCLAW_QA_WHATSAPP_TRACE: "0",
+        },
+        tracePath: "/tmp/openclaw-whatsapp-trace.jsonl",
+      }),
+    ).toBeUndefined();
+    expect(
+      testing.buildWhatsAppGatewayRuntimeEnvPatch({
+        env: {
+          OPENCLAW_QA_GATEWAY_HEAP_CHECKPOINTS: "1",
+          OPENCLAW_QA_WHATSAPP_MODEL_TRANSPORT_DEBUG: "1",
+          OPENCLAW_QA_WHATSAPP_TRACE: "1",
+          OPENCLAW_DEBUG_MODEL_PAYLOAD: "detail",
+          OPENCLAW_DEBUG_SSE: "summary",
+          NODE_OPTIONS: "--max-old-space-size=4096",
+        },
+        timelinePath: "/tmp/openclaw-whatsapp-timeline.jsonl",
+        tracePath: "/tmp/openclaw-whatsapp-trace.jsonl",
+      }),
+    ).toEqual({
+      NODE_OPTIONS: "--max-old-space-size=4096 --heapsnapshot-signal=SIGUSR2",
+      OPENCLAW_DIAGNOSTICS: "timeline",
+      OPENCLAW_DIAGNOSTICS_TIMELINE_PATH: "/tmp/openclaw-whatsapp-timeline.jsonl",
+      OPENCLAW_DEBUG_MODEL_PAYLOAD: "detail",
+      OPENCLAW_DEBUG_MODEL_TRANSPORT: "1",
+      OPENCLAW_DEBUG_SSE: "summary",
+      OPENCLAW_QA_WHATSAPP_TRACE: "1",
+      OPENCLAW_QA_WHATSAPP_TRACE_PATH: "/tmp/openclaw-whatsapp-trace.jsonl",
+    });
+  });
+
+  it("preserves gateway debug artifacts for model transport diagnostics", () => {
+    expect(
+      testing.shouldPreserveWhatsAppGatewayDebugArtifacts({
+        OPENCLAW_QA_WHATSAPP_MODEL_TRANSPORT_DEBUG: "0",
+      }),
+    ).toBe(false);
+    expect(
+      testing.shouldPreserveWhatsAppGatewayDebugArtifacts({
+        OPENCLAW_QA_WHATSAPP_MODEL_TRANSPORT_DEBUG: "1",
+      }),
+    ).toBe(true);
+  });
+
+  it("settles after WhatsApp heap checkpoints before starting RTT timing", () => {
+    expect(
+      testing.resolveWhatsAppHeapCheckpointSettleMs({
+        OPENCLAW_QA_GATEWAY_HEAP_CHECKPOINTS: "0",
+      }),
+    ).toBe(0);
+    expect(
+      testing.resolveWhatsAppHeapCheckpointSettleMs({
+        OPENCLAW_QA_GATEWAY_HEAP_CHECKPOINTS: "1",
+      }),
+    ).toBe(10_000);
+    expect(
+      testing.resolveWhatsAppHeapCheckpointSettleMs({
+        OPENCLAW_QA_GATEWAY_HEAP_CHECKPOINTS: "1",
+        OPENCLAW_QA_WHATSAPP_HEAP_CHECKPOINT_SETTLE_MS: "2500",
+      }),
+    ).toBe(2500);
+    expect(
+      testing.resolveWhatsAppHeapCheckpointSettleMs({
+        OPENCLAW_QA_GATEWAY_HEAP_CHECKPOINTS: "1",
+        OPENCLAW_QA_WHATSAPP_HEAP_CHECKPOINT_SETTLE_MS: "nope",
+      }),
+    ).toBe(0);
+  });
+
+  it("detects complete heap snapshot files before copying", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-wa-heap-test-"));
+    try {
+      const completePath = path.join(tempRoot, "complete.heapsnapshot");
+      const partialPath = path.join(tempRoot, "partial.heapsnapshot");
+      await fs.writeFile(
+        completePath,
+        '{"snapshot":{},"nodes":[],"edges":[],"strings":[]}',
+        "utf8",
+      );
+      await fs.writeFile(partialPath, '{"snapshot":{},"nodes":[],"edges":[],"strings":[', "utf8");
+
+      await expect(
+        testing.heapSnapshotLooksComplete(completePath, (await fs.stat(completePath)).size),
+      ).resolves.toBe(true);
+      await expect(
+        testing.heapSnapshotLooksComplete(partialPath, (await fs.stat(partialPath)).size),
+      ).resolves.toBe(false);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("fails explicitly requested group scenarios when group credentials are missing", () => {
@@ -207,5 +413,95 @@ describe("WhatsApp QA live runtime", () => {
       ),
     ).toBe(true);
     expect(testing.isTransientWhatsAppQaDriverError(new Error("timed out waiting"))).toBe(false);
+  });
+
+  it("classifies logged-out WhatsApp driver credentials", () => {
+    expect(testing.isLoggedOutWhatsAppQaDriverError(new Error("WhatsApp session logged out"))).toBe(
+      true,
+    );
+    expect(
+      testing.isLoggedOutWhatsAppQaDriverError(
+        new Error('{"output":{"statusCode":401,"payload":{"error":"Unauthorized"}}}'),
+      ),
+    ).toBe(true);
+    expect(testing.isLoggedOutWhatsAppQaDriverError(new Error("Connection Closed"))).toBe(false);
+  });
+
+  it("releases repeated rejected Convex WhatsApp credential leases", async () => {
+    const cleanupIssues: string[] = [];
+    const release = vi.fn(async () => {});
+    const stop = vi.fn(async () => {});
+    const lease = { release } as never;
+    const heartbeat = { stop } as never;
+    const leases = [lease];
+    const heartbeats = [heartbeat];
+
+    await testing.discardRejectedWhatsAppCredentialLease({
+      cleanupIssues,
+      heartbeat,
+      heartbeats,
+      lease,
+      leases,
+    });
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(heartbeats).toEqual([]);
+    expect(leases).toEqual([]);
+    expect(cleanupIssues).toEqual([]);
+  });
+
+  it("quarantines first-time rejected Convex WhatsApp credential leases until final cleanup", async () => {
+    const cleanupIssues: string[] = [];
+    const stop = vi.fn(async () => {});
+    const lease = {} as never;
+    const heartbeat = { stop } as never;
+    const leases = [lease];
+    const heartbeats = [heartbeat];
+
+    await testing.quarantineRejectedWhatsAppCredentialLease({
+      cleanupIssues,
+      heartbeat,
+      heartbeats,
+    });
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(heartbeats).toEqual([]);
+    expect(leases).toEqual([lease]);
+    expect(cleanupIssues).toEqual([]);
+  });
+
+  it("recognizes Convex WhatsApp credentials rejected earlier in the same run", () => {
+    const rejectedCredentialIds = new Set(["cred-1"]);
+
+    expect(
+      testing.isPreviouslyRejectedWhatsAppCredentialLease({
+        rejectedCredentialIds,
+        lease: {
+          source: "convex",
+          credentialId: "cred-1",
+        } as never,
+      }),
+    ).toBe(true);
+
+    expect(
+      testing.isPreviouslyRejectedWhatsAppCredentialLease({
+        rejectedCredentialIds,
+        lease: {
+          source: "convex",
+          credentialId: "cred-2",
+        } as never,
+      }),
+    ).toBe(false);
+
+    expect(
+      testing.isPreviouslyRejectedWhatsAppCredentialLease({
+        rejectedCredentialIds,
+        lease: {
+          source: "env",
+          credentialId: "cred-1",
+        } as never,
+      }),
+    ).toBe(false);
   });
 });
