@@ -93,7 +93,7 @@ export default defineConfig(() => {
     },
     publicDir: path.resolve(here, "public"),
     optimizeDeps: {
-      include: ["lit/directives/repeat.js"],
+      include: ["lit/directives/repeat.js", "markdown-it-task-lists"],
     },
     build: {
       outDir,
