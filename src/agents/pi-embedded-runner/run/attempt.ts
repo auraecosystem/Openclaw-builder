@@ -25,6 +25,7 @@ import {
 } from "../../../context-engine/host-compat.js";
 import { resolveContextEngineOwnerPluginId } from "../../../context-engine/registry.js";
 import type { AssembleResult } from "../../../context-engine/types.js";
+import { resolveDiagnosticContentCapturePolicy } from "../../../infra/diagnostic-content-capture.js";
 import { emitTrustedDiagnosticEvent } from "../../../infra/diagnostic-events.js";
 import {
   createChildDiagnosticTraceContext,
@@ -3157,6 +3158,8 @@ export async function runEmbeddedAttempt(
         );
       }
       let diagnosticModelCallSeq = 0;
+      const configForCapture = params.config ?? getRuntimeConfig();
+      const otelCaptureContent = configForCapture?.diagnostics?.otel?.captureContent;
       activeSession.agent.streamFn = wrapStreamFnWithDiagnosticModelCallEvents(
         activeSession.agent.streamFn,
         {
@@ -3186,6 +3189,7 @@ export async function runEmbeddedAttempt(
               firstModelCallStarted: true,
             });
           },
+          contentCapture: resolveDiagnosticContentCapturePolicy(otelCaptureContent),
         },
       );
 

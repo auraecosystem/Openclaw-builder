@@ -522,6 +522,10 @@ type DiagnosticModelCallBaseEvent = DiagnosticBaseEvent & {
   contextWindowSource?: "model" | "modelsConfig" | "agentContextTokens" | "default";
   contextWindowReferenceTokens?: number;
   upstreamRequestIdHash?: string;
+  /** Raw model input text captured after diagnostics.otel.captureContent.inputMessages opt-in; consumers are responsible for export-time bounding and redaction. */
+  inputMessages?: string[];
+  /** Raw model output text captured after diagnostics.otel.captureContent.outputMessages opt-in; consumers are responsible for export-time bounding and redaction. */
+  outputMessages?: string[];
 };
 
 export type DiagnosticModelCallStartedEvent = DiagnosticModelCallBaseEvent & {
