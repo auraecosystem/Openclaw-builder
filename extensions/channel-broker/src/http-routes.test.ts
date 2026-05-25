@@ -17,6 +17,10 @@ type MockResponse = ServerResponse & {
   headers: Record<string, string>;
 };
 
+type OpenKeyedStoreMock = PluginRuntime["state"]["openKeyedStore"] & {
+  callCount(): number;
+};
+
 function createRequest(params: {
   body: string;
   signature?: string;
@@ -91,17 +95,23 @@ function createMemoryKeyedStore<T>() {
   };
 }
 
-function createOpenKeyedStoreMock() {
+function createOpenKeyedStoreMock(): OpenKeyedStoreMock {
   const stores = new Map<string, ReturnType<typeof createMemoryKeyedStore<unknown>>>();
-  const openKeyedStore: PluginRuntime["state"]["openKeyedStore"] = <T>({ namespace }) => {
+  const calls: string[] = [];
+  const openKeyedStore = (<T>(
+    options: Parameters<PluginRuntime["state"]["openKeyedStore"]>[0],
+  ) => {
+    const namespace = options.namespace;
+    calls.push(namespace);
     let store = stores.get(namespace);
     if (!store) {
       store = createMemoryKeyedStore();
       stores.set(namespace, store);
     }
     return store as ReturnType<typeof createMemoryKeyedStore<T>>;
-  };
-  return vi.fn(openKeyedStore);
+  }) as OpenKeyedStoreMock;
+  openKeyedStore.callCount = () => calls.length;
+  return openKeyedStore;
 }
 
 function brokerConfig(
@@ -284,7 +294,7 @@ describe("channel-broker HTTP routes", () => {
         }),
       }),
     );
-    expect(openKeyedStore).toHaveBeenCalledTimes(2);
+    expect(openKeyedStore.callCount()).toBe(2);
   });
 
   it("deduplicates broker webhook redeliveries before dispatching another turn", async () => {
