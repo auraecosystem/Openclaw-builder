@@ -442,6 +442,85 @@ describe("buildCodexMigrationProvider", () => {
     );
   });
 
+  it("warns and skips Codex auth.json API keys when ChatGPT OAuth is present", async () => {
+    const fixture = await createCodexFixture();
+    const reportDir = path.join(fixture.root, "report");
+    const accessToken = fakeJwt({
+      "https://api.openai.com/auth": {
+        chatgpt_account_id: "acct_oauth",
+        chatgpt_plan_type: "plus",
+      },
+      "https://api.openai.com/profile": {
+        email: "codex@example.test",
+      },
+    });
+    await writeFile(
+      path.join(fixture.codexHome, "auth.json"),
+      JSON.stringify({
+        auth_mode: "chatgpt",
+        OPENAI_API_KEY: "sk-stale-platform",
+        tokens: {
+          access_token: accessToken,
+          refresh_token: "refresh-oauth-token",
+          account_id: "acct_oauth",
+        },
+      }),
+    );
+    const configState: MigrationProviderContext["config"] = {
+      agents: {
+        defaults: {
+          workspace: fixture.workspaceDir,
+        },
+      },
+    };
+    const provider = buildCodexMigrationProvider();
+    const ctx = makeContext({
+      source: fixture.codexHome,
+      stateDir: fixture.stateDir,
+      workspaceDir: fixture.workspaceDir,
+      config: configState,
+      runtime: createConfigRuntime(configState),
+      reportDir,
+      includeSecrets: true,
+    });
+
+    const plan = await provider.plan(ctx);
+
+    expectRecordFields(findItem(plan.items, "auth:openai-codex"), { status: "planned" });
+    expect(findItem(plan.items, "auth:openai:codex-api-key-ignored")).toEqual(
+      expect.objectContaining({
+        status: "warning",
+        action: "skip",
+        reason: "Codex OpenAI API key ignored because ChatGPT OAuth is present",
+        details: expect.objectContaining({
+          provider: "openai",
+          credentialKind: "api_key",
+          ignoredBecause: "openai-codex",
+        }),
+      }),
+    );
+
+    const result = await provider.apply(ctx, plan);
+
+    expect(result.items.some((item) => item.id === "auth:openai")).toBe(false);
+    expect(findItem(result.items, "auth:openai:codex-api-key-ignored")).toEqual(
+      expect.objectContaining({ status: "warning" }),
+    );
+    const authStore = JSON.parse(
+      await fs.readFile(
+        path.join(fixture.stateDir, "agents", "main", "agent", "auth-profiles.json"),
+        "utf8",
+      ),
+    ) as { profiles?: Record<string, { provider?: string; type?: string }> };
+    expect(authStore.profiles?.["openai-codex:account-acct_oauth"]).toEqual(
+      expect.objectContaining({
+        type: "oauth",
+        provider: "openai-codex",
+      }),
+    );
+    expect(authStore.profiles?.["openai:codex-import"]).toBeUndefined();
+  });
+
   it("reports late-created Codex API key config auth profile conflicts before writing", async () => {
     const fixture = await createCodexFixture();
     const reportDir = path.join(fixture.root, "report");

@@ -31,6 +31,7 @@ import {
   resolveModelRefFromString,
 } from "../../agents/model-selection.js";
 import {
+  OPENAI_PROVIDER_ID,
   OPENAI_CODEX_PROVIDER_ID,
   openAIProviderUsesCodexRuntimeByDefault,
 } from "../../agents/openai-codex-routing.js";
@@ -104,6 +105,16 @@ type StatusSyntheticAuth = {
   credential?: string;
   mode?: ProviderSyntheticAuthResult["mode"];
   expiresAt?: number;
+};
+
+type AuthStatusWarning = {
+  code: string;
+  severity: "warning";
+  message: string;
+  remediation: string;
+  providers: string[];
+  profiles?: string[];
+  sources?: string[];
 };
 
 function loadProviderUsageRuntime(): Promise<ProviderUsageRuntime> {
@@ -486,6 +497,48 @@ export async function modelsStatusCommand(
         return hasAny;
       });
     const providerAuthMap = new Map(providerAuth.map((entry) => [entry.provider, entry]));
+    const codexAuthProfileOrder = resolveAuthProfileOrder({
+      cfg,
+      store,
+      provider: OPENAI_CODEX_PROVIDER_ID,
+    });
+    const codexOauthProfiles = codexAuthProfileOrder.filter((profileId) => {
+      const credential = store.profiles[profileId];
+      return (
+        credential?.provider === OPENAI_CODEX_PROVIDER_ID &&
+        (credential.type === "oauth" || credential.type === "token")
+      );
+    });
+    const openAIApiKeyProfilesInCodexOrder = codexAuthProfileOrder.filter((profileId) => {
+      const credential = store.profiles[profileId];
+      return credential?.provider === OPENAI_PROVIDER_ID && credential.type === "api_key";
+    });
+    const authWarnings: AuthStatusWarning[] = [];
+    const openAIProviderAuth = providerAuthMap.get(OPENAI_PROVIDER_ID);
+    const directOpenAISources = [
+      ...openAIApiKeyProfilesInCodexOrder.map((profileId) => `profile:${profileId}`),
+      ...(openAIProviderAuth?.env ? [`env:${openAIProviderAuth.env.source}`] : []),
+      ...(openAIProviderAuth?.modelsJson
+        ? [`models.json:${openAIProviderAuth.modelsJson.source}`]
+        : []),
+    ];
+    if (
+      codexRuntimeAuthUsages.length > 0 &&
+      codexOauthProfiles.length > 0 &&
+      directOpenAISources.length > 0
+    ) {
+      authWarnings.push({
+        code: "openai-api-key-with-codex-oauth",
+        severity: "warning",
+        message:
+          "OpenAI API-key auth is still configured while OpenAI models are routed through Codex OAuth. A stale platform key can cause OpenAI quota or billing errors if it is selected by a fallback path.",
+        remediation:
+          "Remove OPENAI_API_KEY/openai:* API-key profiles, or pin auth.order.openai-codex to the intended openai-codex OAuth profile if the API key is only for direct OpenAI use.",
+        providers: [OPENAI_PROVIDER_ID, OPENAI_CODEX_PROVIDER_ID],
+        profiles: openAIApiKeyProfilesInCodexOrder,
+        sources: directOpenAISources,
+      });
+    }
     const missingProviderAuthEffective: ProviderAuthOverview["effective"] = {
       kind: "missing",
       detail: "missing",
@@ -787,6 +840,7 @@ export async function modelsStatusCommand(
           providersWithOAuth: providersWithOauth,
           missingProvidersInUse,
           runtimeAuthRoutes,
+          warnings: authWarnings,
           providers: providerAuth,
           unusableProfiles,
           oauth: {
@@ -990,6 +1044,15 @@ export async function modelsStatusCommand(
             )}`,
           )}${formatSeparator()}${formatKeyValue("status", route.status)}`,
         );
+      }
+    }
+
+    if (authWarnings.length > 0) {
+      runtime.log("");
+      runtime.log(colorize(rich, theme.heading, "Auth warnings"));
+      for (const warning of authWarnings) {
+        runtime.log(`- ${colorize(rich, theme.warn, warning.code)} ${warning.message}`);
+        runtime.log(`  ${colorize(rich, theme.muted, warning.remediation)}`);
       }
     }
 

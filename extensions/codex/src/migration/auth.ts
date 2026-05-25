@@ -34,6 +34,8 @@ const CODEX_REASON_AUTH_PROFILE_EXISTS = "auth profile exists";
 const CODEX_REASON_AUTH_PROFILE_WRITE_FAILED = "failed to write auth profile";
 const CODEX_REASON_AUTH_NO_LONGER_PRESENT = "auth credential no longer present";
 const CODEX_REASON_MISSING_AUTH_METADATA = "missing auth metadata";
+const CODEX_REASON_API_KEY_IGNORED_OAUTH_PRESENT =
+  "Codex OpenAI API key ignored because ChatGPT OAuth is present";
 const CODEX_CONFIG_PATCH_MODE_RETURN = "return";
 
 type CodexMigrationTargets = ReturnType<typeof resolveCodexMigrationTargets>;
@@ -63,6 +65,11 @@ type CodexAuthProfileConfig = {
   mode: "api_key" | "oauth";
   email?: string;
   displayName?: string;
+};
+
+type CodexAuthCredentials = {
+  credentials: CodexAuthCredential[];
+  ignoredApiKey: boolean;
 };
 
 type CodexAuthConfigApplyResult = "configured" | "conflict" | "unavailable";
@@ -241,10 +248,22 @@ async function buildCodexApiKeyCredential(
   };
 }
 
-async function readCodexAuthCredentials(source: CodexSource): Promise<CodexAuthCredential[]> {
+async function readCodexAuthMode(source: CodexSource): Promise<string | undefined> {
+  const raw = await readJsonObject(source.authPath);
+  return readString(raw.auth_mode)?.toLowerCase();
+}
+
+async function readCodexAuthCredentials(source: CodexSource): Promise<CodexAuthCredentials> {
   const oauth = await buildCodexOAuthCredential(source);
   const apiKey = await buildCodexApiKeyCredential(source);
-  return [oauth, apiKey].filter((entry): entry is CodexAuthCredential => entry !== null);
+  const authMode = await readCodexAuthMode(source);
+  const ignoredApiKey = Boolean(oauth && apiKey && authMode !== "apikey");
+  return {
+    credentials: [oauth, ignoredApiKey ? null : apiKey].filter(
+      (entry): entry is CodexAuthCredential => entry !== null,
+    ),
+    ignoredApiKey,
+  };
 }
 
 function findMatchingOAuthProfile(
@@ -544,13 +563,13 @@ export async function buildCodexAuthItems(params: {
   source: CodexSource;
   targets: CodexMigrationTargets;
 }): Promise<MigrationItem[]> {
-  const credentials = await readCodexAuthCredentials(params.source);
-  if (credentials.length === 0) {
+  const auth = await readCodexAuthCredentials(params.source);
+  if (auth.credentials.length === 0 && !auth.ignoredApiKey) {
     return [];
   }
   const store = loadAuthProfileStoreWithoutExternalProfiles(params.targets.agentDir);
   const skipped = !params.ctx.includeSecrets;
-  return credentials.map((credential) => {
+  const items = auth.credentials.map((credential) => {
     const { profileId, matchedExisting } = itemProfileTarget(credential, store);
     const targetExists = Boolean(store.profiles[profileId]);
     const configProfile = authProfileConfigForCredential(credential, profileId);
@@ -589,6 +608,28 @@ export async function buildCodexAuthItems(params: {
       },
     });
   });
+  if (auth.ignoredApiKey) {
+    items.push(
+      createMigrationItem({
+        id: "auth:openai:codex-api-key-ignored",
+        kind: "auth",
+        action: "skip",
+        source: params.source.authPath,
+        status: "warning",
+        sensitive: true,
+        reason: CODEX_REASON_API_KEY_IGNORED_OAUTH_PRESENT,
+        message:
+          "Codex auth.json also contains OPENAI_API_KEY; OpenClaw leaves it unimported because ChatGPT OAuth is present.",
+        details: {
+          provider: OPENAI_PROVIDER_ID,
+          sourceKind: "codex-auth-json",
+          credentialKind: "api_key",
+          ignoredBecause: OPENAI_CODEX_PROVIDER_ID,
+        },
+      }),
+    );
+  }
+  return items;
 }
 
 export async function applyCodexAuthItem(params: {
@@ -608,7 +649,7 @@ export async function applyCodexAuthItem(params: {
   if (!profileId || !provider) {
     return markMigrationItemError(item, CODEX_REASON_MISSING_AUTH_METADATA);
   }
-  const credential = (await readCodexAuthCredentials(source)).find(
+  const credential = (await readCodexAuthCredentials(source)).credentials.find(
     (candidate) => candidate.provider === provider,
   );
   if (!credential) {
@@ -703,7 +744,7 @@ export async function buildCodexAuthConfigPatchItems(params: {
   if (!profileId || !provider) {
     return [];
   }
-  const credential = (await readCodexAuthCredentials(source)).find(
+  const credential = (await readCodexAuthCredentials(source)).credentials.find(
     (candidate) => candidate.provider === provider,
   );
   if (!credential) {

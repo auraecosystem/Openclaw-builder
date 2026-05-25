@@ -838,6 +838,71 @@ describe("modelsStatusCommand auth overview", () => {
     }
   });
 
+  it("warns when OpenAI API-key auth remains beside Codex OAuth runtime auth", async () => {
+    const localRuntime = createRuntime();
+    const originalLoadConfig = mocks.loadConfig.getMockImplementation();
+    const originalProfiles = { ...mocks.store.profiles };
+    const originalOrder = mocks.store.order ? { ...mocks.store.order } : undefined;
+    mocks.loadConfig.mockReturnValue({
+      agents: {
+        defaults: {
+          model: { primary: "openai/gpt-5.5", fallbacks: [] },
+          models: { "openai/gpt-5.5": {} },
+        },
+      },
+      models: { providers: {} },
+      env: { shellEnv: { enabled: true } },
+    });
+    mocks.store.profiles = {
+      "openai-codex:default": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "usable-access",
+        refresh: "usable-refresh",
+        expires: Date.now() + 60_000,
+      },
+      "openai:default": {
+        type: "api_key",
+        provider: "openai",
+        key: "abc123",
+      },
+    };
+    mocks.store.order = {
+      openai: ["openai:default"],
+    };
+
+    try {
+      await modelsStatusCommand({ json: true }, localRuntime as never);
+      const payload = parseFirstJsonLog(localRuntime);
+      expect(payload.auth.warnings).toEqual([
+        expect.objectContaining({
+          code: "openai-api-key-with-codex-oauth",
+          severity: "warning",
+          providers: ["openai", "openai-codex"],
+          profiles: ["openai:default"],
+          sources: expect.arrayContaining([
+            "profile:openai:default",
+            "env:shell env: OPENAI_API_KEY",
+          ]),
+        }),
+      ]);
+      expect(payload.auth.runtimeAuthRoutes).toEqual([
+        expect.objectContaining({
+          provider: "openai",
+          runtime: "codex",
+          authProvider: "openai-codex",
+          status: "usable",
+        }),
+      ]);
+    } finally {
+      mocks.store.profiles = originalProfiles;
+      mocks.store.order = originalOrder;
+      if (originalLoadConfig) {
+        mocks.loadConfig.mockImplementation(originalLoadConfig);
+      }
+    }
+  });
+
   it("fails --check when an in-use provider alias has expired canonical auth health", async () => {
     const localRuntime = createRuntime();
     const originalLoadConfig = mocks.loadConfig.getMockImplementation();
