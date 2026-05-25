@@ -33,7 +33,7 @@ import { isRecord } from "../shared/record-coerce.js";
 import { uniqueStrings } from "../shared/string-normalization.js";
 import { CHARS_PER_TOKEN_ESTIMATE, estimateStringChars } from "../utils/cjk-chars.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./copilot-dynamic-headers.js";
-import { createDeepSeekTextFilter } from "./deepseek-text-filter.js";
+import { createDeepSeekTextFilter, type DsmlToolCall } from "./deepseek-text-filter.js";
 import { resolveMaxTokensParam } from "./model-max-tokens-params.js";
 import { supportsModelTools } from "./model-tool-support.js";
 import {
@@ -2734,6 +2734,16 @@ async function processOpenAICompletionsStream(
   finishAllToolCallBlocks();
   currentBlock = null;
   flushPendingPostToolCallDeltas();
+  // Recover tool calls from DSML markup that was emitted as plain text (#85918).
+  // DeepSeek/Foundry sometimes surfaces tool intent as DSML XML instead of native
+  // tool_calls. The text filter captured the markup; promote it to real tool calls.
+  const recoveredCalls = deepSeekTextFilter?.recoveredToolCalls() ?? [];
+  for (const recovered of recoveredCalls) {
+    injectRecoveredDsmlToolCall(recovered, output, stream);
+  }
+  if (recoveredCalls.length > 0) {
+    output.stopReason = "toolUse";
+  }
   const hasToolCalls = output.content.some((block) => block.type === "toolCall");
   if (output.stopReason === "toolUse" && !hasToolCalls) {
     output.stopReason = "stop";
@@ -2753,6 +2763,30 @@ type CompletionsReasoningDelta =
 
 function shouldFilterDeepSeekDsmlText(compat: ReturnType<typeof getCompat>) {
   return compat.thinkingFormat === "deepseek";
+}
+
+function injectRecoveredDsmlToolCall(
+  recovered: DsmlToolCall,
+  output: MutableAssistantOutput,
+  stream: { push(event: unknown): void },
+) {
+  const id = `dsml-recovered-${randomUUID()}`;
+  const block = {
+    type: "toolCall" as const,
+    id,
+    name: recovered.name,
+    arguments: recovered.arguments,
+    partialArgs: JSON.stringify(recovered.arguments),
+  };
+  output.content.push(block);
+  const contentIndex = output.content.length - 1;
+  stream.push({ type: "toolcall_start", contentIndex, partial: output });
+  stream.push({
+    type: "toolcall_delta",
+    contentIndex,
+    delta: block.partialArgs,
+    partial: output,
+  });
 }
 
 function getCompletionsContentDeltas(content: unknown): CompletionsReasoningDelta[] {
