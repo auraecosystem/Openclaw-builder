@@ -120,7 +120,7 @@ function installLockableFunction(params: {
   params.owner[params.key] = wrapped;
 }
 
-type SessionFileFingerprint =
+export type SessionFileFingerprint =
   | { exists: false }
   | {
       exists: true;
@@ -465,7 +465,7 @@ async function readSessionFileFingerprint(sessionFile: string): Promise<SessionF
   }
 }
 
-function readSessionFileFingerprintSync(sessionFile: string): SessionFileFingerprint {
+export function readSessionFileFingerprintSync(sessionFile: string): SessionFileFingerprint {
   try {
     const stat = statSync(sessionFile, { bigint: true });
     return {
@@ -617,7 +617,7 @@ export function installSessionExternalHookWriteLock(params: {
 export type EmbeddedAttemptSessionLockController = {
   releaseForPrompt(): Promise<void>;
   refreshAfterOwnedSessionWrite(): void;
-  publishOwnedPostMessageWrite(): void;
+  publishOwnedPostMessageWrite(beforeWrite: SessionFileFingerprint | undefined): void;
   reacquireAfterPrompt(): Promise<void>;
   waitForSessionEvents(session: unknown): Promise<void>;
   withSessionWriteLock<T>(
@@ -774,26 +774,35 @@ export async function createEmbeddedAttemptSessionLockController(params: {
         fenceSnapshot = { fingerprint: fenceFingerprint };
       }
     },
-    publishOwnedPostMessageWrite(): void {
-      // Called synchronously after pi's `sessionManager.appendMessage` → `_persist`
-      // → `appendFileSync` from the `onMessagePersisted` callback. Records the
-      // post-write fingerprint as an OWNED write in `ownedSessionFileWrites` so
-      // that subsequent `assertSessionFileFence` calls inside `withSessionWriteLock`
-      // accept the lane's own writes via the owned-write match path rather than
-      // tripping `EmbeddedAttemptSessionTakeoverError`. Critically, this only
-      // publishes when the prior `fenceFingerprint` is in
-      // `trustedSessionFileStates` (set at `releaseForPrompt` time), so an
-      // external mutation that arrives without going through this callback
-      // never gets recorded as owned — preserving fail-closed takeover
-      // detection for genuine same-file external edits.
-      if (takeoverDetected || !fenceFingerprint) {
+    publishOwnedPostMessageWrite(beforeWrite: SessionFileFingerprint | undefined): void {
+      // Called synchronously after pi's `sessionManager.appendMessage` →
+      // `_persist` → `appendFileSync` from the `onMessagePersisted` callback.
+      // `beforeWrite` is the file fingerprint captured immediately BEFORE the
+      // session-manager append (passed through `beforeMessagePersist` in
+      // `installSessionPersistenceGuard`). Records the post-write fingerprint
+      // as an OWNED write in `ownedSessionFileWrites` so subsequent
+      // `assertSessionFileFence` calls inside `withSessionWriteLock` accept
+      // the lane's own writes via the owned-write match path.
+      //
+      // Fail-closed gate: the trust check runs on `beforeWrite`, not on the
+      // current fence fingerprint. If an external mutation lands between
+      // `releaseForPrompt` (which marks F0 trusted) and pi's append, then
+      // `beforeWrite` = F1 ≠ F0 and `isTrustedSessionFileState` returns
+      // false — publish is skipped and the external + pi combined state
+      // (F2) is NOT recorded as owned. The subsequent hook-lock
+      // `assertSessionFileFence` still sees current = F2 ≠ fence = F0 and
+      // trips the takeover correctly.
+      if (takeoverDetected) {
+        return;
+      }
+      if (!beforeWrite) {
+        return;
+      }
+      if (!isTrustedSessionFileState(sessionFileFenceKey, beforeWrite)) {
         return;
       }
       const current = readSessionFileFingerprintSync(params.lockOptions.sessionFile);
-      if (sameSessionFileFingerprint(fenceFingerprint, current)) {
-        return;
-      }
-      if (!isTrustedSessionFileState(sessionFileFenceKey, fenceFingerprint)) {
+      if (sameSessionFileFingerprint(beforeWrite, current)) {
         return;
       }
       const generation = recordOwnedSessionFileWrite(sessionFileFenceKey, current);
