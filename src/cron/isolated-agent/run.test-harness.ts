@@ -73,6 +73,7 @@ export const resolveSessionAuthProfileOverrideMock = createMock();
 export const resolveFastModeStateMock = createMock();
 export const getChannelPluginMock = createMock();
 export const retireSessionMcpRuntimeMock = createMock();
+export const callGatewayMock = createMock();
 export const ensureRuntimePluginsLoadedMock = createMock();
 
 const resolveBootstrapWarningSignaturesSeenMock = createMock();
@@ -226,6 +227,10 @@ vi.mock("../../agents/cli-runner.runtime.js", () => ({
 
 vi.mock("../../agents/pi-bundle-mcp-tools.js", () => ({
   retireSessionMcpRuntime: retireSessionMcpRuntimeMock,
+}));
+
+vi.mock("../../gateway/call.runtime.js", () => ({
+  callGateway: callGatewayMock,
 }));
 
 vi.mock("../../config/sessions/store.runtime.js", () => ({
@@ -564,6 +569,8 @@ function resetRunSessionMocks(): void {
   updateSessionStoreMock.mockResolvedValue(undefined);
   resolveCronSessionMock.mockReset();
   resolveCronSessionMock.mockReturnValue(makeCronSession());
+  callGatewayMock.mockReset();
+  callGatewayMock.mockResolvedValue({ ok: true, deleted: true });
   retireSessionMcpRuntimeMock.mockReset();
   retireSessionMcpRuntimeMock.mockResolvedValue(true);
 }
