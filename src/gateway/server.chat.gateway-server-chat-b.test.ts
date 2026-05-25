@@ -226,7 +226,7 @@ describe("gateway server chat", () => {
     }
   });
 
-  test("chat.send returns in_flight when duplicate attachment send wins parsing race", async () => {
+  test("chat.send returns in_flight for duplicate attachment send while preprocessing is pending", async () => {
     const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-gw-"));
     const dispatchRelease = createDeferred<void>();
     try {
@@ -317,7 +317,7 @@ describe("gateway server chat", () => {
         {
           id: "duplicate",
           ok: true,
-          payload: { runId: "idem-attachment-race", status: "started" },
+          payload: { runId: "idem-attachment-race", status: "in_flight" },
           error: undefined,
         },
       ]);
@@ -336,13 +336,13 @@ describe("gateway server chat", () => {
         {
           id: "duplicate",
           ok: true,
-          payload: { runId: "idem-attachment-race", status: "started" },
+          payload: { runId: "idem-attachment-race", status: "in_flight" },
           error: undefined,
         },
         {
           id: "first",
           ok: true,
-          payload: { runId: "idem-attachment-race", status: "in_flight" },
+          payload: { runId: "idem-attachment-race", status: "started" },
           error: undefined,
         },
       ]);
@@ -354,6 +354,151 @@ describe("gateway server chat", () => {
       }, FAST_WAIT_OPTS);
     } finally {
       dispatchRelease.resolve();
+      dispatchInboundMessageMock.mockReset();
+      testState.sessionStorePath = undefined;
+      clearConfigCache();
+      await fs.rm(sessionDir, { recursive: true, force: true });
+    }
+  });
+
+  test("chat.abort stops an attachment send while preprocessing is still pending", async () => {
+    const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-gw-"));
+    const catalogModels: Awaited<ReturnType<GatewayRequestContext["loadGatewayModelCatalog"]>> = [
+      {
+        id: "vision-model",
+        name: "Vision Model",
+        provider: "test-provider",
+        input: ["text", "image"],
+      },
+    ];
+    const firstCatalog =
+      createDeferred<Awaited<ReturnType<GatewayRequestContext["loadGatewayModelCatalog"]>>>();
+    try {
+      testState.sessionStorePath = path.join(sessionDir, "sessions.json");
+      await writeSessionStore({
+        entries: {
+          main: {
+            sessionId: "sess-main",
+            modelProvider: "test-provider",
+            model: "vision-model",
+            updatedAt: Date.now(),
+          },
+        },
+      });
+
+      const responses: Array<{ id: string; ok: boolean; payload?: unknown; error?: unknown }> = [];
+      const chatAbortControllers = new Map();
+      const context = {
+        loadGatewayModelCatalog: vi
+          .fn<GatewayRequestContext["loadGatewayModelCatalog"]>()
+          .mockImplementationOnce(() => firstCatalog.promise),
+        logGateway: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+        },
+        agentRunSeq: new Map<string, number>(),
+        chatAbortControllers,
+        chatAbortedRuns: new Map(),
+        chatRunBuffers: new Map(),
+        chatDeltaSentAt: new Map(),
+        chatDeltaLastBroadcastLen: new Map(),
+        chatDeltaLastBroadcastText: new Map(),
+        agentDeltaSentAt: new Map(),
+        bufferedAgentEvents: new Map(),
+        addChatRun: vi.fn(),
+        removeChatRun: vi.fn(),
+        broadcast: vi.fn(),
+        nodeSendToSession: vi.fn(),
+        registerToolEventRecipient: vi.fn(),
+        dedupe: new Map(),
+      } as unknown as GatewayRequestContext;
+      dispatchInboundMessageMock.mockResolvedValue(undefined);
+
+      const pngB64 =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/woAAn8B9FD5fHAAAAAASUVORK5CYII=";
+      const params = {
+        sessionKey: "main",
+        message: "see image",
+        idempotencyKey: "idem-abort-attachment-race",
+        attachments: [
+          {
+            type: "image",
+            mimeType: "image/png",
+            fileName: "dot.png",
+            content: pngB64,
+          },
+        ],
+      };
+      const { chatHandlers } = await import("./server-methods/chat.js");
+      const callSend = (id: string) =>
+        chatHandlers["chat.send"]({
+          req: { type: "req", id, method: "chat.send", params },
+          params,
+          client: null,
+          isWebchatConnect: () => false,
+          respond: ((ok, payload, error) => {
+            responses.push({ id, ok, payload, error });
+          }) as RespondFn,
+          context,
+        });
+
+      const send = Promise.resolve(callSend("send"));
+      await vi.waitFor(() => {
+        expect(context.loadGatewayModelCatalog).toHaveBeenCalledTimes(1);
+      }, FAST_WAIT_OPTS);
+
+      const abortResponses: Array<{ ok: boolean; payload?: unknown; error?: unknown }> = [];
+      await chatHandlers["chat.abort"]({
+        req: {
+          type: "req",
+          id: "abort",
+          method: "chat.abort",
+          params: { sessionKey: "main", runId: "idem-abort-attachment-race" },
+        },
+        params: { sessionKey: "main", runId: "idem-abort-attachment-race" },
+        client: null,
+        isWebchatConnect: () => false,
+        respond: ((ok, payload, error) => {
+          abortResponses.push({ ok, payload, error });
+        }) as RespondFn,
+        context,
+      });
+
+      expect(abortResponses).toEqual([
+        {
+          ok: true,
+          payload: {
+            ok: true,
+            aborted: true,
+            runIds: ["idem-abort-attachment-race"],
+          },
+          error: undefined,
+        },
+      ]);
+      expect(chatAbortControllers.has("idem-abort-attachment-race")).toBe(false);
+
+      firstCatalog.resolve(catalogModels);
+      await send;
+
+      expect(responses).toEqual([
+        {
+          id: "send",
+          ok: true,
+          payload: { runId: "idem-abort-attachment-race", status: "started" },
+          error: undefined,
+        },
+      ]);
+      expect(dispatchInboundMessageMock).not.toHaveBeenCalled();
+      expect(context.addChatRun).not.toHaveBeenCalled();
+      expect(context.removeChatRun).toHaveBeenCalledWith(
+        "idem-abort-attachment-race",
+        "idem-abort-attachment-race",
+        "main",
+      );
+    } finally {
+      firstCatalog.resolve(catalogModels);
       dispatchInboundMessageMock.mockReset();
       testState.sessionStorePath = undefined;
       clearConfigCache();
