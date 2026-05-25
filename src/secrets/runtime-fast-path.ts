@@ -14,6 +14,7 @@ import type { AuthProfileStore } from "../agents/auth-profiles/types.js";
 import { resolveOAuthPath } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { coerceSecretRef } from "../config/types.secrets.js";
+import type { PluginManifestRegistry } from "../plugins/manifest-registry.js";
 import type { PluginOrigin } from "../plugins/plugin-origin.types.js";
 import { resolveUserPath } from "../utils.js";
 import type {
@@ -249,6 +250,7 @@ export function prepareSecretsRuntimeFastPathSnapshot(params: {
   includeAuthStoreRefs?: boolean;
   loadAuthStore?: (agentDir?: string) => AuthProfileStore;
   loadablePluginOrigins?: ReadonlyMap<string, PluginOrigin>;
+  manifestRegistry?: Pick<PluginManifestRegistry, "plugins">;
 }): {
   snapshot: PreparedSecretsRuntimeSnapshot;
   refreshContext: SecretsRuntimeRefreshContext;
@@ -305,6 +307,7 @@ export function prepareSecretsRuntimeFastPathSnapshot(params: {
       explicitAgentDirs: params.agentDirs?.length ? [...candidateDirs] : null,
       includeAuthStoreRefs,
       loadablePluginOrigins: params.loadablePluginOrigins ?? new Map<string, PluginOrigin>(),
+      ...(params.manifestRegistry ? { manifestRegistry: params.manifestRegistry } : {}),
       ...(params.loadAuthStore ? { loadAuthStore: params.loadAuthStore } : {}),
     },
   };
