@@ -1136,6 +1136,7 @@ export const ToolsSchema = z
         attachments: z
           .object({
             enabled: z.boolean().optional(),
+            acpEnabled: z.boolean().optional(),
             maxTotalBytes: z.number().optional(),
             maxFiles: z.number().optional(),
             maxFileBytes: z.number().optional(),
