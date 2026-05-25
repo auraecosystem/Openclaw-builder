@@ -391,7 +391,11 @@ import {
   resolveSilentToolResultReplyPayload,
   shouldTreatEmptyAssistantReplyAsSilent,
 } from "./incomplete-turn.js";
-import { resolveLlmIdleTimeoutMs, streamWithIdleTimeout } from "./llm-idle-timeout.js";
+import {
+  resolveLlmIdleTimeoutMs,
+  shouldAllowDiagnosticModelCallAbort,
+  streamWithIdleTimeout,
+} from "./llm-idle-timeout.js";
 import { resolveMessageMergeStrategy } from "./message-merge-strategy.js";
 import { installMessageToolOnlyTerminalHook } from "./message-tool-terminal.js";
 import {
@@ -3038,6 +3042,9 @@ export async function runEmbeddedAttempt(
           ...(params.contextWindowInfo?.referenceTokens
             ? { contextWindowReferenceTokens: params.contextWindowInfo.referenceTokens }
             : {}),
+          allowActiveAbort: shouldAllowDiagnosticModelCallAbort(
+            params.model as { baseUrl?: string; id?: string; provider?: string },
+          ),
           trace: runTrace,
           nextCallId: () => `${params.runId}:model:${(diagnosticModelCallSeq += 1)}`,
           onStarted: () => {

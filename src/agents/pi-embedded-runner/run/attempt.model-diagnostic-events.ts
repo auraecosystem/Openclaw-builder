@@ -37,6 +37,7 @@ type ModelCallDiagnosticContext = {
   contextTokenBudget?: number;
   contextWindowSource?: PluginHookContextWindowSource;
   contextWindowReferenceTokens?: number;
+  allowActiveAbort?: boolean;
   trace: DiagnosticTraceContext;
   nextCallId: () => string;
   onStarted?: () => void;
@@ -159,6 +160,7 @@ function baseModelCallEvent(
     ...(ctx.contextWindowReferenceTokens
       ? { contextWindowReferenceTokens: ctx.contextWindowReferenceTokens }
       : {}),
+    ...(ctx.allowActiveAbort === false ? { allowActiveAbort: false } : {}),
     trace,
   };
 }
