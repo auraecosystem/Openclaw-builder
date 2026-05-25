@@ -114,6 +114,7 @@ import {
 import { CHAT_SEND_SESSION_KEY_MAX_LENGTH } from "../protocol/schema/primitives.js";
 import { getMaxChatHistoryMessagesBytes } from "../server-constants.js";
 import { readSessionTranscriptIndex } from "../session-transcript-index.fs.js";
+import { resolveSessionHistoryTailReadOptions } from "../session-history-state.js";
 import {
   capArrayByJsonBytes,
   loadSessionEntry,
@@ -2121,10 +2122,11 @@ export const chatHandlers: GatewayRequestHandlers = {
     const requested = typeof limit === "number" ? limit : defaultLimit;
     const max = Math.min(hardMax, requested);
     const maxHistoryBytes = getMaxChatHistoryMessagesBytes();
+    const rawHistoryWindow = resolveSessionHistoryTailReadOptions(max);
     const localMessages =
       sessionId && storePath
         ? await readRecentSessionMessagesAsync(sessionId, storePath, entry?.sessionFile, {
-            maxMessages: max,
+            ...rawHistoryWindow,
             maxBytes: Math.max(maxHistoryBytes * 2, 1024 * 1024),
           })
         : [];

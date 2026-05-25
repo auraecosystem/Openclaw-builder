@@ -3,6 +3,10 @@ import { t } from "../i18n/index.ts";
 import { createChatSessionsLoadOverrides, refreshChat, refreshChatAvatar } from "./app-chat.ts";
 import { syncUrlWithSessionKey } from "./app-settings.ts";
 import type { AppViewState } from "./app-view-state.ts";
+import {
+  persistChatComposerState,
+  restoreChatComposerState,
+} from "./chat/composer-persistence.ts";
 import { reconcileChatRunLifecycle } from "./chat/run-lifecycle.ts";
 import {
   renderChatSessionSelect as renderChatSessionSelectBase,
@@ -123,6 +127,7 @@ function restoreChatQueueForSession(state: AppViewState, sessionKey: string): Ch
 function resetChatStateForSessionSwitch(state: AppViewState, sessionKey: string) {
   const host = state as unknown as SessionSwitchHost;
   const previousSessionKey = state.sessionKey;
+  persistChatComposerState(state, previousSessionKey);
   saveChatQueueForSession(state, previousSessionKey);
   state.sessionKey = sessionKey;
   (state as unknown as { currentSessionId?: string | null }).currentSessionId = null;
@@ -142,6 +147,7 @@ function resetChatStateForSessionSwitch(state: AppViewState, sessionKey: string)
   state.realtimeTalkTranscript = null;
   state.resetRealtimeTalkConversation?.();
   state.chatQueue = restoreChatQueueForSession(state, sessionKey);
+  restoreChatComposerState(state);
   host.resetChatInputHistoryNavigation();
   host.chatStreamStartedAt = null;
   reconcileChatRunLifecycle(state as unknown as Parameters<typeof reconcileChatRunLifecycle>[0], {
