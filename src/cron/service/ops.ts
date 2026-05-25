@@ -535,7 +535,7 @@ async function skipInvalidPersistedManualRun(params: {
       startedAt: endedAt,
       endedAt,
     },
-    { preserveSchedule: params.mode === "force" },
+    { preserveSchedule: params.mode === "force", isManual: true },
   );
 
   emit(params.state, {
@@ -778,7 +778,7 @@ async function finishPreparedManualRun(
           startedAt,
           endedAt,
         },
-        { preserveSchedule: mode === "force" },
+        { preserveSchedule: mode === "force", isManual: true },
       );
 
       emit(state, {
