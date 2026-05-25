@@ -69,6 +69,29 @@ describe("xai provider plugin", () => {
     expect(deviceCode?.wizard?.choiceId).toBe("xai-device-code");
   });
 
+  it("classifies xAI spending limit errors with a usage action", async () => {
+    const provider = await registerSingleProviderPlugin(plugin);
+
+    expect(
+      provider.classifyProviderError?.({
+        provider: "xai",
+        errorMessage: "Forbidden",
+        status: 403,
+        code: "SPENDING_LIMIT",
+      } as never),
+    ).toEqual({
+      reason: "billing",
+      status: 403,
+      code: "SPENDING_LIMIT",
+      userMessage: "Your xAI account has reached its spending limit.",
+      action: {
+        kind: "usage",
+        label: "Review xAI usage",
+        url: "https://grok.com/?_s=usage",
+      },
+    });
+  });
+
   it("registers xAI speech providers for batch and streaming STT", async () => {
     const { mediaProviders, realtimeTranscriptionProviders } = await registerProviderPlugin({
       plugin,

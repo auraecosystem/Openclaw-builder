@@ -479,23 +479,24 @@ API key auth, and dynamic model resolution.
       | 23 | `refreshOAuth` | Custom OAuth refresh |
       | 24 | `buildAuthDoctorHint` | Auth repair guidance |
       | 25 | `matchesContextOverflowError` | Provider-owned overflow detection |
-      | 26 | `classifyFailoverReason` | Provider-owned rate-limit/overload classification |
-      | 27 | `isCacheTtlEligible` | Prompt cache TTL gating |
-      | 28 | `buildMissingAuthMessage` | Custom missing-auth hint |
-      | 29 | `augmentModelCatalog` | Synthetic forward-compat rows |
-      | 30 | `resolveThinkingProfile` | Model-specific `/think` option set |
-      | 31 | `isBinaryThinking` | Binary thinking on/off compatibility |
-      | 32 | `supportsXHighThinking` | `xhigh` reasoning support compatibility |
-      | 33 | `resolveDefaultThinkingLevel` | Default `/think` policy compatibility |
-      | 34 | `isModernModelRef` | Live/smoke model matching |
-      | 35 | `prepareRuntimeAuth` | Token exchange before inference |
-      | 36 | `resolveUsageAuth` | Custom usage credential parsing |
-      | 37 | `fetchUsageSnapshot` | Custom usage endpoint |
-      | 38 | `createEmbeddingProvider` | Provider-owned embedding adapter for memory/search |
-      | 39 | `buildReplayPolicy` | Custom transcript replay/compaction policy |
-      | 40 | `sanitizeReplayHistory` | Provider-specific replay rewrites after generic cleanup |
-      | 41 | `validateReplayTurns` | Strict replay-turn validation before the embedded runner |
-      | 42 | `onModelSelected` | Post-selection callback (e.g. telemetry) |
+      | 26 | `classifyProviderError` | Provider-owned structured billing, usage, auth, and rate-limit classification |
+      | 27 | `classifyFailoverReason` | Legacy/simple provider-owned rate-limit/overload classification |
+      | 28 | `isCacheTtlEligible` | Prompt cache TTL gating |
+      | 29 | `buildMissingAuthMessage` | Custom missing-auth hint |
+      | 30 | `augmentModelCatalog` | Synthetic forward-compat rows |
+      | 31 | `resolveThinkingProfile` | Model-specific `/think` option set |
+      | 32 | `isBinaryThinking` | Binary thinking on/off compatibility |
+      | 33 | `supportsXHighThinking` | `xhigh` reasoning support compatibility |
+      | 34 | `resolveDefaultThinkingLevel` | Default `/think` policy compatibility |
+      | 35 | `isModernModelRef` | Live/smoke model matching |
+      | 36 | `prepareRuntimeAuth` | Token exchange before inference |
+      | 37 | `resolveUsageAuth` | Custom usage credential parsing |
+      | 38 | `fetchUsageSnapshot` | Custom usage endpoint |
+      | 39 | `createEmbeddingProvider` | Provider-owned embedding adapter for memory/search |
+      | 40 | `buildReplayPolicy` | Custom transcript replay/compaction policy |
+      | 41 | `sanitizeReplayHistory` | Provider-specific replay rewrites after generic cleanup |
+      | 42 | `validateReplayTurns` | Strict replay-turn validation before the embedded runner |
+      | 43 | `onModelSelected` | Post-selection callback (e.g. telemetry) |
 
       Runtime fallback notes:
 
@@ -505,6 +506,90 @@ API key auth, and dynamic model resolution.
 
       For detailed descriptions and real-world examples, see [Internals: Provider Runtime Hooks](/plugins/architecture-internals#provider-runtime-hooks).
     </Accordion>
+
+    ### Classify provider errors
+
+    Use `classifyProviderError` when a provider has stable error codes, HTTP
+    statuses, or recovery hints that generic text matching cannot safely
+    understand. This keeps provider-specific policy in the provider plugin while
+    giving core one generic contract for billing, usage-cap, auth, rate-limit,
+    overload, and model errors.
+
+    Current legacy flow:
+
+    ```mermaid
+    flowchart TD
+      request["Provider request fails"] --> extract["Core extracts error text"]
+      extract --> overflow["matchesContextOverflowError?"]
+      extract --> legacy["classifyFailoverReason(ctx)"]
+      legacy --> reason["FailoverReason string"]
+      reason --> copy["Generic failover and user error copy"]
+    ```
+
+    Structured provider-error flow:
+
+    ```mermaid
+    flowchart TD
+      request["Provider request fails"] --> extract["Core extracts message, status, and code"]
+      extract --> structured["classifyProviderError(ctx)"]
+      structured --> descriptor["ProviderErrorDescriptor"]
+      descriptor --> reason["reason drives failover and generic copy"]
+      descriptor --> metadata["userMessage, action, retryAfterMs for UI surfaces"]
+      structured --> fallback["No match"]
+      fallback --> legacy["classifyFailoverReason(ctx)"]
+      legacy --> generic["Generic classifiers"]
+    ```
+
+    Prefer `openclaw/plugin-sdk/provider-errors` for declarative maps:
+
+    ```typescript
+    import { defineProviderErrorMap } from "openclaw/plugin-sdk/provider-errors";
+
+    const classifyKnownProviderError = defineProviderErrorMap([
+      {
+        codes: ["SPENDING_LIMIT"],
+        status: [402, 403],
+        reason: "billing",
+        userMessage: "Your xAI account has reached its usage or spending limit.",
+        action: {
+          kind: "usage",
+          label: "Review usage",
+          url: "https://grok.com/?_s=usage",
+        },
+      },
+      {
+        codes: ["RATE_LIMIT_REACHED"],
+        status: 429,
+        reason: "rate_limit",
+        retryAfterMs: 30_000,
+      },
+    ]);
+
+    api.registerProvider({
+      id: "xai",
+      label: "xAI",
+      auth: [],
+      classifyProviderError: classifyKnownProviderError,
+      classifyFailoverReason: (ctx) => {
+        const classification = classifyKnownProviderError(ctx);
+        return typeof classification === "string" ? classification : classification?.reason;
+      },
+    });
+    ```
+
+    Backward compatibility rules:
+
+    - Existing plugins can keep `classifyFailoverReason`; OpenClaw still calls it
+      after `classifyProviderError`.
+    - New plugins should return `ProviderErrorDescriptor` from
+      `classifyProviderError` so future TUI, Control UI, and channel surfaces can
+      show provider-owned recovery copy without moving provider IDs into core.
+    - Provider plugins should match stable upstream fields such as `code`,
+      `status`, or documented error type before matching prose. Use
+      `messagePatterns` only when the provider does not expose a stable field.
+    - Core consumes `reason` today for failover and generic error formatting.
+      `userMessage`, `action`, and `retryAfterMs` are typed metadata for UI
+      surfaces that opt into structured provider errors.
 
   </Step>
 

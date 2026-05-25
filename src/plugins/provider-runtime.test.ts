@@ -54,6 +54,7 @@ let buildProviderUnknownModelHintWithPlugin: typeof import("./provider-runtime.j
 let applyProviderNativeStreamingUsageCompatWithPlugin: typeof import("./provider-runtime.js").applyProviderNativeStreamingUsageCompatWithPlugin;
 let applyProviderConfigDefaultsWithPlugin: typeof import("./provider-runtime.js").applyProviderConfigDefaultsWithPlugin;
 let formatProviderAuthProfileApiKeyWithPlugin: typeof import("./provider-runtime.js").formatProviderAuthProfileApiKeyWithPlugin;
+let classifyProviderErrorWithPlugin: typeof import("./provider-runtime.js").classifyProviderErrorWithPlugin;
 let classifyProviderFailoverReasonWithPlugin: typeof import("./provider-runtime.js").classifyProviderFailoverReasonWithPlugin;
 let matchesProviderContextOverflowWithPlugin: typeof import("./provider-runtime.js").matchesProviderContextOverflowWithPlugin;
 let normalizeProviderConfigWithPlugin: typeof import("./provider-runtime.js").normalizeProviderConfigWithPlugin;
@@ -321,6 +322,7 @@ describe("provider-runtime", () => {
       applyProviderConfigDefaultsWithPlugin,
       applyProviderResolvedModelCompatWithPlugins,
       applyProviderResolvedTransportWithPlugin,
+      classifyProviderErrorWithPlugin,
       classifyProviderFailoverReasonWithPlugin,
       formatProviderAuthProfileApiKeyWithPlugin,
       matchesProviderContextOverflowWithPlugin,
@@ -1389,6 +1391,15 @@ describe("provider-runtime", () => {
       }),
     ).toBe(true);
     expect(
+      classifyProviderErrorWithPlugin({
+        provider: "azure-openai-responses",
+        context: {
+          provider: "azure-openai-responses",
+          errorMessage: "quota exceeded",
+        },
+      }),
+    ).toBe("rate_limit");
+    expect(
       classifyProviderFailoverReasonWithPlugin({
         provider: "azure-openai-responses",
         context: {
@@ -1397,6 +1408,49 @@ describe("provider-runtime", () => {
         },
       }),
     ).toBe("rate_limit");
+  });
+
+  it("prefers structured provider error descriptors before legacy failover hooks", () => {
+    resolvePluginProvidersMock.mockReturnValue([
+      {
+        id: "xai",
+        label: "xAI",
+        auth: [],
+        classifyProviderError: ({ code }) =>
+          code === "SPENDING_LIMIT"
+            ? {
+                reason: "billing",
+                code,
+                userMessage: "Your xAI account has reached its spending limit.",
+                action: {
+                  kind: "usage",
+                  label: "Review usage",
+                  url: "https://grok.com/?_s=usage",
+                },
+              }
+            : undefined,
+        classifyFailoverReason: () => "rate_limit",
+      },
+    ]);
+
+    const context = {
+      provider: "xai",
+      errorMessage: "Forbidden",
+      status: 403,
+      code: "SPENDING_LIMIT",
+    };
+
+    expect(classifyProviderErrorWithPlugin({ provider: "xai", context })).toEqual({
+      reason: "billing",
+      code: "SPENDING_LIMIT",
+      userMessage: "Your xAI account has reached its spending limit.",
+      action: {
+        kind: "usage",
+        label: "Review usage",
+        url: "https://grok.com/?_s=usage",
+      },
+    });
+    expect(classifyProviderFailoverReasonWithPlugin({ provider: "xai", context })).toBe("billing");
   });
 
   it("resolves stream wrapper hooks through hook-only aliases without provider ownership", () => {

@@ -953,7 +953,31 @@ export type ProviderFailoverErrorContext = {
   provider?: string;
   modelId?: string;
   errorMessage: string;
+  status?: number;
+  code?: string;
+  errorType?: string;
 };
+
+export type ProviderErrorActionKind = "billing" | "retry" | "reauth" | "usage";
+
+export type ProviderErrorAction = {
+  kind: ProviderErrorActionKind;
+  label?: string;
+  url?: string;
+  command?: string;
+};
+
+export type ProviderErrorDescriptor = {
+  reason: FailoverReason;
+  status?: number;
+  code?: string;
+  errorType?: string;
+  userMessage?: string;
+  retryAfterMs?: number;
+  action?: ProviderErrorAction;
+};
+
+export type ProviderErrorClassification = FailoverReason | ProviderErrorDescriptor;
 
 /**
  * Generic embedding provider shape returned by provider plugins.
@@ -1543,6 +1567,16 @@ export type ProviderPlugin = {
    * overflow shape that generic heuristics would miss.
    */
   matchesContextOverflowError?: (ctx: ProviderFailoverErrorContext) => boolean | undefined;
+  /**
+   * Provider-owned structured failover error classification.
+   *
+   * Prefer this hook for provider-specific codes, statuses, and recovery hints
+   * that generic string matching cannot safely infer. Return undefined to fall
+   * back to `classifyFailoverReason` and generic classification.
+   */
+  classifyProviderError?: (
+    ctx: ProviderFailoverErrorContext,
+  ) => ProviderErrorClassification | null | undefined;
   /**
    * Provider-owned failover error classification.
    *

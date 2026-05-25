@@ -1264,6 +1264,11 @@ describe("plugin-sdk subpath exports", () => {
       "postTranscriptionRequest",
       "requireTranscriptionText",
     ]);
+    expectSourceMentions("provider-errors", [
+      "defineProviderErrorMap",
+      "classifyProviderErrorFromMap",
+      "ProviderErrorDescriptor",
+    ]);
     expectSourceOmits("speech", [
       "buildElevenLabsSpeechProvider",
       "buildMicrosoftSpeechProvider",

@@ -33,6 +33,7 @@ import {
   matchesFormatErrorPattern,
 } from "./failover-matches.js";
 import {
+  classifyProviderPluginError,
   classifyProviderSpecificError,
   matchesProviderContextOverflow,
 } from "./provider-error-patterns.js";
@@ -263,6 +264,7 @@ type PaymentRequiredFailoverReason = Extract<FailoverReason, "billing" | "rate_l
 export type FailoverSignal = {
   status?: number;
   code?: string;
+  errorType?: string;
   message?: string;
   provider?: string;
 };
@@ -475,11 +477,11 @@ function isSandboxBlockedErrorMessage(raw: string): boolean {
   return Boolean(formatExecDeniedUserMessage(raw)) || SANDBOX_BLOCKED_RE.test(raw);
 }
 
-function isSchemaErrorMessage(raw: string): boolean {
+function isSchemaErrorMessage(raw: string, provider?: string): boolean {
   if (!raw || isReplayInvalidErrorMessage(raw) || isContextOverflowError(raw)) {
     return false;
   }
-  return classifyFailoverReason(raw) === "format" || matchesFormatErrorPattern(raw);
+  return classifyFailoverReason(raw, { provider }) === "format" || matchesFormatErrorPattern(raw);
 }
 
 function isTimeoutTransportErrorMessage(raw: string, status?: number): boolean {
@@ -652,6 +654,7 @@ function classifyFailoverClassificationFromHttpStatus(
   messageClassification: FailoverClassification | null,
   explicitStatus: number | undefined,
   provider?: string,
+  providerPluginClassification?: FailoverClassification | null,
 ): FailoverClassification | null {
   const messageReason = failoverReasonFromClassification(messageClassification);
   if (typeof status !== "number" || !Number.isFinite(status)) {
@@ -659,6 +662,9 @@ function classifyFailoverClassificationFromHttpStatus(
   }
 
   if (status === 402) {
+    if (providerPluginClassification) {
+      return providerPluginClassification;
+    }
     if (!message) {
       return toReasonClassification("billing");
     }
@@ -687,6 +693,9 @@ function classifyFailoverClassificationFromHttpStatus(
   if (status === 401 || status === 403) {
     if (message && isAuthPermanentErrorMessage(message)) {
       return toReasonClassification("auth_permanent");
+    }
+    if (providerPluginClassification) {
+      return providerPluginClassification;
     }
     // billing message on 401/403 takes precedence over generic auth (e.g. OpenRouter
     // "Key limit exceeded" 401/403 should trigger model fallback, not auth)
@@ -926,7 +935,7 @@ function classifyFailoverClassificationFromMessage(
     return toReasonClassification("timeout");
   }
   // Provider-specific patterns as a final catch (Bedrock, Groq, Together AI, etc.)
-  const providerSpecific = classifyProviderSpecificError(raw);
+  const providerSpecific = classifyProviderSpecificError({ errorMessage: raw, provider });
   if (providerSpecific) {
     return toReasonClassification(providerSpecific);
   }
@@ -945,6 +954,22 @@ export function classifyFailoverSignal(signal: FailoverSignal): FailoverClassifi
   const messageClassification = signal.message
     ? classifyFailoverClassificationFromMessage(signal.message, signal.provider)
     : null;
+  const providerPluginReason =
+    messageClassification?.kind !== "context_overflow" &&
+    signal.provider &&
+    (signal.message || signal.code || signal.errorType || inferredStatus !== undefined)
+      ? classifyProviderPluginError({
+          errorMessage: signal.message ?? "",
+          provider: signal.provider,
+          status: inferredStatus,
+          code: signal.code,
+          errorType: signal.errorType,
+        })
+      : null;
+  const providerPluginClassification = providerPluginReason
+    ? toReasonClassification(providerPluginReason)
+    : null;
+  const effectiveMessageClassification = providerPluginClassification ?? messageClassification;
   const codeReason = classifyFailoverReasonFromCode(signal.code);
   if (codeReason === "auth_permanent") {
     return toReasonClassification(codeReason);
@@ -952,9 +977,10 @@ export function classifyFailoverSignal(signal: FailoverSignal): FailoverClassifi
   const statusClassification = classifyFailoverClassificationFromHttpStatus(
     inferredStatus,
     signal.message,
-    messageClassification,
+    effectiveMessageClassification,
     signal.status,
     signal.provider,
+    providerPluginClassification,
   );
   if (statusClassification) {
     return statusClassification;
@@ -962,7 +988,7 @@ export function classifyFailoverSignal(signal: FailoverSignal): FailoverClassifi
   if (codeReason) {
     return toReasonClassification(codeReason);
   }
-  return messageClassification;
+  return effectiveMessageClassification;
 }
 
 export function classifyProviderRuntimeFailureKind(
@@ -1019,7 +1045,7 @@ export function classifyProviderRuntimeFailureKind(
   if (message && isReplayInvalidErrorMessage(message)) {
     return "replay_invalid";
   }
-  if (message && isSchemaErrorMessage(message)) {
+  if (message && isSchemaErrorMessage(message, normalizedSignal.provider)) {
     return "schema";
   }
   if (
