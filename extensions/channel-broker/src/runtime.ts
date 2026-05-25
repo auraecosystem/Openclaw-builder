@@ -45,6 +45,7 @@ export type ChannelBrokerRuntime = {
 };
 
 let runtime: ChannelBrokerRuntime = {};
+const activeInboundDedupeKeys = new Set<string>();
 
 type ChannelBrokerDurableInboundMetadata = {
   providerId: string;
@@ -195,49 +196,60 @@ function createRuntimeFromPluginRuntime(pluginRuntime: PluginRuntime): ChannelBr
         account.providerId,
       );
       const metadata = { providerId: account.providerId, platform: event.platform, ackPolicy };
-      const acceptResult = await journal.accept(dedupeKey, event, { metadata });
+      let acceptResult = await journal.accept(dedupeKey, event, { metadata });
       if (acceptResult.kind === "completed") {
         return { status: "duplicate" };
       }
       if (acceptResult.kind === "pending") {
-        return { status: "pending", message: "delivery pending" };
+        if (activeInboundDedupeKeys.has(dedupeKey)) {
+          return { status: "pending", message: "delivery pending" };
+        }
+        await journal.deletePending(dedupeKey);
+        acceptResult = await journal.accept(dedupeKey, event, { metadata });
+        if (acceptResult.kind === "completed") {
+          return { status: "duplicate" };
+        }
+        if (acceptResult.kind === "pending") {
+          return { status: "pending", message: "delivery pending" };
+        }
       }
+      activeInboundDedupeKeys.add(dedupeKey);
       if (ackPolicy === "after_receive_record") {
         await journal.complete(dedupeKey, { metadata });
       }
-      const cfg = pluginRuntime.config.current() as CoreConfig;
-      const chatKind = conversationKind(event.conversation.type);
-      const replyTarget = buildInboundReplyTarget(event);
-      const peer = {
-        kind: chatKind,
-        id:
-          event.conversation.type === "thread"
-            ? replyTarget
-            : `${event.platform}:${event.conversation.id}`,
-      };
-      const parentPeer =
-        event.conversation.type === "thread"
-          ? {
-              kind: "channel" as const,
-              id: `${event.platform}:${event.conversation.parentId ?? event.conversation.id}`,
-            }
-          : null;
-      const route = pluginRuntime.channel.routing.resolveAgentRoute({
-        cfg: cfg as never,
-        channel: "channel-broker",
-        accountId: account.providerId,
-        peer,
-        parentPeer,
-      });
-      const storePath = pluginRuntime.channel.session.resolveStorePath(cfg.session?.store, {
-        agentId: route.agentId,
-      });
-      const messageText = event.message.text ?? "";
-      const timestamp = event.message.timestamp ? Date.parse(event.message.timestamp) : undefined;
-      const media = toInboundMediaFacts(event.message.attachments, event.message.id);
-
-      let turnResult: Awaited<ReturnType<PluginRuntime["channel"]["turn"]["run"]>>;
       try {
+        const cfg = pluginRuntime.config.current() as CoreConfig;
+        const chatKind = conversationKind(event.conversation.type);
+        const replyTarget = buildInboundReplyTarget(event);
+        const peer = {
+          kind: chatKind,
+          id:
+            event.conversation.type === "thread"
+              ? replyTarget
+              : `${event.platform}:${event.conversation.id}`,
+        };
+        const parentPeer =
+          event.conversation.type === "thread"
+            ? {
+                kind: "channel" as const,
+                id: `${event.platform}:${event.conversation.parentId ?? event.conversation.id}`,
+              }
+            : null;
+        const route = pluginRuntime.channel.routing.resolveAgentRoute({
+          cfg: cfg as never,
+          channel: "channel-broker",
+          accountId: account.providerId,
+          peer,
+          parentPeer,
+        });
+        const storePath = pluginRuntime.channel.session.resolveStorePath(cfg.session?.store, {
+          agentId: route.agentId,
+        });
+        const messageText = event.message.text ?? "";
+        const timestamp = event.message.timestamp ? Date.parse(event.message.timestamp) : undefined;
+        const media = toInboundMediaFacts(event.message.attachments, event.message.id);
+
+        let turnResult: Awaited<ReturnType<PluginRuntime["channel"]["turn"]["run"]>>;
         turnResult = await pluginRuntime.channel.turn.run({
           channel: "channel-broker",
           accountId: account.providerId,
@@ -339,6 +351,18 @@ function createRuntimeFromPluginRuntime(pluginRuntime: PluginRuntime): ChannelBr
             },
           },
         });
+        if (turnResult.dispatched) {
+          if (ackPolicy !== "after_receive_record") {
+            await journal.complete(dedupeKey, { metadata });
+          }
+        } else if (ackPolicy !== "after_receive_record") {
+          await journal.deletePending(dedupeKey);
+        }
+
+        return {
+          status: turnResult.dispatched ? "accepted" : "rejected",
+          ...(turnResult.dispatched ? {} : { message: turnResult.admission.reason }),
+        };
       } catch (error) {
         if (ackPolicy !== "after_receive_record") {
           // Channel-broker providers own retry scheduling; keep failed webhook
@@ -347,20 +371,9 @@ function createRuntimeFromPluginRuntime(pluginRuntime: PluginRuntime): ChannelBr
           await journal.deletePending(dedupeKey);
         }
         throw error;
+      } finally {
+        activeInboundDedupeKeys.delete(dedupeKey);
       }
-
-      if (turnResult.dispatched) {
-        if (ackPolicy !== "after_receive_record") {
-          await journal.complete(dedupeKey, { metadata });
-        }
-      } else if (ackPolicy !== "after_receive_record") {
-        await journal.deletePending(dedupeKey);
-      }
-
-      return {
-        status: turnResult.dispatched ? "accepted" : "rejected",
-        ...(turnResult.dispatched ? {} : { message: turnResult.admission.reason }),
-      };
     },
   };
 }
@@ -372,6 +385,7 @@ export function setChannelBrokerRuntime(next: ChannelBrokerRuntime | PluginRunti
 
 export function resetChannelBrokerRuntimeForTest(): void {
   runtime = {};
+  activeInboundDedupeKeys.clear();
 }
 
 export function getChannelBrokerRuntime(): ChannelBrokerRuntime {

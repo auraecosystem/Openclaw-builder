@@ -364,6 +364,49 @@ describe("channel-broker HTTP routes", () => {
     await expect(first).rejects.toThrow("stop first turn");
   });
 
+  it("reclaims stale pending broker webhooks after a runtime restart", async () => {
+    const body = inboundBody();
+    const config = brokerConfig();
+    const openKeyedStore = createOpenKeyedStoreMock();
+    const pluginRuntime = createPluginRuntimeMock({
+      config: {
+        current: () => config,
+      },
+      state: { openKeyedStore },
+    });
+    let rejectFirstTurn!: (error: Error) => void;
+    vi.mocked(pluginRuntime.channel.turn.run).mockImplementationOnce(
+      async () =>
+        await new Promise<never>((_resolve, reject) => {
+          rejectFirstTurn = reject;
+        }),
+    );
+    setChannelBrokerRuntime(pluginRuntime);
+
+    const first = handleChannelBrokerInboundHttpRequest({
+      cfg: config,
+      req: createRequest({ body, signature: sign(body, "broker-secret") }),
+      res: createResponse(),
+    });
+    await vi.waitFor(() => expect(pluginRuntime.channel.turn.run).toHaveBeenCalledTimes(1));
+
+    resetChannelBrokerRuntimeForTest();
+    setChannelBrokerRuntime(pluginRuntime);
+    const retry = createResponse();
+    await handleChannelBrokerInboundHttpRequest({
+      cfg: config,
+      req: createRequest({ body, signature: sign(body, "broker-secret") }),
+      res: retry,
+    });
+
+    expect(retry.statusCode).toBe(202);
+    expect(JSON.parse(retry.body)).toMatchObject({ ok: true, status: "accepted" });
+    expect(pluginRuntime.channel.turn.run).toHaveBeenCalledTimes(2);
+
+    rejectFirstTurn(new Error("stale process stopped"));
+    await expect(first).rejects.toThrow("stale process stopped");
+  });
+
   it("allows provider redelivery after a failed broker webhook dispatch", async () => {
     const body = inboundBody();
     const config = brokerConfig();
