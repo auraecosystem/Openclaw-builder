@@ -61,19 +61,20 @@ Recommended: a short, user-readable `summary`.
 
 ## What OpenClaw does
 
-1. Strips any model-supplied `confirmation_token` from the input _before_ the
-   first call. Only the consent path is allowed to set it.
-2. Calls the tool. If the response is an ordinary tool result, returns it to
-   the agent unchanged.
-3. Detects the envelope. If absent, the result passes through verbatim.
-4. Issues a [plugin-style approval](/cli/approvals) through the gateway. The
+1. Calls the tool with the original input. If the response is an ordinary tool
+   result (no consent envelope), returns it to the agent unchanged — the tool
+   receives its full argument set including any parameter named
+   `confirmation_token`.
+2. Detects the envelope. If absent, the result passes through verbatim.
+3. Issues a [plugin-style approval](/cli/approvals) through the gateway. The
    user sees a chat message ending with
    `Reply with: /approve <id> allow-once|deny`.
-5. Blocks the agent's tool call until the reply lands on the trusted channel,
+4. Blocks the agent's tool call until the reply lands on the trusted channel,
    the deadline elapses, or the gateway is unavailable.
-6. On `allow-once`: re-calls the tool with `confirmation_token = action_id`
-   set on the input. Returns that second result to the agent.
-7. On `deny`, expiry, or error: returns a synthetic
+5. On `allow-once`: re-calls the tool with `confirmation_token = action_id`
+   set on the input (replacing any model-supplied value). Returns that second
+   result to the agent.
+6. On `deny`, expiry, or error: returns a synthetic
    `{ok:false, approved:false, reason}` result. The original `action_id` is
    **never** included in anything the agent sees.
 
@@ -96,10 +97,12 @@ call is _the model deciding to call it_. With it, the gate is **the user's
 explicit `/approve` reply on a channel that authenticates the sender**.
 
 The model never sees `action_id`. It cannot self-approve by echoing it back,
-because OpenClaw scrubs `confirmation_token` from the model's input on the
-first call and supplies it itself on the second call after the user has
-replied. Even if a malicious or careless agent crafts a fake token, the MCP
-server's own redemption check rejects it.
+because `action_id` is redacted from every result the agent sees. On the
+re-call, OpenClaw supplies `confirmation_token` itself, replacing any
+model-supplied value — so even if a model fabricates a token, the server
+receives the real `action_id` instead. As a final layer, the MCP server's
+own single-use redemption check rejects any token that doesn't match a
+pending action.
 
 This is the same pattern OpenClaw already enforces for shell exec via
 [`exec-approvals`](/tools/exec-approvals): the _agent_ asks, the _user_

@@ -11,7 +11,6 @@ import {
   defaultRequestMcpConsentApproval,
   detectMcpConsentEnvelope,
   type RequestMcpConsentApproval,
-  scrubModelSuppliedConfirmationToken,
 } from "./pi-bundle-mcp-consent.js";
 import {
   buildSafeToolName,
@@ -89,18 +88,16 @@ export function resolveMcpApprovalsConfig(
  *
  *  Pure protocol — no global state. The flow is:
  *
- *    1. Strip any model-supplied `confirmation_token` from input. Only the
- *       consent path is allowed to set it; otherwise the model could
- *       fabricate a token and self-approve.
- *    2. callTool. If the response is an ordinary tool result, return it.
- *    3. Detect an `{ok:false, requires_confirmation:true, action_id, summary}`
+ *    1. callTool with the original input. Non-envelope tools get their full
+ *       argument set unchanged (including any `confirmation_token` they use).
+ *    2. Detect an `{ok:false, requires_confirmation:true, action_id, summary}`
  *       envelope. If absent, return the result verbatim.
- *    4. Issue an approval through the gateway plugin-approval pipeline.
+ *    3. Issue an approval through the gateway plugin-approval pipeline.
  *       Block until the user replies `/approve <id> ...` on the trusted
  *       channel, decision expires, or the system is unavailable.
- *    5. On allow-once / allow-always: call the tool again with
- *       `confirmation_token = action_id`. Return that result.
- *    6. On deny / expired / error: return a synthetic denied result.
+ *    4. On allow-once / allow-always: call the tool again with
+ *       `confirmation_token = action_id` (replaces any model-supplied value).
+ *    5. On deny / expired / error: return a synthetic denied result.
  *       The model never sees `action_id`.
  */
 export async function callMcpToolWithConsent(params: {
@@ -120,13 +117,11 @@ export async function callMcpToolWithConsent(params: {
   if (params.consentEnabled === false) {
     return params.runtime.callTool(params.serverName, params.toolName, params.input);
   }
-  const { cleaned, stripped } = scrubModelSuppliedConfirmationToken(params.input);
-  if (stripped) {
-    logWarn(
-      `bundle-mcp consent: stripped model-supplied confirmation_token from ${params.serverName}.${params.toolName}`,
-    );
-  }
-  const firstResult = await params.runtime.callTool(params.serverName, params.toolName, cleaned);
+  // First call: pass the original input unchanged. Non-envelope tools get
+  // their full argument set (including any `confirmation_token` they
+  // legitimately use). If the server returns a consent envelope, the re-call
+  // below replaces any model-supplied token with the server-issued action_id.
+  const firstResult = await params.runtime.callTool(params.serverName, params.toolName, params.input);
   const envelope = detectMcpConsentEnvelope(firstResult);
   if (!envelope) {
     return firstResult;
@@ -192,7 +187,9 @@ export async function callMcpToolWithConsent(params: {
   }
   // allow-once or allow-always: re-call with the confirmation token. The
   // server is responsible for one-shot/TTL enforcement of the action_id.
-  const baseInput = isPlainObject(cleaned) ? cleaned : {};
+  // Spread the original input then overwrite — any model-fabricated
+  // confirmation_token is replaced by the server-issued action_id.
+  const baseInput = isPlainObject(params.input) ? params.input : {};
   const confirmedInput: Record<string, unknown> = {
     ...baseInput,
     confirmation_token: envelope.actionId,

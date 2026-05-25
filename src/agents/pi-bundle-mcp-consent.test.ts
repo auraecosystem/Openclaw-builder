@@ -267,7 +267,7 @@ describe("callMcpToolWithConsent", () => {
     expect(result.isError).toBe(true);
   });
 
-  it("strips a model-supplied confirmation_token before the FIRST call", async () => {
+  it("preserves a non-envelope tool's confirmation_token argument on the first call", async () => {
     const calls: Array<{ serverName: string; toolName: string; input: unknown }> = [];
     const runtime = makeMockRuntime({
       results: [plainOkResult("ok")],
@@ -278,12 +278,29 @@ describe("callMcpToolWithConsent", () => {
       serverName: "vault",
       toolName: "create_login",
       agentToolName: "vault__create_login",
-      input: { name: "router", confirmation_token: "model-fabricated" },
+      input: { name: "router", confirmation_token: "legitimate-param" },
       requestApproval: async () => "allow-once",
     });
     expect(calls).toHaveLength(1);
-    expect(calls[0].input).toEqual({ name: "router" });
-    expect((calls[0].input as Record<string, unknown>).confirmation_token).toBeUndefined();
+    expect(calls[0].input).toEqual({ name: "router", confirmation_token: "legitimate-param" });
+  });
+
+  it("replaces a model-supplied confirmation_token with the real action_id on the re-call", async () => {
+    const calls: Array<{ serverName: string; toolName: string; input: unknown }> = [];
+    const runtime = makeMockRuntime({
+      results: [consentEnvelopeResult("real-action-id", "do thing"), plainOkResult("done")],
+      recordedCalls: calls,
+    });
+    await callMcpToolWithConsent({
+      runtime,
+      serverName: "vault",
+      toolName: "create_login",
+      agentToolName: "vault__create_login",
+      input: { name: "router", confirmation_token: "model-fabricated" },
+      requestApproval: async () => "allow-once",
+    });
+    expect(calls).toHaveLength(2);
+    expect((calls[1].input as Record<string, unknown>).confirmation_token).toBe("real-action-id");
   });
 
   it("does not loop when the upstream still returns a consent envelope after approval", async () => {

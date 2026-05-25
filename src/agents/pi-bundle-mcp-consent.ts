@@ -213,11 +213,11 @@ export const defaultRequestMcpConsentApproval: RequestMcpConsentApproval = async
     );
   } catch (err) {
     logWarn(`bundle-mcp consent: gateway approval request failed: ${String(err)}`);
-    return "deny";
+    return "unavailable";
   }
   const id = requestResult?.id;
   if (!id) {
-    return "deny";
+    return "unavailable";
   }
   // Distinguish three immediate-decision shapes from the gateway:
   //   - `decision` key absent: accepted two-phase request — fall through
@@ -268,7 +268,7 @@ export const defaultRequestMcpConsentApproval: RequestMcpConsentApproval = async
     }
   } catch (err) {
     logWarn(`bundle-mcp consent: gateway waitDecision failed: ${String(err)}`);
-    return "deny";
+    return "unavailable";
   }
   // No decision after the wait → the approval expired without a user
   // reply. Distinguish this from an explicit deny so audit logs and the
