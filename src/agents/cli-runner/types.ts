@@ -106,7 +106,8 @@ export type CliReusableSession = {
     | "auth-epoch"
     | "system-prompt"
     | "mcp"
-    | "missing-transcript";
+    | "missing-transcript"
+    | "orphaned-tool-use";
 };
 
 export type PreparedCliRunContext = {
