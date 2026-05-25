@@ -198,6 +198,7 @@ import {
   buildCodexUserPromptMessage,
   mirrorCodexAppServerTranscript,
 } from "./transcript-mirror.js";
+import { repairCodexRolloutMissingCustomToolOutputs } from "./transcript-repair.js";
 import { createCodexUserInputBridge } from "./user-input-bridge.js";
 import { filterToolsForVisionInputs } from "./vision-tools.js";
 
@@ -1013,6 +1014,31 @@ export async function runCodexAppServerAttempt(
     codexHome: appServer.start.env?.CODEX_HOME,
     config: params.config,
   });
+  if (startupBinding?.threadId) {
+    try {
+      const rolloutFiles = await listCodexAppServerRolloutFilesForThread(
+        agentDir,
+        startupBinding.threadId,
+        appServer.start.env?.CODEX_HOME,
+      );
+      const repair = await repairCodexRolloutMissingCustomToolOutputs(
+        rolloutFiles.map((file) => file.path),
+      );
+      if (repair.insertedOutputs > 0) {
+        embeddedAgentLog.warn("repaired codex app-server native transcript tool outputs", {
+          threadId: startupBinding.threadId,
+          scannedFiles: repair.scannedFiles,
+          repairedFiles: repair.repairedFiles,
+          insertedOutputs: repair.insertedOutputs,
+        });
+      }
+    } catch (error) {
+      embeddedAgentLog.warn("failed to repair codex app-server native transcript", {
+        threadId: startupBinding.threadId,
+        error,
+      });
+    }
+  }
   const startupAuthProfileCandidate =
     params.runtimePlan?.auth.forwardedAuthProfileId ??
     params.authProfileId ??
