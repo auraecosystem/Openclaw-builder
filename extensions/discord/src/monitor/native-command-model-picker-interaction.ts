@@ -6,6 +6,7 @@ import {
   type CommandArgs,
 } from "openclaw/plugin-sdk/command-auth-native";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import type { ModelsProviderData } from "openclaw/plugin-sdk/models-provider-runtime";
 import {
   Button,
   StringSelectMenu,
@@ -17,6 +18,8 @@ import {
 import { readDiscordModelPickerRecentModels } from "./model-picker-preferences.js";
 import {
   DISCORD_MODEL_PICKER_CUSTOM_ID_KEY,
+  findModelBucketId,
+  findProviderBucketId,
   loadDiscordModelPickerData,
   parseDiscordModelPickerData,
   renderDiscordModelPickerModelsView,
@@ -53,6 +56,18 @@ function resolveModelPickerSelectionValue(
   }
   const trimmed = first.trim();
   return trimmed || null;
+}
+
+function resolveModelPickerRuntimeByIndex(params: {
+  data: ModelsProviderData;
+  provider?: string;
+  runtimeIndex?: number;
+}): string | undefined {
+  if (!params.provider || typeof params.runtimeIndex !== "number") {
+    return undefined;
+  }
+  const choices = params.data.runtimeChoicesByProvider?.get(params.provider);
+  return choices?.[params.runtimeIndex - 1]?.id;
 }
 
 function buildDiscordModelPickerSelectionCommand(params: {
@@ -238,6 +253,7 @@ export async function handleDiscordModelPickerInteraction(params: {
       quickModels,
       currentModel: currentModelRef,
       runtime: parsed.runtime,
+      runtimeIndex: parsed.runtimeIndex,
       provider: parsed.provider,
       page: parsed.page,
       providerPage: parsed.providerPage,
@@ -252,6 +268,7 @@ export async function handleDiscordModelPickerInteraction(params: {
       userId: parsed.userId,
       data: pickerData,
       page: parsed.page,
+      providerBucket: parsed.providerBucket,
       currentModel: currentModelRef,
     });
     await updatePicker(toDiscordModelPickerMessagePayload(rendered));
@@ -264,7 +281,63 @@ export async function handleDiscordModelPickerInteraction(params: {
       userId: parsed.userId,
       data: pickerData,
       page: parsed.page,
+      providerBucket: parsed.providerBucket,
       currentModel: currentModelRef,
+    });
+    await updatePicker(toDiscordModelPickerMessagePayload(rendered));
+    return;
+  }
+
+  if (parsed.action === "bucket" && parsed.view === "providers") {
+    // Bucket select carries the new bucket id in interaction.values[0].
+    // Other state in the customId is preserved so prev/next + selection
+    // history survive the bucket switch.
+    const selectInteraction = interaction as StringSelectMenuInteraction;
+    const newBucketRaw = selectInteraction.values?.[0]?.trim().toLowerCase();
+    const newBucket = newBucketRaw === "all" ? undefined : newBucketRaw;
+    const rendered = renderDiscordModelPickerProvidersView({
+      command: parsed.command,
+      userId: parsed.userId,
+      data: pickerData,
+      page: 1,
+      providerBucket: newBucket,
+      currentModel: currentModelRef,
+    });
+    await updatePicker(toDiscordModelPickerMessagePayload(rendered));
+    return;
+  }
+
+  if (parsed.action === "bucket" && parsed.view === "models") {
+    const selectInteraction = interaction as StringSelectMenuInteraction;
+    const newBucketRaw = selectInteraction.values?.[0]?.trim().toLowerCase();
+    const newBucket = newBucketRaw === "all" ? undefined : newBucketRaw;
+    const provider =
+      parsed.provider ??
+      splitDiscordModelRef(currentModelRef ?? "")?.provider ??
+      pickerData.resolvedDefault.provider;
+    const rendered = renderDiscordModelPickerModelsView({
+      command: parsed.command,
+      userId: parsed.userId,
+      data: pickerData,
+      provider,
+      page: 1,
+      providerPage: parsed.providerPage ?? 1,
+      // bucket-action customId omits providerBucket to stay under 100
+      // chars; derive from the picked provider on re-render.
+      providerBucket: parsed.providerBucket ?? findProviderBucketId(pickerData, provider),
+      modelBucket: newBucket,
+      currentModel: currentModelRef,
+      currentRuntime,
+      // Bucket customIds carry pending runtime as a compact index so long
+      // provider/runtime ids stay under Discord's 100-character cap.
+      pendingRuntime:
+        parsed.runtime ??
+        resolveModelPickerRuntimeByIndex({
+          data: pickerData,
+          provider,
+          runtimeIndex: parsed.runtimeIndex,
+        }),
+      quickModels,
     });
     await updatePicker(toDiscordModelPickerMessagePayload(rendered));
     return;
@@ -287,11 +360,19 @@ export async function handleDiscordModelPickerInteraction(params: {
       provider,
       page: parsed.page,
       providerPage: parsed.providerPage ?? 1,
+      providerBucket: parsed.providerBucket ?? findProviderBucketId(pickerData, provider),
+      modelBucket: parsed.modelBucket,
       currentModel: currentModelRef,
       currentRuntime,
       ...(pendingModel ? { pendingModel: `${provider}/${pendingModel}` } : {}),
       pendingModelIndex: parsed.modelIndex,
-      pendingRuntime: parsed.runtime,
+      pendingRuntime:
+        parsed.runtime ??
+        resolveModelPickerRuntimeByIndex({
+          data: pickerData,
+          provider,
+          runtimeIndex: parsed.runtimeIndex,
+        }),
       quickModels,
     });
     await updatePicker(toDiscordModelPickerMessagePayload(rendered));
@@ -310,9 +391,17 @@ export async function handleDiscordModelPickerInteraction(params: {
       provider,
       page: parsed.page ?? 1,
       providerPage: parsed.providerPage ?? 1,
+      providerBucket: parsed.providerBucket ?? findProviderBucketId(pickerData, provider),
+      modelBucket: parsed.modelBucket,
       currentModel: currentModelRef,
       currentRuntime,
-      pendingRuntime: parsed.runtime,
+      pendingRuntime:
+        parsed.runtime ??
+        resolveModelPickerRuntimeByIndex({
+          data: pickerData,
+          provider,
+          runtimeIndex: parsed.runtimeIndex,
+        }),
       quickModels,
     });
     await updatePicker(toDiscordModelPickerMessagePayload(rendered));
@@ -332,6 +421,10 @@ export async function handleDiscordModelPickerInteraction(params: {
       provider: selectedProvider,
       page: 1,
       providerPage: parsed.providerPage ?? parsed.page,
+      // Provider button customId no longer carries providerBucket;
+      // derive from the picked provider so the bucket select stays in
+      // sync on the next render.
+      providerBucket: parsed.providerBucket ?? findProviderBucketId(pickerData, selectedProvider),
       currentModel: currentModelRef,
       currentRuntime,
       quickModels,
@@ -357,6 +450,12 @@ export async function handleDiscordModelPickerInteraction(params: {
       return;
     }
     const modelRef = `${provider}/${selectedModel}`;
+    // The model select customId omits providerBucket/modelBucket to stay
+    // under Discord's 100-char limit; derive both from the durable state.
+    const derivedProviderBucket =
+      parsed.providerBucket ?? findProviderBucketId(pickerData, provider);
+    const derivedModelBucket =
+      parsed.modelBucket ?? findModelBucketId(pickerData, provider, selectedModel);
     const rendered = renderDiscordModelPickerModelsView({
       command: parsed.command,
       userId: parsed.userId,
@@ -364,11 +463,19 @@ export async function handleDiscordModelPickerInteraction(params: {
       provider,
       page: parsed.page,
       providerPage: parsed.providerPage ?? 1,
+      providerBucket: derivedProviderBucket,
+      modelBucket: derivedModelBucket,
       currentModel: currentModelRef,
       currentRuntime,
       pendingModel: modelRef,
       pendingModelIndex: modelIndex,
-      pendingRuntime: parsed.runtime,
+      pendingRuntime:
+        parsed.runtime ??
+        resolveModelPickerRuntimeByIndex({
+          data: pickerData,
+          provider,
+          runtimeIndex: parsed.runtimeIndex,
+        }),
       quickModels,
     });
     await updatePicker(toDiscordModelPickerMessagePayload(rendered));
@@ -389,6 +496,21 @@ export async function handleDiscordModelPickerInteraction(params: {
       modelIndex: parsed.modelIndex,
     });
     const pendingModel = selectedModel ? `${provider}/${selectedModel}` : undefined;
+    // Runtime select customId carries modelBucket only when no pending
+    // model is set; otherwise derive from the pending model. As a final
+    // fallback, derive from the user's current durable model so the
+    // browse-bucket position survives a runtime change without anything
+    // pending.
+    const derivedProviderBucket =
+      parsed.providerBucket ?? findProviderBucketId(pickerData, provider);
+    const currentModelOnly = splitDiscordModelRef(currentModelRef ?? "");
+    const derivedModelBucket =
+      parsed.modelBucket ??
+      (selectedModel
+        ? findModelBucketId(pickerData, provider, selectedModel)
+        : currentModelOnly && currentModelOnly.provider === provider
+          ? findModelBucketId(pickerData, provider, currentModelOnly.model)
+          : undefined);
     const rendered = renderDiscordModelPickerModelsView({
       command: parsed.command,
       userId: parsed.userId,
@@ -396,6 +518,8 @@ export async function handleDiscordModelPickerInteraction(params: {
       provider,
       page: parsed.page,
       providerPage: parsed.providerPage ?? 1,
+      providerBucket: derivedProviderBucket,
+      modelBucket: derivedModelBucket,
       currentModel: currentModelRef,
       currentRuntime,
       ...(pendingModel ? { pendingModel } : {}),
@@ -445,7 +569,13 @@ export async function handleDiscordModelPickerInteraction(params: {
     const selectedRuntime = resolveDiscordModelPickerSubmissionRuntime({
       data: pickerData,
       provider: parsedModelRef.provider,
-      parsedRuntime: parsed.runtime,
+      parsedRuntime:
+        parsed.runtime ??
+        resolveModelPickerRuntimeByIndex({
+          data: pickerData,
+          provider: parsed.provider,
+          runtimeIndex: parsed.runtimeIndex,
+        }),
       currentRuntime,
     });
     const selectionCommand = buildDiscordModelPickerSelectionCommand({
