@@ -1,5 +1,10 @@
+import fs from "node:fs/promises";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeEnv } from "../runtime.js";
+
+type DocsConfig = {
+  redirects?: Array<{ source?: string }>;
+};
 
 const runCommandWithTimeout = vi.fn();
 const hasBinary = vi.fn();
@@ -63,9 +68,17 @@ describe("docsSearchCommand", () => {
 
     expect(runCommandWithTimeout).toHaveBeenCalledTimes(1);
     const argv = runCommandWithTimeout.mock.calls[0][0] as string[];
+    const expectedToolUrl = "https://docs.openclaw.ai/mcp.search_open_claw";
     const toolUrl = argv.find((arg) => arg.includes("docs.openclaw.ai/mcp."));
-    expect(toolUrl).toBe("https://docs.openclaw.ai/mcp.search_open_claw");
+    expect(toolUrl).toBe(expectedToolUrl);
     expect(toolUrl).not.toMatch(/SearchOpenClaw/);
+
+    const mcpServerPath = new URL(expectedToolUrl).pathname.replace(/\.[^.]+$/, "");
+    const docsConfig = JSON.parse(
+      await fs.readFile(new URL("../../docs/docs.json", import.meta.url), "utf8"),
+    ) as DocsConfig;
+    const redirectSources = (docsConfig.redirects ?? []).map(({ source }) => source);
+    expect(redirectSources).not.toContain(mcpServerPath);
   });
 
   it("fails loudly when mcporter returns a JSON-RPC MCP error on stdout with exit 0", async () => {
