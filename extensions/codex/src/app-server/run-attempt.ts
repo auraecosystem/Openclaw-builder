@@ -655,7 +655,7 @@ function isCodexAppServerApprovalPolicy(value: unknown): boolean {
   );
 }
 
-const CODEX_APP_SERVER_NATIVE_THREAD_MAX_TOKENS = 70_000;
+const DEFAULT_CODEX_APP_SERVER_NATIVE_THREAD_MAX_TOKENS = 70_000;
 const CODEX_APP_SERVER_BYTE_UNITS: Record<string, number> = {
   b: 1,
   k: 1024,
@@ -670,6 +670,12 @@ const CODEX_APP_SERVER_BYTE_UNITS: Record<string, number> = {
   t: 1024 * 1024 * 1024 * 1024,
   tb: 1024 * 1024 * 1024 * 1024,
   tib: 1024 * 1024 * 1024 * 1024,
+};
+const CODEX_APP_SERVER_TOKEN_UNITS: Record<string, number> = {
+  k: 1_000,
+  kt: 1_000,
+  m: 1_000_000,
+  mt: 1_000_000,
 };
 
 function parseCodexAppServerByteLimit(value: unknown): number | undefined {
@@ -693,6 +699,41 @@ function parseCodexAppServerByteLimit(value: unknown): number | undefined {
     return undefined;
   }
   return Math.max(1, Math.round(amount * multiplier));
+}
+
+function parseCodexAppServerTokenLimit(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*([a-z]+)?$/i);
+  if (!match) {
+    return undefined;
+  }
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount < 0) {
+    return undefined;
+  }
+  const unit = (match[2] ?? "").toLowerCase();
+  const multiplier = unit === "" ? 1 : CODEX_APP_SERVER_TOKEN_UNITS[unit];
+  if (multiplier === undefined) {
+    return undefined;
+  }
+  const tokens = amount * multiplier;
+  return Number.isSafeInteger(tokens) ? tokens : undefined;
+}
+
+function resolveCodexAppServerTokenLimit(value: unknown): number | undefined {
+  if (value === undefined || value === null) {
+    return DEFAULT_CODEX_APP_SERVER_NATIVE_THREAD_MAX_TOKENS;
+  }
+  const parsed = parseCodexAppServerTokenLimit(value);
+  if (parsed === undefined) {
+    return DEFAULT_CODEX_APP_SERVER_NATIVE_THREAD_MAX_TOKENS;
+  }
+  return parsed > 0 ? parsed : undefined;
 }
 
 async function listCodexAppServerRolloutFilesForThread(
@@ -832,12 +873,17 @@ function maxFiniteNumber(values: Array<number | undefined>): number | undefined 
   return Math.max(...nums);
 }
 
+function hasContextEngineThreadBootstrapProjection(binding: CodexAppServerThreadBinding): boolean {
+  return binding.contextEngine?.projection?.mode === "thread_bootstrap";
+}
+
 async function rotateOversizedCodexAppServerStartupBinding(params: {
   binding: CodexAppServerThreadBinding | undefined;
   sessionFile: string;
   agentDir: string;
   codexHome?: string;
   config: EmbeddedRunAttemptParams["config"] | undefined;
+  contextEngineActive?: boolean;
 }): Promise<CodexAppServerThreadBinding | undefined> {
   const binding = params.binding;
   if (!binding?.threadId) {
@@ -846,10 +892,27 @@ async function rotateOversizedCodexAppServerStartupBinding(params: {
   if (params.config?.agents?.defaults?.compaction?.truncateAfterCompaction !== true) {
     return binding;
   }
-  const sessionRecord = await readCodexSessionRecordForSessionFile(params.sessionFile);
+  if (params.contextEngineActive === true && hasContextEngineThreadBootstrapProjection(binding)) {
+    embeddedAgentLog.debug(
+      "codex app-server deferring native transcript size guard for context-engine thread bootstrap",
+      {
+        threadId: binding.threadId,
+        engineId: binding.contextEngine?.engineId,
+        epoch: binding.contextEngine?.projection?.epoch,
+        fingerprint: binding.contextEngine?.projection?.fingerprint,
+      },
+    );
+    return binding;
+  }
   const maxBytes = parseCodexAppServerByteLimit(
     params.config?.agents?.defaults?.compaction?.maxActiveTranscriptBytes,
   );
+  const maxTokens = resolveCodexAppServerTokenLimit(
+    params.config?.agents?.defaults?.compaction?.maxActiveTranscriptTokens,
+  );
+  if (maxBytes === undefined && maxTokens === undefined) {
+    return binding;
+  }
   const rolloutFiles = await listCodexAppServerRolloutFilesForThread(
     params.agentDir,
     binding.threadId,
@@ -870,11 +933,15 @@ async function rotateOversizedCodexAppServerStartupBinding(params: {
       return undefined;
     }
   }
+  if (maxTokens === undefined) {
+    return binding;
+  }
   const nativeTokens = maxFiniteNumber(
     await Promise.all(
       rolloutFiles.map(async (file) => readCodexAppServerRolloutTokenUsage(file.path)),
     ),
   );
+  const sessionRecord = await readCodexSessionRecordForSessionFile(params.sessionFile);
   const sessionTokens =
     sessionRecord?.totalTokensFresh !== false &&
     typeof sessionRecord?.totalTokens === "number" &&
@@ -882,12 +949,12 @@ async function rotateOversizedCodexAppServerStartupBinding(params: {
       ? sessionRecord.totalTokens
       : undefined;
   const tokenCount = maxFiniteNumber([sessionTokens, nativeTokens]);
-  if (tokenCount !== undefined && tokenCount >= CODEX_APP_SERVER_NATIVE_THREAD_MAX_TOKENS) {
+  if (tokenCount !== undefined && tokenCount >= maxTokens) {
     embeddedAgentLog.warn(
       "codex app-server native transcript exceeded active token limit; starting a fresh thread",
       {
         threadId: binding.threadId,
-        maxTokens: CODEX_APP_SERVER_NATIVE_THREAD_MAX_TOKENS,
+        maxTokens,
         sessionKey: sessionRecord?.sessionKey,
         sessionTokens,
         nativeTokens,
@@ -1006,6 +1073,7 @@ export async function runCodexAppServerAttempt(
     agentDir,
     codexHome: appServer.start.env?.CODEX_HOME,
     config: params.config,
+    contextEngineActive: isActiveHarnessContextEngine(params.contextEngine),
   });
   const startupAuthProfileCandidate =
     params.runtimePlan?.auth.forwardedAuthProfileId ??
