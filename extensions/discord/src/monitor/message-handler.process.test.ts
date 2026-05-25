@@ -16,8 +16,9 @@ const sendMocks = vi.hoisted(() => ({
     (channelId: string, messageId: string, emoji: string, opts?: unknown) => Promise<void>
   >(async () => {}),
 }));
-function createMockDraftStream() {
-  let messageId: string | undefined = "preview-1";
+function createMockDraftStream(options?: { initialMessageId?: string }) {
+  let messageId: string | undefined =
+    options && "initialMessageId" in options ? options.initialMessageId : "preview-1";
   return {
     update: vi.fn<(text: string) => void>(() => {}),
     flush: vi.fn(async () => {}),
@@ -632,8 +633,8 @@ function expectRemoveAckCallAt(
   expectReactionCallAt(sendMocks.removeReactionDiscord, index, emoji, params);
 }
 
-function createMockDraftStreamForTest() {
-  const draftStream = createMockDraftStream();
+function createMockDraftStreamForTest(options?: { initialMessageId?: string }) {
+  const draftStream = createMockDraftStream(options);
   createDiscordDraftStream.mockReturnValueOnce(draftStream);
   return draftStream;
 }
@@ -1803,8 +1804,12 @@ describe("processDiscordMessage draft streaming", () => {
 
     const updates = draftStream.update.mock.calls.map((call) => call[0]);
     expect(updates).toEqual(["Pinching\n\n🛠️ Exec\n• exec done"]);
-    expectPreviewEditContent("done");
-    expect(deliverDiscordReply).not.toHaveBeenCalled();
+    expect(editMessageDiscord).not.toHaveBeenCalled();
+    expect(draftStream.clear).toHaveBeenCalledTimes(1);
+    expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
+    expect(firstMockArg(deliverDiscordReply, "deliverDiscordReply")).toMatchObject({
+      replies: [{ text: "done" }],
+    });
   });
 
   it("does not update Discord progress drafts after final answer delivery", async () => {
@@ -1835,8 +1840,12 @@ describe("processDiscordMessage draft streaming", () => {
 
     const updates = draftStream.update.mock.calls.map((call) => call[0]);
     expect(updates).toEqual(["Shelling\n\n🛠️ Exec\n• exec running"]);
-    expectPreviewEditContent("done");
-    expect(deliverDiscordReply).not.toHaveBeenCalled();
+    expect(editMessageDiscord).not.toHaveBeenCalled();
+    expect(draftStream.clear).toHaveBeenCalledTimes(1);
+    expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
+    expect(firstMockArg(deliverDiscordReply, "deliverDiscordReply")).toMatchObject({
+      replies: [{ text: "done" }],
+    });
   });
 
   it("does not update Discord progress drafts while final answer delivery is pending", async () => {
@@ -1867,8 +1876,12 @@ describe("processDiscordMessage draft streaming", () => {
 
     const updates = draftStream.update.mock.calls.map((call) => call[0]);
     expect(updates).toEqual(["Shelling\n\n🛠️ Exec\n• exec running"]);
-    expectPreviewEditContent("done");
-    expect(deliverDiscordReply).not.toHaveBeenCalled();
+    expect(editMessageDiscord).not.toHaveBeenCalled();
+    expect(draftStream.clear).toHaveBeenCalledTimes(1);
+    expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
+    expect(firstMockArg(deliverDiscordReply, "deliverDiscordReply")).toMatchObject({
+      replies: [{ text: "done" }],
+    });
   });
 
   it("streams Discord tool progress for coding-profile message-tool-only guild replies", async () => {
@@ -2184,7 +2197,7 @@ describe("processDiscordMessage draft streaming", () => {
     expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps finalized previews when later tool warning finals are delivered", async () => {
+  it("keeps finalized previews and suppresses later tool warning finals", async () => {
     const draftStream = createMockDraftStreamForTest();
     dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
       await params?.dispatcher.sendFinalReply({ text: "delivery survived" });
@@ -2204,15 +2217,7 @@ describe("processDiscordMessage draft streaming", () => {
     expectPreviewEditContent("delivery survived");
     expect(draftStream.clear).not.toHaveBeenCalled();
     expect(draftStream.messageId()).toBe("preview-1");
-    expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
-    expect(firstMockArg(deliverDiscordReply, "deliverDiscordReply")).toMatchObject({
-      replies: [
-        {
-          text: "⚠️ 🛠️ `run openclaw definitely-not-a-real-subcommand (agent)` failed",
-          isError: true,
-        },
-      ],
-    });
+    expect(deliverDiscordReply).not.toHaveBeenCalled();
   });
 
   it("keeps draft previews when tool warning finals arrive before recovered replies", async () => {
@@ -2366,7 +2371,7 @@ describe("processDiscordMessage draft streaming", () => {
     expect(draftStream.flush).not.toHaveBeenCalled();
   });
 
-  it("keeps Discord progress drafts instead of delivering text-only interim blocks after work expands", async () => {
+  it("clears Discord progress drafts and sends the final reply separately", async () => {
     const draftStream = createMockDraftStreamForTest();
 
     dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
@@ -2391,11 +2396,50 @@ describe("processDiscordMessage draft streaming", () => {
     await runProcessDiscordMessage(ctx);
 
     expect(draftStream.update).toHaveBeenCalledWith("Shelling\n\n🛠️ Exec\n• exec done");
-    expect(deliverDiscordReply).not.toHaveBeenCalled();
-    expectPreviewEditContent("done");
+    expect(editMessageDiscord).not.toHaveBeenCalled();
+    expect(draftStream.clear).toHaveBeenCalledTimes(1);
+    expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
+    expect(firstMockArg(deliverDiscordReply, "deliverDiscordReply")).toMatchObject({
+      replies: [{ text: "done" }],
+    });
   });
 
-  it("keeps finalized progress previews when later tool warning finals are delivered", async () => {
+  it("clears pending Discord progress drafts before final replies even before a message id exists", async () => {
+    const draftStream = createMockDraftStreamForTest({ initialMessageId: undefined });
+
+    dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
+      await params?.replyOptions?.onToolStart?.({ name: "exec", phase: "start" });
+      await params?.replyOptions?.onItemEvent?.({ progressText: "exec done" });
+      await params?.dispatcher.sendFinalReply({ text: "done" });
+      return { queuedFinal: true, counts: { final: 1, tool: 0, block: 0 } };
+    });
+
+    const ctx = await createAutomaticSourceDeliveryContext({
+      discordConfig: {
+        streaming: {
+          mode: "progress",
+          progress: {
+            label: "Shelling",
+          },
+        },
+      },
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    expect(draftStream.messageId()).toBeUndefined();
+    expect(draftStream.update).toHaveBeenCalledWith("Shelling\n\n🛠️ Exec\n• exec done");
+    expect(draftStream.clear).toHaveBeenCalledTimes(1);
+    expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
+    expect(draftStream.clear.mock.invocationCallOrder[0]).toBeLessThan(
+      deliverDiscordReply.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(firstMockArg(deliverDiscordReply, "deliverDiscordReply")).toMatchObject({
+      replies: [{ text: "done" }],
+    });
+  });
+
+  it("clears Discord progress drafts before recovered replies and suppresses later tool warnings", async () => {
     const draftStream = createMockDraftStreamForTest();
 
     dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
@@ -2423,9 +2467,44 @@ describe("processDiscordMessage draft streaming", () => {
     await runProcessDiscordMessage(ctx);
 
     expect(draftStream.update).toHaveBeenCalledWith("Shelling\n\n🛠️ Exec\n• exec done");
-    expectPreviewEditContent("delivery survived");
-    expect(draftStream.clear).not.toHaveBeenCalled();
-    expect(draftStream.messageId()).toBe("preview-1");
+    expect(editMessageDiscord).not.toHaveBeenCalled();
+    expect(draftStream.clear).toHaveBeenCalledTimes(1);
+    expect(draftStream.messageId()).toBeUndefined();
+    expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
+    expect(firstMockArg(deliverDiscordReply, "deliverDiscordReply")).toMatchObject({
+      replies: [{ text: "delivery survived" }],
+    });
+  });
+
+  it("still delivers Discord error finals when no visible final reply was delivered first", async () => {
+    const draftStream = createMockDraftStreamForTest();
+
+    dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
+      await params?.replyOptions?.onToolStart?.({ name: "exec", phase: "start" });
+      await params?.replyOptions?.onItemEvent?.({ progressText: "exec failed" });
+      await params?.dispatcher.sendFinalReply({
+        text: "⚠️ 🛠️ `run openclaw definitely-not-a-real-subcommand (agent)` failed",
+        isError: true,
+      } as never);
+      return { queuedFinal: true, counts: { final: 1, tool: 0, block: 0 } };
+    });
+
+    const ctx = await createAutomaticSourceDeliveryContext({
+      discordConfig: {
+        streaming: {
+          mode: "progress",
+          progress: {
+            label: "Shelling",
+          },
+        },
+      },
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    expect(draftStream.update).toHaveBeenCalledWith("Shelling\n\n🛠️ Exec\n• exec failed");
+    expect(editMessageDiscord).not.toHaveBeenCalled();
+    expect(draftStream.clear).toHaveBeenCalledTimes(1);
     expect(deliverDiscordReply).toHaveBeenCalledTimes(1);
     expect(firstMockArg(deliverDiscordReply, "deliverDiscordReply")).toMatchObject({
       replies: [
@@ -2498,6 +2577,39 @@ describe("processDiscordMessage draft streaming", () => {
     await runProcessDiscordMessage(ctx);
 
     expect(draftStream.update).toHaveBeenCalledWith("Shelling\n\n🛠️ Exec\n• done");
+  });
+
+  it("hides command-output titles in Discord status progress drafts", async () => {
+    const draftStream = createMockDraftStreamForTest();
+
+    dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
+      await params?.replyOptions?.onToolStart?.({ name: "exec", phase: "start" });
+      await params?.replyOptions?.onCommandOutput?.({
+        phase: "end",
+        title: "run internal config check failed",
+        name: "exec",
+        exitCode: 1,
+      });
+      return createNoQueuedDispatchResult();
+    });
+
+    const ctx = await createAutomaticSourceDeliveryContext({
+      discordConfig: {
+        streaming: {
+          mode: "progress",
+          progress: {
+            label: "Shelling",
+            commandText: "status",
+          },
+        },
+      },
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    expect(draftStream.update).toHaveBeenCalledWith("Shelling\n\n🛠️ Exec\n🛠️ exit 1");
+    const updates = draftStream.update.mock.calls.map((call) => call[0]);
+    expect(updates.join("\n")).not.toContain("run internal config check failed");
   });
 
   it("keeps Discord progress lines below the configured label", async () => {
