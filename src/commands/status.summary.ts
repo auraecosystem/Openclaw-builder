@@ -22,6 +22,12 @@ import {
 import { resolveRuntimeServiceVersion } from "../version.js";
 import type { HeartbeatStatus, SessionStatus, StatusSummary } from "./status.types.js";
 
+type SessionCandidate = {
+  key: string;
+  entry: SessionEntry | undefined;
+  updatedAt: number | null;
+};
+
 const channelSummaryModuleLoader = createLazyImportLoader(
   () => import("../infra/channel-summary.js"),
 );
@@ -219,112 +225,124 @@ export async function getStatusSummary(
     return store;
   };
   const buildSessionRows = (
-    store: Record<string, SessionEntry | undefined>,
+    candidates: SessionCandidate[],
     opts: { agentIdOverride?: string } = {},
   ) =>
+    candidates.map(({ key, entry, updatedAt }) => {
+      const age = updatedAt ? now - updatedAt : null;
+      const parsedAgentId = parseAgentSessionKey(key)?.agentId;
+      const agentId = opts.agentIdOverride ?? parsedAgentId;
+      const configuredForSession = resolveConfiguredStatusModelRef({
+        cfg,
+        defaultProvider: DEFAULT_PROVIDER,
+        defaultModel: DEFAULT_MODEL,
+        agentId,
+      });
+      const configuredSessionModel = configuredForSession.model ?? DEFAULT_MODEL;
+      const configuredSessionModelLabel = `${configuredForSession.provider ?? DEFAULT_PROVIDER}/${configuredSessionModel}`;
+      const resolvedModel = resolveSessionModelRef(cfg, entry, opts.agentIdOverride);
+      const model = resolvedModel.model ?? configuredSessionModel ?? null;
+      const selectedModelLabel =
+        resolvedModel.provider && model ? `${resolvedModel.provider}/${model}` : model;
+      const modelSelectionDiffers =
+        selectedModelLabel != null &&
+        selectedModelLabel !== configuredSessionModelLabel &&
+        !areRuntimeModelRefsEquivalent(selectedModelLabel, configuredSessionModelLabel) &&
+        hasUserPinnedModelSelection(entry);
+      const contextTokens =
+        resolveContextTokensForModel({
+          cfg,
+          provider: resolvedModel.provider,
+          model,
+          contextTokensOverride: entry?.contextTokens,
+          fallbackContextTokens: configContextTokens ?? undefined,
+          allowAsyncLoad: false,
+        }) ?? null;
+      const total = resolveSessionTotalTokens(entry);
+      const totalTokensFresh =
+        typeof entry?.totalTokens === "number" ? entry?.totalTokensFresh !== false : false;
+      const remaining =
+        contextTokens != null && total !== undefined ? Math.max(0, contextTokens - total) : null;
+      const pct =
+        contextTokens && contextTokens > 0 && total !== undefined
+          ? Math.min(999, Math.round((total / contextTokens) * 100))
+          : null;
+      const runtime = resolveSessionRuntimeLabel({
+        cfg,
+        entry,
+        provider: resolvedModel.provider,
+        model: model ?? "",
+        agentId,
+        sessionKey: key,
+      });
+
+      return {
+        agentId,
+        key,
+        kind: classifySessionKey(key, entry),
+        sessionId: entry?.sessionId,
+        updatedAt,
+        age,
+        thinkingLevel: entry?.thinkingLevel,
+        fastMode: entry?.fastMode,
+        verboseLevel: entry?.verboseLevel,
+        traceLevel: entry?.traceLevel,
+        reasoningLevel: entry?.reasoningLevel,
+        elevatedLevel: entry?.elevatedLevel,
+        systemSent: entry?.systemSent,
+        abortedLastRun: entry?.abortedLastRun,
+        inputTokens: entry?.inputTokens,
+        outputTokens: entry?.outputTokens,
+        cacheRead: entry?.cacheRead,
+        cacheWrite: entry?.cacheWrite,
+        totalTokens: total ?? null,
+        totalTokensFresh,
+        remainingTokens: remaining,
+        percentUsed: pct,
+        model,
+        configuredModel: configuredSessionModelLabel,
+        selectedModel: selectedModelLabel,
+        modelSelectionReason: modelSelectionDiffers ? "session override" : null,
+        runtime,
+        contextTokens,
+        flags: buildFlags(entry),
+      } satisfies SessionStatus;
+    });
+  const collectSessionCandidates = (
+    store: Record<string, SessionEntry | undefined>,
+  ): SessionCandidate[] =>
     Object.entries(store)
       .filter(([key]) => key !== "global" && key !== "unknown")
-      .map(([key, entry]) => {
-        const updatedAt = entry?.updatedAt ?? null;
-        const age = updatedAt ? now - updatedAt : null;
-        const parsedAgentId = parseAgentSessionKey(key)?.agentId;
-        const agentId = opts.agentIdOverride ?? parsedAgentId;
-        const configuredForSession = resolveConfiguredStatusModelRef({
-          cfg,
-          defaultProvider: DEFAULT_PROVIDER,
-          defaultModel: DEFAULT_MODEL,
-          agentId,
-        });
-        const configuredSessionModel = configuredForSession.model ?? DEFAULT_MODEL;
-        const configuredSessionModelLabel = `${configuredForSession.provider ?? DEFAULT_PROVIDER}/${configuredSessionModel}`;
-        const resolvedModel = resolveSessionModelRef(cfg, entry, opts.agentIdOverride);
-        const model = resolvedModel.model ?? configuredSessionModel ?? null;
-        const selectedModelLabel =
-          resolvedModel.provider && model ? `${resolvedModel.provider}/${model}` : model;
-        const modelSelectionDiffers =
-          selectedModelLabel != null &&
-          selectedModelLabel !== configuredSessionModelLabel &&
-          !areRuntimeModelRefsEquivalent(selectedModelLabel, configuredSessionModelLabel) &&
-          hasUserPinnedModelSelection(entry);
-        const contextTokens =
-          resolveContextTokensForModel({
-            cfg,
-            provider: resolvedModel.provider,
-            model,
-            contextTokensOverride: entry?.contextTokens,
-            fallbackContextTokens: configContextTokens ?? undefined,
-            allowAsyncLoad: false,
-          }) ?? null;
-        const total = resolveSessionTotalTokens(entry);
-        const totalTokensFresh =
-          typeof entry?.totalTokens === "number" ? entry?.totalTokensFresh !== false : false;
-        const remaining =
-          contextTokens != null && total !== undefined ? Math.max(0, contextTokens - total) : null;
-        const pct =
-          contextTokens && contextTokens > 0 && total !== undefined
-            ? Math.min(999, Math.round((total / contextTokens) * 100))
-            : null;
-        const runtime = resolveSessionRuntimeLabel({
-          cfg,
-          entry,
-          provider: resolvedModel.provider,
-          model: model ?? "",
-          agentId,
-          sessionKey: key,
-        });
-
-        return {
-          agentId,
-          key,
-          kind: classifySessionKey(key, entry),
-          sessionId: entry?.sessionId,
-          updatedAt,
-          age,
-          thinkingLevel: entry?.thinkingLevel,
-          fastMode: entry?.fastMode,
-          verboseLevel: entry?.verboseLevel,
-          traceLevel: entry?.traceLevel,
-          reasoningLevel: entry?.reasoningLevel,
-          elevatedLevel: entry?.elevatedLevel,
-          systemSent: entry?.systemSent,
-          abortedLastRun: entry?.abortedLastRun,
-          inputTokens: entry?.inputTokens,
-          outputTokens: entry?.outputTokens,
-          cacheRead: entry?.cacheRead,
-          cacheWrite: entry?.cacheWrite,
-          totalTokens: total ?? null,
-          totalTokensFresh,
-          remainingTokens: remaining,
-          percentUsed: pct,
-          model,
-          configuredModel: configuredSessionModelLabel,
-          selectedModel: selectedModelLabel,
-          modelSelectionReason: modelSelectionDiffers ? "session override" : null,
-          runtime,
-          contextTokens,
-          flags: buildFlags(entry),
-        } satisfies SessionStatus;
-      })
-      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+      .map(([key, entry]) => ({
+        key,
+        entry,
+        updatedAt: entry?.updatedAt ?? null,
+      }));
+  const sortSessionCandidates = (candidates: SessionCandidate[]): SessionCandidate[] =>
+    candidates.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  const recentSessionRows = (
+    candidates: SessionCandidate[],
+    opts: { agentIdOverride?: string } = {},
+  ) => buildSessionRows(candidates.slice(0, 10), opts);
 
   const paths = new Set<string>();
   const byAgent = agentList.agents.map((agent) => {
     const storePath = resolveStorePath(cfg.session?.store, { agentId: agent.id });
     paths.add(storePath);
     const store = loadStore(storePath);
-    const sessions = buildSessionRows(store, { agentIdOverride: agent.id });
+    const sessions = sortSessionCandidates(collectSessionCandidates(store));
     return {
       agentId: agent.id,
       path: storePath,
       count: sessions.length,
-      recent: sessions.slice(0, 10),
+      recent: recentSessionRows(sessions, { agentIdOverride: agent.id }),
     };
   });
 
   const allSessions = Array.from(paths)
-    .flatMap((storePath) => buildSessionRows(loadStore(storePath)))
+    .flatMap((storePath) => collectSessionCandidates(loadStore(storePath)))
     .toSorted((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-  const recent = allSessions.slice(0, 10);
+  const recent = recentSessionRows(allSessions);
   const totalSessions = allSessions.length;
 
   const summary: StatusSummary = {

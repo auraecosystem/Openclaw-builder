@@ -321,6 +321,35 @@ describe("getStatusSummary", () => {
     expect(summary.sessions.recent[0]?.runtime).toBe("OpenAI Codex");
   });
 
+  it("hydrates only recent session rows while preserving full session counts", async () => {
+    const base = 1_700_000_000_000;
+    statusSummaryMocks.readSessionStoreReadOnly.mockReturnValue(
+      Object.fromEntries(
+        Array.from({ length: 12 }, (_, index) => [
+          `agent:main:session-${index}`,
+          {
+            sessionId: `session-${index}`,
+            updatedAt: base + index,
+          },
+        ]),
+      ),
+    );
+
+    const summary = await getStatusSummary();
+
+    expect(summary.sessions.count).toBe(12);
+    expect(summary.sessions.recent).toHaveLength(10);
+    expect(summary.sessions.byAgent[0]?.count).toBe(12);
+    expect(summary.sessions.byAgent[0]?.recent).toHaveLength(10);
+
+    const hydratedSessionKeys = vi
+      .mocked(statusSummaryRuntime.resolveSessionRuntimeLabel)
+      .mock.calls.map(([call]) => call.sessionKey);
+    expect(hydratedSessionKeys).toHaveLength(20);
+    expect(hydratedSessionKeys).not.toContain("agent:main:session-0");
+    expect(hydratedSessionKeys).not.toContain("agent:main:session-1");
+  });
+
   it("includes configured and selected model labels for pinned sessions", async () => {
     vi.mocked(statusSummaryRuntime.resolveConfiguredStatusModelRef).mockReturnValue({
       provider: "zhipu",
