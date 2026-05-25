@@ -7,7 +7,10 @@ import { estimateMessagesTokens } from "../../agents/compaction.js";
 import { resolveAgentHarnessPolicy } from "../../agents/harness/policy.js";
 import { ensureSelectedAgentHarnessPlugin } from "../../agents/harness/runtime-plugin.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
-import { listLegacyRuntimeModelProviderAliases } from "../../agents/model-runtime-aliases.js";
+import {
+  listLegacyRuntimeModelProviderAliases,
+  resolveCliRuntimeExecutionProvider,
+} from "../../agents/model-runtime-aliases.js";
 import { isCliProvider } from "../../agents/model-selection.js";
 import { resolveContextConfigProviderForRuntime } from "../../agents/openai-codex-routing.js";
 import { resolveSandboxConfigForAgent, resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
@@ -41,6 +44,7 @@ import {
 import type { TemplateContext } from "../templating.js";
 import type { VerboseLevel } from "../thinking.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
+import { resolveRunAuthProfile } from "./agent-runner-auth-profile.js";
 import {
   buildEmbeddedRunExecutionParams,
   resolveModelFallbackOptions,
@@ -626,7 +630,29 @@ export async function runPreflightCompactionIfNeeded(params: {
     return entry ?? params.sessionEntry;
   }
 
-  const isCli = isCliProvider(params.followupRun.run.provider, params.cfg);
+  const { authProfileId } = resolveRunAuthProfile(
+    params.followupRun.run,
+    params.followupRun.run.provider,
+  );
+  const sessionRuntimeOverride = resolveMemoryFlushRuntimeOverrideForProvider({
+    provider: params.followupRun.run.provider,
+    entry,
+  });
+  const cliExecutionProvider =
+    sessionRuntimeOverride === "pi"
+      ? params.followupRun.run.provider
+      : ((sessionRuntimeOverride && isCliProvider(sessionRuntimeOverride, params.cfg)
+          ? sessionRuntimeOverride
+          : undefined) ??
+        resolveCliRuntimeExecutionProvider({
+          provider: params.followupRun.run.provider,
+          cfg: params.cfg,
+          agentId: params.followupRun.run.agentId,
+          modelId: params.followupRun.run.model ?? params.defaultModel,
+          authProfileId,
+        }) ??
+        params.followupRun.run.provider);
+  const isCli = isCliProvider(cliExecutionProvider, params.cfg);
   if (params.isHeartbeat || isCli) {
     return entry ?? params.sessionEntry;
   }
@@ -878,11 +904,33 @@ export async function runMemoryFlushIfNeeded(params: {
     return sandboxCfg.workspaceAccess === "rw";
   })();
 
-  const isCli = isCliProvider(params.followupRun.run.provider, params.cfg);
-  const canAttemptFlush = memoryFlushWritable && !params.isHeartbeat && !isCli;
   let entry =
     params.sessionEntry ??
     (params.sessionKey ? params.sessionStore?.[params.sessionKey] : undefined);
+  const { authProfileId: flushAuthProfileId } = resolveRunAuthProfile(
+    params.followupRun.run,
+    params.followupRun.run.provider,
+  );
+  const sessionRuntimeOverride = resolveMemoryFlushRuntimeOverrideForProvider({
+    provider: params.followupRun.run.provider,
+    entry,
+  });
+  const cliExecutionProvider =
+    sessionRuntimeOverride === "pi"
+      ? params.followupRun.run.provider
+      : ((sessionRuntimeOverride && isCliProvider(sessionRuntimeOverride, params.cfg)
+          ? sessionRuntimeOverride
+          : undefined) ??
+        resolveCliRuntimeExecutionProvider({
+          provider: params.followupRun.run.provider,
+          cfg: params.cfg,
+          agentId: params.followupRun.run.agentId,
+          modelId: params.followupRun.run.model ?? params.defaultModel,
+          authProfileId: flushAuthProfileId,
+        }) ??
+        params.followupRun.run.provider);
+  const isCli = isCliProvider(cliExecutionProvider, params.cfg);
+  const canAttemptFlush = memoryFlushWritable && !params.isHeartbeat && !isCli;
   const contextWindowTokens = resolveMemoryFlushContextWindowTokens({
     cfg: params.cfg,
     provider: resolveFollowupContextConfigProvider({
