@@ -402,9 +402,9 @@ function repairToolCallInputs(
         // OpenAI Responses persists finalized function calls with both parsed
         // arguments and the original partialJson bytes. Strip only the
         // redundant partialJson field so replay keeps the finalized call.
-        const stripped = { ...(block as object) } as Record<string, unknown>;
+        const stripped: RawToolCallBlock = { ...block };
         delete stripped.partialJson;
-        workBlock = stripped as typeof block;
+        workBlock = stripped;
         changed = true;
         messageChanged = true;
       }
