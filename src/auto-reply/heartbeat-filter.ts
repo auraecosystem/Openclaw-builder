@@ -8,6 +8,7 @@ import {
   resolveHeartbeatPromptForResponseTool,
   stripHeartbeatToken,
 } from "./heartbeat.js";
+import { HEARTBEAT_TOKEN } from "./tokens.js";
 
 const HEARTBEAT_TASK_PROMPT_PREFIX =
   "Run the following periodic tasks (only those due based on their intervals):";
@@ -395,6 +396,8 @@ function resolveHeartbeatArtifactSpanEnd(
   let index = startIndex + 1;
   let sawTerminalHeartbeatArtifact = false;
   let sawNonTerminalAssistantOutput = false;
+  let sawToolActivity = false;
+  let sawHeartbeatTokenInAssistant = false;
 
   while (index < messages.length) {
     const message = messages[index];
@@ -413,6 +416,7 @@ function resolveHeartbeatArtifactSpanEnd(
       if (hasCompletedVisibleHeartbeatResponseToolCall(messages, index)) {
         return undefined;
       }
+      sawToolActivity = true;
       index++;
       continue;
     }
@@ -426,19 +430,37 @@ function resolveHeartbeatArtifactSpanEnd(
       continue;
     }
     if (isToolResultMessage(message) || hasAssistantToolCall(message)) {
+      sawToolActivity = true;
       index++;
       continue;
     }
     if (message.role === "assistant") {
       sawNonTerminalAssistantOutput = true;
+      const { text } = resolveMessageText(message.content);
+      if (text.includes(HEARTBEAT_TOKEN)) {
+        sawHeartbeatTokenInAssistant = true;
+      }
       index++;
       continue;
     }
     return undefined;
   }
 
+  // Keep unrecognized assistant output that doesn't resemble HEARTBEAT_OK.
+  // If the model responded without the HEARTBEAT_OK token at all, it
+  // intentionally produced a meaningful report worth preserving regardless
+  // of position or tool activity. Fixes #85614.
+  //
+  // If the output DOES contain the token, it's a verbose OK wrapper; only
+  // preserve when a user message followed (proving interaction) or tools
+  // were used (indicating real work).
   if (sawNonTerminalAssistantOutput && !sawTerminalHeartbeatArtifact) {
-    return undefined;
+    if (!sawHeartbeatTokenInAssistant) {
+      return undefined;
+    }
+    if (index < messages.length || sawToolActivity) {
+      return undefined;
+    }
   }
   return index;
 }
