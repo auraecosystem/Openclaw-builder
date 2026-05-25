@@ -173,6 +173,28 @@ describe("getTelegramSequentialKey", () => {
     ],
     [
       {
+        guestMessage: mockMessage({
+          chat: mockChat({ id: -100123, type: "supergroup" }),
+          from: { id: 42, is_bot: false, first_name: "Guest" },
+        }) as Message & { guest_query_id?: string },
+      },
+      "telegram:guest:-100123:sender:42",
+    ],
+    [
+      {
+        update: {
+          guest_message: mockMessage({
+            chat: mockChat({ id: -100123, type: "supergroup" }),
+            guest_query_id: "guest-query-1",
+          } as Partial<Message> & { chat: Chat; guest_query_id: string }) as Message & {
+            guest_query_id?: string;
+          },
+        },
+      },
+      "telegram:guest:guest-query-1",
+    ],
+    [
+      {
         me: { username: "openclaw_bot" } as never,
         message: mockMessage({
           chat: mockChat({ id: 123 }),

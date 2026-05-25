@@ -19,7 +19,6 @@ describe("resolveTelegramAllowedUpdates", () => {
       "business_message",
       "edited_business_message",
       "deleted_business_messages",
-      "guest_message",
       "inline_query",
       "chosen_inline_result",
       "callback_query",
@@ -35,5 +34,15 @@ describe("resolveTelegramAllowedUpdates", () => {
       "removed_chat_boost",
     ]);
     expect(updates).toEqual([...DEFAULT_TELEGRAM_UPDATE_TYPES, "message_reaction"]);
+    expect(updates).not.toContain("guest_message");
+    expect(resolveTelegramAllowedUpdates({ guest: { enabled: false } })).not.toContain(
+      "guest_message",
+    );
+    expect(resolveTelegramAllowedUpdates({ includeGuest: false })).not.toContain("guest_message");
+  });
+
+  it("includes guest messages when guest mode is explicitly enabled", () => {
+    const updates = resolveTelegramAllowedUpdates({ guest: { enabled: true } });
+    expect(updates).toContain("guest_message");
   });
 });

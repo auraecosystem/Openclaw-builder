@@ -145,9 +145,13 @@ export const buildTelegramMessageContext = async ({
 }: BuildTelegramMessageContextParams): Promise<TelegramMessageContext | null> => {
   const msg = primaryCtx.message;
   const chatId = msg.chat.id;
-  const isGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
+  const chatIsGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
+  const forceDirectConversation = options?.conversationKindOverride === "direct";
+  const isGroup = chatIsGroup && !forceDirectConversation;
   const senderId = msg.from?.id ? String(msg.from.id) : "";
-  const messageThreadId = (msg as { message_thread_id?: number }).message_thread_id;
+  const messageThreadId = forceDirectConversation
+    ? undefined
+    : (msg as { message_thread_id?: number }).message_thread_id;
   const reactionApi =
     typeof bot.api.setMessageReaction === "function"
       ? bot.api.setMessageReaction.bind(bot.api)
@@ -241,6 +245,7 @@ export const buildTelegramMessageContext = async ({
     loadFreshConfig?.() ??
     (runtime?.getRuntimeConfig ?? (await loadTelegramMessageContextRuntime()).getRuntimeConfig)();
   const telegramCfg = mergeTelegramAccountConfig(freshCfg, account.accountId);
+  const overrideSessionKey = options?.sessionKeyOverride?.trim();
   let { route, configuredBinding, configuredBindingSessionKey } = resolveTelegramConversationRoute({
     cfg: freshCfg,
     accountId: account.accountId,
@@ -249,7 +254,8 @@ export const buildTelegramMessageContext = async ({
     resolvedThreadId,
     replyThreadId,
     senderId,
-    topicAgentId: topicConfig?.agentId,
+    topicAgentId: options?.routeAgentIdOverride ?? topicConfig?.agentId,
+    skipBindings: Boolean(overrideSessionKey),
   });
   const requiresExplicitAccountBinding = (
     candidate: ReturnType<typeof resolveTelegramConversationRoute>["route"],
@@ -288,17 +294,19 @@ export const buildTelegramMessageContext = async ({
   const effectiveGroupAllow = normalizeAllowFrom(expandedGroupAllowFrom);
   const hasGroupAllowOverride = groupAllowOverride !== undefined;
   const senderUsername = msg.from?.username ?? "";
-  const baseAccess = evaluateTelegramGroupBaseAccess({
-    isGroup,
-    groupConfig,
-    topicConfig,
-    hasGroupAllowOverride,
-    effectiveGroupAllow,
-    senderId,
-    senderUsername,
-    enforceAllowOverride: true,
-    requireSenderForAllowOverride: false,
-  });
+  const baseAccess = options?.skipGroupBaseAccess
+    ? ({ allowed: true } as const)
+    : evaluateTelegramGroupBaseAccess({
+        isGroup,
+        groupConfig,
+        topicConfig,
+        hasGroupAllowOverride,
+        effectiveGroupAllow,
+        senderId,
+        senderUsername,
+        enforceAllowOverride: true,
+        requireSenderForAllowOverride: false,
+      });
   if (!baseAccess.allowed) {
     if (baseAccess.reason === "group-disabled") {
       logVerbose(`Blocked telegram group ${chatId} (group disabled)`);
@@ -414,7 +422,7 @@ export const buildTelegramMessageContext = async ({
     useDmThreadSession && dmThreadId != null
       ? resolveThreadSessionKeys({ baseSessionKey, threadId: `${chatId}:${dmThreadId}` })
       : null;
-  const sessionKey = threadKeys?.sessionKey ?? baseSessionKey;
+  const sessionKey = overrideSessionKey || threadKeys?.sessionKey || baseSessionKey;
   route = {
     ...route,
     sessionKey,
