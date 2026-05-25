@@ -50,7 +50,10 @@ type DoctorHealthContribution = FlowContribution & {
   run: (ctx: DoctorHealthFlowContext) => Promise<void>;
 };
 
-const LEGACY_POSITIONAL_REPAIR_CHECK_IDS = new Set(["core/doctor/shell-completion"]);
+const LEGACY_POSITIONAL_REPAIR_CHECK_IDS = new Set([
+  "core/doctor/shell-completion",
+  "core/doctor/ui-protocol-freshness",
+]);
 
 function isUpdateDoctorRun(env: NodeJS.ProcessEnv | Record<string, string | undefined>): boolean {
   const value = env.OPENCLAW_UPDATE_IN_PROGRESS;
