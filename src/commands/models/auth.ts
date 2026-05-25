@@ -572,6 +572,7 @@ export async function modelsAuthPasteTokenCommand(
     provider?: string;
     profileId?: string;
     expiresIn?: string;
+    token?: string;
     agent?: string;
   },
   runtime: RuntimeEnv,
@@ -587,23 +588,36 @@ export async function modelsAuthPasteTokenCommand(
   const profileId =
     normalizeOptionalString(opts.profileId) || resolveDefaultTokenProfileId(provider);
 
-  const tokenInput = await readPastedSecret({
-    message: `Paste token for ${provider}`,
-    masked: false,
-    validate: (value) => {
-      const trimmed = value?.trim();
-      if (!trimmed) {
-        return "Required";
-      }
-      if (provider === "anthropic") {
-        return validateAnthropicSetupToken(trimmed.replaceAll(/\s+/g, ""));
-      }
-      if (isOpenAICodexProvider(provider) && looksLikeOpenAIApiKey(trimmed)) {
-        return `That looks like an OpenAI API key. Use ${formatCliCommand("openclaw models auth paste-api-key --provider openai-codex")} for API-key auth.`;
-      }
-      return undefined;
-    },
-  });
+  const validateTokenInput = (value: string | undefined): string | undefined => {
+    const trimmed = value?.trim();
+    if (!trimmed) {
+      return "Required";
+    }
+    if (provider === "anthropic") {
+      return validateAnthropicSetupToken(trimmed.replaceAll(/\s+/g, ""));
+    }
+    if (isOpenAICodexProvider(provider) && looksLikeOpenAIApiKey(trimmed)) {
+      return `That looks like an OpenAI API key. Use ${formatCliCommand("openclaw models auth paste-api-key --provider openai-codex")} for API-key auth.`;
+    }
+    return undefined;
+  };
+  const rawToken = normalizeOptionalString(opts.token);
+  if (opts.token !== undefined && !rawToken) {
+    throw new Error("--token value must not be empty");
+  }
+  if (rawToken !== undefined) {
+    const rawTokenValidation = validateTokenInput(rawToken);
+    if (rawTokenValidation) {
+      throw new Error(rawTokenValidation);
+    }
+  }
+  const tokenInput =
+    rawToken ??
+    (await readPastedSecret({
+      message: `Paste token for ${provider}`,
+      masked: false,
+      validate: validateTokenInput,
+    }));
   const token =
     provider === "anthropic"
       ? tokenInput.replaceAll(/\s+/g, "").trim()
