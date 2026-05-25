@@ -1,4 +1,6 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import type { ChannelRouteRef } from "../../plugin-sdk/channel-route.js";
 import { isPluginJsonValue, type PluginJsonValue } from "../../plugins/host-hook-json.js";
@@ -45,8 +47,49 @@ export type LoadSessionStoreOptions = {
 
 const log = createSubsystemLogger("sessions/store");
 
+// --- tmp candidate naming (PR addition) -------------------------------------
+
+function isSessionStoreTmpCandidateName(entry: string, storeBase: string): boolean {
+  if (!entry.endsWith(".tmp")) {
+    return false;
+  }
+
+  // Legacy/writeTextAtomic/self-heal temps: sessions.json.<uuid>.tmp
+  if (entry.startsWith(`${storeBase}.`)) {
+    return true;
+  }
+
+  // Pinned fs-safe atomic replace temps: .fs-safe-replace.<pid>.<uuid>.tmp
+  if (/^\.fs-safe-replace\.\d+\..+\.tmp$/.test(entry)) {
+    return true;
+  }
+
+  return false;
+}
+
+// --- shape guards -----------------------------------------------------------
+
 function isSessionStoreRecord(value: unknown): value is Record<string, SessionEntry> {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSessionEntryRecord(value: unknown): value is SessionEntry {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasAtLeastOneSessionEntry(record: Record<string, unknown>): boolean {
+  for (const value of Object.values(record)) {
+    if (
+      !!value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      typeof (value as { sessionId?: unknown }).sessionId === "string" &&
+      (value as { sessionId: string }).sessionId.length > 0
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -377,6 +420,10 @@ export function loadSessionStore(
   let serializedFromDisk: string | undefined;
   const maxReadAttempts = process.platform === "win32" ? 3 : 1;
   const retryBuf = maxReadAttempts > 1 ? new Int32Array(new SharedArrayBuffer(4)) : undefined;
+
+  // Track whether the primary read/parse actually failed (PR addition).
+  let primaryReadFailed = false;
+
   for (let attempt = 0; attempt < maxReadAttempts; attempt += 1) {
     try {
       const raw = fs.readFileSync(storePath, "utf-8");
@@ -397,6 +444,157 @@ export function loadSessionStore(
       if (attempt < maxReadAttempts - 1) {
         Atomics.wait(retryBuf!, 0, 0, 50);
         continue;
+      }
+      // All retries exhausted — primary read failed.
+      primaryReadFailed = true;
+    }
+  }
+
+  // Recovery path (PR addition): only trigger if the primary read/parse
+  // actually failed. A successful parse — even of an empty store — short-
+  // circuits before any sibling is touched.
+  const mainFileExists = fs.existsSync(storePath);
+  if (mainFileExists && primaryReadFailed) {
+    const storeDir = path.dirname(storePath);
+
+    // 1. Try .bak first, with the same lstat + nlink gate used for .tmp.
+    const bakPath = `${storePath}.bak`;
+    try {
+      const bakStats = fs.lstatSync(bakPath);
+      if (!bakStats.isFile() || bakStats.isSymbolicLink() || bakStats.nlink !== 1) {
+        throw new Error("invalid .bak");
+      }
+      const bakRaw = fs.readFileSync(bakPath, "utf-8");
+      const bakParsed = JSON.parse(bakRaw);
+      if (isSessionStoreRecord(bakParsed) && hasAtLeastOneSessionEntry(bakParsed)) {
+        // Apply the same normalize pipeline that load() runs on primary-store
+        // entries so a recovered store cannot bypass current main's shape /
+        // plugin-extension validators (clawsweeper P2 2026-05-16).
+        for (const key of Object.keys(bakParsed)) {
+          const entry = bakParsed[key];
+          if (!isSessionEntryRecord(entry)) {
+            delete bakParsed[key];
+            continue;
+          }
+          const shaped = normalizePersistedSessionEntryShape(entry);
+          if (!shaped) {
+            delete bakParsed[key];
+            continue;
+          }
+          bakParsed[key] = stripPersistedSkillsCache(
+            normalizePluginExtensionSlotKeys(
+              normalizePluginExtensions(
+                normalizePendingFinalDeliveryFields(
+                  normalizeSessionEntryDelivery(normalizeSessionRuntimeModelFields(shaped)),
+                ),
+              ),
+            ),
+          );
+        }
+        if (hasAtLeastOneSessionEntry(bakParsed)) {
+          store = bakParsed;
+          serializedFromDisk = JSON.stringify(store, null, 2);
+          log.info("self-healed session store from backup", { storePath, recoverySource: "bak" });
+        }
+      }
+    } catch {
+      // no .bak or invalid; continue to tmp.
+    }
+
+    // 2. Try stale .tmp files if .bak did not recover anything.
+    if (Object.keys(store).length === 0) {
+      try {
+        const entries = fs.readdirSync(storeDir);
+        const tmpCandidates: { name: string; full: string; mtime: number }[] = [];
+
+        for (const entry of entries) {
+          if (!isSessionStoreTmpCandidateName(entry, path.basename(storePath))) {
+            continue;
+          }
+
+          const fullPath = path.join(storeDir, entry);
+
+          // File-integrity gate identical to .bak: lstat + regular file +
+          // not a symlink + nlink === 1.
+          let stats: fs.Stats;
+          try {
+            stats = fs.lstatSync(fullPath);
+          } catch {
+            continue;
+          }
+          if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1) {
+            continue;
+          }
+
+          // Skip very recent tmps to avoid racing the active writer.
+          const STALE_THRESHOLD_MS = 10_000;
+          if (Date.now() - stats.mtimeMs < STALE_THRESHOLD_MS) {
+            continue;
+          }
+
+          tmpCandidates.push({ name: entry, full: fullPath, mtime: stats.mtimeMs });
+        }
+
+        // Newest mtime first — the most recent completed atomic write wins.
+        tmpCandidates.sort((a, b) => b.mtime - a.mtime);
+
+        for (const candidate of tmpCandidates) {
+          try {
+            const tmpRaw = fs.readFileSync(candidate.full, "utf-8");
+            const tmpParsed = JSON.parse(tmpRaw);
+            if (isSessionStoreRecord(tmpParsed) && hasAtLeastOneSessionEntry(tmpParsed)) {
+              // Same normalize pipeline as the .bak accept path (clawsweeper P2).
+              for (const key of Object.keys(tmpParsed)) {
+                const entry = tmpParsed[key];
+                if (!isSessionEntryRecord(entry)) {
+                  delete tmpParsed[key];
+                  continue;
+                }
+                const shaped = normalizePersistedSessionEntryShape(entry);
+                if (!shaped) {
+                  delete tmpParsed[key];
+                  continue;
+                }
+                tmpParsed[key] = stripPersistedSkillsCache(
+                  normalizePluginExtensionSlotKeys(
+                    normalizePluginExtensions(
+                      normalizePendingFinalDeliveryFields(
+                        normalizeSessionEntryDelivery(normalizeSessionRuntimeModelFields(shaped)),
+                      ),
+                    ),
+                  ),
+                );
+              }
+              if (!hasAtLeastOneSessionEntry(tmpParsed)) continue;
+              store = tmpParsed;
+              serializedFromDisk = JSON.stringify(store, null, 2);
+              log.info("self-healed session store from backup/tmp", {
+                storePath,
+                recoverySource: "tmp",
+                recoveryPath: candidate.full,
+                entryCount: Object.keys(store).length,
+              });
+              break;
+            }
+          } catch {
+            // skip invalid tmp candidate
+          }
+        }
+      } catch {
+        // readdir failed; skip recovery.
+      }
+    }
+
+    // 3. Self-heal: write recovered state back atomically at 0o600.
+    if (Object.keys(store).length > 0 && serializedFromDisk) {
+      try {
+        const tmpHeal = `${storePath}.${crypto.randomUUID()}.tmp`;
+        fs.writeFileSync(tmpHeal, serializedFromDisk, { mode: 0o600, encoding: "utf-8" });
+        fs.renameSync(tmpHeal, storePath);
+        fileStat = getFileStatSnapshot(storePath);
+        mtimeMs = fileStat?.mtimeMs;
+      } catch {
+        // write failed; continue with in-memory store.
       }
     }
   }

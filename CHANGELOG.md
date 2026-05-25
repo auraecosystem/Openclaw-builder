@@ -13,6 +13,8 @@ Docs: https://docs.openclaw.ai
 - iOS: improve Talk mode with direct realtime voice sessions, compact toolbar status, and responsive voice waveform feedback. (#86355) Thanks @ngutman.
 
 ### Fixes
+ 
+- Sessions: recover store from backup and tmp artifacts. Fixes #77783.
 
 - Agents/heartbeat: stop heartbeat turns after the first valid `heartbeat_respond` so repeated response loops do not burn tokens. (#86357) Thanks @udaymanish6.
 - Memory-core: keep REM dreaming focused on live light-staged memories and mark staged entries as considered so old recall history no longer dominates fresh candidates. (#86302) Thanks @SebTardif.
