@@ -1,3 +1,4 @@
+import type { OperatorScope } from "../../gateway/operator-scopes.js";
 import type { PluginRuntimeChannel } from "./types-channel.js";
 import type { PluginRuntimeCore, RuntimeLogger } from "./types-core.js";
 
@@ -72,6 +73,7 @@ export type RuntimeNodeInvokeParams = {
   params?: unknown;
   timeoutMs?: number;
   idempotencyKey?: string;
+  scopes?: OperatorScope[];
 };
 
 /** Trusted in-process runtime surface injected into native plugins. */

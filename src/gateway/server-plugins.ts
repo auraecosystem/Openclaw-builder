@@ -277,6 +277,17 @@ function hasAdminScope(client: GatewayRequestOptions["client"] | undefined): boo
   return scopes.includes(ADMIN_SCOPE);
 }
 
+function hasRequestedScopes(
+  client: GatewayRequestOptions["client"] | undefined,
+  requestedScopes: readonly string[],
+): boolean {
+  if (requestedScopes.length === 0) {
+    return true;
+  }
+  const scopes = Array.isArray(client?.connect?.scopes) ? client.connect.scopes : [];
+  return scopes.includes(ADMIN_SCOPE) || requestedScopes.every((scope) => scopes.includes(scope));
+}
+
 function canClientUseModelOverride(client: GatewayRequestOptions["client"]): boolean {
   return hasAdminScope(client) || client?.internal?.allowModelOverride === true;
 }
@@ -577,13 +588,31 @@ export function createGatewayNodesRuntime(): PluginRuntime["nodes"] {
       };
     },
     async invoke(params) {
-      const payload = await dispatchGatewayMethod<unknown>("node.invoke", {
-        nodeId: params.nodeId,
-        command: params.command,
-        ...(params.params !== undefined && { params: params.params }),
-        timeoutMs: params.timeoutMs,
-        idempotencyKey: params.idempotencyKey || randomUUID(),
-      });
+      const requestedScopes = Array.isArray(params.scopes) ? params.scopes : [];
+      const scope = getPluginRuntimeGatewayRequestScope();
+      const pluginId =
+        typeof scope?.pluginId === "string" && scope.pluginId.trim()
+          ? scope.pluginId.trim()
+          : undefined;
+      const payload = await dispatchGatewayMethod<unknown>(
+        "node.invoke",
+        {
+          nodeId: params.nodeId,
+          command: params.command,
+          ...(params.params !== undefined && { params: params.params }),
+          timeoutMs: params.timeoutMs,
+          idempotencyKey: params.idempotencyKey || randomUUID(),
+        },
+        requestedScopes.length > 0
+          ? {
+              syntheticScopes: requestedScopes,
+              ...(pluginId ? { pluginRuntimeOwnerId: pluginId } : {}),
+              ...(!hasRequestedScopes(scope?.client, requestedScopes)
+                ? { forceSyntheticClient: true }
+                : {}),
+            }
+          : undefined,
+      );
       return payload;
     },
   };

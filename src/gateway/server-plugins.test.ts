@@ -795,6 +795,29 @@ describe("loadGatewayPlugins", () => {
     expect(result.nodes).toEqual([{ nodeId: "connected", connected: true }]);
   });
 
+  test("lets plugin nodes runtime request admin-scoped browser proxy dispatch", async () => {
+    loadOpenClawPlugins.mockReturnValue(createRegistry([]));
+    loadGatewayStartupPluginsForTest();
+    serverPluginsModule.setFallbackGatewayContext(createTestContext("nodes-invoke-admin-scope"));
+
+    const runtime = runtimeModule.createPluginRuntime({
+      allowGatewaySubagentBinding: true,
+    });
+    await runtime.nodes.invoke({
+      nodeId: "node-1",
+      command: "browser.proxy",
+      params: { method: "GET", path: "/profiles" },
+      scopes: ["operator.admin"],
+    });
+
+    expect(getLastDispatchedParams()).toMatchObject({
+      nodeId: "node-1",
+      command: "browser.proxy",
+      params: { method: "GET", path: "/profiles" },
+    });
+    expect(getLastDispatchedClientScopes()).toEqual(["operator.admin"]);
+  });
+
   test("forwards provider and model overrides when the request scope is authorized", async () => {
     const serverPlugins = serverPluginsModule;
     const runtime = await createSubagentRuntime(serverPlugins);

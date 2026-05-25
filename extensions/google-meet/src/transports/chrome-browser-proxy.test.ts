@@ -34,6 +34,7 @@ describe("Google Meet Chrome browser proxy", () => {
         timeoutMs: 100,
       },
       timeoutMs: 5_100,
+      scopes: ["operator.admin"],
     });
   });
 });

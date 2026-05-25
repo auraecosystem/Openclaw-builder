@@ -39,6 +39,7 @@ export function createPluginCliGatewayNodesRuntime(): PluginRuntime["nodes"] {
         timeoutMs: params.timeoutMs ? params.timeoutMs + 5_000 : undefined,
         clientName: GATEWAY_CLIENT_NAMES.CLI,
         mode: GATEWAY_CLIENT_MODES.CLI,
+        scopes: params.scopes,
       });
     },
   };
