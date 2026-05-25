@@ -14,7 +14,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { resolveAgentIdByWorkspacePath, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { getRuntimeConfig, type OpenClawConfig } from "../config/config.js";
-import type { CommandEntry } from "../gateway/protocol/index.js";
+import type { CommandEntry, SessionsListParams } from "../gateway/protocol/index.js";
 import { registerUncaughtExceptionHandler } from "../infra/unhandled-rejections.js";
 import { setConsoleSubsystemFilter } from "../logging/console.js";
 import { loggingState } from "../logging/state.js";
@@ -210,6 +210,60 @@ export function resolveGatewayDisconnectState(reason?: string): {
     connectionStatus: `gateway disconnected: ${reasonLabel}`,
     activityStatus: "idle",
   };
+}
+
+export function formatStartupConversationSummary(summaryText?: string): string[] {
+  const normalized = (summaryText ?? "").trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const lines = normalized
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+
+  if (lines.length === 0) {
+    return [];
+  }
+
+  return ["startup summary from your last conversation:", ...lines.map((line) => `- ${line}`)];
+}
+
+export function shouldFetchStartupConversationSummary(params: {
+  isLocalMode: boolean;
+  reconnected: boolean;
+}): boolean {
+  return !params.isLocalMode && !params.reconnected;
+}
+
+export function createStartupConversationSummaryListParams(agentId: string): SessionsListParams {
+  return {
+    limit: 10,
+    includeGlobal: false,
+    includeUnknown: false,
+    includeDerivedTitles: true,
+    includeLastMessage: true,
+    agentId: normalizeAgentId(agentId),
+  };
+}
+
+type StartupConversationSummarySession = {
+  key?: string;
+  derivedTitle?: string | null;
+  lastMessagePreview?: string | null;
+};
+
+export function selectStartupConversationSummarySession(
+  sessions: StartupConversationSummarySession[] | undefined,
+  currentSessionKey: string,
+): StartupConversationSummarySession | undefined {
+  const current = currentSessionKey.trim();
+  return (
+    sessions?.find((session) => current && session.key === current) ??
+    sessions?.find((session) => session.key !== current)
+  );
 }
 
 export function createBackspaceDeduper(params?: { dedupeWindowMs?: number; now?: () => number }) {
@@ -1438,6 +1492,30 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
       updateHeader();
       updateAutocompleteProvider();
       await loadHistory();
+      if (shouldFetchStartupConversationSummary({ isLocalMode, reconnected })) {
+        try {
+          const sessionsRes = await client.listSessions(
+            createStartupConversationSummaryListParams(currentAgentId),
+          );
+          const summarySession = selectStartupConversationSummarySession(
+            sessionsRes.sessions,
+            currentSessionKey,
+          );
+          if (summarySession) {
+            const summaryStr =
+              summarySession.derivedTitle || summarySession.lastMessagePreview || "";
+            const dynamicLines = formatStartupConversationSummary(summaryStr);
+            if (dynamicLines.length > 0) {
+              chatLog.addSystem("");
+              for (const line of dynamicLines) {
+                chatLog.addSystem(line);
+              }
+            }
+          }
+        } catch {
+          // Best effort, ignore fetch failures
+        }
+      }
       setConnectionStatus(
         isLocalMode ? "local ready" : reconnected ? "gateway reconnected" : "gateway connected",
         4000,
