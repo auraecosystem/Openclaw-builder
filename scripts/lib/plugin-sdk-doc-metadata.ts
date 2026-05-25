@@ -47,6 +47,9 @@ export const pluginSdkDocMetadata = {
   "channel-actions": {
     category: "channel",
   },
+  "channel-broker": {
+    category: "channel",
+  },
   "channel-config-schema": {
     category: "channel",
   },
