@@ -210,4 +210,28 @@ describe("buildEmbeddedCompactionRuntimeContext", () => {
       authProfileId: undefined,
     });
   });
+
+  it("routes openai+openai-codex auth profile to openai-codex runtime provider (#86373)", () => {
+    const result = resolveEmbeddedCompactionTarget({
+      provider: "openai",
+      modelId: "gpt-5.4",
+      authProfileId: "openai-codex:default",
+      defaultProvider: "openai",
+      defaultModel: "gpt-5.4",
+    });
+    expect(result.provider).toBe("openai-codex");
+    expect(result.model).toBe("gpt-5.4");
+    expect(result.authProfileId).toBe("openai-codex:default");
+  });
+
+  it("leaves non-openai providers unchanged", () => {
+    const result = resolveEmbeddedCompactionTarget({
+      provider: "anthropic",
+      modelId: "claude-opus-4-5",
+      authProfileId: "anthropic:default",
+      defaultProvider: "anthropic",
+      defaultModel: "claude-opus-4-5",
+    });
+    expect(result.provider).toBe("anthropic");
+  });
 });

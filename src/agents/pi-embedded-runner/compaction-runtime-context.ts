@@ -1,6 +1,7 @@
 import type { SourceReplyDeliveryMode } from "../../auto-reply/get-reply-options.types.js";
 import type { ReasoningLevel, ThinkLevel } from "../../auto-reply/thinking.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { resolveSelectedOpenAIPiRuntimeProvider } from "../openai-codex-routing.js";
 import {
   listActiveProcessSessionReferences,
   type ActiveProcessSessionReference,
@@ -51,8 +52,22 @@ export function resolveEmbeddedCompactionTarget(params: {
   const model = params.modelId?.trim() || params.defaultModel;
   const override = params.config?.agents?.defaults?.compaction?.model?.trim();
   if (!override) {
+    // Apply the same OpenAI -> openai-codex routing the main run path uses.
+    // Without this, an embedded run with provider=openai +
+    // authProfileId=openai-codex:* would enter the plain OpenAI API-key path
+    // during compaction fallback and fail with 'No API key found for provider
+    // openai', even though the active session is using Codex OAuth (#86373).
+    const runtimeProvider = provider
+      ? resolveSelectedOpenAIPiRuntimeProvider({
+          provider,
+          harnessRuntime: "pi",
+          authProfileProvider: params.authProfileId?.split(":", 1)[0],
+          authProfileId: params.authProfileId ?? undefined,
+          config: params.config,
+        })
+      : provider;
     return {
-      provider,
+      provider: runtimeProvider || provider,
       model,
       authProfileId: params.authProfileId ?? undefined,
     };
