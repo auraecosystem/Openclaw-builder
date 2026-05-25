@@ -74,7 +74,7 @@ const {
         subscribe: vi.fn(() => ({
           on: vi.fn(),
           destroy: vi.fn(),
-          [Symbol.asyncIterator]: async function* () {},
+          async *[Symbol.asyncIterator] () {},
         })),
       },
       state: {

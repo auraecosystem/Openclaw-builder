@@ -98,7 +98,7 @@ describe("createDiscordGatewayPlugin", () => {
         error: vi.fn(),
         exit: vi.fn(),
       },
-      ...(testing ? { testing: testing } : {}),
+      ...(testing ? { testing } : {}),
     });
   }
 

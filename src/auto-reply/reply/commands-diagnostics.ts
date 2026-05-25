@@ -54,7 +54,7 @@ type CodexDiagnosticsApprovalIntegration = {
 const defaultDiagnosticsCommandDeps: DiagnosticsCommandDeps = {
   createExecTool,
   resolvePrivateDiagnosticsTargets: resolvePrivateDiagnosticsTargetsForCommand,
-  deliverPrivateDiagnosticsReply: deliverPrivateDiagnosticsReply,
+  deliverPrivateDiagnosticsReply,
 };
 
 export function createDiagnosticsCommandHandler(
