@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   BrokerInboundEventV1,
   BrokerMessageAttachment,
@@ -5,11 +6,17 @@ import type {
   BrokerReceiptV1,
 } from "openclaw/plugin-sdk/channel-broker";
 import { buildBrokerConversationTarget } from "openclaw/plugin-sdk/channel-broker";
+import { createDurableInboundReceiveJournal } from "openclaw/plugin-sdk/channel-message";
 import type { InboundMediaFacts } from "openclaw/plugin-sdk/channel-inbound";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-payload";
 import type { ResolvedChannelBrokerAccount } from "./types.js";
 import type { CoreConfig } from "./types.js";
+
+const CHANNEL_BROKER_DURABLE_INBOUND_PENDING_MAX_ENTRIES = 450;
+const CHANNEL_BROKER_DURABLE_INBOUND_COMPLETED_MAX_ENTRIES = 450;
+const CHANNEL_BROKER_DURABLE_INBOUND_PENDING_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const CHANNEL_BROKER_DURABLE_INBOUND_COMPLETED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type ChannelBrokerInboundAckPolicy =
   | "after_receive_record"
@@ -38,6 +45,41 @@ export type ChannelBrokerRuntime = {
 };
 
 let runtime: ChannelBrokerRuntime = {};
+
+type ChannelBrokerDurableInboundMetadata = {
+  providerId: string;
+  platform: string;
+  ackPolicy: ChannelBrokerInboundAckPolicy;
+};
+
+function hashNamespacePart(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 24);
+}
+
+function createChannelBrokerDurableInboundReceiveJournal(
+  pluginRuntime: PluginRuntime,
+  accountId: string,
+) {
+  const accountPart = hashNamespacePart(accountId);
+  return createDurableInboundReceiveJournal<
+    BrokerInboundEventV1,
+    ChannelBrokerDurableInboundMetadata,
+    ChannelBrokerDurableInboundMetadata
+  >({
+    pendingStore: pluginRuntime.state.openKeyedStore({
+      namespace: `channel-broker.inbound.v1.pending.${accountPart}`,
+      maxEntries: CHANNEL_BROKER_DURABLE_INBOUND_PENDING_MAX_ENTRIES,
+      defaultTtlMs: CHANNEL_BROKER_DURABLE_INBOUND_PENDING_TTL_MS,
+    }),
+    completedStore: pluginRuntime.state.openKeyedStore({
+      namespace: `channel-broker.inbound.v1.completed.${accountPart}`,
+      maxEntries: CHANNEL_BROKER_DURABLE_INBOUND_COMPLETED_MAX_ENTRIES,
+      defaultTtlMs: CHANNEL_BROKER_DURABLE_INBOUND_COMPLETED_TTL_MS,
+    }),
+    pendingTtlMs: CHANNEL_BROKER_DURABLE_INBOUND_PENDING_TTL_MS,
+    completedTtlMs: CHANNEL_BROKER_DURABLE_INBOUND_COMPLETED_TTL_MS,
+  });
+}
 
 function isPluginRuntime(value: unknown): value is PluginRuntime {
   return Boolean(
@@ -147,7 +189,19 @@ async function deliverBrokerInboundReply(params: {
 
 function createRuntimeFromPluginRuntime(pluginRuntime: PluginRuntime): ChannelBrokerRuntime {
   return {
-    receiveInboundEvent: async ({ account, event }) => {
+    receiveInboundEvent: async ({ account, event, dedupeKey, ackPolicy }) => {
+      const journal = createChannelBrokerDurableInboundReceiveJournal(
+        pluginRuntime,
+        account.providerId,
+      );
+      const metadata = { providerId: account.providerId, platform: event.platform, ackPolicy };
+      const acceptResult = await journal.accept(dedupeKey, event, { metadata });
+      if (acceptResult.duplicate) {
+        return { status: "duplicate" };
+      }
+      if (ackPolicy === "after_receive_record") {
+        await journal.complete(dedupeKey, { metadata });
+      }
       const cfg = pluginRuntime.config.current() as CoreConfig;
       const chatKind = conversationKind(event.conversation.type);
       const peer = {
@@ -176,107 +230,127 @@ function createRuntimeFromPluginRuntime(pluginRuntime: PluginRuntime): ChannelBr
       const timestamp = event.message.timestamp ? Date.parse(event.message.timestamp) : undefined;
       const media = toInboundMediaFacts(event.message.attachments, event.message.id);
 
-      const turnResult = await pluginRuntime.channel.turn.run({
-        channel: "channel-broker",
-        accountId: account.providerId,
-        raw: event,
-        adapter: {
-          ingest: () => ({
-            id: event.message.id || event.eventId,
-            timestamp: Number.isFinite(timestamp) ? timestamp : undefined,
-            rawText: messageText,
-            textForAgent: messageText,
-            textForCommands: messageText,
-            raw: event,
-          }),
-          resolveTurn: (input) => {
-            const ctxPayload = pluginRuntime.channel.turn.buildContext({
-              channel: "channel-broker",
-              accountId: account.providerId,
-              provider: account.providerId,
-              surface: event.platform,
-              messageId: event.message.id,
-              messageIdFull: event.eventId,
-              timestamp: input.timestamp,
-              from: `${event.platform}:${event.sender.id}`,
-              sender: {
-                id: event.sender.id,
-                name: event.sender.displayName,
-                username: event.sender.handle,
-                isBot: event.sender.isBot,
-              },
-              conversation: {
-                kind: chatKind,
-                id: event.conversation.id,
-                label: event.conversation.title,
-                parentId: event.conversation.parentId,
-                threadId: event.conversation.threadId,
-                nativeChannelId: event.conversation.id,
-                routePeer: peer,
-              },
-              route: {
-                agentId: route.agentId,
+      let turnResult: Awaited<ReturnType<PluginRuntime["channel"]["turn"]["run"]>>;
+      try {
+        turnResult = await pluginRuntime.channel.turn.run({
+          channel: "channel-broker",
+          accountId: account.providerId,
+          raw: event,
+          adapter: {
+            ingest: () => ({
+              id: event.message.id || event.eventId,
+              timestamp: Number.isFinite(timestamp) ? timestamp : undefined,
+              rawText: messageText,
+              textForAgent: messageText,
+              textForCommands: messageText,
+              raw: event,
+            }),
+            resolveTurn: (input) => {
+              const ctxPayload = pluginRuntime.channel.turn.buildContext({
+                channel: "channel-broker",
                 accountId: account.providerId,
-                routeSessionKey: route.sessionKey,
-                dispatchSessionKey: route.sessionKey,
-              },
-              reply: {
-                to: replyTarget,
-                originatingTo: replyTarget,
-                replyToId: event.message.replyToId,
-                messageThreadId: event.conversation.threadId,
-                nativeChannelId: event.conversation.id,
-              },
-              message: {
-                rawBody: input.rawText,
-                bodyForAgent: input.textForAgent,
-                commandBody: input.textForCommands,
-                envelopeFrom: event.sender.displayName ?? event.sender.handle ?? event.sender.id,
-              },
-              media,
-              extra: {
-                BrokerProviderId: account.providerId,
-                BrokerPlatform: event.platform,
-                BrokerNativeIds: event.message.nativeIds,
-                BrokerRawRef: event.message.rawRef,
-              },
-            });
-            return {
-              cfg,
-              channel: "channel-broker",
-              accountId: account.providerId,
-              agentId: route.agentId,
-              routeSessionKey: route.sessionKey,
-              storePath,
-              ctxPayload,
-              recordInboundSession: pluginRuntime.channel.session.recordInboundSession,
-              dispatchReplyWithBufferedBlockDispatcher:
-                pluginRuntime.channel.reply.dispatchReplyWithBufferedBlockDispatcher,
-              delivery: {
-                durable: () => ({
-                  to: replyTarget,
+                provider: account.providerId,
+                surface: event.platform,
+                messageId: event.message.id,
+                messageIdFull: event.eventId,
+                timestamp: input.timestamp,
+                from: `${event.platform}:${event.sender.id}`,
+                sender: {
+                  id: event.sender.id,
+                  name: event.sender.displayName,
+                  username: event.sender.handle,
+                  isBot: event.sender.isBot,
+                },
+                conversation: {
+                  kind: chatKind,
+                  id: event.conversation.id,
+                  label: event.conversation.title,
+                  parentId: event.conversation.parentId,
                   threadId: event.conversation.threadId,
+                  nativeChannelId: event.conversation.id,
+                  routePeer: peer,
+                },
+                route: {
+                  agentId: route.agentId,
+                  accountId: account.providerId,
+                  routeSessionKey: route.sessionKey,
+                  dispatchSessionKey: route.sessionKey,
+                },
+                reply: {
+                  to: replyTarget,
+                  originatingTo: replyTarget,
                   replyToId: event.message.replyToId,
-                  requiredCapabilities: {
-                    payload: true,
-                    thread: Boolean(event.conversation.threadId),
-                    replyTo: Boolean(event.message.replyToId),
-                  },
-                }),
-                deliver: async (payload) =>
-                  await deliverBrokerInboundReply({
-                    cfg,
-                    account,
+                  messageThreadId: event.conversation.threadId,
+                  nativeChannelId: event.conversation.id,
+                },
+                message: {
+                  rawBody: input.rawText,
+                  bodyForAgent: input.textForAgent,
+                  commandBody: input.textForCommands,
+                  envelopeFrom: event.sender.displayName ?? event.sender.handle ?? event.sender.id,
+                },
+                media,
+                extra: {
+                  BrokerProviderId: account.providerId,
+                  BrokerPlatform: event.platform,
+                  BrokerNativeIds: event.message.nativeIds,
+                  BrokerRawRef: event.message.rawRef,
+                },
+              });
+              return {
+                cfg,
+                channel: "channel-broker",
+                accountId: account.providerId,
+                agentId: route.agentId,
+                routeSessionKey: route.sessionKey,
+                storePath,
+                ctxPayload,
+                recordInboundSession: pluginRuntime.channel.session.recordInboundSession,
+                dispatchReplyWithBufferedBlockDispatcher:
+                  pluginRuntime.channel.reply.dispatchReplyWithBufferedBlockDispatcher,
+                delivery: {
+                  durable: () => ({
                     to: replyTarget,
-                    payload,
                     threadId: event.conversation.threadId,
                     replyToId: event.message.replyToId,
+                    requiredCapabilities: {
+                      payload: true,
+                      thread: Boolean(event.conversation.threadId),
+                      replyTo: Boolean(event.message.replyToId),
+                    },
                   }),
-              },
-            };
+                  deliver: async (payload) =>
+                    await deliverBrokerInboundReply({
+                      cfg,
+                      account,
+                      to: replyTarget,
+                      payload,
+                      threadId: event.conversation.threadId,
+                      replyToId: event.message.replyToId,
+                    }),
+                },
+              };
+            },
           },
-        },
-      });
+        });
+      } catch (error) {
+        if (ackPolicy !== "after_receive_record") {
+          await journal.release(dedupeKey, {
+            lastError: error instanceof Error ? error.message : String(error),
+          });
+        }
+        throw error;
+      }
+
+      if (turnResult.dispatched) {
+        if (ackPolicy !== "after_receive_record") {
+          await journal.complete(dedupeKey, { metadata });
+        }
+      } else if (ackPolicy !== "after_receive_record") {
+        const reason =
+          "reason" in turnResult.admission ? String(turnResult.admission.reason) : "not dispatched";
+        await journal.release(dedupeKey, { lastError: reason });
+      }
 
       return {
         status: turnResult.dispatched ? "accepted" : "rejected",
