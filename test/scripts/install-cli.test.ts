@@ -1,5 +1,15 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -144,12 +154,7 @@ describe("install-cli.sh", () => {
     linkRequiredShellTools(bin);
     writeFileSync(
       fakeApk,
-      [
-        "#!/bin/bash",
-        'printf "%s\\n" "$*" >> "$APK_LOG"',
-        "exit 99",
-        "",
-      ].join("\n"),
+      ["#!/bin/bash", 'printf "%s\\n" "$*" >> "$APK_LOG"', "exit 99", ""].join("\n"),
     );
     writeFileSync(
       fakeNode,
@@ -166,14 +171,7 @@ describe("install-cli.sh", () => {
         "",
       ].join("\n"),
     );
-    writeFileSync(
-      fakeNpm,
-      [
-        "#!/bin/bash",
-        "exit 0",
-        "",
-      ].join("\n"),
-    );
+    writeFileSync(fakeNpm, ["#!/bin/bash", "exit 0", ""].join("\n"));
     chmodSync(fakeApk, 0o755);
     chmodSync(fakeNode, 0o755);
     chmodSync(fakeNpm, 0o755);
@@ -233,12 +231,7 @@ describe("install-cli.sh", () => {
     mkdirSync(nodePrefixBin, { recursive: true });
     writeFileSync(
       fakeApk,
-      [
-        "#!/bin/bash",
-        'printf "%s\\n" "$*" >> "$APK_LOG"',
-        "exit 99",
-        "",
-      ].join("\n"),
+      ["#!/bin/bash", 'printf "%s\\n" "$*" >> "$APK_LOG"', "exit 99", ""].join("\n"),
     );
     writeFileSync(
       staleNode,
@@ -285,22 +278,8 @@ describe("install-cli.sh", () => {
         "",
       ].join("\n"),
     );
-    writeFileSync(
-      oldNpm,
-      [
-        "#!/bin/bash",
-        "exit 0",
-        "",
-      ].join("\n"),
-    );
-    writeFileSync(
-      fakeNpm,
-      [
-        "#!/bin/bash",
-        "exit 0",
-        "",
-      ].join("\n"),
-    );
+    writeFileSync(oldNpm, ["#!/bin/bash", "exit 0", ""].join("\n"));
+    writeFileSync(fakeNpm, ["#!/bin/bash", "exit 0", ""].join("\n"));
     chmodSync(fakeApk, 0o755);
     chmodSync(staleNode, 0o755);
     chmodSync(oldNode, 0o755);
@@ -384,14 +363,7 @@ describe("install-cli.sh", () => {
         "",
       ].join("\n"),
     );
-    writeFileSync(
-      fakeNpm,
-      [
-        "#!/bin/bash",
-        "exit 0",
-        "",
-      ].join("\n"),
-    );
+    writeFileSync(fakeNpm, ["#!/bin/bash", "exit 0", ""].join("\n"));
     chmodSync(fakeApk, 0o755);
     chmodSync(fakeNode, 0o755);
     chmodSync(fakeNpm, 0o755);
@@ -446,12 +418,7 @@ describe("install-cli.sh", () => {
     linkRequiredShellTools(bin);
     writeFileSync(
       fakeApk,
-      [
-        "#!/bin/bash",
-        'printf "%s\\n" "$*" >> "$APK_LOG"',
-        "exit 0",
-        "",
-      ].join("\n"),
+      ["#!/bin/bash", 'printf "%s\\n" "$*" >> "$APK_LOG"', "exit 0", ""].join("\n"),
     );
     writeFileSync(
       fakeNode,
@@ -468,14 +435,7 @@ describe("install-cli.sh", () => {
         "",
       ].join("\n"),
     );
-    writeFileSync(
-      fakeNpm,
-      [
-        "#!/bin/bash",
-        "exit 0",
-        "",
-      ].join("\n"),
-    );
+    writeFileSync(fakeNpm, ["#!/bin/bash", "exit 0", ""].join("\n"));
     chmodSync(fakeApk, 0o755);
     chmodSync(fakeNode, 0o755);
     chmodSync(fakeNpm, 0o755);
@@ -504,7 +464,9 @@ describe("install-cli.sh", () => {
 
       expect(result.status).toBe(1);
       expect(readFileSync(apkLog, "utf8")).toContain("add --no-cache nodejs npm");
-      expect(result.stdout).toContain("Alpine Node package must provide Node >= 22.22.0 with node:sqlite");
+      expect(result.stdout).toContain(
+        "Alpine Node package must provide Node >= 22.22.0 with node:sqlite",
+      );
       expect(result.stdout).toContain("found v22.18.0");
     } finally {
       rmSync(tmp, { force: true, recursive: true });

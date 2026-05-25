@@ -8,7 +8,11 @@ import type { OpenClawConfig } from "../config/config.js";
 import { createOpenClawCodingTools } from "./pi-tools.js";
 import { createCanonicalFixtureSkill } from "./skills.test-helpers.js";
 import { createHostSandboxFsBridge } from "./test-helpers/host-sandbox-fs-bridge.js";
-import { expectReadWriteEditTools, getTextContent } from "./test-helpers/pi-tools-fs-helpers.js";
+import {
+  expectReadWriteEditTools,
+  expectReadWriteTools,
+  getTextContent,
+} from "./test-helpers/pi-tools-fs-helpers.js";
 import { createPiToolsSandboxContext } from "./test-helpers/pi-tools-sandbox-context.js";
 
 vi.mock("../infra/shell-env.js", async () => {
@@ -385,6 +389,57 @@ describe("workspace path resolution", () => {
         }),
       ).rejects.toThrow(/Path escapes sandbox root|outside-workspace/i);
       expect(await fs.readFile(skillFile, "utf8")).toContain("original skill");
+    });
+  });
+
+  it("allows memory-triggered workspaceOnly reads for persisted skill prompt locations", async () => {
+    await withTempDir("openclaw-memory-skill-read-", async (rootDir) => {
+      const workspaceDir = path.join(rootDir, "workspace");
+      const skillDir = path.join(rootDir, "shared-tools", "memory-save");
+      const siblingDir = path.join(rootDir, "shared-tools", "other");
+      await fs.mkdir(workspaceDir, { recursive: true });
+      await fs.mkdir(skillDir, { recursive: true });
+      await fs.mkdir(siblingDir, { recursive: true });
+      const skillFile = path.join(skillDir, "SKILL.md");
+      const guideFile = path.join(skillDir, "format.md");
+      const siblingFile = path.join(siblingDir, "SKILL.md");
+      await fs.writeFile(skillFile, "# Memory save\n", "utf8");
+      await fs.writeFile(guideFile, "daily memory format", "utf8");
+      await fs.writeFile(siblingFile, "sibling skill", "utf8");
+
+      const tools = createOpenClawCodingTools({
+        workspaceDir,
+        trigger: "memory",
+        memoryFlushWritePath: "memory/2026-05-22.md",
+        skillsSnapshot: {
+          prompt: [
+            "<available_skills>",
+            "  <skill>",
+            "    <name>memory-save</name>",
+            `    <location>${skillFile}</location>`,
+            "  </skill>",
+            "</available_skills>",
+          ].join("\n"),
+          skills: [{ name: "memory-save" }],
+          // Persisted session snapshots intentionally omit resolvedSkills.
+        },
+      });
+      const { readTool, writeTool } = expectReadWriteTools(tools);
+
+      expect(
+        getTextContent(await readTool.execute("read-prompt-skill", { path: skillFile })),
+      ).toContain("Memory save");
+      expect(
+        getTextContent(await readTool.execute("read-prompt-skill-guide", { path: guideFile })),
+      ).toContain("daily memory format");
+      await expect(readTool.execute("read-prompt-sibling", { path: siblingFile })).rejects.toThrow(
+        /Path escapes sandbox root/i,
+      );
+      await expect(
+        writeTool.execute("write-prompt-skill", { path: skillFile, content: "overwritten" }),
+      ).rejects.toThrow(
+        /Memory flush writes are restricted|Path escapes sandbox root|outside-workspace/i,
+      );
     });
   });
 

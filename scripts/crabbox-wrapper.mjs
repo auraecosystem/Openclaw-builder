@@ -10,7 +10,10 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoLocal = resolveCrabboxBinary(process.env, process.platform);
 const pathLocal = resolvePathBinary("crabbox", process.env, process.platform);
 const binary =
-  repoLocal ?? pathLocal ?? resolveGitCommonCrabboxBinary(process.env, process.platform) ?? "crabbox";
+  repoLocal ??
+  pathLocal ??
+  resolveGitCommonCrabboxBinary(process.env, process.platform) ??
+  "crabbox";
 const args = process.argv.slice(2);
 
 if (args[0] === "--") {
@@ -544,10 +547,7 @@ function shouldUseFullCheckoutForCleanSparseRemoteSync(commandArgs, providerName
   if (commandArgs[0] !== "run" || isLocalContainerProvider(providerName)) {
     return false;
   }
-  if (
-    hasOption(commandArgs, "--no-sync") ||
-    hasOption(commandArgs, "--id")
-  ) {
+  if (hasOption(commandArgs, "--no-sync") || hasOption(commandArgs, "--id")) {
     return false;
   }
 

@@ -131,6 +131,32 @@ function readOnlyAgentWorkspaceMount(
   ];
 }
 
+function decodeSkillPromptLocation(raw: string): string {
+  return raw
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, ">")
+    .replace(/&lt;/g, "<")
+    .replace(/&amp;/g, "&");
+}
+
+function addSkillReadRoot(roots: Set<string>, rawPath: string): void {
+  const trimmed = rawPath.trim();
+  if (!trimmed) {
+    return;
+  }
+  const expanded =
+    trimmed === "~"
+      ? process.env.HOME
+      : trimmed.startsWith("~/") && process.env.HOME
+        ? path.join(process.env.HOME, trimmed.slice(2))
+        : trimmed;
+  if (!expanded || !path.isAbsolute(expanded)) {
+    return;
+  }
+  roots.add(path.resolve(path.dirname(expanded)));
+}
+
 function resolveSkillReadRoots(skillsSnapshot?: SkillSnapshot): string[] | undefined {
   const roots = new Set<string>();
   for (const skill of skillsSnapshot?.resolvedSkills ?? []) {
@@ -141,6 +167,10 @@ function resolveSkillReadRoots(skillsSnapshot?: SkillSnapshot): string[] | undef
       continue;
     }
     roots.add(path.resolve(root));
+  }
+  const prompt = typeof skillsSnapshot?.prompt === "string" ? skillsSnapshot.prompt : "";
+  for (const match of prompt.matchAll(/<location>([\s\S]*?)<\/location>/g)) {
+    addSkillReadRoot(roots, decodeSkillPromptLocation(match[1] ?? ""));
   }
   if (roots.size === 0) {
     return undefined;
