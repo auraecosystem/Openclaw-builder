@@ -1,0 +1,24 @@
+{
+  "id": "goal",
+  "activation": {
+    "onStartup": false,
+    "onCommands": ["goal"]
+  },
+  "name": "Goal",
+  "description": "Session-scoped goal tracking with bounded continuation turns.",
+  "contracts": {
+    "tools": ["goal_status"]
+  },
+  "commandAliases": [
+    {
+      "name": "goal",
+      "kind": "runtime-slash",
+      "cliCommand": "plugins"
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
