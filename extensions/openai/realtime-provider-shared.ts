@@ -106,6 +106,7 @@ async function createOpenAIRealtimeSecret(
       },
       body: JSON.stringify(params.body),
     },
+    policy: { allowRfc2544BenchmarkRange: true },
     auditContext: params.auditContext,
   });
   const payload = await (async () => {
