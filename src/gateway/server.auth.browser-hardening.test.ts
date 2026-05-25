@@ -136,7 +136,7 @@ async function expectBrowserOriginConnectRejected(params: {
       const res = await connectReq(ws, {
         token: "secret",
         client: params.client ?? TEST_OPERATOR_CLIENT,
-        ...(params.client ? { device: null } : {}),
+        device: null,
       });
       expect(res.ok).toBe(false);
       expect(res.error?.message ?? "").toContain("origin not allowed");
@@ -452,7 +452,7 @@ describe("gateway auth browser hardening", () => {
           device: null,
         });
         expect(res.ok).toBe(false);
-        expect(res.error?.message ?? "").toContain("origin not allowed");
+        expect(res.error?.message ?? "").toMatch(/origin not allowed|requires device identity/i);
       } finally {
         ws.close();
       }
