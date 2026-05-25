@@ -7,6 +7,7 @@ import {
   resolveSupportedThinkingLevel,
   type VerboseLevel,
 } from "../auto-reply/thinking.js";
+import { resolveChannelModelOverride } from "../channels/model-overrides.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import type { CliDeps } from "../cli/deps.types.js";
 import { getRuntimeConfig } from "../config/io.js";
@@ -82,11 +83,13 @@ import { runWithModelFallback } from "./model-fallback.js";
 import type { ModelManifestNormalizationContext } from "./model-selection-normalize.js";
 import {
   buildConfiguredModelCatalog,
+  buildModelAliasIndex,
   modelKey,
   normalizeModelRef,
   parseModelRef,
   resolveConfiguredModelRef,
   resolveDefaultModelForAgent,
+  resolveModelRefFromString,
   resolveThinkingDefault,
 } from "./model-selection.js";
 import {
@@ -900,6 +903,8 @@ async function agentCommandInternal(
     );
     let provider = defaultProvider;
     let model = defaultModel;
+    let primaryProvider = defaultProvider;
+    let primaryModel = defaultModel;
     const hasAllowlist = agentCfg?.models && Object.keys(agentCfg.models).length > 0;
     const hasStoredOverride = Boolean(
       sessionEntry?.modelOverride || sessionEntry?.providerOverride,
@@ -931,7 +936,6 @@ async function agentCommandInternal(
       defaultModel,
       ...modelManifestContext,
     });
-
     if (needsModelCatalog) {
       modelCatalog = loadManifestModelCatalog({ config: cfg, workspaceDir });
       visibilityPolicy = createModelVisibilityPolicy({
@@ -943,6 +947,45 @@ async function agentCommandInternal(
         ...modelManifestContext,
       });
       allowedModelCatalog = visibilityPolicy.allowedCatalog;
+    }
+
+    const channelModelOverride = !hasExplicitRunOverride
+      ? resolveChannelModelOverride({
+          cfg,
+          channel:
+            sessionEntry?.channel ??
+            sessionEntry?.lastChannel ??
+            sessionEntry?.origin?.provider ??
+            opts.runContext?.messageChannel ??
+            opts.messageChannel ??
+            opts.channel,
+          groupId: sessionEntry?.groupId ?? opts.runContext?.groupId ?? opts.groupId,
+          groupChatType: sessionEntry?.chatType ?? sessionEntry?.origin?.chatType,
+          groupChannel:
+            sessionEntry?.groupChannel ?? opts.runContext?.groupChannel ?? opts.groupChannel,
+          groupSubject: sessionEntry?.subject,
+          parentSessionKey: sessionEntry?.parentSessionKey ?? sessionKey,
+        })
+      : null;
+    if (channelModelOverride) {
+      const modelAliasIndex = buildModelAliasIndex({
+        cfg,
+        defaultProvider,
+        ...modelManifestContext,
+      });
+      const channelRef = resolveModelRefFromString({
+        cfg,
+        raw: channelModelOverride.model,
+        defaultProvider,
+        aliasIndex: modelAliasIndex,
+        ...modelManifestContext,
+      })?.ref;
+      if (channelRef) {
+        provider = channelRef.provider;
+        model = channelRef.model;
+        primaryProvider = channelRef.provider;
+        primaryModel = channelRef.model;
+      }
     }
 
     if (
@@ -1011,8 +1054,8 @@ async function agentCommandInternal(
       ? resolveAutoFallbackPrimaryProbe({
           entry: sessionEntry,
           sessionKey,
-          primaryProvider: defaultProvider,
-          primaryModel: defaultModel,
+          primaryProvider,
+          primaryModel,
         })
       : undefined;
     let autoFallbackPrimaryProbeSessionEntry: SessionEntry | undefined;
