@@ -5,6 +5,7 @@ import {
   buildEmbeddedSystemPromptMock,
   contextEngineCompactMock,
   createOpenClawCodingToolsMock,
+  enqueueCommandInLaneMock,
   ensureRuntimePluginsLoaded,
   estimateTokensMock,
   getMemorySearchManagerMock,
@@ -1481,6 +1482,39 @@ describe("compactEmbeddedPiSession hooks (ownsCompaction engine)", () => {
       authProfileId: "openai:p1",
       currentTokenCount: 333,
     });
+  });
+
+  it("fails deferred budget compaction when background maintenance is not scheduled", async () => {
+    const dispose = vi.fn(async () => {});
+    const maintain = vi.fn(async () => ({
+      changed: false,
+      bytesFreed: 0,
+      rewrittenEntries: 0,
+    }));
+    resolveContextEngineMock.mockResolvedValue({
+      info: { ownsCompaction: true, turnMaintenanceMode: "background" },
+      compact: contextEngineCompactMock,
+      dispose,
+      maintain,
+    } as never);
+    enqueueCommandInLaneMock.mockImplementationOnce(() => {
+      throw new Error("scheduler offline");
+    });
+
+    const result = await compactEmbeddedPiSession(
+      wrappedCompactionArgs({
+        trigger: "budget",
+        deferOwningContextEngineCompaction: true,
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.compacted).toBe(false);
+    expect(result.reason).toBe("failed to schedule background context-engine maintenance");
+    expect(result.failure?.reason).toBe("deferred_compaction_not_scheduled");
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(maintain).not.toHaveBeenCalled();
+    expect(contextEngineCompactMock).not.toHaveBeenCalled();
   });
 
   it("does not fall back to context-engine compaction for Codex native binding failures", async () => {

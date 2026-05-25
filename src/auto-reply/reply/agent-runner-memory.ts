@@ -10,6 +10,7 @@ import { runWithModelFallback } from "../../agents/model-fallback.js";
 import { listLegacyRuntimeModelProviderAliases } from "../../agents/model-runtime-aliases.js";
 import { isCliProvider } from "../../agents/model-selection.js";
 import { resolveContextConfigProviderForRuntime } from "../../agents/openai-codex-routing.js";
+import { classifyCompactionReason } from "../../agents/pi-embedded-runner/compact-reasons.js";
 import { resolveSandboxConfigForAgent, resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
 import {
   derivePromptTokens,
@@ -174,6 +175,19 @@ function resolveEffectivePromptTokens(
   // Flush gating projects the next input context by adding the previous
   // completion and the current user prompt estimate.
   return base + output + estimate;
+}
+
+function isPreflightCompactionSkipReason(reason?: string): boolean {
+  const classification = classifyCompactionReason(reason);
+  // Preflight compaction is a guardrail, not a hard dependency. These classes
+  // mean the context engine found nothing useful to compact, so the reply should
+  // continue instead of surfacing a generic user-facing failure.
+  return (
+    classification === "below_threshold" ||
+    classification === "no_compactable_entries" ||
+    classification === "already_compacted_recently" ||
+    classification === "deferred_background"
+  );
 }
 
 function resolveMemoryFlushModelFallbackOptions(
@@ -813,6 +827,7 @@ export async function runPreflightCompactionIfNeeded(params: {
     thinkLevel: params.followupRun.run.thinkLevel,
     bashElevated: params.followupRun.run.bashElevated,
     trigger: "budget",
+    deferOwningContextEngineCompaction: true,
     currentTokenCount: tokenCountForCompaction ?? freshPersistedTokens,
     ownerNumbers: params.followupRun.run.ownerNumbers,
     abortSignal: params.replyOperation.abortSignal,
@@ -820,6 +835,10 @@ export async function runPreflightCompactionIfNeeded(params: {
 
   if (!result?.ok || !result.compacted) {
     const reason = result?.reason ?? "not_compacted";
+    if (result?.ok && isPreflightCompactionSkipReason(reason)) {
+      logVerbose(`preflightCompaction skipped: sessionKey=${params.sessionKey} reason=${reason}`);
+      return entry ?? params.sessionEntry;
+    }
     logVerbose(`preflightCompaction failed: sessionKey=${params.sessionKey} reason=${reason}`);
     if (isRecoverableNativeHarnessBindingFailure(result)) {
       logVerbose(

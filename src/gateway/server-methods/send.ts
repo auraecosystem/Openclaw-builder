@@ -288,6 +288,37 @@ async function mirrorDeliveredSourceReplyToTranscriptBestEffort(params: {
   }
 }
 
+const sourceReplyTranscriptMirrorQueues = new Map<string, Promise<void>>();
+
+function resolveSourceReplyTranscriptMirrorQueueKey(
+  mirror: Parameters<typeof mirrorDeliveredSourceReplyToTranscript>[0],
+): string {
+  return mirror.sessionKey?.trim() || "__global__";
+}
+
+function scheduleDeliveredSourceReplyTranscriptMirror(params: {
+  context: GatewayRequestContext;
+  mirror: Parameters<typeof mirrorDeliveredSourceReplyToTranscript>[0];
+}) {
+  const queueKey = resolveSourceReplyTranscriptMirrorQueueKey(params.mirror);
+  const previous = sourceReplyTranscriptMirrorQueues.get(queueKey);
+  // Transcript mirroring is best-effort bookkeeping after a successful channel
+  // send. Queue it per session so gateway responses are not held hostage by
+  // session-store I/O while transcript order remains deterministic.
+  const queued = (async () => {
+    await previous?.catch(() => undefined);
+    await mirrorDeliveredSourceReplyToTranscriptBestEffort(params);
+  })();
+  sourceReplyTranscriptMirrorQueues.set(queueKey, queued);
+  void queued
+    .finally(() => {
+      if (sourceReplyTranscriptMirrorQueues.get(queueKey) === queued) {
+        sourceReplyTranscriptMirrorQueues.delete(queueKey);
+      }
+    })
+    .catch(() => undefined);
+}
+
 export const sendHandlers: GatewayRequestHandlers = {
   "message.action": async ({ params, respond, context, client }) => {
     const p = params;
@@ -399,7 +430,7 @@ export const sendHandlers: GatewayRequestHandlers = {
         const agentId =
           normalizeOptionalString(request.agentId) ??
           (sessionKey ? resolveSessionAgentId({ sessionKey, config: cfg }) : undefined);
-        await mirrorDeliveredSourceReplyToTranscriptBestEffort({
+        scheduleDeliveredSourceReplyTranscriptMirror({
           context,
           mirror: {
             action: request.action,

@@ -120,6 +120,7 @@ export const rotateTranscriptAfterCompactionMock: Mock<
 > = vi.fn(async () => ({
   rotated: false,
 }));
+export const enqueueCommandInLaneMock = vi.fn((_lane: unknown, task: () => unknown) => task());
 
 function createCompactHooksRuntimePlan(params: BuildAgentRuntimePlanParams): AgentRuntimePlan {
   const modelApi = params.modelApi ?? params.model?.api ?? undefined;
@@ -272,6 +273,8 @@ export function resetCompactSessionStateMocks(): void {
   maybeCompactAgentHarnessSessionMock.mockResolvedValue(undefined);
   rotateTranscriptAfterCompactionMock.mockReset();
   rotateTranscriptAfterCompactionMock.mockResolvedValue({ rotated: false });
+  enqueueCommandInLaneMock.mockReset();
+  enqueueCommandInLaneMock.mockImplementation((_lane: unknown, task: () => unknown) => task());
   listRegisteredPluginAgentPromptGuidanceMock.mockReset();
   listRegisteredPluginAgentPromptGuidanceMock.mockImplementation((params?: { surface?: string }) =>
     params?.surface === "subagent"
@@ -532,7 +535,7 @@ export async function loadCompactHooksHarness(): Promise<{
   }));
 
   vi.doMock("../../process/command-queue.js", () => ({
-    enqueueCommandInLane: vi.fn((_lane: unknown, task: () => unknown) => task()),
+    enqueueCommandInLane: enqueueCommandInLaneMock,
     clearCommandLane: vi.fn(() => 0),
   }));
 

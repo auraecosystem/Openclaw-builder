@@ -17,7 +17,7 @@ import { hasGlobalHooks } from "../../plugins/hook-runner-global.js";
 import { PluginApprovalResolutions } from "../../plugins/types.js";
 import { uniqueValues } from "../../shared/string-normalization.js";
 import { asBoolean } from "../../utils/boolean.js";
-import { runBeforeToolCallHook } from "../pi-tools.before-tool-call.js";
+import { hasBeforeToolCallPolicy, runBeforeToolCallHook } from "../pi-tools.before-tool-call.js";
 import { stableStringify } from "../stable-stringify.js";
 import { normalizeToolName } from "../tool-policy.js";
 import { callGatewayTool } from "../tools/gateway.js";
@@ -110,6 +110,7 @@ export type RegisterNativeHookRelayParams = {
 
 export type NativeHookRelayCommandOptions = {
   executable?: string;
+  nice?: number | false;
   nodeExecutable?: string;
   timeoutMs?: number;
 };
@@ -330,6 +331,7 @@ export function registerNativeHookRelay(
         provider: params.provider,
         relayId,
         event,
+        nice: params.command?.nice,
         timeoutMs: params.command?.timeoutMs,
         executable: params.command?.executable,
         nodeExecutable: params.command?.nodeExecutable,
@@ -376,12 +378,24 @@ function normalizeRelayId(value: string | undefined): string | undefined {
   return trimmed;
 }
 
+function resolveNativeHookRelayNicePrefix(value: number | false | undefined): string[] {
+  if (process.platform === "win32" || value === false || value === undefined) {
+    return [];
+  }
+  const nice = normalizePositiveInteger(value, 0);
+  if (nice <= 0) {
+    return [];
+  }
+  return ["nice", "-n", String(nice)];
+}
+
 export function buildNativeHookRelayCommand(params: {
   provider: NativeHookRelayProvider;
   relayId: string;
   event: NativeHookRelayEvent;
   timeoutMs?: number;
   executable?: string;
+  nice?: number | false;
   nodeExecutable?: string;
 }): string {
   const timeoutMs = normalizePositiveInteger(params.timeoutMs, DEFAULT_RELAY_TIMEOUT_MS);
@@ -390,7 +404,9 @@ export function buildNativeHookRelayCommand(params: {
     executable === "openclaw"
       ? ["openclaw"]
       : [params.nodeExecutable ?? process.execPath, executable];
+  const nicePrefix = resolveNativeHookRelayNicePrefix(params.nice);
   return shellQuoteArgs([
+    ...nicePrefix,
     ...argv,
     "hooks",
     "relay",
@@ -407,7 +423,9 @@ export function buildNativeHookRelayCommand(params: {
 
 function nativeHookRelayEventHasLocalWork(event: NativeHookRelayEvent): boolean {
   if (event === "pre_tool_use") {
-    return true;
+    // Avoid spawning a native hook relay for every Codex tool call when there
+    // is no before_tool_call hook or trusted-tool policy to enforce.
+    return hasBeforeToolCallPolicy();
   }
   if (event === "post_tool_use") {
     return hasGlobalHooks("after_tool_call");
