@@ -468,7 +468,7 @@ export async function sendChannelBrokerMedia(params: {
       media: true,
       ...(text ? { text: true } : {}),
     },
-    receiptKind: "media",
+    receiptKind: params.audioAsVoice ? "voice" : "media",
   });
 }
 

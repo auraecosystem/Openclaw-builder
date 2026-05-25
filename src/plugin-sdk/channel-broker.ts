@@ -332,6 +332,19 @@ function normalizeOptionalBrokerString(value: string | undefined): string | unde
   return trimmed || undefined;
 }
 
+function normalizeBrokerMessageText(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw new Error("broker message text must be a string");
+  }
+  if (value.length === 0) {
+    return undefined;
+  }
+  return value;
+}
+
 function normalizeBrokerAttachments(
   attachments: BrokerMessageAttachment[] | undefined,
 ): BrokerMessageAttachment[] | undefined {
@@ -488,8 +501,8 @@ export function normalizeBrokerInboundEvent(event: BrokerInboundEventV1): Broker
     },
     message: {
       id: requireBrokerString(event.message.id, "broker message id"),
-      ...(normalizeOptionalBrokerString(event.message.text)
-        ? { text: event.message.text?.trim() }
+      ...(normalizeBrokerMessageText(event.message.text)
+        ? { text: event.message.text }
         : {}),
       ...(attachments ? { attachments } : {}),
       ...(normalizeOptionalBrokerString(event.message.timestamp)
