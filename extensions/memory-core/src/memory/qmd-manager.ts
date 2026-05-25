@@ -1688,7 +1688,7 @@ export class QmdMemoryManager implements MemorySearchManager {
   }
 
   private shouldRunEmbed(force?: boolean): boolean {
-    if (!qmdUsesVectors(this.qmd.searchMode)) {
+    if (!qmdUsesVectors(this.qmd.searchMode) && this.qmd.update.embedIntervalMs <= 0) {
       return false;
     }
     const now = Date.now();
@@ -1704,7 +1704,7 @@ export class QmdMemoryManager implements MemorySearchManager {
   }
 
   private shouldScheduleEmbedTimer(): boolean {
-    if (!qmdUsesVectors(this.qmd.searchMode)) {
+    if (!qmdUsesVectors(this.qmd.searchMode) && this.qmd.update.embedIntervalMs <= 0) {
       return false;
     }
     const embedIntervalMs = this.qmd.update.embedIntervalMs;
