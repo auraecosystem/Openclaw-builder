@@ -369,7 +369,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
               params.logChannels.info(
                 `restarting ${channel} channel after failed plugin reload pre-stop`,
               );
-              await params.startChannel(channel);
+              await params.startChannel(channel, undefined, { includeKnownAccounts: true });
               channelsStoppedBeforePluginReload.delete(channel);
             },
             onFailure: (channel, err) => {
@@ -479,7 +479,11 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
           if (!channelsStoppedBeforePluginReload.has(name)) {
             await params.stopChannel(name, undefined, { manual: false });
           }
-          await params.startChannel(name);
+          if (plan.reloadPlugins) {
+            await params.startChannel(name, undefined, { includeKnownAccounts: true });
+          } else {
+            await params.startChannel(name);
+          }
         };
         const restartFailures = await collectChannelOperationFailures({
           channels: channelsToRestart,
