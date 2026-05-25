@@ -73,6 +73,20 @@ function resolveManifestPluginsForModelIdNormalization(params: {
   }).plugins;
 }
 
+function hasConfiguredModelAliasEntries(cfg: OpenClawConfig): boolean {
+  const rawModels = cfg.agents?.defaults?.models;
+  if (!rawModels) {
+    return false;
+  }
+  return Object.entries(rawModels).some(([keyRaw, entryRaw]) => {
+    const trimmedKey = keyRaw.trim();
+    if (trimmedKey.endsWith("/*") && normalizeProviderId(trimmedKey.slice(0, -2))) {
+      return false;
+    }
+    return Boolean(normalizeOptionalString((entryRaw as { alias?: string } | undefined)?.alias));
+  });
+}
+
 function sanitizeModelWarningValue(value: string): string {
   const stripped = value ? stripAnsi(value) : "";
   let controlBoundary = -1;
@@ -624,12 +638,15 @@ export function resolveConfiguredModelRef(
       }
       return manifestPlugins;
     };
+    const aliasIndexManifestPlugins = hasConfiguredModelAliasEntries(params.cfg)
+      ? getManifestPlugins()
+      : manifestPlugins;
     const aliasIndex = buildModelAliasIndex({
       cfg: params.cfg,
       defaultProvider: params.defaultProvider,
       allowManifestNormalization: params.allowManifestNormalization,
       allowPluginNormalization: params.allowPluginNormalization,
-      manifestPlugins,
+      manifestPlugins: aliasIndexManifestPlugins,
     });
     const aliasKey = normalizeLowercaseStringOrEmpty(trimmed);
     const aliasMatch = aliasIndex.byAlias.get(aliasKey);

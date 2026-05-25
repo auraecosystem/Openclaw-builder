@@ -254,4 +254,45 @@ describe("configured model manifest workspace scope", () => {
     ).toEqual({ provider: "openrouter", model: "openrouter/auto" });
     expect(loadManifestMetadataSnapshotMock).toHaveBeenCalledTimes(1);
   });
+
+  it("reuses alias manifest metadata when resolving a non-alias primary model", async () => {
+    loadManifestMetadataSnapshotMock.mockReturnValue({
+      plugins: [
+        {
+          modelIdNormalization: {
+            providers: {
+              anthropic: {
+                aliases: {
+                  "sonnet-4.6": "claude-sonnet-4-6",
+                },
+              },
+              openrouter: {
+                prefixWhenBare: "openrouter",
+              },
+            },
+          },
+        },
+      ],
+    });
+    const { resolveConfiguredModelRef } = await import("./model-selection-shared.js");
+    const cfg = {
+      agents: {
+        defaults: {
+          model: { primary: "openrouter:auto" },
+          models: {
+            "anthropic/sonnet-4.6": { alias: "sonnet" },
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    expect(
+      resolveConfiguredModelRef({
+        cfg,
+        defaultProvider: "anthropic",
+        defaultModel: "claude-sonnet-4-6",
+      }),
+    ).toEqual({ provider: "openrouter", model: "openrouter/auto" });
+    expect(loadManifestMetadataSnapshotMock).toHaveBeenCalledTimes(1);
+  });
 });
