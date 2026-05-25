@@ -64,6 +64,16 @@ function resolvePiNativeCodexResponsesStreamFn(params: {
   return piNativeCodexResponsesStreamFnForTest ?? params.currentStreamFn ?? streamSimple;
 }
 
+function hasOpenAICodexResponsesSessionStream(params: {
+  model: EmbeddedRunAttemptParams["model"];
+  currentStreamFn: StreamFn | undefined;
+}): boolean {
+  return (
+    isOpenAICodexResponsesModel(params.model) &&
+    !isDefaultPiStreamFnForModel(params.model, params.currentStreamFn)
+  );
+}
+
 export function describeEmbeddedAgentStreamStrategy(params: {
   currentStreamFn: StreamFn | undefined;
   providerStreamFn?: StreamFn;
@@ -88,6 +98,15 @@ export function describeEmbeddedAgentStreamStrategy(params: {
     return createBoundaryAwareStreamFnForModel(params.model)
       ? `boundary-aware:${params.model.api}`
       : "stream-simple";
+  }
+  if (
+    hasResolvedRuntimeApiKey(params.resolvedApiKey) &&
+    hasOpenAICodexResponsesSessionStream({
+      model: params.model,
+      currentStreamFn: params.currentStreamFn,
+    })
+  ) {
+    return "session-custom";
   }
   if (
     hasResolvedRuntimeApiKey(params.resolvedApiKey) &&
@@ -148,6 +167,32 @@ export function resolveEmbeddedAgentStreamFn(params: {
   });
   if (piNativeCodexResponsesStreamFn) {
     return wrapEmbeddedAgentStreamFn(piNativeCodexResponsesStreamFn, {
+      runSignal: params.signal,
+      resolvedApiKey: params.resolvedApiKey,
+      authProfileId: params.authProfileId,
+      authStorage: params.authStorage,
+      providerId: params.model.provider,
+      sessionId: params.sessionId,
+      transformContext: (context) =>
+        context.systemPrompt
+          ? {
+              ...context,
+              systemPrompt: stripSystemPromptCacheBoundary(context.systemPrompt),
+            }
+          : context,
+    });
+  }
+
+  if (
+    hasResolvedRuntimeApiKey(params.resolvedApiKey) &&
+    hasOpenAICodexResponsesSessionStream({
+      model: params.model,
+      currentStreamFn: params.currentStreamFn,
+    })
+  ) {
+    // Codex's PI session stream owns Responses continuation state; keep it
+    // native and only inject the resolved runtime auth/run context.
+    return wrapEmbeddedAgentStreamFn(currentStreamFn, {
       runSignal: params.signal,
       resolvedApiKey: params.resolvedApiKey,
       authProfileId: params.authProfileId,
