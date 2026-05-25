@@ -154,6 +154,13 @@ type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
 
 const DEVICE_SIGNATURE_SKEW_MS = 2 * 60 * 1000;
 
+/** Match production release versions (YYYY.M.D or YYYY.M.D-beta.N). */
+const RELEASED_VERSION_RE = /^\d{4}\.\d+\.\d+/;
+
+function isReleasedVersion(version: string): boolean {
+  return RELEASED_VERSION_RE.test(version);
+}
+
 export type WsOriginCheckMetrics = {
   hostHeaderFallbackAccepted: number;
 };
@@ -1580,6 +1587,36 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           });
         }
         setSocketMaxPayload(socket, MAX_PAYLOAD_BYTES);
+
+        // Version mismatch: kick local node hosts so the OS supervisor restarts them.
+        // Only applies to local clients (same machine) where the updated dist is on disk.
+        // Remote nodes may legitimately lag behind during fleet upgrades (#83736).
+        // Placed before setClient/presence to avoid phantom online state on rejection.
+        if (role === "node" && isLocalClient) {
+          const gatewayVersion = resolveRuntimeServiceVersion(process.env);
+          const clientVersion = connectParams.client.version;
+          if (
+            clientVersion &&
+            gatewayVersion &&
+            clientVersion !== gatewayVersion &&
+            isReleasedVersion(gatewayVersion) &&
+            isReleasedVersion(clientVersion)
+          ) {
+            logWsControl.info(
+              `node version mismatch conn=${connId} client=${formatForLog(clientLabel)} clientVersion=${formatForLog(clientVersion)} gatewayVersion=${gatewayVersion}; closing for supervisor restart`,
+            );
+            sendHandshakeErrorResponse(ErrorCodes.INVALID_REQUEST, "client version mismatch", {
+              details: {
+                code: ConnectErrorDetailCodes.CLIENT_VERSION_MISMATCH,
+                clientVersion,
+                gatewayVersion,
+              },
+            });
+            close(1008, "client version mismatch");
+            return;
+          }
+        }
+
         if (!setClient(nextClient)) {
           setCloseCause("connect-aborted-before-register", {
             ...clientMeta,
