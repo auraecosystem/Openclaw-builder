@@ -216,6 +216,19 @@ describe("Discord native slash commands with commands.allowFrom", () => {
     expectUnauthorizedReply(interaction);
   });
 
+  it("rejects guild slash commands when cfg.commands.ownerAllowFrom fails even if the channel-level native gate allowed the command", async () => {
+    const { dispatchSpy, interaction } = await runGuildSlashCommand({
+      userId: "999999999999999999",
+      mutateConfig: (cfg) => {
+        cfg.commands = {
+          ownerAllowFrom: ["user:123456789012345678"],
+        };
+      },
+    });
+    expect(dispatchSpy).not.toHaveBeenCalled();
+    expectUnauthorizedReply(interaction);
+  });
+
   it("authorizes guild slash commands when commands.allowFrom.discord contains a matching guild: entry", async () => {
     const { dispatchSpy, interaction } = await runGuildSlashCommand({
       userId: "999999999999999999",

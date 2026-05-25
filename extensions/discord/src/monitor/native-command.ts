@@ -15,6 +15,7 @@ import { resolveHumanDelayConfig } from "openclaw/plugin-sdk/agent-runtime";
 import { createChannelReplyPipeline } from "openclaw/plugin-sdk/channel-reply-pipeline";
 import { resolveChannelStreamingBlockEnabled } from "openclaw/plugin-sdk/channel-streaming";
 import {
+  resolveCommandAuthorization,
   resolveCommandAuthorizedFromAuthorizers,
   resolveNativeCommandSessionTargets,
 } from "openclaw/plugin-sdk/command-auth-native";
@@ -992,46 +993,6 @@ async function dispatchDiscordCommandInteraction(params: {
     }
   }
 
-  const menu = resolveCommandArgMenu({
-    command,
-    args: commandArgs,
-    cfg,
-  });
-  if (menu) {
-    const menuPayload = buildDiscordCommandArgMenu({
-      command,
-      menu,
-      interaction: interaction as CommandInteraction,
-      ctx: {
-        cfg,
-        discordConfig,
-        accountId,
-        sessionPrefix,
-        threadBindings,
-      },
-      safeInteractionCall: safeDiscordInteractionCall,
-      dispatchCommandInteraction: dispatchDiscordCommandInteraction,
-    });
-    if (preferFollowUp) {
-      await safeDiscordInteractionCall("interaction follow-up", () =>
-        interaction.followUp({
-          content: menuPayload.content,
-          components: menuPayload.components,
-          ephemeral: true,
-        }),
-      );
-      return;
-    }
-    await safeDiscordInteractionCall("interaction reply", () =>
-      interaction.reply({
-        content: menuPayload.content,
-        components: menuPayload.components,
-        ephemeral: true,
-      }),
-    );
-    return;
-  }
-
   const pluginMatch = matchPluginCommandImpl(prompt);
   if (pluginMatch) {
     if (suppressReplies) {
@@ -1079,24 +1040,6 @@ async function dispatchDiscordCommandInteraction(params: {
       maxLinesPerMessage: resolveDiscordMaxLinesPerMessage({ cfg, discordConfig, accountId }),
       preferFollowUp,
       chunkMode: resolveChunkMode(cfg, "discord", accountId),
-    });
-    return;
-  }
-
-  const pickerCommandContext = shouldOpenDiscordModelPickerFromCommand({
-    command,
-    commandArgs,
-  });
-  if (pickerCommandContext) {
-    await replyWithDiscordModelPickerProviders({
-      interaction,
-      cfg,
-      command: pickerCommandContext,
-      userId: user.id,
-      accountId,
-      threadBindings,
-      preferFollowUp,
-      safeInteractionCall: safeDiscordInteractionCall,
     });
     return;
   }
@@ -1150,6 +1093,80 @@ async function dispatchDiscordCommandInteraction(params: {
     },
     sender: { id: sender.id, name: sender.name, tag: sender.tag },
   });
+
+  const hasConfiguredCommandOwnerAllowFrom =
+    Array.isArray(cfg.commands?.ownerAllowFrom) && cfg.commands.ownerAllowFrom.length > 0;
+  const hasNativeOwnerAllowFrom =
+    Array.isArray(ctxPayload.OwnerAllowFrom) && ctxPayload.OwnerAllowFrom.length > 0;
+  if (hasConfiguredCommandOwnerAllowFrom || hasNativeOwnerAllowFrom) {
+    const nativeCommandAuthorization = resolveCommandAuthorization({
+      ctx: ctxPayload,
+      cfg,
+      commandAuthorized,
+    });
+    if (!nativeCommandAuthorization.isAuthorizedSender) {
+      await respond("You are not authorized to use this command.", { ephemeral: true });
+      return;
+    }
+  }
+
+  const menu = resolveCommandArgMenu({
+    command,
+    args: commandArgs,
+    cfg,
+  });
+  if (menu) {
+    const menuPayload = buildDiscordCommandArgMenu({
+      command,
+      menu,
+      interaction: interaction as CommandInteraction,
+      ctx: {
+        cfg,
+        discordConfig,
+        accountId,
+        sessionPrefix,
+        threadBindings,
+      },
+      safeInteractionCall: safeDiscordInteractionCall,
+      dispatchCommandInteraction: dispatchDiscordCommandInteraction,
+    });
+    if (preferFollowUp) {
+      await safeDiscordInteractionCall("interaction follow-up", () =>
+        interaction.followUp({
+          content: menuPayload.content,
+          components: menuPayload.components,
+          ephemeral: true,
+        }),
+      );
+      return;
+    }
+    await safeDiscordInteractionCall("interaction reply", () =>
+      interaction.reply({
+        content: menuPayload.content,
+        components: menuPayload.components,
+        ephemeral: true,
+      }),
+    );
+    return;
+  }
+
+  const pickerCommandContext = shouldOpenDiscordModelPickerFromCommand({
+    command,
+    commandArgs,
+  });
+  if (pickerCommandContext) {
+    await replyWithDiscordModelPickerProviders({
+      interaction,
+      cfg,
+      command: pickerCommandContext,
+      userId: user.id,
+      accountId,
+      threadBindings,
+      preferFollowUp,
+      safeInteractionCall: safeDiscordInteractionCall,
+    });
+    return;
+  }
 
   const { onModelSelected, ...replyPipeline } = createChannelReplyPipeline({
     cfg,
