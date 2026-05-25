@@ -2,6 +2,12 @@ import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { resolveRuntimeConfigCacheKey } from "../../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
+import { fireAndForgetBoundedHook } from "../../hooks/fire-and-forget.js";
+import {
+  type AgentTurnEndHookContext,
+  createInternalHookEvent,
+  triggerInternalHook,
+} from "../../hooks/internal-hooks.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import { isAcpSessionKey } from "../../sessions/session-key-utils.js";
@@ -51,6 +57,7 @@ import {
   type AcpManagerObservabilitySnapshot,
   type AcpRunTurnInput,
   type AcpSessionManagerDeps,
+  type AcpTurnEndHookContext,
   type AcpSessionResolution,
   type AcpSessionRuntimeOptions,
   type AcpSessionStatus,
@@ -797,9 +804,11 @@ export class AcpSessionManager {
                   `All ACP backends failed (${backendAttempts.length}): ${failedBackends}`,
                 )
               : error;
-          this.recordTurnCompletion({
+          await this.recordTurnCompletion({
+            sessionKey,
             startedAt: turnStartedAt,
             errorCode: errorToRecord.code,
+            beforeHook: input.onBeforeTurnEndHook,
           });
           if (taskContext) {
             this.markBackgroundTaskTerminal(taskContext.runId, {
@@ -967,8 +976,10 @@ export class AcpSessionManager {
                   "ACP turn ended without a terminal done event.",
                 );
               }
-              this.recordTurnCompletion({
+              await this.recordTurnCompletion({
+                sessionKey,
                 startedAt: turnStartedAt,
+                beforeHook: input.onBeforeTurnEndHook,
               });
               if (taskContext) {
                 const terminalResult = resolveBackgroundTaskTerminalResult(taskProgressSummary);
@@ -1774,16 +1785,52 @@ export class AcpSessionManager {
     }
   }
 
-  private recordTurnCompletion(params: { startedAt: number; errorCode?: AcpRuntimeError["code"] }) {
+  private async recordTurnCompletion(params: {
+    sessionKey: string;
+    startedAt: number;
+    errorCode?: AcpRuntimeError["code"];
+    beforeHook?: (context: AcpTurnEndHookContext) => Promise<void> | void;
+  }) {
     const durationMs = Math.max(0, Date.now() - params.startedAt);
     this.turnLatencyStats.totalMs += durationMs;
     this.turnLatencyStats.maxMs = Math.max(this.turnLatencyStats.maxMs, durationMs);
     if (params.errorCode) {
       this.turnLatencyStats.failed += 1;
       this.recordErrorCode(params.errorCode);
-      return;
+    } else {
+      this.turnLatencyStats.completed += 1;
     }
-    this.turnLatencyStats.completed += 1;
+    const context = {
+      sessionKey: params.sessionKey,
+      success: !params.errorCode,
+      durationMs,
+      ...(params.errorCode ? { errorCode: params.errorCode } : {}),
+    } satisfies AcpTurnEndHookContext;
+    try {
+      await params.beforeHook?.(context);
+    } catch (error) {
+      logVerbose(
+        `acp-manager: before agent:turn:end hook callback failed for ${params.sessionKey}: ${formatErrorMessage(
+          error,
+        )}`,
+      );
+    }
+    this.emitTurnEndHook(context);
+  }
+
+  private emitTurnEndHook(context: AcpTurnEndHookContext): void {
+    fireAndForgetBoundedHook(
+      () =>
+        triggerInternalHook(
+          createInternalHookEvent(
+            "agent",
+            "turn:end",
+            context.sessionKey,
+            context satisfies AgentTurnEndHookContext,
+          ),
+        ),
+      "agent:turn:end internal hook failed",
+    );
   }
 
   private recordErrorCode(code: string): void {
