@@ -2142,16 +2142,17 @@ export async function runReplyAgent(params: {
         sendPolicy,
       });
       const finalDeliveryText = buildPendingFinalDeliveryText(finalPayloads);
-      // #85714: under message_tool_only the final text is kept private. If the
-      // model never invoked the delivery tool this turn, that private text is a
-      // silent message loss — surface it (without leaking the body) so the
-      // failure is observable instead of looking like an unresponsive bot.
+      // #85714: detect a stranded reply from the actual assistant final text,
+      // not finalDeliveryText — the latter also bundles verbose notices, plugin
+      // status, raw trace, and the usage line, none of which should trip the
+      // warn (e.g. an intentional NO_REPLY turn with trace/usage enabled).
+      const assistantFinalText = rawAssistantText ?? "";
       if (
         isStrandedMessageToolReply({
           sourceReplyDeliveryMode: sourceReplyPolicy.sourceReplyDeliveryMode,
           sendPolicyDenied: sourceReplyPolicy.sendPolicyDenied,
           successfulSideEffectDelivery,
-          finalText: finalDeliveryText,
+          finalText: assistantFinalText,
         })
       ) {
         warnStrandedMessageToolReply({
@@ -2161,7 +2162,7 @@ export async function runReplyAgent(params: {
             sessionCtx.Surface ??
             sessionCtx.Provider ??
             activeSessionEntry?.channel,
-          finalTextLength: finalDeliveryText.trim().length,
+          finalTextLength: assistantFinalText.trim().length,
         });
       }
       const pendingText = sourceReplyPolicy.suppressDelivery ? "" : finalDeliveryText;
