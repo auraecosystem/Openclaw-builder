@@ -1,11 +1,11 @@
 import nodeFs from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveUserPath } from "openclaw/plugin-sdk/agent-harness-runtime";
 import type {
   EmbeddedRunAttemptParams,
   EmbeddedRunAttemptResult,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
+import { resolveUserPath } from "openclaw/plugin-sdk/agent-harness-runtime";
 import {
   appendRegularFile,
   resolveRegularFileAppendFlags,
@@ -33,7 +33,48 @@ const AUTHORIZATION_VALUE_RE = /\b(Bearer|Basic)\s+[A-Za-z0-9+/._~=-]{8,}/giu;
 const JWT_VALUE_RE = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/gu;
 const COOKIE_PAIR_RE = /\b([A-Za-z][A-Za-z0-9_.-]{1,64})=([A-Za-z0-9+/._~%=-]{16,})(?=;|\s|$)/gu;
 const TRAJECTORY_RUNTIME_FILE_MAX_BYTES = 50 * 1024 * 1024;
-const TRAJECTORY_RUNTIME_EVENT_MAX_BYTES = 256 * 1024;
+
+const DEFAULT_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES = 256 * 1024;
+
+function resolveCodexTrajectoryRuntimeEventMaxBytes(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.OPENCLAW_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES?.trim();
+  if (!raw) return DEFAULT_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES;
+  try {
+    const parsed = parseCodexTrajectoryEventByteSize(raw);
+    if (parsed > 0) return parsed;
+  } catch {
+    // Fall through to default on invalid input.
+  }
+  return DEFAULT_TRAJECTORY_RUNTIME_EVENT_MAX_BYTES;
+}
+
+/**
+ * Minimal byte-size parser for the trajectory event cap env var.
+ * Supports: raw integers, `kb`, `mb`, `gb` suffixes.
+ */
+function parseCodexTrajectoryEventByteSize(raw: string): number {
+  const lower = raw.toLowerCase().replace(/\s+/g, "");
+  const m = /^(\d+(?:\.\d+)?)([a-z]*)$/.exec(lower);
+  if (!m) throw new Error(`invalid byte size: ${raw}`);
+  const [, numStr, unit] = m;
+  const num = parseFloat(numStr);
+  switch (unit) {
+    case "kb":
+    case "k":
+      return Math.floor(num * 1024);
+    case "mb":
+    case "m":
+      return Math.floor(num * 1024 * 1024);
+    case "gb":
+    case "g":
+      return Math.floor(num * 1024 * 1024 * 1024);
+    case "":
+    case "b":
+      return Math.floor(num);
+    default:
+      throw new Error(`invalid byte size unit: ${unit}`);
+  }
+}
 
 type CodexTrajectoryOpenFlagConstants = Pick<
   typeof nodeFs.constants,
@@ -68,10 +109,13 @@ async function safeAppendTrajectoryFile(filePath: string, line: string): Promise
   });
 }
 
-function boundedTrajectoryLine(event: Record<string, unknown>): string | undefined {
+function boundedTrajectoryLine(
+  event: Record<string, unknown>,
+  maxBytes: number,
+): string | undefined {
   const line = JSON.stringify(event);
   const bytes = Buffer.byteLength(line, "utf8");
-  if (bytes <= TRAJECTORY_RUNTIME_EVENT_MAX_BYTES) {
+  if (bytes <= maxBytes) {
     return `${line}\n`;
   }
   const truncated = JSON.stringify({
@@ -79,11 +123,11 @@ function boundedTrajectoryLine(event: Record<string, unknown>): string | undefin
     data: {
       truncated: true,
       originalBytes: bytes,
-      limitBytes: TRAJECTORY_RUNTIME_EVENT_MAX_BYTES,
+      limitBytes: maxBytes,
       reason: "trajectory-event-size-limit",
     },
   });
-  if (Buffer.byteLength(truncated, "utf8") <= TRAJECTORY_RUNTIME_EVENT_MAX_BYTES) {
+  if (Buffer.byteLength(truncated, "utf8") <= maxBytes) {
     return `${truncated}\n`;
   }
   return undefined;
@@ -149,6 +193,7 @@ export function createCodexTrajectoryRecorder(
     return null;
   }
 
+  const eventMaxBytes = resolveCodexTrajectoryRuntimeEventMaxBytes(env);
   const filePath = resolveTrajectoryFilePath({
     env,
     sessionFile: params.attempt.sessionFile,
@@ -187,7 +232,7 @@ export function createCodexTrajectoryRecorder(
         modelApi: attribution.api,
         data: data ? sanitizeValue(data) : undefined,
       };
-      const line = boundedTrajectoryLine(event);
+      const line = boundedTrajectoryLine(event, eventMaxBytes);
       if (!line) {
         return;
       }
