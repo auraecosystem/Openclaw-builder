@@ -812,7 +812,11 @@ export async function createEmbeddedAttemptSessionLockController(params: {
       }
       const { lock, owned } = await acquireWriteLock();
       try {
-        await assertSessionFileFence();
+        if (owned) {
+          await refreshSessionFileFence();
+        } else {
+          await assertSessionFileFence();
+        }
         const beforeWrite = await readSessionFileFingerprint(params.lockOptions.sessionFile);
         const runWithLock = async () => {
           try {
@@ -847,6 +851,7 @@ export async function createEmbeddedAttemptSessionLockController(params: {
       if (takeoverDetected) {
         return noopLock;
       }
+      const hadLock = heldLock !== undefined;
       try {
         heldLock ??= await acquireLock();
       } catch (err) {
@@ -859,7 +864,14 @@ export async function createEmbeddedAttemptSessionLockController(params: {
       const cleanupLock = heldLock;
       heldLock = undefined;
       try {
-        await assertSessionFileFence();
+        if (!hadLock) {
+          // Lock was freshly acquired after a prompt release — same
+          // rationale as withSessionWriteLock: in-process writes are
+          // legitimate, trust the lock acquisition for takeover detection.
+          await refreshSessionFileFence();
+        } else {
+          await assertSessionFileFence();
+        }
       } catch (err) {
         await cleanupLock.release();
         if (err instanceof EmbeddedAttemptSessionTakeoverError) {
