@@ -1443,6 +1443,10 @@ export function createConfigIO(
       mode: 0o600,
       tempPrefix: path.basename(configPath),
       copyFallbackOnPermissionError: true,
+      // fsync the temp file and parent directory so a crash mid write or a
+      // power loss on a network volume cannot leave a partial config file.
+      syncTempFile: true,
+      syncParentDir: true,
       fileSystem: deps.fs,
     });
   }
@@ -2412,6 +2416,10 @@ export function createConfigIO(
         mode: 0o600,
         tempPrefix: path.basename(configPath),
         copyFallbackOnPermissionError: true,
+        // fsync the temp file and parent directory so a crash mid write or a
+        // power loss on a network volume cannot leave a partial config file.
+        syncTempFile: true,
+        syncParentDir: true,
         fileSystem: deps.fs,
         beforeRename: async () => {
           if (deps.fs.existsSync(configPath)) {
