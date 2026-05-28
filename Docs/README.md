@@ -28,7 +28,8 @@ If you want a personal, single-user assistant that feels local, fast, and always
 Preferred setup: run the onboarding wizard (`openclaw onboard`) in your terminal.
 The wizard guides you step by step through setting up the gateway, workspace, channels, and skills. The CLI wizard is the recommended path and works on **macOS, Linux, and Windows (via WSL2; strongly recommended)**.
 Works with npm, pnpm, or bun.
-New install? Start here: [Getting started](https://docs.openclaw.ai/start/getting-started)
+New install? Start here:
+> [Getting started](https://docs.openclaw.ai/start/getting-started)
 
 **Subscriptions (OAuth):**
 
@@ -37,7 +38,7 @@ New install? Start here: [Getting started](https://docs.openclaw.ai/start/gettin
 
 Model note: while any model is supported, I strongly recommend **Anthropic Pro/Max (100/200) + Opus 4.6** for long‑context strength and better prompt‑injection resistance. See [Onboarding](https://docs.openclaw.ai/start/onboarding).
 
-## Models (selection + auth)
+> ## Models (selection + auth)
 
 - Models config + CLI: [Models](https://docs.openclaw.ai/concepts/models)
 - Auth profile rotation (OAuth vs API keys) + fallbacks: [Model failover](https://docs.openclaw.ai/concepts/model-failover)
@@ -55,7 +56,7 @@ openclaw onboard --install-daemon
 
 The wizard installs the Gateway daemon (launchd/systemd user service) so it stays running.
 
-## Quick start (TL;DR)
+> ## Quick start (TL;DR)
 
 Runtime: **Node ≥22**.
 
@@ -75,7 +76,7 @@ openclaw agent --message "Ship checklist" --thinking high
 
 Upgrading? [Updating guide](https://docs.openclaw.ai/install/updating) (and run `openclaw doctor`).
 
-## Development channels
+> ## Development channels
 
 - **stable**: tagged releases (`vYYYY.M.D` or `vYYYY.M.D-<patch>`), npm dist-tag `latest`.
 - **beta**: prerelease tags (`vYYYY.M.D-beta.N`), npm dist-tag `beta` (macOS app may be missing).
@@ -84,7 +85,7 @@ Upgrading? [Updating guide](https://docs.openclaw.ai/install/updating) (and run 
 Switch channels (git + npm): `openclaw update --channel stable|beta|dev`.
 Details: [Development channels](https://docs.openclaw.ai/install/development-channels).
 
-## From source (development)
+> ## From source (development)
 
 Prefer `pnpm` for builds from source. Bun is optional for running TypeScript directly.
 
