@@ -1,0 +1,16 @@
+{
+  tools: {
+    exec: {
+      backgroundMs: 10000,
+      timeoutSec: 1800,
+      cleanupMs: 1800000,
+      notifyOnExit: true,
+      notifyOnExitEmptySuccess: false,
+      commandHighlighting: false,
+      applyPatch: {
+        enabled: false,
+        allowModels: ["gpt-5.5"],
+      },
+    },
+  },
+}
